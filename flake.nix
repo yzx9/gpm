@@ -1,5 +1,5 @@
 {
-  description = "gpm";
+  description = "gpm — Android-first age-only gopass password client";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -45,12 +45,25 @@
             cargo-release
             cargo-outdated
 
+            # node / frontend
+            nodejs_22
+            pnpm
+
+            # tauri v2 (macOS uses system WebKit; no extra libs needed)
+            pkg-config
+            openssl
+
             # misc
             just
             jq
             prettier
             nixfmt
           ];
+
+          # Ensure cargo binaries are on PATH
+          shellHook = ''
+            export PATH="$HOME/.cargo/bin:$PATH"
+          '';
         };
       }
     );

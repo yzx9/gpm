@@ -6,6 +6,42 @@ Repo: gpm
 Status: APPROVED
 Mode: Builder
 
+## Implementation Status
+
+### Phase 1: Rust core library ✅ DONE
+
+- `crypto.rs` — age decryption via `IdentityFile::from_buffer` + `Decryptor`, safe error messages
+- `store.rs` — walkdir for `.age` files (skips `.git`, `.gpg`), content parsing (password + notes), path traversal guard
+- `git.rs` — `git2` clone/pull (ff-only) with HTTPS PAT credential callback
+- `secure_storage.rs` — MVP local file storage for identity + repo config (app-private on Android)
+- `error.rs` — `AppError` with safe codes, no secrets in messages; `From` impls for `io::Error`, `git2::Error`, `serde_json::Error`
+- Security: `Zeroizing<String>` for decrypted content, `identity_bytes.zeroize()` after every decrypt, custom `Debug` impl with `[REDACTED]`
+- **14 integration tests passing** — store parsing, content parsing, crypto (correct/wrong identity, corrupted data), security (no secrets in errors)
+
+### Phase 2: Desktop Tauri app ✅ DONE
+
+- `pnpm` + Vue 3 + TypeScript + Vite scaffolded via `create-tauri-app`
+- `tauri-plugin-clipboard-manager` with 30s auto-clear (tokio::spawn)
+- Three-page Vue app:
+  - **SetupPage** — Git URL, PAT, age identity input → `setup` command (clone + save config)
+  - **EntryListPage** — list entries, case-insensitive search, copy button, pull-to-refresh, reset
+  - **EntryDetailPage** — show/copy password, 30s auto-clear timer, `onBeforeUnmount` + `onBeforeRouteLeave` cleanup
+- Router guard: redirects to `/setup` if not configured
+- TypeScript types mirroring Rust structs
+- Dark mode support via `prefers-color-scheme`
+
+### Phase 3: Android target ⬜ TODO
+
+- `pnpm tauri android init`
+- Test on real Android device
+- Handle Android-specific: back navigation, screen size, clipboard behavior
+
+### Phase 4: Polish & publish ⬜ TODO
+
+- Android FLAG_SECURE
+- Android Keystore for identity storage
+- Publish APK via GitHub Release
+
 ## Problem Statement
 
 There is no Android GUI client that can read age-encrypted gopass/password-store repositories. The Android Password Store app is unmaintained and GPG-only. gopass itself is Go/CLI-only. People resort to running gopass inside Termux on Android. The intersection of age encryption + gopass store format + Android is genuinely empty.

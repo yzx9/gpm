@@ -1,0 +1,33 @@
+/** Tauri IPC types — mirrors Rust structs */
+
+export interface Entry {
+  path: string;
+  name: string;
+}
+
+export interface CopyResult {
+  success: boolean;
+  entry_name: string;
+  cleared_after_secs: number;
+}
+
+export interface SensitiveContent {
+  password: string;
+  notes: string;
+}
+
+export interface PullResult {
+  changed: boolean;
+  head: string;
+}
+
+export interface RepoConfig {
+  url: string;
+  pat: string | null;
+  local_path: string;
+}
+
+export interface AppError {
+  code: string;
+  message: string;
+}
