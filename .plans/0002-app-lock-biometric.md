@@ -17,6 +17,7 @@ Outside voice (Codex) identified that the design relies entirely on the OS sandb
 The MVP design has no app-level authentication. The assumption is that the device lock screen is sufficient. This is acceptable for personal use on a device you control, but should be addressed for broader distribution.
 
 Implementation options:
+
 - Android `BiometricPrompt` before each decrypt
 - App-level PIN/password
 - Tauri plugin wrapping Android biometric API

@@ -63,7 +63,10 @@ pub struct PullResult {
 /// Skips `.git` directory. Only returns files with `.age` extension.
 pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, AppError> {
     if !repo_path.exists() {
-        return Err(AppError::new(ErrorCode::NoRepo, "Repository path does not exist"));
+        return Err(AppError::new(
+            ErrorCode::NoRepo,
+            "Repository path does not exist",
+        ));
     }
 
     let mut entries: Vec<Entry> = WalkDir::new(repo_path)
@@ -77,16 +80,12 @@ pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, AppError> {
         })
         .filter(|e| {
             // Skip anything inside .git directory
-            !e.path()
-                .components()
-                .any(|c| c.as_os_str() == ".git")
+            !e.path().components().any(|c| c.as_os_str() == ".git")
         })
         .filter_map(|e| {
             let rel = e.path().strip_prefix(repo_path).ok()?;
             let rel_str = rel.to_str()?.to_string();
-            let name = rel_str
-                .trim_end_matches(".age")
-                .to_string();
+            let name = rel_str.trim_end_matches(".age").to_string();
             Some(Entry {
                 path: rel_str,
                 name,
@@ -126,7 +125,10 @@ pub fn parse_decrypted_content(content: &[u8]) -> Result<DecryptedEntry, AppErro
 }
 
 /// Verify an entry file exists within the repo.
-pub fn resolve_entry_path(repo_path: &Path, entry_path: &str) -> Result<std::path::PathBuf, AppError> {
+pub fn resolve_entry_path(
+    repo_path: &Path,
+    entry_path: &str,
+) -> Result<std::path::PathBuf, AppError> {
     let full_path = repo_path.join(entry_path);
 
     if !full_path.exists() {

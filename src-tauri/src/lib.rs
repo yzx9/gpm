@@ -7,8 +7,8 @@ mod store;
 /// Re-export core functions for integration tests.
 pub mod test_support {
     pub use crate::crypto::decrypt_bytes;
-    pub use crate::store::{list_entries, parse_decrypted_content};
     pub use crate::error::AppError;
+    pub use crate::store::{list_entries, parse_decrypted_content};
 }
 
 use std::path::Path;
@@ -125,15 +125,16 @@ async fn copy_password(
     let mut entry = store::parse_decrypted_content(&decrypted)?;
 
     // Derive display name from entry path
-    let entry_name = entry_path
-        .trim_end_matches(".age")
-        .to_string();
+    let entry_name = entry_path.trim_end_matches(".age").to_string();
 
     // Copy password to clipboard via Tauri plugin
     app.clipboard()
         .write_text(entry.password.to_string())
         .map_err(|e| {
-            AppError::new(error::ErrorCode::ClipboardError, format!("Clipboard error: {}", e))
+            AppError::new(
+                error::ErrorCode::ClipboardError,
+                format!("Clipboard error: {}", e),
+            )
         })?;
 
     // Zeroize decrypted content immediately
@@ -216,8 +217,8 @@ fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let config_dir = SecureStorage::default_config_dir()
-        .expect("Cannot determine config directory");
+    let config_dir =
+        SecureStorage::default_config_dir().expect("Cannot determine config directory");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())

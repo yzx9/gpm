@@ -15,6 +15,7 @@ Outside voice (Codex) identified that there is no provenance check beyond "git p
 ## Context
 
 This is a genuine trust gap for a product whose value proposition is trust. However, solving it properly requires:
+
 - Commit signature verification (GPG or SSH signed commits)
 - Key distribution story (how does the user know which signing key to trust?)
 - Trust anchor management (first-use trust on commit? pinned key?)

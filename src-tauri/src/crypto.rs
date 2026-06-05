@@ -8,22 +8,19 @@ use crate::error::{AppError, ErrorCode};
 /// Decrypt an .age file using the given identity bytes.
 /// Returns the raw decrypted bytes. The caller is responsible for zeroizing
 /// the identity after calling this function.
-pub fn decrypt_file(
-    file_path: &Path,
-    identity_bytes: &[u8],
-) -> Result<Vec<u8>, AppError> {
+pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
     let encrypted = std::fs::read(file_path).map_err(|e| {
-        AppError::new(ErrorCode::IoError, format!("Failed to read entry file: {}", e))
+        AppError::new(
+            ErrorCode::IoError,
+            format!("Failed to read entry file: {}", e),
+        )
     })?;
 
     decrypt_bytes(&encrypted, identity_bytes)
 }
 
 /// Decrypt age-encrypted bytes using the given identity.
-pub fn decrypt_bytes(
-    encrypted: &[u8],
-    identity_bytes: &[u8],
-) -> Result<Vec<u8>, AppError> {
+pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
     // Parse the identity from buffer — validates AGE-SECRET-KEY-... format
     let identity_file = age::IdentityFile::from_buffer(identity_bytes).map_err(|_| {
         AppError::new(

@@ -59,11 +59,6 @@
             prettier
             nixfmt
           ];
-
-          # Ensure cargo binaries are on PATH
-          shellHook = ''
-            export PATH="$HOME/.cargo/bin:$PATH"
-          '';
         };
       }
     );

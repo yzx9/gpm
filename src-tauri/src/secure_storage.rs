@@ -20,10 +20,7 @@ impl SecureStorage {
     /// Get the default config directory for the app.
     pub fn default_config_dir() -> Result<PathBuf, AppError> {
         let dir = dirs::config_dir().ok_or_else(|| {
-            AppError::new(
-                ErrorCode::ConfigError,
-                "Cannot determine config directory",
-            )
+            AppError::new(ErrorCode::ConfigError, "Cannot determine config directory")
         })?;
         Ok(dir.join("gpm"))
     }

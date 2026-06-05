@@ -17,6 +17,7 @@ Outside voice (Codex) argues that Tauri creates the WebView boundary the design 
 This is a contingency, not a planned path. The user has chosen Tauri twice (D1: proceed despite maturity risk, D7: acknowledge setup page contradiction). Phase 3 will reveal whether Tauri mobile works for this use case.
 
 If triggered:
+
 - Phase 1 output (Rust core library) is reusable without changes
 - Phase 2 output (desktop Tauri app) can remain as the desktop client
 - New work: Kotlin/Jetpack Compose UI, JNI bindings to Rust core, Android Keystore integration

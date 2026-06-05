@@ -17,6 +17,7 @@ The product's core value is trust ("whoa, I can audit exactly what this app does
 The outside voice (Codex) identified that the trust story collapses at setup — the user pastes their deepest secrets into a WebView with no reassurance. The eng review accepted this as a documented limitation (D7), but the emotional arc can still be improved with copy and UX patterns.
 
 Key trust moments to address:
+
 - Setup page: brief trust statement below identity field ("Stored locally. Nothing leaves your device.")
 - Clone operation: progress indication (spinner + "Cloning repository..." → "Decrypting test entry..." → "Ready")
 - Entry list: "Last synced 2h ago" header with pull-to-refresh

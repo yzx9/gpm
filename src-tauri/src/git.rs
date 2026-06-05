@@ -7,11 +7,7 @@ use crate::store::PullResult;
 
 /// Clone a git repository to a local directory.
 /// For HTTPS URLs, uses PAT credential callback.
-pub fn clone_repo(
-    url: &str,
-    dest: &Path,
-    pat: Option<&str>,
-) -> Result<(), AppError> {
+pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), AppError> {
     // Remove existing directory if present (re-clone)
     if dest.exists() {
         std::fs::remove_dir_all(dest)?;
@@ -32,18 +28,16 @@ pub fn clone_repo(
     let mut builder = git2::build::RepoBuilder::new();
     builder.fetch_options(fetch_opts);
 
-    builder
-        .clone(url, dest)
-        .map_err(|e| {
-            let msg = e.message().to_string();
-            if msg.contains("authentication") || msg.contains("unsupported URL") {
-                AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {}", msg))
-            } else if msg.contains("unable to connect") || msg.contains("timeout") {
-                AppError::new(ErrorCode::NetworkError, format!("Network error: {}", msg))
-            } else {
-                AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {}", msg))
-            }
-        })?;
+    builder.clone(url, dest).map_err(|e| {
+        let msg = e.message().to_string();
+        if msg.contains("authentication") || msg.contains("unsupported URL") {
+            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {}", msg))
+        } else if msg.contains("unable to connect") || msg.contains("timeout") {
+            AppError::new(ErrorCode::NetworkError, format!("Network error: {}", msg))
+        } else {
+            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {}", msg))
+        }
+    })?;
 
     Ok(())
 }
@@ -51,9 +45,8 @@ pub fn clone_repo(
 /// Pull (fetch + fast-forward only merge) from origin/main.
 /// Returns whether any commits were pulled and the new HEAD hash.
 pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppError> {
-    let repo = Repository::discover(repo_path).map_err(|_| {
-        AppError::new(ErrorCode::NoRepo, "No git repository found at path")
-    })?;
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| AppError::new(ErrorCode::NoRepo, "No git repository found at path"))?;
 
     let mut remote = repo.find_remote("origin").map_err(|e| {
         AppError::new(
@@ -78,16 +71,17 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppE
     remote.fetch(&["refs/heads/*:refs/heads/*"], Some(&mut fetch_opts), None)?;
 
     // Get current HEAD
-    let head_oid = repo.head()?.target().ok_or_else(|| {
-        AppError::new(ErrorCode::PullFfFailed, "Cannot determine current HEAD")
-    })?;
+    let head_oid = repo
+        .head()?
+        .target()
+        .ok_or_else(|| AppError::new(ErrorCode::PullFfFailed, "Cannot determine current HEAD"))?;
 
     // Find the upstream branch (origin/main or origin/master)
     let upstream_branch = find_default_branch(&repo)?;
     let upstream_ref = repo.find_reference(&format!("refs/heads/{}", upstream_branch))?;
-    let upstream_oid = upstream_ref.target().ok_or_else(|| {
-        AppError::new(ErrorCode::PullFfFailed, "Cannot determine upstream HEAD")
-    })?;
+    let upstream_oid = upstream_ref
+        .target()
+        .ok_or_else(|| AppError::new(ErrorCode::PullFfFailed, "Cannot determine upstream HEAD"))?;
 
     // Check if fast-forward is possible
     if upstream_oid == head_oid {
@@ -122,7 +116,10 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppE
 fn find_default_branch(repo: &Repository) -> Result<String, AppError> {
     // Try refs/heads/main first, then refs/heads/master
     for branch in &["main", "master"] {
-        if repo.find_reference(&format!("refs/heads/{}", branch)).is_ok() {
+        if repo
+            .find_reference(&format!("refs/heads/{}", branch))
+            .is_ok()
+        {
             return Ok(branch.to_string());
         }
     }

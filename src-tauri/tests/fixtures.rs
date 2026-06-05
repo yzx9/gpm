@@ -72,10 +72,7 @@ mod tests {
     #[test]
     fn test_list_entries_skips_gpg_files() {
         let (_identity, recipient) = generate_test_keypair();
-        let dir = create_test_store(
-            vec![("valid.age", b"password")],
-            &recipient,
-        );
+        let dir = create_test_store(vec![("valid.age", b"password")], &recipient);
         // Add a .gpg file
         std::fs::write(dir.path().join("legacy.gpg"), b"encrypted-gpg-data").unwrap();
 
@@ -87,10 +84,7 @@ mod tests {
     #[test]
     fn test_list_entries_skips_git_dir() {
         let (_identity, recipient) = generate_test_keypair();
-        let dir = create_test_store(
-            vec![("real.age", b"password")],
-            &recipient,
-        );
+        let dir = create_test_store(vec![("real.age", b"password")], &recipient);
         // Create a .git directory with a fake .age file inside
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join(".git/config.age"), b"should-be-skipped").unwrap();
@@ -121,11 +115,7 @@ mod tests {
     fn test_list_entries_sorted_case_insensitive() {
         let (_identity, recipient) = generate_test_keypair();
         let dir = create_test_store(
-            vec![
-                ("Zebra.age", b"z"),
-                ("alpha.age", b"a"),
-                ("Beta.age", b"b"),
-            ],
+            vec![("Zebra.age", b"z"), ("alpha.age", b"a"), ("Beta.age", b"b")],
             &recipient,
         );
 
@@ -189,8 +179,7 @@ mod tests {
         let (wrong_identity, _wrong_recipient) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"secret", &recipient);
 
-        let result =
-            gpm_lib::test_support::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
+        let result = gpm_lib::test_support::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
         assert!(result.is_err());
         // Verify error message contains no secret content
         let err_msg = format!("{}", result.unwrap_err());
@@ -221,8 +210,7 @@ mod tests {
         let (wrong_identity, _) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"my-real-password", &recipient);
 
-        let result =
-            gpm_lib::test_support::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
+        let result = gpm_lib::test_support::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
         let err = result.unwrap_err();
         let msg = format!("{}", err);
 

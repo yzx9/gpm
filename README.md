@@ -28,14 +28,14 @@ There is no Android GUI client that can read age-encrypted gopass/password-store
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| App framework | Tauri v2 |
-| Backend | Rust (age, git2, zeroize, walkdir) |
-| Frontend | Vue 3 + TypeScript + Vite |
-| Crypto | [age](https://github.com/str4d/rage) (Rust reference implementation) |
-| Clipboard | tauri-plugin-clipboard-manager |
-| Package manager | pnpm |
+| Layer           | Technology                                                           |
+| --------------- | -------------------------------------------------------------------- |
+| App framework   | Tauri v2                                                             |
+| Backend         | Rust (age, git2, zeroize, walkdir)                                   |
+| Frontend        | Vue 3 + TypeScript + Vite                                            |
+| Crypto          | [age](https://github.com/str4d/rage) (Rust reference implementation) |
+| Clipboard       | tauri-plugin-clipboard-manager                                       |
+| Package manager | pnpm                                                                 |
 
 ## Getting Started
 
@@ -101,16 +101,16 @@ gpm/
 
 ## Rust Command API
 
-| Command | Description | Secrets cross IPC? |
-|---------|-------------|-------------------|
-| `setup` | Clone repo + save identity + config | No |
-| `list_entries` | Walk repo, return `.age` entries | No |
-| `pull_repo` | Fetch + fast-forward merge | No |
-| `copy_password` | Decrypt → clipboard → zeroize | **No** (primary op) |
-| `show_password` | Decrypt → return to Vue (30s auto-clear) | Yes (secondary op) |
-| `is_configured` | Check if setup is complete | No |
-| `get_config` | Return repo URL + path | No |
-| `reset_config` | Clear all local data | No |
+| Command         | Description                              | Secrets cross IPC?  |
+| --------------- | ---------------------------------------- | ------------------- |
+| `setup`         | Clone repo + save identity + config      | No                  |
+| `list_entries`  | Walk repo, return `.age` entries         | No                  |
+| `pull_repo`     | Fetch + fast-forward merge               | No                  |
+| `copy_password` | Decrypt → clipboard → zeroize            | **No** (primary op) |
+| `show_password` | Decrypt → return to Vue (30s auto-clear) | Yes (secondary op)  |
+| `is_configured` | Check if setup is complete               | No                  |
+| `get_config`    | Return repo URL + path                   | No                  |
+| `reset_config`  | Clear all local data                     | No                  |
 
 ## License
 

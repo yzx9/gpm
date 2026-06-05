@@ -60,7 +60,10 @@ async function onSubmit() {
             placeholder="Optional — for private repos"
             :disabled="loading"
           />
-          <small>HTTPS PAT for git authentication. Leave empty for public repos.</small>
+          <small
+            >HTTPS PAT for git authentication. Leave empty for public
+            repos.</small
+          >
         </div>
 
         <div class="field">
@@ -140,7 +143,8 @@ label {
   font-weight: 500;
 }
 
-input, textarea {
+input,
+textarea {
   padding: 0.6rem 0.75rem;
   border: 1px solid #ddd;
   border-radius: 8px;
@@ -150,14 +154,16 @@ input, textarea {
   color: inherit;
 }
 
-input:focus, textarea:focus {
+input:focus,
+textarea:focus {
   outline: none;
   border-color: #4a6cf7;
   box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.2);
 }
 
 @media (prefers-color-scheme: dark) {
-  input, textarea {
+  input,
+  textarea {
     background: #1a1a2e;
     border-color: #444;
   }

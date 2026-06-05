@@ -61,9 +61,12 @@ async function pullRepo() {
 async function copyPassword(entry: Entry) {
   error.value = "";
   try {
-    const result = await invoke<import("../types").CopyResult>("copy_password", {
-      entryPath: entry.path,
-    });
+    const result = await invoke<import("../types").CopyResult>(
+      "copy_password",
+      {
+        entryPath: entry.path,
+      },
+    );
     // Show brief toast-like feedback
     pullResult.value = `Copied ${result.entry_name} (${result.cleared_after_secs}s)`;
     setTimeout(() => {
@@ -80,7 +83,8 @@ function openEntry(entry: Entry) {
 }
 
 async function resetConfig() {
-  if (!confirm("Reset gpm? This will remove all local data and configuration.")) return;
+  if (!confirm("Reset gpm? This will remove all local data and configuration."))
+    return;
   try {
     await invoke("reset_config");
     router.push({ name: "setup" });
@@ -98,10 +102,19 @@ onMounted(loadEntries);
     <header class="header">
       <h1>🔐 gpm</h1>
       <div class="header-actions">
-        <button @click="pullRepo" :disabled="pulling" class="btn-sm" title="Pull updates">
+        <button
+          @click="pullRepo"
+          :disabled="pulling"
+          class="btn-sm"
+          title="Pull updates"
+        >
           {{ pulling ? "⏳" : "↓ Pull" }}
         </button>
-        <button @click="resetConfig" class="btn-sm btn-danger" title="Reset configuration">
+        <button
+          @click="resetConfig"
+          class="btn-sm btn-danger"
+          title="Reset configuration"
+        >
           ⚙ Reset
         </button>
       </div>

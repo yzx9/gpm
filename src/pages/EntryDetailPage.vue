@@ -8,7 +8,9 @@ const route = useRoute();
 const router = useRouter();
 
 const entryPath = decodeURIComponent(
-  Array.isArray(route.params.pathMatch) ? route.params.pathMatch[0] : route.params.pathMatch,
+  Array.isArray(route.params.pathMatch)
+    ? route.params.pathMatch[0]
+    : route.params.pathMatch,
 );
 const entryName = entryPath.replace(/\.age$/, "");
 
@@ -47,9 +49,12 @@ async function showPassword() {
 async function copyPassword() {
   error.value = "";
   try {
-    const result = await invoke<import("../types").CopyResult>("copy_password", {
-      entryPath,
-    });
+    const result = await invoke<import("../types").CopyResult>(
+      "copy_password",
+      {
+        entryPath,
+      },
+    );
     error.value = ""; // clear any previous error
     // Show brief feedback
     revealed.value = false;

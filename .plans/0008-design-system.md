@@ -17,6 +17,7 @@ No DESIGN.md exists. Without a design system, every component gets ad-hoc stylin
 The app is 3 pages (Setup, Entry List, Entry Detail). The design system is deliberately minimal — dark theme for trust, single accent color for focus, monospace for crypto content.
 
 Color system (CSS variables):
+
 - --bg-primary: #0D1117 (deep charcoal)
 - --bg-surface: #161B22 (card/surface background)
 - --text-primary: #E6EDF3 (high contrast)
@@ -26,6 +27,7 @@ Color system (CSS variables):
 - --success: #3FB950 (success states)
 
 Typography:
+
 - Display: Inter 600 20px (app name)
 - Heading: Inter 600 16px (entry names)
 - Body: Inter 400 14px (notes, metadata)

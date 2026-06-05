@@ -11,7 +11,12 @@ const routes = [
   { path: "/", redirect: "/setup" },
   { path: "/setup", name: "setup", component: SetupPage },
   { path: "/entries", name: "entries", component: EntryListPage },
-  { path: "/entry/:pathMatch(.*)", name: "entry", component: EntryDetailPage, props: true },
+  {
+    path: "/entry/:pathMatch(.*)",
+    name: "entry",
+    component: EntryDetailPage,
+    props: true,
+  },
 ];
 
 const router = createRouter({

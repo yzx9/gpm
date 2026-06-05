@@ -17,11 +17,13 @@ Android-first means viewport handling is critical (software keyboard, notch, ges
 The app targets Android phones primarily, with desktop as bonus. The software keyboard takes 40-60% of screen on phones, which affects the setup page (3 inputs + button).
 
 Responsive behavior:
+
 - Phone (375px): Single column, full-width inputs, sticky bottom CTA on setup page
 - Tablet (768px): Wider list, side padding, larger touch targets
 - Desktop (1024px+): Max-width container (480px centered), same mobile layout
 
 Accessibility:
+
 - All interactive elements: minimum 48px touch target
 - Screen reader: aria-live for copy confirmation, aria-label for show/hide toggle
 - Keyboard: Tab order follows visual order, Enter submits, Escape navigates back
