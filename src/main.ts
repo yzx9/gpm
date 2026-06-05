@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { createApp } from "vue";
 import { createRouter, createWebHashHistory } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";

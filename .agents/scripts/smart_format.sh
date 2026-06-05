@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
+#
+# SPDX-License-Identifier: Apache-2.0
 
 if [[ -n "$CLAUDE_PROJECT_DIR" ]]; then
   input=$(cat)
