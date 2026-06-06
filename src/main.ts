@@ -6,6 +6,7 @@ import { createApp } from "vue";
 import { createRouter, createWebHashHistory } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App.vue";
+import "./assets/main.css";
 
 import SetupPage from "./pages/SetupPage.vue";
 import EntryListPage from "./pages/EntryListPage.vue";

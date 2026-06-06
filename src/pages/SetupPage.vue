@@ -78,14 +78,23 @@ async function onSubmit() {
 </script>
 
 <template>
-  <main class="setup-page" role="main">
-    <div class="setup-card">
-      <h1>🔐 gpm</h1>
-      <p class="subtitle">Age-only gopass password client</p>
+  <main
+    class="min-h-screen flex items-center justify-center max-[480px]:items-start p-4 max-[480px]:pt-6 max-[480px]:pb-0"
+    role="main"
+  >
+    <div
+      class="w-full max-w-[420px] bg-surface rounded-lg p-8 shadow-[0_2px_12px_rgba(0,0,0,0.08)] max-[480px]:p-4 max-[480px]:pb-[calc(3rem+4rem+env(safe-area-inset-bottom,0px))]"
+    >
+      <h1 class="text-center text-display mb-1">🔐 gpm</h1>
+      <p class="text-center text-muted text-sm mb-6">
+        Age-only gopass password client
+      </p>
 
-      <form @submit.prevent="onSubmit" class="setup-form">
-        <div class="field">
-          <label for="repo-url">Git Repository URL</label>
+      <form @submit.prevent="onSubmit" class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1">
+          <label for="repo-url" class="text-sm font-medium"
+            >Git Repository URL</label
+          >
           <input
             id="repo-url"
             v-model="repoUrl"
@@ -94,11 +103,14 @@ async function onSubmit() {
             required
             autocomplete="off"
             :disabled="loading"
+            class="input-base"
           />
         </div>
 
-        <div class="field">
-          <label for="pat">Personal Access Token</label>
+        <div class="flex flex-col gap-1">
+          <label for="pat" class="text-sm font-medium"
+            >Personal Access Token</label
+          >
           <input
             id="pat"
             v-model="pat"
@@ -106,15 +118,16 @@ async function onSubmit() {
             placeholder="Optional — for private repos"
             autocomplete="off"
             :disabled="loading"
+            class="input-base"
           />
-          <small
+          <small class="text-xs text-muted"
             >HTTPS PAT for git authentication. Leave empty for public
             repos.</small
           >
         </div>
 
-        <div class="field">
-          <label for="identity">Age Identity</label>
+        <div class="flex flex-col gap-1">
+          <label for="identity" class="text-sm font-medium">Age Identity</label>
           <textarea
             id="identity"
             v-model="identity"
@@ -124,18 +137,29 @@ async function onSubmit() {
             autocomplete="off"
             spellcheck="false"
             :disabled="loading"
+            class="input-base"
           />
-          <small>Paste your age secret key (starts with AGE-SECRET-KEY-)</small>
+          <small class="text-xs text-muted"
+            >Paste your age secret key (starts with AGE-SECRET-KEY-)</small
+          >
         </div>
 
-        <p class="trust-statement">
+        <p
+          class="text-center text-xs text-info bg-info-soft p-2 px-3 rounded-sm"
+        >
           Stored locally. Nothing leaves your device.
         </p>
 
-        <div v-if="error" class="error" role="alert">{{ error }}</div>
+        <div
+          v-if="error"
+          class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm"
+          role="alert"
+        >
+          {{ error }}
+        </div>
 
         <button type="submit" :disabled="loading" class="btn-primary">
-          <span v-if="loading" class="spinner" aria-hidden="true"></span>
+          <span v-if="loading" class="spinner-white" aria-hidden="true"></span>
           <span v-if="loading">{{ progressSteps[progressStep] }}</span>
           <span v-else>Clone &amp; Setup</span>
         </button>
@@ -145,109 +169,38 @@ async function onSubmit() {
 </template>
 
 <style scoped>
-.setup-page {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--screen-padding);
-}
-
-.setup-card {
-  width: 100%;
-  max-width: 420px;
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  padding: var(--space-2xl);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-
-h1 {
-  text-align: center;
-  font-size: var(--font-size-display);
-  margin-bottom: var(--space-xs);
-}
-
-.subtitle {
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-xl);
-}
-
-.setup-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-}
-
-input,
-textarea {
-  padding: 0.6rem var(--space-md);
-  border: 1px solid var(--border);
+.input-base {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-edge);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-base);
+  font-size: var(--text-base);
   font-family: inherit;
-  background: var(--bg-input);
+  background: var(--color-input);
   color: inherit;
-  min-height: var(--input-min-height);
+  min-height: 48px;
 }
 
-input:focus,
-textarea:focus {
+.input-base:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-focus-ring);
-}
-
-small {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-}
-
-.error {
-  background: var(--danger-bg);
-  color: var(--danger);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-}
-
-.trust-statement {
-  text-align: center;
-  font-size: var(--font-size-xs);
-  color: var(--trust-color);
-  background: var(--trust-bg);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--trust-radius);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .btn-primary {
-  padding: var(--space-md);
-  background: var(--accent);
+  padding: 0.75rem;
+  background: var(--color-accent);
   color: white;
   border: none;
   border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
+  font-size: var(--text-md);
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;
-  min-height: var(--btn-min-height);
+  min-height: 48px;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--color-accent-deep);
 }
 
 .btn-primary:disabled {
@@ -255,7 +208,7 @@ small {
   cursor: not-allowed;
 }
 
-.spinner {
+.spinner-white {
   display: inline-block;
   width: 14px;
   height: 14px;
@@ -265,26 +218,5 @@ small {
   animation: spin 0.6s linear infinite;
   margin-right: 0.4rem;
   vertical-align: middle;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 480px) {
-  .setup-page {
-    align-items: flex-start;
-    padding-top: var(--space-xl);
-    padding-bottom: 0;
-  }
-
-  .setup-card {
-    padding: var(--space-lg);
-    padding-bottom: calc(
-      var(--btn-min-height) + var(--space-xl) + env(safe-area-inset-bottom, 0px)
-    );
-  }
 }
 </style>

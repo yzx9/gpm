@@ -142,10 +142,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="entry-list-page" role="main">
-    <header class="header" role="banner">
-      <h1>🔐 gpm</h1>
-      <div class="header-actions">
+  <main class="max-w-[480px] md:max-w-[600px] mx-auto p-4" role="main">
+    <header class="flex justify-between items-center mb-4" role="banner">
+      <h1 class="text-xl">🔐 gpm</h1>
+      <div class="flex gap-2">
         <button
           @click="pullRepo"
           :disabled="pulling"
@@ -168,66 +168,94 @@ onBeforeUnmount(() => {
 
     <div
       v-if="lastSyncLabel"
-      class="freshness"
+      class="text-xs text-subtle text-center mb-2"
       aria-live="polite"
       role="status"
     >
       Last synced {{ lastSyncLabel }}
     </div>
 
-    <div class="search-bar">
+    <div class="mb-4">
       <input
         v-model="search"
         type="search"
         placeholder="Search entries..."
-        class="search-input"
+        class="input-base w-full"
       />
     </div>
 
-    <div v-if="error" class="error" role="alert">
+    <div
+      v-if="error"
+      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-3 flex justify-between items-center"
+      role="alert"
+    >
       {{ error }}
       <button @click="loadEntries" class="btn-retry">Retry</button>
     </div>
-    <div v-if="pullResult" class="info" role="status" aria-live="polite">
+    <div
+      v-if="pullResult"
+      class="bg-info-soft text-info p-2 px-3 rounded-sm text-sm mb-3"
+      role="status"
+      aria-live="polite"
+    >
       {{ pullResult }}
     </div>
-    <div v-if="toast" class="toast" role="status" aria-live="polite">
+    <div
+      v-if="toast"
+      class="bg-success-soft text-success p-2 px-3 rounded-sm text-sm mb-3"
+      role="status"
+      aria-live="polite"
+    >
       {{ toast }}
     </div>
 
-    <div v-if="loading" class="empty">
-      <div class="spinner"></div>
+    <div v-if="loading" class="text-center text-muted py-8">
+      <span class="spinner"></span>
       <span>Loading entries...</span>
     </div>
-    <div v-else-if="entries.length === 0 && !error" class="empty">
-      <span class="empty-icon">🔒</span>
+    <div
+      v-else-if="entries.length === 0 && !error"
+      class="text-center text-muted py-8"
+    >
+      <span class="text-4xl block mb-2">🔒</span>
       <p>No passwords yet</p>
-      <p class="empty-hint">Pull updates or check your repository</p>
+      <p class="text-xs text-subtle mt-1">
+        Pull updates or check your repository
+      </p>
     </div>
-    <div v-else-if="filteredEntries().length === 0" class="empty">
-      <span class="empty-icon">🔍</span>
+    <div
+      v-else-if="filteredEntries().length === 0"
+      class="text-center text-muted py-8"
+    >
+      <span class="text-4xl block mb-2">🔍</span>
       <p>No matches for "{{ search }}"</p>
     </div>
 
-    <ul v-else class="entry-list" role="list">
+    <ul v-else class="list-none flex flex-col gap-0.5" role="list">
       <li
         v-for="entry in filteredEntries()"
         :key="entry.path"
-        class="entry-item"
+        class="flex items-center justify-between p-[0.6rem_0.75rem] md:p-[0.8rem_1rem] bg-surface rounded-md transition-colors duration-150 min-h-12 hover:bg-hover"
       >
         <div
-          class="entry-info"
+          class="flex-1 cursor-pointer min-w-0"
           tabindex="0"
           role="button"
           @click="openEntry(entry)"
           @keydown.enter="openEntry(entry)"
         >
-          <span class="entry-name">{{ entry.name }}</span>
-          <span class="entry-path">{{ entry.path }}</span>
+          <span
+            class="block font-medium whitespace-nowrap overflow-hidden text-ellipsis"
+            >{{ entry.name }}</span
+          >
+          <span
+            class="block text-xs text-muted whitespace-nowrap overflow-hidden text-ellipsis"
+            >{{ entry.path }}</span
+          >
         </div>
         <button
           @click.stop="copyPassword(entry)"
-          class="btn-copy"
+          class="bg-transparent border-none text-lg cursor-pointer p-1 px-[0.4rem] rounded-sm transition-colors duration-150 shrink-0 min-w-12 min-h-12 flex items-center justify-center hover:bg-[rgba(0,0,0,0.05)]"
           aria-label="Copy password"
           title="Copy password"
         >
@@ -239,215 +267,35 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.entry-list-page {
-  max-width: var(--max-width);
-  margin: 0 auto;
-  padding: var(--screen-padding);
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--space-lg);
-}
-
-.freshness {
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  text-align: center;
-  margin-bottom: var(--space-sm);
-}
-
-h1 {
-  font-size: var(--font-size-xl);
-}
-
-.header-actions {
-  display: flex;
-  gap: var(--space-sm);
-}
-
-.search-bar {
-  margin-bottom: var(--space-lg);
-}
-
-.search-input {
-  width: 100%;
-  padding: 0.6rem var(--space-md);
-  border: 1px solid var(--border);
+.input-base {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-edge);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-base);
-  background: var(--bg-surface);
+  font-size: var(--text-base);
+  background: var(--color-surface);
   color: inherit;
-  min-height: var(--input-min-height);
+  min-height: 48px;
 }
 
-.search-input:focus {
+.input-base:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-focus-ring);
-}
-
-.error {
-  background: var(--danger-bg);
-  color: var(--danger);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-md);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.btn-retry {
-  background: none;
-  border: 1px solid var(--danger);
-  color: var(--danger);
-  padding: 0.15rem var(--space-sm);
-  border-radius: 4px;
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  min-height: var(--btn-min-height);
-}
-
-.btn-retry:hover {
-  opacity: 0.8;
-}
-
-.info {
-  background: var(--info-bg);
-  color: var(--info);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-md);
-}
-
-.toast {
-  background: var(--success-bg);
-  color: var(--success);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-md);
-}
-
-.empty {
-  text-align: center;
-  color: var(--text-secondary);
-  padding: var(--space-2xl) 0;
-}
-
-.empty-icon {
-  font-size: 2rem;
-  display: block;
-  margin-bottom: var(--space-sm);
-}
-
-.empty-hint {
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  margin-top: var(--space-xs);
-}
-
-.spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: var(--space-sm);
-  vertical-align: middle;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.entry-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.entry-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem var(--space-md);
-  background: var(--bg-surface);
-  border-radius: var(--radius-md);
-  transition: background 0.15s;
-  min-height: var(--touch-min);
-}
-
-.entry-item:hover {
-  background: var(--bg-hover);
-}
-
-.entry-info {
-  flex: 1;
-  cursor: pointer;
-  min-width: 0;
-}
-
-.entry-name {
-  display: block;
-  font-weight: var(--font-weight-medium);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.entry-path {
-  display: block;
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.btn-copy {
-  background: none;
-  border: none;
-  font-size: var(--font-size-lg);
-  cursor: pointer;
-  padding: var(--space-xs) 0.4rem;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s;
-  flex-shrink: 0;
-  min-width: var(--touch-min);
-  min-height: var(--touch-min);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-copy:hover {
-  background: rgba(0, 0, 0, 0.05);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .btn-sm {
   padding: 0.3rem 0.6rem;
-  font-size: var(--font-size-xs);
-  border: 1px solid var(--border);
+  font-size: var(--text-xs);
+  border: 1px solid var(--color-edge);
   border-radius: var(--radius-sm);
-  background: var(--bg-surface);
+  background: var(--color-surface);
   color: inherit;
   cursor: pointer;
-  min-height: var(--btn-min-height);
+  min-height: 48px;
 }
 
 .btn-sm:hover {
-  background: var(--bg-hover);
+  background: var(--color-hover);
 }
 
 .btn-sm:disabled {
@@ -456,17 +304,34 @@ h1 {
 }
 
 .btn-danger {
-  border-color: var(--danger-border);
+  border-color: var(--color-danger-edge);
   color: #c66;
 }
 
-@media (min-width: 768px) {
-  .entry-list-page {
-    max-width: 600px;
-  }
+.btn-retry {
+  background: none;
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  min-height: 48px;
+}
 
-  .entry-item {
-    padding: 0.8rem var(--space-lg);
-  }
+.btn-retry:hover {
+  opacity: 0.8;
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-edge);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 0.5rem;
+  vertical-align: middle;
 }
 </style>

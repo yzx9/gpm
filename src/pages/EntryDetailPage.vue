@@ -113,28 +113,48 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="entry-detail-page" role="main" @keydown="handleKeydown">
-    <header class="header" role="banner">
-      <button @click="goBack" class="btn-back" aria-label="Back to entry list">
+  <main class="max-w-[480px] mx-auto p-4" role="main" @keydown="handleKeydown">
+    <header class="flex items-center gap-3 mb-6" role="banner">
+      <button
+        @click="goBack"
+        class="bg-transparent border-none text-base cursor-pointer text-accent p-1 min-w-12 min-h-12"
+        aria-label="Back to entry list"
+      >
         ← Back
       </button>
-      <h1 class="entry-title">{{ entryName }}</h1>
+      <h1
+        class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
+      >
+        {{ entryName }}
+      </h1>
     </header>
 
-    <div v-if="error" class="error" role="alert">
+    <div
+      v-if="error"
+      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-4"
+      role="alert"
+    >
       {{ error }}
-      <span v-if="error.includes('ecrypt')" class="error-hint">
+      <span
+        v-if="error.includes('ecrypt')"
+        class="block text-xs opacity-80 mt-1"
+      >
         Check your age identity and try again
       </span>
     </div>
-    <div v-if="toast" class="toast" role="status" aria-live="polite">
+    <div
+      v-if="toast"
+      class="bg-success-soft text-success p-2 px-3 rounded-sm text-sm mb-4"
+      role="status"
+      aria-live="polite"
+    >
       {{ toast }}
     </div>
 
-    <div class="actions">
+    <div class="flex gap-3 mb-6">
       <button
         @click="copyPassword"
-        class="btn-primary"
+        class="btn-primary flex-1"
         :disabled="loading"
         aria-label="Copy password to clipboard"
       >
@@ -142,7 +162,7 @@ onBeforeUnmount(() => {
       </button>
       <button
         @click="showPassword"
-        class="btn-secondary"
+        class="btn-secondary flex-1"
         :disabled="loading"
         :aria-label="revealed ? 'Password is showing' : 'Show password'"
       >
@@ -151,107 +171,61 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div v-if="loading" class="loading">
-      <div class="spinner"></div>
+    <div v-if="loading" class="text-center text-muted py-4">
+      <span class="spinner"></span>
       <span>Decrypting...</span>
     </div>
 
-    <div v-if="revealed && password !== null" class="sensitive-section">
-      <div class="field">
-        <label>Password</label>
-        <div class="password-display">{{ password }}</div>
+    <div
+      v-if="revealed && password !== null"
+      class="bg-surface rounded-lg p-4 shadow-[0_1px_6px_rgba(0,0,0,0.06)]"
+    >
+      <div class="mb-4">
+        <label
+          class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
+          >Password</label
+        >
+        <div
+          class="font-mono text-lg p-2 bg-accent-ring rounded-sm break-all select-all"
+        >
+          {{ password }}
+        </div>
       </div>
 
-      <div v-if="notes" class="field">
-        <label>Notes</label>
-        <pre class="notes-display">{{ notes }}</pre>
+      <div v-if="notes" class="mb-2">
+        <label
+          class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
+          >Notes</label
+        >
+        <pre
+          class="text-sm p-2 bg-input rounded-sm whitespace-pre-wrap break-all font-[inherit] select-text max-h-[200px] overflow-y-auto"
+          >{{ notes }}</pre
+        >
       </div>
 
-      <p class="auto-clear-hint">Auto-clears in 30 seconds</p>
+      <p class="text-center text-xs text-muted mt-3">
+        Auto-clears in 30 seconds
+      </p>
     </div>
   </main>
 </template>
 
 <style scoped>
-.entry-detail-page {
-  max-width: var(--max-width);
-  margin: 0 auto;
-  padding: var(--screen-padding);
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  margin-bottom: var(--space-xl);
-}
-
-.btn-back {
-  background: none;
-  border: none;
-  font-size: var(--font-size-md);
-  cursor: pointer;
-  color: var(--accent);
-  padding: var(--space-xs);
-  min-width: var(--touch-min);
-  min-height: var(--touch-min);
-}
-
-.entry-title {
-  font-size: var(--font-size-lg);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-}
-
-.error {
-  background: var(--danger-bg);
-  color: var(--danger);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-lg);
-}
-
-.error-hint {
-  display: block;
-  font-size: var(--font-size-xs);
-  opacity: 0.8;
-  margin-top: var(--space-xs);
-}
-
-.toast {
-  background: var(--success-bg);
-  color: var(--success);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-lg);
-}
-
-.actions {
-  display: flex;
-  gap: var(--space-md);
-  margin-bottom: var(--space-xl);
-}
-
 .btn-primary {
-  flex: 1;
-  padding: var(--space-md);
-  background: var(--accent);
+  padding: 0.75rem;
+  background: var(--color-accent);
   color: white;
   border: none;
   border-radius: var(--radius-md);
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-medium);
+  font-size: var(--text-base);
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;
-  min-height: var(--btn-min-height);
+  min-height: 48px;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--color-accent-deep);
 }
 
 .btn-primary:disabled {
@@ -260,21 +234,20 @@ onBeforeUnmount(() => {
 }
 
 .btn-secondary {
-  flex: 1;
-  padding: var(--space-md);
-  background: var(--bg-surface);
-  color: var(--accent);
-  border: 1px solid var(--accent);
+  padding: 0.75rem;
+  background: var(--color-surface);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-medium);
+  font-size: var(--text-base);
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;
-  min-height: var(--btn-min-height);
+  min-height: 48px;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: var(--bg-hover);
+  background: var(--color-hover);
 }
 
 .btn-secondary:disabled {
@@ -282,82 +255,15 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-.loading {
-  text-align: center;
-  color: var(--text-secondary);
-  padding: var(--space-lg) 0;
-}
-
 .spinner {
   display: inline-block;
   width: 18px;
   height: 18px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
+  border: 2px solid var(--color-edge);
+  border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
-  margin-right: var(--space-sm);
+  margin-right: 0.5rem;
   vertical-align: middle;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.sensitive-section {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  padding: var(--space-lg);
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
-}
-
-.field {
-  margin-bottom: var(--space-lg);
-}
-
-.field:last-of-type {
-  margin-bottom: var(--space-sm);
-}
-
-label {
-  display: block;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-secondary);
-  margin-bottom: var(--space-xs);
-}
-
-.password-display {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-lg);
-  padding: var(--space-sm);
-  background: var(--accent-focus-ring);
-  border-radius: var(--radius-sm);
-  word-break: break-all;
-  user-select: all;
-}
-
-.notes-display {
-  font-size: var(--font-size-sm);
-  padding: var(--space-sm);
-  background: var(--bg-input);
-  border-radius: var(--radius-sm);
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: inherit;
-  user-select: text;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.auto-clear-hint {
-  text-align: center;
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  margin-top: var(--space-md);
 }
 </style>

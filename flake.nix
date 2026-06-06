@@ -46,7 +46,7 @@
             cargo-outdated
 
             # node / frontend
-            nodejs_22
+            nodejs
             pnpm
 
             # tauri v2 (macOS uses system WebKit; no extra libs needed)
