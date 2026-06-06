@@ -31,3 +31,7 @@ src-tauri/target/
 
 # tauri
 src-tauri/gen/
+
+# agentic tools
+.gstack/
+.playwright-mcp/
