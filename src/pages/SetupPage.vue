@@ -16,8 +16,24 @@ const identity = ref("");
 const loading = ref(false);
 const error = ref("");
 
+function validate(): string | null {
+  if (!repoUrl.value.trim()) return "Repository URL is required";
+  if (!repoUrl.value.trim().startsWith("https://"))
+    return "Only HTTPS URLs are supported";
+  if (!identity.value.trim()) return "Age identity is required";
+  if (!identity.value.trim().startsWith("AGE-SECRET-KEY-"))
+    return "Identity must start with AGE-SECRET-KEY-...";
+  return null;
+}
+
 async function onSubmit() {
   error.value = "";
+  const validationError = validate();
+  if (validationError) {
+    error.value = validationError;
+    return;
+  }
+
   loading.value = true;
 
   try {
@@ -86,6 +102,7 @@ async function onSubmit() {
         <div v-if="error" class="error">{{ error }}</div>
 
         <button type="submit" :disabled="loading" class="btn-primary">
+          <span v-if="loading" class="spinner"></span>
           {{ loading ? "Cloning repository..." : "Clone & Setup" }}
         </button>
       </form>
@@ -99,117 +116,115 @@ async function onSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: var(--screen-padding);
 }
 
 .setup-card {
   width: 100%;
   max-width: 420px;
-  background: white;
-  border-radius: 12px;
-  padding: 2rem;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2xl);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-
-@media (prefers-color-scheme: dark) {
-  .setup-card {
-    background: #252540;
-  }
 }
 
 h1 {
   text-align: center;
-  font-size: 1.75rem;
-  margin-bottom: 0.25rem;
+  font-size: var(--font-size-display);
+  margin-bottom: var(--space-xs);
 }
 
 .subtitle {
   text-align: center;
-  color: #888;
-  font-size: 0.875rem;
-  margin-bottom: 1.5rem;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-xl);
 }
 
 .setup-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-lg);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--space-xs);
 }
 
 label {
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
 }
 
 input,
 textarea {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  padding: 0.6rem var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
   font-family: inherit;
-  background: #fafafa;
+  background: var(--bg-input);
   color: inherit;
 }
 
 input:focus,
 textarea:focus {
   outline: none;
-  border-color: #4a6cf7;
-  box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.2);
-}
-
-@media (prefers-color-scheme: dark) {
-  input,
-  textarea {
-    background: #1a1a2e;
-    border-color: #444;
-  }
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-focus-ring);
 }
 
 small {
-  font-size: 0.75rem;
-  color: #888;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
 }
 
 .error {
-  background: #fee;
-  color: #c33;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .error {
-    background: #3a1a1a;
-  }
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
 }
 
 .btn-primary {
-  padding: 0.75rem;
-  background: #4a6cf7;
+  padding: var(--space-md);
+  background: var(--accent);
   color: white;
   border: none;
-  border-radius: 8px;
-  font-size: 1rem;
-  font-weight: 500;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #3a5ce5;
+  background: var(--accent-hover);
 }
 
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

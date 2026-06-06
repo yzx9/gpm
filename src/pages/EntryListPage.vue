@@ -16,6 +16,8 @@ const loading = ref(false);
 const pulling = ref(false);
 const error = ref("");
 const pullResult = ref("");
+const toast = ref("");
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 const filteredEntries = () => {
   const q = search.value.toLowerCase();
@@ -62,8 +64,16 @@ async function pullRepo() {
   }
 }
 
+function showToast(message: string) {
+  toast.value = message;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.value = "";
+    toastTimer = null;
+  }, 3000);
+}
+
 async function copyPassword(entry: Entry) {
-  error.value = "";
   try {
     const result = await invoke<import("../types").CopyResult>(
       "copy_password",
@@ -71,14 +81,12 @@ async function copyPassword(entry: Entry) {
         entryPath: entry.path,
       },
     );
-    // Show brief toast-like feedback
-    pullResult.value = `Copied ${result.entry_name} (${result.cleared_after_secs}s)`;
-    setTimeout(() => {
-      pullResult.value = "";
-    }, 3000);
+    showToast(
+      `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
+    );
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Copy failed";
+    showToast(`Failed: ${appError?.message || "Copy failed"}`);
   }
 }
 
@@ -133,12 +141,25 @@ onMounted(loadEntries);
       />
     </div>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error" class="error">
+      {{ error }}
+      <button @click="loadEntries" class="btn-retry">Retry</button>
+    </div>
     <div v-if="pullResult" class="info">{{ pullResult }}</div>
+    <div v-if="toast" class="toast">{{ toast }}</div>
 
-    <div v-if="loading" class="empty">Loading entries...</div>
+    <div v-if="loading" class="empty">
+      <div class="spinner"></div>
+      <span>Loading entries...</span>
+    </div>
+    <div v-else-if="entries.length === 0 && !error" class="empty">
+      <span class="empty-icon">🔒</span>
+      <p>No passwords yet</p>
+      <p class="empty-hint">Pull updates or check your repository</p>
+    </div>
     <div v-else-if="filteredEntries().length === 0" class="empty">
-      {{ entries.length === 0 ? "No entries found" : "No matches" }}
+      <span class="empty-icon">🔍</span>
+      <p>No matches for "{{ search }}"</p>
     </div>
 
     <ul v-else class="entry-list">
@@ -165,88 +186,125 @@ onMounted(loadEntries);
 
 <style scoped>
 .entry-list-page {
-  max-width: 480px;
+  max-width: var(--max-width);
   margin: 0 auto;
-  padding: 1rem;
+  padding: var(--screen-padding);
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-lg);
 }
 
 h1 {
-  font-size: 1.25rem;
+  font-size: var(--font-size-xl);
 }
 
 .header-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-sm);
 }
 
 .search-bar {
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-lg);
 }
 
 .search-input {
   width: 100%;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  background: white;
+  padding: 0.6rem var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  background: var(--bg-surface);
   color: inherit;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #4a6cf7;
-  box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.2);
-}
-
-@media (prefers-color-scheme: dark) {
-  .search-input {
-    background: #252540;
-    border-color: #444;
-  }
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-focus-ring);
 }
 
 .error {
-  background: #fee;
-  color: #c33;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  margin-bottom: 0.75rem;
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-md);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-@media (prefers-color-scheme: dark) {
-  .error {
-    background: #3a1a1a;
-  }
+.btn-retry {
+  background: none;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 0.15rem var(--space-sm);
+  border-radius: 4px;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.btn-retry:hover {
+  opacity: 0.8;
 }
 
 .info {
-  background: #e8f4fd;
-  color: #1976d2;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  margin-bottom: 0.75rem;
+  background: var(--info-bg);
+  color: var(--info);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-md);
 }
 
-@media (prefers-color-scheme: dark) {
-  .info {
-    background: #1a2a3a;
-  }
+.toast {
+  background: var(--success-bg);
+  color: var(--success);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-md);
 }
 
 .empty {
   text-align: center;
-  color: #888;
-  padding: 2rem 0;
+  color: var(--text-secondary);
+  padding: var(--space-2xl) 0;
+}
+
+.empty-icon {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: var(--space-sm);
+}
+
+.empty-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-top: var(--space-xs);
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: var(--space-sm);
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .entry-list {
@@ -260,23 +318,14 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.6rem 0.75rem;
-  background: white;
-  border-radius: 8px;
+  padding: 0.6rem var(--space-md);
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
   transition: background 0.15s;
 }
 
 .entry-item:hover {
-  background: #f0f0f5;
-}
-
-@media (prefers-color-scheme: dark) {
-  .entry-item {
-    background: #252540;
-  }
-  .entry-item:hover {
-    background: #2f2f50;
-  }
+  background: var(--bg-hover);
 }
 
 .entry-info {
@@ -287,7 +336,7 @@ h1 {
 
 .entry-name {
   display: block;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -295,8 +344,8 @@ h1 {
 
 .entry-path {
   display: block;
-  font-size: 0.75rem;
-  color: #888;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -305,10 +354,10 @@ h1 {
 .btn-copy {
   background: none;
   border: none;
-  font-size: 1.1rem;
+  font-size: var(--font-size-lg);
   cursor: pointer;
-  padding: 0.25rem 0.4rem;
-  border-radius: 6px;
+  padding: var(--space-xs) 0.4rem;
+  border-radius: var(--radius-sm);
   transition: background 0.15s;
   flex-shrink: 0;
 }
@@ -319,16 +368,16 @@ h1 {
 
 .btn-sm {
   padding: 0.3rem 0.6rem;
-  font-size: 0.8rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: white;
+  font-size: var(--font-size-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
   color: inherit;
   cursor: pointer;
 }
 
 .btn-sm:hover {
-  background: #f0f0f5;
+  background: var(--bg-hover);
 }
 
 .btn-sm:disabled {
@@ -337,17 +386,7 @@ h1 {
 }
 
 .btn-danger {
-  border-color: #fcc;
+  border-color: var(--danger-border);
   color: #c66;
-}
-
-@media (prefers-color-scheme: dark) {
-  .btn-sm {
-    background: #252540;
-    border-color: #444;
-  }
-  .btn-sm:hover {
-    background: #2f2f50;
-  }
 }
 </style>

@@ -24,7 +24,9 @@ const notes = ref<string | null>(null);
 const loading = ref(false);
 const error = ref("");
 const revealed = ref(false);
+const toast = ref("");
 let autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function showPassword() {
   loading.value = true;
@@ -59,13 +61,14 @@ async function copyPassword() {
         entryPath,
       },
     );
-    error.value = ""; // clear any previous error
-    // Show brief feedback
     revealed.value = false;
     notes.value = null;
-    password.value = `Copied! (${result.cleared_after_secs}s auto-clear)`;
-    setTimeout(() => {
-      password.value = null;
+    password.value = null;
+    toast.value = `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toast.value = "";
+      toastTimer = null;
     }, 3000);
   } catch (e) {
     const appError = e as AppError;
@@ -110,7 +113,13 @@ onBeforeUnmount(() => {
       <h1 class="entry-title">{{ entryName }}</h1>
     </header>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error" class="error">
+      {{ error }}
+      <span v-if="error.includes('ecrypt')" class="error-hint">
+        Check your age identity and try again
+      </span>
+    </div>
+    <div v-if="toast" class="toast">{{ toast }}</div>
 
     <div class="actions">
       <button @click="copyPassword" class="btn-primary" :disabled="loading">
@@ -121,7 +130,10 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div v-if="loading" class="loading">Decrypting...</div>
+    <div v-if="loading" class="loading">
+      <div class="spinner"></div>
+      <span>Decrypting...</span>
+    </div>
 
     <div v-if="revealed && password !== null" class="sensitive-section">
       <div class="field">
@@ -141,29 +153,29 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .entry-detail-page {
-  max-width: 480px;
+  max-width: var(--max-width);
   margin: 0 auto;
-  padding: 1rem;
+  padding: var(--screen-padding);
 }
 
 .header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
 }
 
 .btn-back {
   background: none;
   border: none;
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   cursor: pointer;
-  color: #4a6cf7;
-  padding: 0.25rem;
+  color: var(--accent);
+  padding: var(--space-xs);
 }
 
 .entry-title {
-  font-size: 1.1rem;
+  font-size: var(--font-size-lg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -171,41 +183,51 @@ onBeforeUnmount(() => {
 }
 
 .error {
-  background: #fee;
-  color: #c33;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  margin-bottom: 1rem;
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-lg);
 }
 
-@media (prefers-color-scheme: dark) {
-  .error {
-    background: #3a1a1a;
-  }
+.error-hint {
+  display: block;
+  font-size: var(--font-size-xs);
+  opacity: 0.8;
+  margin-top: var(--space-xs);
+}
+
+.toast {
+  background: var(--success-bg);
+  color: var(--success);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-lg);
 }
 
 .actions {
   display: flex;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
 }
 
 .btn-primary {
   flex: 1;
-  padding: 0.75rem;
-  background: #4a6cf7;
+  padding: var(--space-md);
+  background: var(--accent);
   color: white;
   border: none;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 500;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #3a5ce5;
+  background: var(--accent-hover);
 }
 
 .btn-primary:disabled {
@@ -215,19 +237,19 @@ onBeforeUnmount(() => {
 
 .btn-secondary {
   flex: 1;
-  padding: 0.75rem;
-  background: white;
-  color: #4a6cf7;
-  border: 1px solid #4a6cf7;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 500;
+  padding: var(--space-md);
+  background: var(--bg-surface);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #f0f4ff;
+  background: var(--bg-hover);
 }
 
 .btn-secondary:disabled {
@@ -235,89 +257,82 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-@media (prefers-color-scheme: dark) {
-  .btn-secondary {
-    background: #252540;
-  }
-  .btn-secondary:hover:not(:disabled) {
-    background: #2f2f50;
-  }
-}
-
 .loading {
   text-align: center;
-  color: #888;
-  padding: 1rem 0;
+  color: var(--text-secondary);
+  padding: var(--space-lg) 0;
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: var(--space-sm);
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .sensitive-section {
-  background: white;
-  border-radius: 10px;
-  padding: 1rem;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
 }
 
-@media (prefers-color-scheme: dark) {
-  .sensitive-section {
-    background: #252540;
-  }
-}
-
 .field {
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-lg);
 }
 
 .field:last-of-type {
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-sm);
 }
 
 label {
   display: block;
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #888;
-  margin-bottom: 0.25rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-xs);
 }
 
 .password-display {
-  font-family: "SF Mono", "Fira Code", monospace;
-  font-size: 1.1rem;
-  padding: 0.5rem;
-  background: #f0f4ff;
-  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-lg);
+  padding: var(--space-sm);
+  background: var(--accent-focus-ring);
+  border-radius: var(--radius-sm);
   word-break: break-all;
   user-select: all;
 }
 
-@media (prefers-color-scheme: dark) {
-  .password-display {
-    background: #1a1a3e;
-  }
-}
-
 .notes-display {
-  font-size: 0.85rem;
-  padding: 0.5rem;
-  background: #fafafa;
-  border-radius: 6px;
+  font-size: var(--font-size-sm);
+  padding: var(--space-sm);
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
   white-space: pre-wrap;
   word-break: break-all;
   font-family: inherit;
   user-select: text;
-}
-
-@media (prefers-color-scheme: dark) {
-  .notes-display {
-    background: #1a1a2e;
-  }
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .auto-clear-hint {
   text-align: center;
-  font-size: 0.75rem;
-  color: #888;
-  margin-top: 0.75rem;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin-top: var(--space-md);
 }
 </style>
