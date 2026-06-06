@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type { Entry, PullResult, AppError } from "../types";
@@ -19,6 +19,24 @@ const pullResult = ref("");
 const toast = ref("");
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+const lastSyncTime = ref<number | null>(null);
+const now = ref(Date.now());
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+
+function formatRelativeTime(timestamp: number): string {
+  const seconds = Math.floor((now.value - timestamp) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+const lastSyncLabel = computed(() => {
+  if (!lastSyncTime.value) return null;
+  return formatRelativeTime(lastSyncTime.value);
+});
+
 const filteredEntries = () => {
   const q = search.value.toLowerCase();
   if (!q) return entries.value;
@@ -32,6 +50,7 @@ async function loadEntries() {
   error.value = "";
   try {
     entries.value = await invoke<Entry[]>("list_entries");
+    lastSyncTime.value = Date.now();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load entries";
@@ -49,6 +68,7 @@ async function pullRepo() {
     if (result.changed) {
       pullResult.value = `Updated to ${result.head}`;
       await loadEntries();
+      lastSyncTime.value = Date.now();
     } else {
       pullResult.value = "Already up to date";
     }
@@ -106,31 +126,54 @@ async function resetConfig() {
   }
 }
 
-onMounted(loadEntries);
+onMounted(() => {
+  loadEntries();
+  tickTimer = setInterval(() => {
+    now.value = Date.now();
+  }, 60_000);
+});
+
+onBeforeUnmount(() => {
+  if (tickTimer) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+});
 </script>
 
 <template>
-  <div class="entry-list-page">
-    <header class="header">
+  <main class="entry-list-page" role="main">
+    <header class="header" role="banner">
       <h1>🔐 gpm</h1>
       <div class="header-actions">
         <button
           @click="pullRepo"
           :disabled="pulling"
           class="btn-sm"
+          aria-label="Pull updates"
           title="Pull updates"
         >
-          {{ pulling ? "⏳" : "↓ Pull" }}
+          <span aria-hidden="true">{{ pulling ? "⏳" : "↓" }}</span> Pull
         </button>
         <button
           @click="resetConfig"
           class="btn-sm btn-danger"
+          aria-label="Reset configuration"
           title="Reset configuration"
         >
-          ⚙ Reset
+          <span aria-hidden="true">⚙</span> Reset
         </button>
       </div>
     </header>
+
+    <div
+      v-if="lastSyncLabel"
+      class="freshness"
+      aria-live="polite"
+      role="status"
+    >
+      Last synced {{ lastSyncLabel }}
+    </div>
 
     <div class="search-bar">
       <input
@@ -141,12 +184,16 @@ onMounted(loadEntries);
       />
     </div>
 
-    <div v-if="error" class="error">
+    <div v-if="error" class="error" role="alert">
       {{ error }}
       <button @click="loadEntries" class="btn-retry">Retry</button>
     </div>
-    <div v-if="pullResult" class="info">{{ pullResult }}</div>
-    <div v-if="toast" class="toast">{{ toast }}</div>
+    <div v-if="pullResult" class="info" role="status" aria-live="polite">
+      {{ pullResult }}
+    </div>
+    <div v-if="toast" class="toast" role="status" aria-live="polite">
+      {{ toast }}
+    </div>
 
     <div v-if="loading" class="empty">
       <div class="spinner"></div>
@@ -162,26 +209,33 @@ onMounted(loadEntries);
       <p>No matches for "{{ search }}"</p>
     </div>
 
-    <ul v-else class="entry-list">
+    <ul v-else class="entry-list" role="list">
       <li
         v-for="entry in filteredEntries()"
         :key="entry.path"
         class="entry-item"
       >
-        <div class="entry-info" @click="openEntry(entry)">
+        <div
+          class="entry-info"
+          tabindex="0"
+          role="button"
+          @click="openEntry(entry)"
+          @keydown.enter="openEntry(entry)"
+        >
           <span class="entry-name">{{ entry.name }}</span>
           <span class="entry-path">{{ entry.path }}</span>
         </div>
         <button
           @click.stop="copyPassword(entry)"
           class="btn-copy"
+          aria-label="Copy password"
           title="Copy password"
         >
-          📋
+          <span aria-hidden="true">📋</span>
         </button>
       </li>
     </ul>
-  </div>
+  </main>
 </template>
 
 <style scoped>
@@ -196,6 +250,13 @@ onMounted(loadEntries);
   justify-content: space-between;
   align-items: center;
   margin-bottom: var(--space-lg);
+}
+
+.freshness {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  text-align: center;
+  margin-bottom: var(--space-sm);
 }
 
 h1 {
@@ -219,6 +280,7 @@ h1 {
   font-size: var(--font-size-base);
   background: var(--bg-surface);
   color: inherit;
+  min-height: var(--input-min-height);
 }
 
 .search-input:focus {
@@ -247,6 +309,7 @@ h1 {
   border-radius: 4px;
   font-size: var(--font-size-xs);
   cursor: pointer;
+  min-height: var(--btn-min-height);
 }
 
 .btn-retry:hover {
@@ -322,6 +385,7 @@ h1 {
   background: var(--bg-surface);
   border-radius: var(--radius-md);
   transition: background 0.15s;
+  min-height: var(--touch-min);
 }
 
 .entry-item:hover {
@@ -360,6 +424,11 @@ h1 {
   border-radius: var(--radius-sm);
   transition: background 0.15s;
   flex-shrink: 0;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-copy:hover {
@@ -374,6 +443,7 @@ h1 {
   background: var(--bg-surface);
   color: inherit;
   cursor: pointer;
+  min-height: var(--btn-min-height);
 }
 
 .btn-sm:hover {
@@ -388,5 +458,15 @@ h1 {
 .btn-danger {
   border-color: var(--danger-border);
   color: #c66;
+}
+
+@media (min-width: 768px) {
+  .entry-list-page {
+    max-width: 600px;
+  }
+
+  .entry-item {
+    padding: 0.8rem var(--space-lg);
+  }
 }
 </style>

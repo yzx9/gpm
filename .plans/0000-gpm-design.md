@@ -29,6 +29,9 @@ Mode: Builder
 - Router guard: redirects to `/setup` if not configured
 - TypeScript types mirroring Rust structs
 - Dark mode support via `prefers-color-scheme`
+- Trust-building UX: trust statement on SetupPage, multi-step clone progress, freshness indicator ("Last synced X ago")
+- Accessibility: semantic landmarks, aria-live regions, aria-labels, keyboard navigation (Escape to go back), 48px touch targets
+- Responsive: mobile-first layout, tablet media query (768px), `prefers-reduced-motion` support
 
 ### Phase 3: Android target ⬜ TODO
 

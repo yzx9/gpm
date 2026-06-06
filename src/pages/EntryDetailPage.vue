@@ -91,6 +91,12 @@ function goBack() {
   router.push({ name: "entries" });
 }
 
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    goBack();
+  }
+}
+
 // Clean up on page leave — security lifecycle
 onBeforeUnmount(() => {
   clearSensitive();
@@ -107,26 +113,41 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="entry-detail-page">
-    <header class="header">
-      <button @click="goBack" class="btn-back">← Back</button>
+  <main class="entry-detail-page" role="main" @keydown="handleKeydown">
+    <header class="header" role="banner">
+      <button @click="goBack" class="btn-back" aria-label="Back to entry list">
+        ← Back
+      </button>
       <h1 class="entry-title">{{ entryName }}</h1>
     </header>
 
-    <div v-if="error" class="error">
+    <div v-if="error" class="error" role="alert">
       {{ error }}
       <span v-if="error.includes('ecrypt')" class="error-hint">
         Check your age identity and try again
       </span>
     </div>
-    <div v-if="toast" class="toast">{{ toast }}</div>
+    <div v-if="toast" class="toast" role="status" aria-live="polite">
+      {{ toast }}
+    </div>
 
     <div class="actions">
-      <button @click="copyPassword" class="btn-primary" :disabled="loading">
-        📋 Copy Password
+      <button
+        @click="copyPassword"
+        class="btn-primary"
+        :disabled="loading"
+        aria-label="Copy password to clipboard"
+      >
+        <span aria-hidden="true">📋</span> Copy Password
       </button>
-      <button @click="showPassword" class="btn-secondary" :disabled="loading">
-        {{ revealed ? "👁 Showing..." : "👁 Show Password" }}
+      <button
+        @click="showPassword"
+        class="btn-secondary"
+        :disabled="loading"
+        :aria-label="revealed ? 'Password is showing' : 'Show password'"
+      >
+        <span aria-hidden="true">{{ revealed ? "👁" : "👁" }}</span>
+        {{ revealed ? "Showing..." : "Show Password" }}
       </button>
     </div>
 
@@ -148,7 +169,7 @@ onBeforeUnmount(() => {
 
       <p class="auto-clear-hint">Auto-clears in 30 seconds</p>
     </div>
-  </div>
+  </main>
 </template>
 
 <style scoped>
@@ -172,6 +193,8 @@ onBeforeUnmount(() => {
   cursor: pointer;
   color: var(--accent);
   padding: var(--space-xs);
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
 }
 
 .entry-title {
@@ -224,6 +247,7 @@ onBeforeUnmount(() => {
   font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: background 0.2s;
+  min-height: var(--btn-min-height);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -246,6 +270,7 @@ onBeforeUnmount(() => {
   font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: background 0.2s;
+  min-height: var(--btn-min-height);
 }
 
 .btn-secondary:hover:not(:disabled) {

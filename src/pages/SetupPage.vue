@@ -15,6 +15,29 @@ const pat = ref("");
 const identity = ref("");
 const loading = ref(false);
 const error = ref("");
+const progressStep = ref(0);
+const progressSteps = [
+  "Cloning repository...",
+  "Verifying encryption...",
+  "Preparing store...",
+];
+let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+function startProgress() {
+  progressStep.value = 0;
+  progressTimer = setInterval(() => {
+    if (progressStep.value < progressSteps.length - 1) {
+      progressStep.value++;
+    }
+  }, 2000);
+}
+
+function stopProgress() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
 
 function validate(): string | null {
   if (!repoUrl.value.trim()) return "Repository URL is required";
@@ -35,6 +58,7 @@ async function onSubmit() {
   }
 
   loading.value = true;
+  startProgress();
 
   try {
     await invoke("setup", {
@@ -47,13 +71,14 @@ async function onSubmit() {
     const appError = e as AppError;
     error.value = appError?.message || "Setup failed";
   } finally {
+    stopProgress();
     loading.value = false;
   }
 }
 </script>
 
 <template>
-  <div class="setup-page">
+  <main class="setup-page" role="main">
     <div class="setup-card">
       <h1>🔐 gpm</h1>
       <p class="subtitle">Age-only gopass password client</p>
@@ -67,6 +92,7 @@ async function onSubmit() {
             type="url"
             placeholder="https://github.com/user/password-store.git"
             required
+            autocomplete="off"
             :disabled="loading"
           />
         </div>
@@ -78,6 +104,7 @@ async function onSubmit() {
             v-model="pat"
             type="password"
             placeholder="Optional — for private repos"
+            autocomplete="off"
             :disabled="loading"
           />
           <small
@@ -94,20 +121,27 @@ async function onSubmit() {
             placeholder="AGE-SECRET-KEY-..."
             rows="3"
             required
+            autocomplete="off"
+            spellcheck="false"
             :disabled="loading"
           />
           <small>Paste your age secret key (starts with AGE-SECRET-KEY-)</small>
         </div>
 
-        <div v-if="error" class="error">{{ error }}</div>
+        <p class="trust-statement">
+          Stored locally. Nothing leaves your device.
+        </p>
+
+        <div v-if="error" class="error" role="alert">{{ error }}</div>
 
         <button type="submit" :disabled="loading" class="btn-primary">
-          <span v-if="loading" class="spinner"></span>
-          {{ loading ? "Cloning repository..." : "Clone & Setup" }}
+          <span v-if="loading" class="spinner" aria-hidden="true"></span>
+          <span v-if="loading">{{ progressSteps[progressStep] }}</span>
+          <span v-else>Clone &amp; Setup</span>
         </button>
       </form>
     </div>
-  </div>
+  </main>
 </template>
 
 <style scoped>
@@ -167,6 +201,7 @@ textarea {
   font-family: inherit;
   background: var(--bg-input);
   color: inherit;
+  min-height: var(--input-min-height);
 }
 
 input:focus,
@@ -189,6 +224,15 @@ small {
   font-size: var(--font-size-sm);
 }
 
+.trust-statement {
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--trust-color);
+  background: var(--trust-bg);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--trust-radius);
+}
+
 .btn-primary {
   padding: var(--space-md);
   background: var(--accent);
@@ -199,6 +243,7 @@ small {
   font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: background 0.2s;
+  min-height: var(--btn-min-height);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -225,6 +270,21 @@ small {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 480px) {
+  .setup-page {
+    align-items: flex-start;
+    padding-top: var(--space-xl);
+    padding-bottom: 0;
+  }
+
+  .setup-card {
+    padding: var(--space-lg);
+    padding-bottom: calc(
+      var(--btn-min-height) + var(--space-xl) + env(safe-area-inset-bottom, 0px)
+    );
   }
 }
 </style>

@@ -82,6 +82,17 @@ onMounted(async () => {
 
   /* Touch */
   --touch-min: 48px;
+  --input-min-height: var(--touch-min);
+  --btn-min-height: var(--touch-min);
+
+  /* Trust banner */
+  --trust-bg: var(--info-bg);
+  --trust-color: var(--info);
+  --trust-radius: var(--radius-sm);
+
+  /* Z-index layers */
+  --z-sticky: 10;
+  --z-toast: 20;
 
   /* Apply base styles */
   font-family: var(--font-sans);
@@ -118,5 +129,15 @@ onMounted(async () => {
 
 body {
   min-height: 100vh;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>
