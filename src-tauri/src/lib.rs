@@ -2,6 +2,23 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+//! GPM — age-only gopass password manager client built with Tauri v2.
+
+#![warn(
+    trivial_casts,
+    trivial_numeric_casts,
+    missing_copy_implementations,
+    missing_debug_implementations,
+    missing_docs,
+    unsafe_code,
+    unstable_features,
+    unused_import_braces,
+    unused_qualifications,
+    clippy::dbg_macro,
+    clippy::indexing_slicing,
+    clippy::pedantic
+)]
+
 mod crypto;
 mod error;
 mod git;
@@ -28,6 +45,7 @@ use zeroize::Zeroize;
 // App state
 // ---------------------------------------------------------------------------
 
+/// Application state shared across all Tauri commands.
 struct AppState {
     storage: SecureStorage,
 }
@@ -38,12 +56,14 @@ struct AppState {
 
 /// Check if the app has been configured (identity + repo exist).
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
 fn is_configured(state: tauri::State<'_, AppState>) -> Result<bool, AppError> {
     Ok(state.storage.is_configured())
 }
 
 /// Full setup: validate identity, clone repo, save config.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn setup(
     state: tauri::State<'_, AppState>,
     repo_url: String,
@@ -88,6 +108,7 @@ fn setup(
 
 /// List all .age entries in the configured repository.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn list_entries(state: tauri::State<'_, AppState>) -> Result<Vec<Entry>, AppError> {
     let config = state.storage.load_repo_config()?;
     let repo_path = Path::new(&config.local_path);
@@ -96,6 +117,7 @@ fn list_entries(state: tauri::State<'_, AppState>) -> Result<Vec<Entry>, AppErro
 
 /// Pull latest changes (fast-forward only).
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn pull_repo(state: tauri::State<'_, AppState>) -> Result<PullResult, AppError> {
     let config = state.storage.load_repo_config()?;
     let repo_path = Path::new(&config.local_path);
@@ -103,8 +125,9 @@ fn pull_repo(state: tauri::State<'_, AppState>) -> Result<PullResult, AppError> 
 }
 
 /// Primary operation: decrypt and copy password to clipboard.
-/// Password never reaches the WebView.
+/// Password never reaches the `WebView`.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 async fn copy_password(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
@@ -137,7 +160,7 @@ async fn copy_password(
         .map_err(|e| {
             AppError::new(
                 error::ErrorCode::ClipboardError,
-                format!("Clipboard error: {}", e),
+                format!("Clipboard error: {e}"),
             )
         })?;
 
@@ -162,6 +185,7 @@ async fn copy_password(
 /// Secondary operation: decrypt and return password for display.
 /// Password crosses IPC — Vue component must follow strict lifecycle.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn show_password(
     state: tauri::State<'_, AppState>,
     entry_path: String,
@@ -198,12 +222,14 @@ fn show_password(
 
 /// Get the current repo config (for display in settings).
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn get_config(state: tauri::State<'_, AppState>) -> Result<RepoConfig, AppError> {
     state.storage.load_repo_config()
 }
 
 /// Reset all configuration and local data.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
     // Remove local repo if it exists
     if let Ok(config) = state.storage.load_repo_config() {
@@ -219,6 +245,12 @@ fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
 // App entry point
 // ---------------------------------------------------------------------------
 
+/// Application entry point.
+///
+/// # Panics
+///
+/// Panics if the config directory cannot be determined or if the Tauri
+/// runtime fails to start.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let config_dir =

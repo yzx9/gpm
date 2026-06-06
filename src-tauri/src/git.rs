@@ -18,8 +18,8 @@ pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), AppEr
     }
 
     let mut callbacks = RemoteCallbacks::new();
-    if let Some(_token) = pat {
-        let token = _token.to_string();
+    if let Some(token) = pat {
+        let token = token.to_string();
         callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
             git2::Cred::userpass_plaintext(&token, "")
                 .or_else(|_| git2::Cred::userpass_plaintext("", &token))
@@ -35,11 +35,11 @@ pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), AppEr
     builder.clone(url, dest).map_err(|e| {
         let msg = e.message().to_string();
         if msg.contains("authentication") || msg.contains("unsupported URL") {
-            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {}", msg))
+            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
         } else if msg.contains("unable to connect") || msg.contains("timeout") {
-            AppError::new(ErrorCode::NetworkError, format!("Network error: {}", msg))
+            AppError::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
         } else {
-            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {}", msg))
+            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
         }
     })?;
 
@@ -61,8 +61,8 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppE
 
     // Set up credential callback for HTTPS PAT
     let mut callbacks = RemoteCallbacks::new();
-    if let Some(_token) = pat {
-        let token = _token.to_string();
+    if let Some(token) = pat {
+        let token = token.to_string();
         callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
             git2::Cred::userpass_plaintext(&token, "")
                 .or_else(|_| git2::Cred::userpass_plaintext("", &token))
@@ -82,7 +82,7 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppE
 
     // Find the upstream branch (origin/main or origin/master)
     let upstream_branch = find_default_branch(&repo)?;
-    let upstream_ref = repo.find_reference(&format!("refs/heads/{}", upstream_branch))?;
+    let upstream_ref = repo.find_reference(&format!("refs/heads/{upstream_branch}"))?;
     let upstream_oid = upstream_ref
         .target()
         .ok_or_else(|| AppError::new(ErrorCode::PullFfFailed, "Cannot determine upstream HEAD"))?;
@@ -107,8 +107,8 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppE
     }
 
     // Perform fast-forward merge
-    repo.checkout_tree(&upstream_commit.as_object(), None)?;
-    repo.set_head(&format!("refs/heads/{}", upstream_branch))?;
+    repo.checkout_tree(upstream_commit.as_object(), None)?;
+    repo.set_head(&format!("refs/heads/{upstream_branch}"))?;
 
     Ok(PullResult {
         changed: true,
@@ -120,10 +120,7 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppE
 fn find_default_branch(repo: &Repository) -> Result<String, AppError> {
     // Try refs/heads/main first, then refs/heads/master
     for branch in &["main", "master"] {
-        if repo
-            .find_reference(&format!("refs/heads/{}", branch))
-            .is_ok()
-        {
+        if repo.find_reference(&format!("refs/heads/{branch}")).is_ok() {
             return Ok(branch.to_string());
         }
     }

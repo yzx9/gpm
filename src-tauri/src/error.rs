@@ -5,7 +5,7 @@
 use serde::Serialize;
 
 /// Machine-readable error codes — all messages are safe (no secrets).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     CloneFailed,
@@ -24,11 +24,14 @@ pub enum ErrorCode {
 /// Safe error type that never contains secret content.
 #[derive(Debug, Clone, Serialize)]
 pub struct AppError {
+    /// Machine-readable error code string (e.g. `"CLONE_FAILED"`).
     pub code: String,
+    /// Human-readable error message (no secrets).
     pub message: String,
 }
 
 impl AppError {
+    /// Create a new error from a code and message.
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
             code: match code {
@@ -60,7 +63,7 @@ impl std::error::Error for AppError {}
 
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
-        AppError::new(ErrorCode::IoError, format!("Filesystem error: {}", e))
+        AppError::new(ErrorCode::IoError, format!("Filesystem error: {e}"))
     }
 }
 
@@ -92,6 +95,6 @@ impl From<git2::Error> for AppError {
 
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
-        AppError::new(ErrorCode::ConfigError, format!("Config error: {}", e))
+        AppError::new(ErrorCode::ConfigError, format!("Config error: {e}"))
     }
 }

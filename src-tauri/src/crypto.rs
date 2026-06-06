@@ -16,7 +16,7 @@ pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, 
     let encrypted = std::fs::read(file_path).map_err(|e| {
         AppError::new(
             ErrorCode::IoError,
-            format!("Failed to read entry file: {}", e),
+            format!("Failed to read entry file: {e}"),
         )
     })?;
 
@@ -24,6 +24,11 @@ pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, 
 }
 
 /// Decrypt age-encrypted bytes using the given identity.
+///
+/// # Errors
+///
+/// Returns an error if the identity format is invalid, contains no valid
+/// identities, the encrypted data cannot be parsed, or decryption fails.
 pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
     // Parse the identity from buffer — validates AGE-SECRET-KEY-... format
     let identity_file = age::IdentityFile::from_buffer(identity_bytes).map_err(|_| {
@@ -48,19 +53,16 @@ pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>,
     }
 
     // Build a decryptor from the age format (armored or binary)
-    let decryptor = match Decryptor::new(encrypted) {
-        Ok(d) => d,
-        Err(_) => {
-            return Err(AppError::new(
-                ErrorCode::DecryptFailed,
-                "Failed to parse encrypted data",
-            ))
-        }
+    let Ok(decryptor) = Decryptor::new(encrypted) else {
+        return Err(AppError::new(
+            ErrorCode::DecryptFailed,
+            "Failed to parse encrypted data",
+        ));
     };
 
     // Perform decryption
     let mut output = Vec::new();
-    match decryptor.decrypt(identities.iter().map(|i| i.as_ref() as &dyn age::Identity)) {
+    match decryptor.decrypt(identities.iter().map(AsRef::as_ref)) {
         Ok(mut reader) => {
             if reader.read_to_end(&mut output).is_err() {
                 return Err(AppError::new(

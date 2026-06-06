@@ -35,7 +35,7 @@ impl std::fmt::Debug for DecryptedEntry {
     }
 }
 
-/// Returned by copy_password — no secret data, safe for IPC.
+/// Returned by `copy_password` — no secret data, safe for IPC.
 #[derive(Debug, Clone, Serialize)]
 pub struct CopyResult {
     pub success: bool,
@@ -43,7 +43,7 @@ pub struct CopyResult {
     pub cleared_after_secs: u32,
 }
 
-/// Returned by show_password — contains secrets, strict Vue lifecycle required.
+/// Returned by `show_password` — contains secrets, strict Vue lifecycle required.
 /// Zeroizing<String> fields are zeroized on Drop after IPC serialization.
 #[derive(Debug, Clone, Serialize)]
 pub struct SensitiveContent {
@@ -65,6 +65,10 @@ pub struct PullResult {
 
 /// Walk a gopass store directory and return all `.age` entries.
 /// Skips `.git` directory. Only returns files with `.age` extension.
+///
+/// # Errors
+///
+/// Returns an error if the repository path does not exist.
 pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, AppError> {
     if !repo_path.exists() {
         return Err(AppError::new(
@@ -75,12 +79,14 @@ pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, AppError> {
 
     let mut entries: Vec<Entry> = WalkDir::new(repo_path)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
         .filter(|e| {
-            e.file_name()
-                .to_str()
-                .is_some_and(|name| name.ends_with(".age"))
+            e.file_name().to_str().is_some_and(|name| {
+                Path::new(name)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
+            })
         })
         .filter(|e| {
             // Skip anything inside .git directory
@@ -97,11 +103,15 @@ pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, AppError> {
         })
         .collect();
 
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|a| a.name.to_lowercase());
     Ok(entries)
 }
 
 /// Parse decrypted bytes into password (first line) and notes (rest).
+///
+/// # Errors
+///
+/// Returns an error if the decrypted content is empty.
 pub fn parse_decrypted_content(content: &[u8]) -> Result<DecryptedEntry, AppError> {
     let text = String::from_utf8_lossy(content);
     let text = text.trim_end();
@@ -138,7 +148,7 @@ pub fn resolve_entry_path(
     if !full_path.exists() {
         return Err(AppError::new(
             ErrorCode::EntryNotFound,
-            format!("Entry not found: {}", entry_path),
+            format!("Entry not found: {entry_path}"),
         ));
     }
 
