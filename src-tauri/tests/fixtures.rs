@@ -2,53 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::Write;
-use std::str::FromStr;
-
-use age::secrecy::ExposeSecret;
-use age::x25519::{Identity, Recipient};
-
-/// Helper: create a test identity and recipient pair.
-/// Returns (identity_string, recipient_string).
-fn generate_test_keypair() -> (String, String) {
-    let sk = Identity::generate();
-    let pk = sk.to_public();
-
-    let identity_str = sk.to_string().expose_secret().to_string();
-    let recipient_str = pk.to_string();
-    (identity_str, recipient_str)
-}
-
-/// Helper: encrypt plaintext to a recipient, return the ciphertext bytes.
-fn encrypt_to_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
-    let recipient = Recipient::from_str(recipient_str).unwrap();
-
-    let encryptor =
-        age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
-            .unwrap();
-    let mut encrypted = Vec::new();
-    let mut writer = encryptor.wrap_output(&mut encrypted).unwrap();
-    writer.write_all(plaintext).unwrap();
-    writer.finish().unwrap();
-    encrypted
-}
-
-/// Helper: create a temporary directory that acts as a gopass store.
-fn create_test_store(entries: Vec<(&str, &[u8])>, recipient_str: &str) -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    for (path, content) in entries {
-        let file_path = dir.path().join(path);
-        if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        let encrypted = encrypt_to_recipient(content, recipient_str);
-        std::fs::write(file_path, encrypted).unwrap();
-    }
-    dir
-}
+mod common;
 
 mod tests {
-    use super::*;
+    use super::common::*;
 
     // -----------------------------------------------------------------------
     // Store parsing tests

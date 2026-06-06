@@ -27,9 +27,11 @@ mod store;
 
 /// Re-export core functions for integration tests.
 pub mod test_support {
-    pub use crate::crypto::decrypt_bytes;
-    pub use crate::error::AppError;
-    pub use crate::store::{list_entries, parse_decrypted_content};
+    pub use crate::crypto::{decrypt_bytes, decrypt_file};
+    pub use crate::error::{AppError, ErrorCode};
+    pub use crate::git::{clone_repo, pull_repo};
+    pub use crate::secure_storage::{RepoConfig, SecureStorage};
+    pub use crate::store::{list_entries, parse_decrypted_content, resolve_entry_path, PullResult};
 }
 
 use std::path::Path;

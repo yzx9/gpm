@@ -8,16 +8,27 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
+    /// Git clone operation failed.
     CloneFailed,
+    /// Fast-forward pull failed (diverged branches).
     PullFfFailed,
+    /// Age decryption failed.
     DecryptFailed,
+    /// Invalid age identity format.
     InvalidIdentity,
+    /// No git repository found.
     NoRepo,
+    /// No age identity configured.
     NoIdentity,
+    /// Network connectivity error.
     NetworkError,
+    /// Requested entry not found in repository.
     EntryNotFound,
+    /// Filesystem I/O error.
     IoError,
+    /// Clipboard operation failed.
     ClipboardError,
+    /// Configuration read/write error.
     ConfigError,
 }
 
@@ -96,5 +107,126 @@ impl From<git2::Error> for AppError {
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
         AppError::new(ErrorCode::ConfigError, format!("Config error: {e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn expected_code_string(code: ErrorCode) -> &'static str {
+        match code {
+            ErrorCode::CloneFailed => "CLONE_FAILED",
+            ErrorCode::PullFfFailed => "PULL_FF_FAILED",
+            ErrorCode::DecryptFailed => "DECRYPT_FAILED",
+            ErrorCode::InvalidIdentity => "INVALID_IDENTITY",
+            ErrorCode::NoRepo => "NO_REPO",
+            ErrorCode::NoIdentity => "NO_IDENTITY",
+            ErrorCode::NetworkError => "NETWORK_ERROR",
+            ErrorCode::EntryNotFound => "ENTRY_NOT_FOUND",
+            ErrorCode::IoError => "IO_ERROR",
+            ErrorCode::ClipboardError => "CLIPBOARD_ERROR",
+            ErrorCode::ConfigError => "CONFIG_ERROR",
+        }
+    }
+
+    #[test]
+    fn error_code_serialize() {
+        let variants = [
+            ErrorCode::CloneFailed,
+            ErrorCode::PullFfFailed,
+            ErrorCode::DecryptFailed,
+            ErrorCode::InvalidIdentity,
+            ErrorCode::NoRepo,
+            ErrorCode::NoIdentity,
+            ErrorCode::NetworkError,
+            ErrorCode::EntryNotFound,
+            ErrorCode::IoError,
+            ErrorCode::ClipboardError,
+            ErrorCode::ConfigError,
+        ];
+        for variant in variants {
+            let json = serde_json::to_string(&variant).unwrap_or_default();
+            let expected = format!("\"{}\"", expected_code_string(variant));
+            assert_eq!(
+                json, expected,
+                "ErrorCode::{variant:?} did not serialize correctly"
+            );
+        }
+    }
+
+    #[test]
+    fn app_error_new_maps_codes() {
+        let variants = [
+            ErrorCode::CloneFailed,
+            ErrorCode::PullFfFailed,
+            ErrorCode::DecryptFailed,
+            ErrorCode::InvalidIdentity,
+            ErrorCode::NoRepo,
+            ErrorCode::NoIdentity,
+            ErrorCode::NetworkError,
+            ErrorCode::EntryNotFound,
+            ErrorCode::IoError,
+            ErrorCode::ClipboardError,
+            ErrorCode::ConfigError,
+        ];
+        for variant in variants {
+            let err = AppError::new(variant, "test message");
+            assert_eq!(
+                err.code,
+                expected_code_string(variant),
+                "AppError::new code mismatch for {variant:?}"
+            );
+            assert_eq!(err.message, "test message");
+        }
+    }
+
+    #[test]
+    fn app_error_display_format() {
+        let err = AppError::new(ErrorCode::DecryptFailed, "bad key");
+        let displayed = format!("{err}");
+        assert_eq!(displayed, "DECRYPT_FAILED: bad key");
+    }
+
+    #[test]
+    fn from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let app_err: AppError = io_err.into();
+        assert_eq!(app_err.code, "IO_ERROR");
+        assert!(
+            app_err.message.contains("file missing"),
+            "message should contain original io error: {}",
+            app_err.message
+        );
+    }
+
+    #[test]
+    fn from_git2_error_maps_correctly() {
+        // Opening a non-existent path produces a real git2::Error.
+        // The exact message varies by platform and libgit2 version, but it
+        // should not match any of the PullFfFailed or NetworkError patterns,
+        // so it falls through to CloneFailed.
+        let err = git2::Repository::open("/nonexistent/path/that/does/not/exist");
+        let Err(git_err) = err else {
+            panic!("expected error opening nonexistent repo");
+        };
+        let app_err: AppError = git_err.into();
+        assert_eq!(
+            app_err.code, "CLONE_FAILED",
+            "unmatched git2 error should map to CLONE_FAILED"
+        );
+    }
+
+    #[test]
+    fn from_serde_json_error() {
+        // Parsing invalid JSON produces a real serde_json::Error.
+        let serde_err = serde_json::from_str::<serde_json::Value>("{invalid").unwrap_err();
+        let app_err: AppError = serde_err.into();
+        assert_eq!(app_err.code, "CONFIG_ERROR");
+        assert!(
+            app_err.message.contains("Config error:"),
+            "message should have Config error prefix: {}",
+            app_err.message
+        );
     }
 }
