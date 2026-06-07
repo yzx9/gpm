@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::{AppError, ErrorCode};
 
@@ -24,16 +24,10 @@ impl SecureStorage {
         Self { config_dir }
     }
 
-    /// Get the default config directory for the app.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the system config directory cannot be determined.
-    pub fn default_config_dir() -> Result<PathBuf, AppError> {
-        let dir = dirs::config_dir().ok_or_else(|| {
-            AppError::new(ErrorCode::ConfigError, "Cannot determine config directory")
-        })?;
-        Ok(dir.join("gpm"))
+    /// Get the config directory used by this storage instance.
+    #[must_use]
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
     }
 
     fn identity_path(&self) -> PathBuf {

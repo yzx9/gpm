@@ -40,6 +40,7 @@ use error::AppError;
 use secure_storage::{RepoConfig, SecureStorage};
 use store::{CopyResult, Entry, PullResult, SensitiveContent};
 
+use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use zeroize::Zeroize;
 
@@ -82,8 +83,7 @@ fn setup(
     }
 
     // Determine local repo path
-    let config_dir = SecureStorage::default_config_dir()?;
-    let repo_dir = config_dir.join("repo");
+    let repo_dir = state.storage.config_dir().join("repo");
 
     // Clear any existing configuration
     state.storage.clear_all()?;
@@ -255,13 +255,17 @@ fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
 /// runtime fails to start.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let config_dir =
-        SecureStorage::default_config_dir().expect("Cannot determine config directory");
-
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(AppState {
-            storage: SecureStorage::new(config_dir),
+        .setup(|app| {
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .expect("Cannot determine app config directory");
+            app.manage(AppState {
+                storage: SecureStorage::new(config_dir),
+            });
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             is_configured,

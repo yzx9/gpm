@@ -1,9 +1,9 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Capability for the main window",
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile-capability",
+  "description": "Capabilities for Android",
   "windows": ["main"],
-  "platforms": ["macOS", "windows", "linux"],
+  "platforms": ["android"],
   "permissions": [
     "core:default",
     "clipboard-manager:allow-write-text",

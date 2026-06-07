@@ -30,7 +30,15 @@ dist-ssr
 src-tauri/target/
 
 # tauri
-src-tauri/gen/
+# Ignore auto-generated schemas
+src-tauri/gen/schemas/
+# Ignore Android build outputs but keep the scaffolded project
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/app/tauri.build.gradle.kts
+src-tauri/gen/android/build/
+# Default Tauri icons — regenerated from tauri.conf.json bundle.icon on build
+src-tauri/gen/android/app/src/main/res/mipmap-*/
 
 # agentic tools
 .gstack/

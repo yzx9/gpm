@@ -33,15 +33,24 @@ Mode: Builder
 - Accessibility: semantic landmarks, aria-live regions, aria-labels, keyboard navigation (Escape to go back), 48px touch targets
 - Responsive: mobile-first layout, tablet media query (768px), `prefers-reduced-motion` support
 
-### Phase 3: Android target ⬜ TODO
+### Phase 3: Android target ✅ DONE
 
-- `pnpm tauri android init`
-- Test on real Android device
-- Handle Android-specific: back navigation, screen size, clipboard behavior
+- `dirs::config_dir()` → Tauri `app.path().app_config_dir()` (Android returns None for dirs)
+- Vendored OpenSSL + libgit2 via git2 features for cross-compilation
+- fenix Rust toolchain with 4 Android targets (aarch64, armv7, x86_64, i686)
+- androidenv SDK/NDK (platforms 28+36, NDK, cmake) in Nix flake
+- Fixed macOS OpenSSL cross-compilation (rust-lang/rust#131407): TARGET_AR/AR/RANLIB via NDK llvm tools
+- Android project scaffolded via `pnpm tauri android init`
+- Mobile capabilities (clipboard on Android)
+- FLAG_SECURE in MainActivity.kt (blocks screenshots)
+- viewport-fit=cover for edge-to-edge
+- Justfile recipes: dev, android-build, android-release, android-dev, android-install
+- Debug APK (562M) and Release APK (58M) build successfully
+- **16 integration tests passing**
 
 ### Phase 4: Polish & publish ⬜ TODO
 
-- Android FLAG_SECURE
+- [Done] Android FLAG_SECURE
 - Android Keystore for identity storage
 - Publish APK via GitHub Release
 

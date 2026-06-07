@@ -9,15 +9,17 @@ gpm is an Android-first, age-only gopass password client built with Tauri v2 + R
 ## Commands
 
 ```bash
-just test        # Run Rust integration tests (cargo test via src-tauri/)
-just lint        # Clippy -D warnings + vue-tsc --noEmit
-just fmt         # rustfmt + prettier
-
-pnpm tauri dev   # Desktop dev mode
-pnpm tauri android dev   # Android dev
+just test              # Run Rust integration tests
+just lint              # Clippy -D warnings + vue-tsc --noEmit
+just fmt               # rustfmt + prettier
+just dev               # Desktop dev server with hot reload
+just android-build     # Build debug APK
+just android-release   # Build release APK (unsigned)
+just android-dev       # Android dev server (requires device/emulator)
+just android-install   # Build + install debug APK to connected device
 ```
 
-Formatting is auto-applied after every Edit/Write via `.claude/settings.json` hook (`.agents/scripts/smart_format.sh`).
+See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
 
 ## Architecture
 
