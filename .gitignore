@@ -40,6 +40,12 @@ src-tauri/gen/android/build/
 # Default Tauri icons — regenerated from tauri.conf.json bundle.icon on build
 src-tauri/gen/android/app/src/main/res/mipmap-*/
 
+# Android signing
+*.jks
+*.keystore
+src-tauri/gen/android/.keystores/
+src-tauri/gen/android/keystore.properties
+
 # agentic tools
 .gstack/
 .playwright-mcp/

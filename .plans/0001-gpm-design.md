@@ -48,11 +48,15 @@ Mode: Builder
 - Debug APK (562M) and Release APK (58M) build successfully
 - **16 integration tests passing**
 
-### Phase 4: Polish & publish ⬜ TODO
+### Phase 4: Polish & publish 🔄 IN PROGRESS
 
 - [Done] Android FLAG_SECURE
+- [Done] APK signing config in `build.gradle.kts` (reads from `keystore.properties`, graceful unsigned fallback)
+- [Done] GitHub Actions release workflow (`.github/workflows/release.yml`) — nix-based CI, tag-triggered, signed APK to GitHub Release
+- [Done] Justfile recipes: `android-release` (signed if keystore exists), `android-install-release`
+- [Done] `.gitignore` excludes keystore files
 - Android Keystore for identity storage
-- Publish APK via GitHub Release
+- Publish first release (manual: generate keystore → set GitHub Secrets → push tag)
 
 ## Problem Statement
 
@@ -185,6 +189,8 @@ Three-page Vue app:
 ### Phase 4: Polish & publish
 
 - Android FLAG_SECURE
+- APK signing config (Gradle signingConfigs from keystore.properties)
+- GitHub Actions release workflow (tag-triggered, nix-based CI)
 - Android Keystore for identity storage (replace mock)
 - Publish APK via GitHub Release
 

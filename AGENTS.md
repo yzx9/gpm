@@ -13,10 +13,11 @@ just test              # Run Rust integration tests
 just lint              # Clippy -D warnings + vue-tsc --noEmit
 just fmt               # rustfmt + prettier
 just dev               # Desktop dev server with hot reload
-just android-build     # Build debug APK
-just android-release   # Build release APK (unsigned)
+just android-debug     # Build debug APK
+just android-release   # Build release APK (signed if keystore.properties exists)
 just android-dev       # Android dev server (requires device/emulator)
 just android-install   # Build + install debug APK to connected device
+just android-install-release # Build + install release APK to connected device
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.

@@ -75,10 +75,11 @@ just test              # Run Rust integration tests
 just lint              # Clippy -D warnings + vue-tsc --noEmit
 just fmt               # rustfmt + prettier
 just dev               # Desktop dev server with hot reload
-just android-build     # Build debug APK
-just android-release   # Build release APK (unsigned)
+just android-debug     # Build debug APK
+just android-release   # Build release APK (signed if keystore.properties exists)
 just android-dev       # Android dev server (requires device/emulator)
 just android-install   # Build + install debug APK to connected device
+just android-install-release # Build + install release APK to connected device
 ```
 
 If you don't want to use `just`, you can see the individual commands in `justfile` and run them manually.
@@ -128,3 +129,39 @@ Contributions are welcome! We follow standard GitHub flow:
 5. Address review feedback and iterate
 
 This project is licensed under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0). By contributing, you agree that your contributions will be licensed under the same terms.
+
+## Releasing
+
+Releases are automated via GitHub Actions. Pushing a `v*` tag (e.g. `v0.1.0`) triggers the release workflow, which builds a signed APK and publishes it as a GitHub Release.
+
+### Setup (one-time)
+
+1. **Generate a signing keystore:**
+
+   ```bash
+   mkdir -p ~/.keystores
+   keytool -genkey -v -keystore ~/.keystores/gpm-upload.jks \
+     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+   ```
+
+2. **Create `src-tauri/gen/android/keystore.properties`** (gitignored):
+
+   ```properties
+   keyAlias=upload
+   password=<your-password>
+   storeFile=/path/to/gpm-upload.jks
+   ```
+
+3. **Add GitHub Secrets** (Settings → Secrets → Actions):
+   - `ANDROID_KEY_ALIAS` — e.g. `upload`
+   - `ANDROID_KEY_PASSWORD` — the keystore password
+   - `ANDROID_KEYSTORE_BASE64` — `base64 -i ~/.keystores/gpm-upload.jks`
+
+### Create a release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds the signed APK and creates a GitHub Release with the artifact attached. Tags containing `-rc` or `-beta` are automatically marked as pre-releases.

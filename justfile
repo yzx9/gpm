@@ -22,10 +22,10 @@ dev:
   pnpm tauri dev
 
 # Build debug APK
-android-build:
+android-debug:
   pnpm tauri android build --debug
 
-# Build release APK (unsigned)
+# Build release APK (signed if keystore.properties exists)
 android-release:
   pnpm tauri android build
 
@@ -34,5 +34,9 @@ android-dev:
   pnpm tauri android dev
 
 # Install debug APK to connected device
-android-install: android-build
+android-install: android-debug
   adb install src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+
+# Install release APK to connected device
+android-install-release: android-release
+  adb install src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk

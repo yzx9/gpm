@@ -1,4 +1,4 @@
-package com.gpm.app
+package xyz.yzx9.gpm
 
 import android.os.Bundle
 import android.view.WindowManager
