@@ -35,12 +35,17 @@ async function showPassword() {
     const result = await invoke<SensitiveContent>("show_password", {
       entryPath,
     });
+    // Clear any previous auto-hide timer
+    if (autoHideTimer) {
+      clearTimeout(autoHideTimer);
+      autoHideTimer = null;
+    }
+
     password.value = result.password;
     notes.value = result.notes;
     revealed.value = true;
 
     // Auto-clear after 30 seconds
-    clearSensitive();
     autoHideTimer = setTimeout(() => {
       clearSensitive();
     }, 30_000);

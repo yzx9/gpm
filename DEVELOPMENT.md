@@ -63,7 +63,7 @@ pnpm install
 
 ```bash
 just lint   # Clippy + vue-tsc type check
-just test   # Rust integration tests
+just test   # All tests (Rust + frontend)
 ```
 
 ## Commands
@@ -71,7 +71,9 @@ just test   # Rust integration tests
 We use [just](https://github.com/casey/just) as a task runner. The most common commands:
 
 ```bash
-just test              # Run Rust integration tests
+just test              # Run all tests (backend + frontend)
+just test-be           # Run backend (Rust) tests only
+just test-fe           # Run frontend unit tests only
 just lint              # Clippy -D warnings + vue-tsc --noEmit
 just fmt               # rustfmt + prettier
 just dev               # Desktop dev server with hot reload

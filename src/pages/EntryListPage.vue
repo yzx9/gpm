@@ -7,6 +7,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type { Entry, PullResult, AppError } from "../types";
+import { formatRelativeTime } from "../utils/format";
+import { filterEntries } from "../utils/filter";
 
 const router = useRouter();
 
@@ -23,26 +25,13 @@ const lastSyncTime = ref<number | null>(null);
 const now = ref(Date.now());
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
-function formatRelativeTime(timestamp: number): string {
-  const seconds = Math.floor((now.value - timestamp) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
-}
-
 const lastSyncLabel = computed(() => {
   if (!lastSyncTime.value) return null;
-  return formatRelativeTime(lastSyncTime.value);
+  return formatRelativeTime(now.value, lastSyncTime.value);
 });
 
 const filteredEntries = () => {
-  const q = search.value.toLowerCase();
-  if (!q) return entries.value;
-  return entries.value.filter(
-    (e) => e.name.toLowerCase().includes(q) || e.path.toLowerCase().includes(q),
-  );
+  return filterEntries(entries.value, search.value);
 };
 
 async function loadEntries() {

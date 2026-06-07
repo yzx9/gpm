@@ -3,9 +3,16 @@
 default:
   @just --list
 
-# Run Rust integration tests
-test:
+# Run backend (Rust) integration tests
+test-be:
   cd src-tauri && cargo test --all-features
+
+# Run frontend unit tests
+test-fe:
+  pnpm test
+
+# Run all tests (backend + frontend)
+test: test-be test-fe
 
 # Clippy + vue-tsc type check
 lint:
