@@ -7,87 +7,9 @@ on:
 
 jobs:
   build-and-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android"
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-
-      - name: Configure Android NDK
-        run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-
-      - name: Setup Android signing
-        run: |
-          cd src-tauri/gen/android
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
-          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
-          base64 -d <<< "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" > "$RUNNER_TEMP/keystore.jks"
-          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
-
-      - name: Build signed APKs (per-arch + universal)
-        run: |
-          pnpm install
-          pnpm tauri android build --apk --split-per-abi
-          pnpm tauri android build --apk
-
-      - name: Rename APKs for release
-        id: version
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          APK_DIR="src-tauri/gen/android/app/build/outputs/apk"
-          cp "${APK_DIR}/arm64/release/app-arm64-release.apk"         "gpm-${VERSION}-arm64-v8a.apk"
-          cp "${APK_DIR}/arm/release/app-arm-release.apk"             "gpm-${VERSION}-armeabi-v7a.apk"
-          cp "${APK_DIR}/x86_64/release/app-x86_64-release.apk"       "gpm-${VERSION}-x86_64.apk"
-          cp "${APK_DIR}/x86/release/app-x86-release.apk"             "gpm-${VERSION}-x86.apk"
-          cp "${APK_DIR}/universal/release/app-universal-release.apk" "gpm-${VERSION}-universal.apk"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "gpm ${{ github.ref_name }}"
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
-          files: |
-            gpm-${{ steps.version.outputs.version }}-arm64-v8a.apk
-            gpm-${{ steps.version.outputs.version }}-armeabi-v7a.apk
-            gpm-${{ steps.version.outputs.version }}-x86_64.apk
-            gpm-${{ steps.version.outputs.version }}-x86.apk
-            gpm-${{ steps.version.outputs.version }}-universal.apk
-          body: |
-            ## gpm ${{ steps.version.outputs.version }}
-
-            ### Installation
-            Download the appropriate APK for your device:
-
-            | File | Architecture | Devices |
-            |------|-------------|---------|
-            | `*-arm64-v8a.apk` | arm64-v8a | Most modern Android phones (**recommended**) |
-            | `*-armeabi-v7a.apk` | armeabi-v7a | Older 32-bit ARM devices |
-            | `*-x86_64.apk` | x86_64 | Android emulator |
-            | `*-x86.apk` | x86 | Android emulator (older) |
-            | `*-universal.apk` | All | Compatible with all devices (larger file) |
-
-            If unsure, download `*-arm64-v8a.apk` for a physical device, or `*-universal.apk` as a fallback.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_build-android.yml
+    with:
+      build_type: release
+      create_release: true
+      split_per_abi: true
+    secrets: inherit

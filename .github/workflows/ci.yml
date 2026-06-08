@@ -1,0 +1,15 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    uses: ./.github/workflows/_build-android.yml
+    with:
+      build_type: debug
+      create_release: false
+      split_per_abi: false
