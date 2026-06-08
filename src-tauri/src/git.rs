@@ -181,18 +181,25 @@ mod tests {
             .expect("failed to create signature")
     }
 
+    /// Read the system's default branch name from git config.
+    fn config_default_branch(repo: &Repository) -> String {
+        repo.config()
+            .and_then(|c| c.get_string("init.defaultBranch"))
+            .unwrap_or_else(|_| "master".to_string())
+    }
+
     #[test]
     fn find_default_branch_main() {
-        // Repository::init creates a default branch matching the system
-        // default (main on modern git). Committing via HEAD writes to that
-        // branch, so refs/heads/main exists automatically.
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         let repo = Repository::init(dir.path()).expect("failed to init repo");
         let sig = test_signature();
         let _oid = create_empty_commit(&repo, &sig);
 
+        // The commit creates the system's default branch (e.g. "main" or
+        // "master"). find_default_branch should return it.
+        let expected = config_default_branch(&repo);
         let branch = find_default_branch(&repo).expect("should find a branch");
-        assert_eq!(branch, "main");
+        assert_eq!(branch, expected);
     }
 
     #[test]
@@ -202,11 +209,12 @@ mod tests {
         let sig = test_signature();
         let oid = create_empty_commit(&repo, &sig);
 
-        // Remove the auto-created default branch (main) and create master.
-        repo.find_reference("refs/heads/main")
-            .expect("should find auto-created main ref")
+        // Remove the auto-created default branch and create master instead.
+        let default_branch = config_default_branch(&repo);
+        repo.find_reference(&format!("refs/heads/{default_branch}"))
+            .expect("should find auto-created ref")
             .delete()
-            .expect("failed to delete main ref");
+            .expect("failed to delete ref");
         repo.reference("refs/heads/master", oid, false, "test master branch")
             .expect("failed to create master ref");
         repo.set_head("refs/heads/master")
@@ -223,12 +231,13 @@ mod tests {
         let sig = test_signature();
         let oid = create_empty_commit(&repo, &sig);
 
-        // Remove the auto-created default branch (main) so neither main nor
-        // master exists, then create a different branch for the HEAD fallback.
-        repo.find_reference("refs/heads/main")
-            .expect("should find auto-created main ref")
+        // Remove the auto-created default branch so neither main nor
+        // master exists, then create develop for the HEAD fallback path.
+        let default_branch = config_default_branch(&repo);
+        repo.find_reference(&format!("refs/heads/{default_branch}"))
+            .expect("should find auto-created ref")
             .delete()
-            .expect("failed to delete main ref");
+            .expect("failed to delete ref");
         repo.reference("refs/heads/develop", oid, false, "test develop branch")
             .expect("failed to create develop ref");
         repo.set_head("refs/heads/develop")

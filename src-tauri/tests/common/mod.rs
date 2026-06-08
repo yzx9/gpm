@@ -56,7 +56,7 @@ pub fn create_test_store(entries: Vec<(&str, &[u8])>, recipient_str: &str) -> te
 /// - `bare_dir` is a bare repo (acts as "remote")
 /// - `clone_dir` is a working clone (acts as "local")
 ///
-/// The bare repo has one initial commit on `refs/heads/main` containing
+/// The bare repo has one initial commit on the default branch containing
 /// any provided `.age` entries (encrypted to `recipient_str`).
 #[allow(dead_code)]
 pub fn create_test_git_repo(
@@ -154,10 +154,10 @@ pub fn add_commit_to_bare(
         .unwrap();
 
     // Push back to bare repo (origin)
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let refspec = format!("{0}:{0}", format!("refs/heads/{branch}"));
     let mut remote = repo.find_remote("origin").unwrap();
-    remote
-        .push(&["refs/heads/main:refs/heads/main"], None)
-        .unwrap();
+    remote.push(&[&refspec], None).unwrap();
 
     commit_id
 }
