@@ -18,9 +18,24 @@ The MVP design has no app-level authentication. The assumption is that the devic
 
 Implementation options:
 
-- Android `BiometricPrompt` before each decrypt
-- App-level PIN/password
-- Tauri plugin wrapping Android biometric API
+1. **`tauri-plugin-biometric`** (recommended) — Official Tauri plugin wrapping Android `BiometricPrompt` and iOS `LAContext`. Prompts fingerprint/face/PIN before decrypt.
+2. **`tauri-plugin-keystore`** (impierce) — Device-native key storage that can require biometric unlock to retrieve the identity. Combine with 0008-android-keystore.md.
+3. **App-level PIN/password** — Simple but less secure than hardware-backed biometric.
+
+Recommended approach: Use `tauri-plugin-biometric` to gate `copy_password` and `show_password` commands. The biometric prompt appears before each decrypt operation. On failure or cancel, the operation is rejected.
+
+### Key files
+
+- `src-tauri/src/lib.rs` — Register biometric plugin, add auth check before decrypt commands
+- `src-tauri/Cargo.toml` — Add `tauri-plugin-biometric` dependency
+- `rustpass/src/store.rs` — `get()` method is the single decrypt entry point, add auth gate here or at Tauri command level
+
+### UX considerations
+
+- First launch after setup: prompt user to enable biometric lock (optional, not forced)
+- Subsequent launches: biometric prompt before decrypt
+- Desktop fallback: no biometric available, either skip or use a master password
+- Failed attempts: rate-limit after N failures (Android BiometricPrompt handles this)
 
 ## Effort
 
