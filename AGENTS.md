@@ -49,6 +49,9 @@ All Tauri IPC types live in `src/types.ts`.
 - `show_password` is secondary — 30s auto-clear with lifecycle cleanup
 - All decrypted content uses `Zeroizing<String>` and is wiped after use
 - Error messages are sanitized to never contain secrets
+- CSP restricts script/connect sources to `self` + IPC only
+
+See [SECURITY.md](SECURITY.md) for the full threat model and known limitations.
 
 ## Testing
 
