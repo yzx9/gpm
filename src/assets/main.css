@@ -95,6 +95,12 @@
     min-height: 100vh;
   }
 
+  .app-shell {
+    padding-top: var(--safe-area-inset-top, 0px);
+    padding-bottom: var(--safe-area-inset-bottom, 0px);
+    min-height: 100vh;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

@@ -5,18 +5,24 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { applySafeAreaInsets } from "./utils/safe-area";
 
 const configured = ref(false);
 
-onMounted(async () => {
-  try {
-    configured.value = await invoke<boolean>("is_configured");
-  } catch {
-    configured.value = false;
-  }
+onMounted(() => {
+  applySafeAreaInsets();
+  invoke<boolean>("is_configured")
+    .then((v) => {
+      configured.value = v;
+    })
+    .catch(() => {
+      configured.value = false;
+    });
 });
 </script>
 
 <template>
-  <router-view />
+  <div class="app-shell">
+    <router-view />
+  </div>
 </template>
