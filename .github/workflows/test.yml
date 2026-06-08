@@ -24,11 +24,9 @@ jobs:
             librsvg2-dev
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
 
       - name: Run backend tests
-        run: cd src-tauri && cargo test --all-features
+        run: cargo test --all-features
 
   frontend:
     runs-on: ubuntu-latest
@@ -58,8 +56,6 @@ jobs:
           components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
 
       - uses: pnpm/action-setup@v4
 
@@ -72,7 +68,7 @@ jobs:
         run: pnpm install
 
       - name: Check Rust formatting
-        run: cd src-tauri && cargo fmt --check
+        run: cargo fmt --check
 
       - name: Check frontend formatting
         run: npx prettier --check src
@@ -96,11 +92,9 @@ jobs:
             librsvg2-dev
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
 
       - name: Clippy
-        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   typecheck:
     runs-on: ubuntu-latest

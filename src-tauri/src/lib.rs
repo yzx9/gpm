@@ -19,30 +19,31 @@
     clippy::pedantic
 )]
 
-mod crypto;
-mod error;
-mod git;
-mod secure_storage;
-mod store;
-
-/// Re-export core functions for integration tests.
-pub mod test_support {
-    pub use crate::crypto::{decrypt_bytes, decrypt_file};
-    pub use crate::error::{AppError, ErrorCode};
-    pub use crate::git::{clone_repo, pull_repo};
-    pub use crate::secure_storage::{RepoConfig, SecureStorage};
-    pub use crate::store::{list_entries, parse_decrypted_content, resolve_entry_path, PullResult};
-}
-
-use std::path::Path;
-
-use error::AppError;
-use secure_storage::{RepoConfig, SecureStorage};
-use store::{CopyResult, Entry, PullResult, SensitiveContent};
+use rustpass::error::ErrorCode;
+use rustpass::{Entry, Error, RepoConfig, Store, SyncResult};
+use serde::Serialize;
 
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use zeroize::Zeroize;
+
+// ---------------------------------------------------------------------------
+// Tauri-IPC types (not in rustpass — these are UI-layer concerns)
+// ---------------------------------------------------------------------------
+
+/// Returned by `copy_password` — no secret data, safe for IPC.
+#[derive(Debug, Clone, Serialize)]
+struct CopyResult {
+    success: bool,
+    entry_name: String,
+    cleared_after_secs: u32,
+}
+
+/// Returned by `show_password` — contains secrets, strict Vue lifecycle required.
+#[derive(Debug, Clone, Serialize)]
+struct SensitiveContent {
+    password: String,
+    notes: String,
+}
 
 // ---------------------------------------------------------------------------
 // App state
@@ -50,7 +51,7 @@ use zeroize::Zeroize;
 
 /// Application state shared across all Tauri commands.
 struct AppState {
-    storage: SecureStorage,
+    store: Store,
 }
 
 // ---------------------------------------------------------------------------
@@ -60,8 +61,8 @@ struct AppState {
 /// Check if the app has been configured (identity + repo exist).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
-fn is_configured(state: tauri::State<'_, AppState>) -> Result<bool, AppError> {
-    Ok(state.storage.is_configured())
+fn is_configured(state: tauri::State<'_, AppState>) -> Result<bool, Error> {
+    Ok(state.store.is_configured())
 }
 
 /// Full setup: validate identity, clone repo, save config.
@@ -72,58 +73,22 @@ fn setup(
     repo_url: String,
     pat: Option<String>,
     identity: String,
-) -> Result<(), AppError> {
-    // Validate identity format
-    let identity_bytes = identity.trim().as_bytes();
-    if !identity.trim().starts_with("AGE-SECRET-KEY-") {
-        return Err(AppError::new(
-            error::ErrorCode::InvalidIdentity,
-            "Identity must start with AGE-SECRET-KEY-...",
-        ));
-    }
-
-    // Determine local repo path
-    let repo_dir = state.storage.config_dir().join("repo");
-
-    // Clear any existing configuration
-    state.storage.clear_all()?;
-
-    // Remove existing repo directory if present
-    if repo_dir.exists() {
-        std::fs::remove_dir_all(&repo_dir)?;
-    }
-
-    // Save identity first (before clone, so decrypt can work)
-    state.storage.save_identity(identity_bytes)?;
-
-    // Clone the repo
-    git::clone_repo(&repo_url, &repo_dir, pat.as_deref())?;
-
-    // Save repo config
-    let local_path = repo_dir.to_string_lossy().to_string();
-    state
-        .storage
-        .save_repo_config(&repo_url, pat.as_deref(), &local_path)?;
-
-    Ok(())
+) -> Result<(), Error> {
+    state.store.configure(&repo_url, pat.as_deref(), &identity)
 }
 
 /// List all .age entries in the configured repository.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn list_entries(state: tauri::State<'_, AppState>) -> Result<Vec<Entry>, AppError> {
-    let config = state.storage.load_repo_config()?;
-    let repo_path = Path::new(&config.local_path);
-    store::list_entries(repo_path)
+fn list_entries(state: tauri::State<'_, AppState>) -> Result<Vec<Entry>, Error> {
+    state.store.list()
 }
 
 /// Pull latest changes (fast-forward only).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn pull_repo(state: tauri::State<'_, AppState>) -> Result<PullResult, AppError> {
-    let config = state.storage.load_repo_config()?;
-    let repo_path = Path::new(&config.local_path);
-    git::pull_repo(repo_path, config.pat.as_deref())
+fn pull_repo(state: tauri::State<'_, AppState>) -> Result<SyncResult, Error> {
+    state.store.sync()
 }
 
 /// Primary operation: decrypt and copy password to clipboard.
@@ -134,47 +99,24 @@ async fn copy_password(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
     entry_path: String,
-) -> Result<CopyResult, AppError> {
-    let config = state.storage.load_repo_config()?;
-    let repo_path = Path::new(&config.local_path);
-
-    // Resolve and validate entry path
-    let file_path = store::resolve_entry_path(repo_path, &entry_path)?;
-
-    // Load identity (caller must zeroize)
-    let mut identity_bytes = state.storage.load_identity()?;
-
-    // Decrypt
-    let decrypted = crypto::decrypt_file(&file_path, &identity_bytes)?;
-
-    // Zeroize identity immediately after decryption
-    identity_bytes.zeroize();
-
-    // Parse into password + notes
-    let mut entry = store::parse_decrypted_content(&decrypted)?;
+) -> Result<CopyResult, Error> {
+    let secret = state.store.get(&entry_path)?;
 
     // Derive display name from entry path
     let entry_name = entry_path.trim_end_matches(".age").to_string();
 
     // Copy password to clipboard via Tauri plugin
     app.clipboard()
-        .write_text(entry.password.to_string())
-        .map_err(|e| {
-            AppError::new(
-                error::ErrorCode::ClipboardError,
-                format!("Clipboard error: {e}"),
-            )
-        })?;
-
-    // Zeroize decrypted content immediately
-    entry.password.zeroize();
-    entry.notes.zeroize();
+        .write_text(secret.password().to_string())
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Clipboard error: {e}")))?;
 
     // Spawn clipboard auto-clear after 30 seconds
     let clear_handle = app.clone();
+    let pw = secret.password().to_string();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         let _ = clear_handle.clipboard().write_text(String::new());
+        drop(pw);
     });
 
     Ok(CopyResult {
@@ -191,33 +133,13 @@ async fn copy_password(
 fn show_password(
     state: tauri::State<'_, AppState>,
     entry_path: String,
-) -> Result<SensitiveContent, AppError> {
-    let config = state.storage.load_repo_config()?;
-    let repo_path = Path::new(&config.local_path);
-
-    // Resolve and validate entry path
-    let file_path = store::resolve_entry_path(repo_path, &entry_path)?;
-
-    // Load identity (caller must zeroize)
-    let mut identity_bytes = state.storage.load_identity()?;
-
-    // Decrypt
-    let decrypted = crypto::decrypt_file(&file_path, &identity_bytes)?;
-
-    // Zeroize identity immediately after decryption
-    identity_bytes.zeroize();
-
-    // Parse into password + notes
-    let mut entry = store::parse_decrypted_content(&decrypted)?;
+) -> Result<SensitiveContent, Error> {
+    let secret = state.store.get(&entry_path)?;
 
     let result = SensitiveContent {
-        password: entry.password.to_string(),
-        notes: entry.notes.to_string(),
+        password: secret.password().to_string(),
+        notes: secret.body().to_string(),
     };
-
-    // Zeroize the Rust-side DecryptedEntry fields
-    entry.password.zeroize();
-    entry.notes.zeroize();
 
     Ok(result)
 }
@@ -225,22 +147,15 @@ fn show_password(
 /// Get the current repo config (for display in settings).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn get_config(state: tauri::State<'_, AppState>) -> Result<RepoConfig, AppError> {
-    state.storage.load_repo_config()
+fn get_config(state: tauri::State<'_, AppState>) -> Result<RepoConfig, Error> {
+    state.store.config()
 }
 
 /// Reset all configuration and local data.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    // Remove local repo if it exists
-    if let Ok(config) = state.storage.load_repo_config() {
-        let repo_path = Path::new(&config.local_path);
-        if repo_path.exists() {
-            std::fs::remove_dir_all(repo_path)?;
-        }
-    }
-    state.storage.clear_all()
+fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), Error> {
+    state.store.reset()
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +178,7 @@ pub fn run() {
                 .app_config_dir()
                 .expect("Cannot determine app config directory");
             app.manage(AppState {
-                storage: SecureStorage::new(config_dir),
+                store: Store::new(config_dir),
             });
             Ok(())
         })

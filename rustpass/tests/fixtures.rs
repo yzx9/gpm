@@ -6,6 +6,9 @@ mod common;
 
 mod tests {
     use super::common::*;
+    use rustpass::crypto;
+    use rustpass::secret::Secret;
+    use rustpass::store;
 
     // -----------------------------------------------------------------------
     // Store parsing tests
@@ -23,7 +26,7 @@ mod tests {
             &recipient,
         );
 
-        let entries = gpm_lib::test_support::list_entries(dir.path()).unwrap();
+        let entries = store::list_entries(dir.path()).unwrap();
         assert_eq!(entries.len(), 3);
         assert!(entries.iter().any(|e| e.name == "gmail/personal"));
         assert!(entries.iter().any(|e| e.name == "work/vpn"));
@@ -37,7 +40,7 @@ mod tests {
         // Add a .gpg file
         std::fs::write(dir.path().join("legacy.gpg"), b"encrypted-gpg-data").unwrap();
 
-        let entries = gpm_lib::test_support::list_entries(dir.path()).unwrap();
+        let entries = store::list_entries(dir.path()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "valid");
     }
@@ -50,7 +53,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join(".git/config.age"), b"should-be-skipped").unwrap();
 
-        let entries = gpm_lib::test_support::list_entries(dir.path()).unwrap();
+        let entries = store::list_entries(dir.path()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "real");
     }
@@ -66,7 +69,7 @@ mod tests {
             &recipient,
         );
 
-        let entries = gpm_lib::test_support::list_entries(dir.path()).unwrap();
+        let entries = store::list_entries(dir.path()).unwrap();
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|e| e.path == "cloud/aws/root.age"));
         assert!(entries.iter().any(|e| e.path == "cloud/gcp/admin.age"));
@@ -80,43 +83,43 @@ mod tests {
             &recipient,
         );
 
-        let entries = gpm_lib::test_support::list_entries(dir.path()).unwrap();
+        let entries = store::list_entries(dir.path()).unwrap();
         assert_eq!(entries[0].name, "alpha");
         assert_eq!(entries[1].name, "Beta");
         assert_eq!(entries[2].name, "Zebra");
     }
 
     // -----------------------------------------------------------------------
-    // Content parsing tests
+    // Content parsing tests (via Secret::parse)
     // -----------------------------------------------------------------------
 
     #[test]
     fn test_parse_single_line() {
-        let entry = gpm_lib::test_support::parse_decrypted_content(b"my-password").unwrap();
-        assert_eq!(entry.password.as_str(), "my-password");
-        assert_eq!(entry.notes.as_str(), "");
+        let secret = Secret::parse(b"my-password").unwrap();
+        assert_eq!(secret.password(), "my-password");
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
     fn test_parse_multi_line() {
         let content = b"my-password\nusername: alice\nurl: https://example.com";
-        let entry = gpm_lib::test_support::parse_decrypted_content(content).unwrap();
-        assert_eq!(entry.password.as_str(), "my-password");
-        assert!(entry.notes.as_str().contains("username: alice"));
-        assert!(entry.notes.as_str().contains("url: https://example.com"));
+        let secret = Secret::parse(content).unwrap();
+        assert_eq!(secret.password(), "my-password");
+        assert!(secret.body().contains("username: alice"));
+        assert!(secret.body().contains("url: https://example.com"));
     }
 
     #[test]
     fn test_parse_empty_content_errors() {
-        let result = gpm_lib::test_support::parse_decrypted_content(b"");
+        let result = Secret::parse(b"");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_trailing_whitespace_stripped() {
-        let entry = gpm_lib::test_support::parse_decrypted_content(b"pw\nnotes\n").unwrap();
-        assert_eq!(entry.password.as_str(), "pw");
-        assert_eq!(entry.notes.as_str(), "notes");
+        let secret = Secret::parse(b"pw\nnotes\n").unwrap();
+        assert_eq!(secret.password(), "pw");
+        assert_eq!(secret.body(), "notes");
     }
 
     // -----------------------------------------------------------------------
@@ -129,8 +132,7 @@ mod tests {
         let plaintext = b"super-secret-password\nusername: alice";
         let encrypted = encrypt_to_recipient(plaintext, &recipient);
 
-        let decrypted =
-            gpm_lib::test_support::decrypt_bytes(&encrypted, identity.as_bytes()).unwrap();
+        let decrypted = crypto::decrypt_bytes(&encrypted, identity.as_bytes()).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
@@ -140,7 +142,7 @@ mod tests {
         let (wrong_identity, _wrong_recipient) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"secret", &recipient);
 
-        let result = gpm_lib::test_support::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
+        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
         assert!(result.is_err());
         // Verify error message contains no secret content
         let err_msg = format!("{}", result.unwrap_err());
@@ -149,15 +151,14 @@ mod tests {
 
     #[test]
     fn test_decrypt_invalid_identity_format() {
-        let result = gpm_lib::test_support::decrypt_bytes(b"some data", b"not-a-valid-identity");
+        let result = crypto::decrypt_bytes(b"some data", b"not-a-valid-identity");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_decrypt_corrupted_data() {
         let (identity, _recipient) = generate_test_keypair();
-        let result =
-            gpm_lib::test_support::decrypt_bytes(b"not-valid-age-data", identity.as_bytes());
+        let result = crypto::decrypt_bytes(b"not-valid-age-data", identity.as_bytes());
         assert!(result.is_err());
     }
 
@@ -171,7 +172,7 @@ mod tests {
         let (wrong_identity, _) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"my-real-password", &recipient);
 
-        let result = gpm_lib::test_support::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
+        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
         let err = result.unwrap_err();
         let msg = format!("{}", err);
 

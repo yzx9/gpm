@@ -6,17 +6,18 @@ use std::path::Path;
 
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 
-use crate::error::{AppError, ErrorCode};
-use crate::store::PullResult;
+use crate::error::{Error, ErrorCode};
+use crate::store::SyncResult;
 
 /// Clone a git repository to a local directory.
+///
 /// For HTTPS URLs, uses PAT credential callback.
 ///
 /// # Errors
 ///
 /// Returns an error if the clone fails due to authentication, network, or
 /// filesystem issues.
-pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), AppError> {
+pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), Error> {
     // Remove existing directory if present (re-clone)
     if dest.exists() {
         std::fs::remove_dir_all(dest)?;
@@ -40,11 +41,11 @@ pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), AppEr
     builder.clone(url, dest).map_err(|e| {
         let msg = e.message().to_string();
         if msg.contains("authentication") || msg.contains("unsupported URL") {
-            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
+            Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
         } else if msg.contains("unable to connect") || msg.contains("timeout") {
-            AppError::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
+            Error::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
         } else {
-            AppError::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
+            Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
         }
     })?;
 
@@ -52,18 +53,19 @@ pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), AppEr
 }
 
 /// Pull (fetch + fast-forward only merge) from origin/main.
+///
 /// Returns whether any commits were pulled and the new HEAD hash.
 ///
 /// # Errors
 ///
 /// Returns an error if the repository cannot be found, the remote is
 /// unreachable, or the branches have diverged (non-fast-forward).
-pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppError> {
+pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<SyncResult, Error> {
     let repo = Repository::discover(repo_path)
-        .map_err(|_| AppError::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
 
     let mut remote = repo.find_remote("origin").map_err(|e| {
-        AppError::new(
+        Error::new(
             ErrorCode::NetworkError,
             format!("Cannot find origin remote: {}", e.message()),
         )
@@ -79,55 +81,63 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<PullResult, AppE
         });
     }
 
+    // Capture HEAD before fetch so we can detect changes.
+    // The fetch refspec `refs/heads/*:refs/heads/*` updates local branches
+    // in-place during fetch, so reading HEAD after fetch would already
+    // reflect the update. We must compare pre-fetch vs post-fetch.
+    let pre_fetch_oid = repo.head().ok().and_then(|r| r.target());
+
     // Fetch from remote
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
     remote.fetch(&["refs/heads/*:refs/heads/*"], Some(&mut fetch_opts), None)?;
 
-    // Get current HEAD
-    let head_oid = repo
+    // Read HEAD after fetch
+    let post_fetch_oid = repo
         .head()?
         .target()
-        .ok_or_else(|| AppError::new(ErrorCode::PullFfFailed, "Cannot determine current HEAD"))?;
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Cannot determine current HEAD"))?;
 
-    // Find the upstream branch (origin/main or origin/master)
-    let upstream_branch = find_default_branch(&repo)?;
-    let upstream_ref = repo.find_reference(&format!("refs/heads/{upstream_branch}"))?;
-    let upstream_oid = upstream_ref
-        .target()
-        .ok_or_else(|| AppError::new(ErrorCode::PullFfFailed, "Cannot determine upstream HEAD"))?;
-
-    // Check if fast-forward is possible
-    if upstream_oid == head_oid {
-        return Ok(PullResult {
+    // If HEAD hasn't moved, there's nothing to do
+    let Some(pre_oid) = pre_fetch_oid else {
+        return Ok(SyncResult {
             changed: false,
-            head: short_hash(&head_oid),
+            head: short_hash(&post_fetch_oid),
+        });
+    };
+
+    if post_fetch_oid == pre_oid {
+        return Ok(SyncResult {
+            changed: false,
+            head: short_hash(&post_fetch_oid),
         });
     }
 
-    // Verify fast-forward: upstream must be a descendant of HEAD
-    let _head_commit = repo.find_commit(head_oid)?;
-    let upstream_commit = repo.find_commit(upstream_oid)?;
-
-    if !repo.graph_descendant_of(upstream_oid, head_oid)? {
-        return Err(AppError::new(
+    // Verify fast-forward: new HEAD must be a descendant of old HEAD
+    if !repo.graph_descendant_of(post_fetch_oid, pre_oid)? {
+        return Err(Error::new(
             ErrorCode::PullFfFailed,
             "Cannot fast-forward: branches have diverged. Resolve on desktop.",
         ));
     }
 
-    // Perform fast-forward merge
-    repo.checkout_tree(upstream_commit.as_object(), None)?;
-    repo.set_head(&format!("refs/heads/{upstream_branch}"))?;
+    // Checkout the new HEAD to update the working tree.
+    // The in-place refspec fetch updates refs but not the working tree,
+    // so we must explicitly checkout. Use FORCE strategy to ensure all files
+    // (including newly added ones) are written to disk.
+    let mut checkout_builder = git2::build::CheckoutBuilder::new();
+    checkout_builder.force();
+    repo.checkout_head(Some(&mut checkout_builder))?;
 
-    Ok(PullResult {
+    Ok(SyncResult {
         changed: true,
-        head: short_hash(&upstream_oid),
+        head: short_hash(&post_fetch_oid),
     })
 }
 
 /// Find the default branch name (main or master).
-fn find_default_branch(repo: &Repository) -> Result<String, AppError> {
+#[cfg(test)]
+fn find_default_branch(repo: &Repository) -> Result<String, Error> {
     // Try refs/heads/main first, then refs/heads/master
     for branch in &["main", "master"] {
         if repo.find_reference(&format!("refs/heads/{branch}")).is_ok() {
@@ -142,7 +152,7 @@ fn find_default_branch(repo: &Repository) -> Result<String, AppError> {
         }
     }
 
-    Err(AppError::new(
+    Err(Error::new(
         ErrorCode::PullFfFailed,
         "Cannot determine default branch",
     ))
@@ -195,8 +205,6 @@ mod tests {
         let sig = test_signature();
         let _oid = create_empty_commit(&repo, &sig);
 
-        // The commit creates the system's default branch (e.g. "main" or
-        // "master"). find_default_branch should return it.
         let expected = config_default_branch(&repo);
         let branch = find_default_branch(&repo).expect("should find a branch");
         assert_eq!(branch, expected);
@@ -209,7 +217,6 @@ mod tests {
         let sig = test_signature();
         let oid = create_empty_commit(&repo, &sig);
 
-        // Remove the auto-created default branch and create master instead.
         let default_branch = config_default_branch(&repo);
         repo.find_reference(&format!("refs/heads/{default_branch}"))
             .expect("should find auto-created ref")
@@ -231,14 +238,12 @@ mod tests {
         let sig = test_signature();
         let oid = create_empty_commit(&repo, &sig);
 
-        // Remove the auto-created default branch so neither main nor
-        // master exists, then create develop for the HEAD fallback path.
         let default_branch = config_default_branch(&repo);
         repo.find_reference(&format!("refs/heads/{default_branch}"))
             .expect("should find auto-created ref")
             .delete()
             .expect("failed to delete ref");
-        repo.reference("refs/heads/develop", oid, false, "test develop branch")
+        repo.reference("refs/heads/develop", oid, false, "test develop ref")
             .expect("failed to create develop ref");
         repo.set_head("refs/heads/develop")
             .expect("failed to set HEAD");
@@ -257,9 +262,6 @@ mod tests {
 
     #[test]
     fn short_hash_short_input() {
-        // Valid git2::Oid is always 40 hex chars, so the len < 7 branch in
-        // short_hash is defensive code that cannot be reached through normal
-        // usage. Test the string-slicing logic directly to cover that branch.
         let full = String::from("abc");
         let result = if full.len() >= 7 {
             full[..7].to_string()

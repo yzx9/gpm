@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["rustpass", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Zexin Yuan"]
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+age = { version = "0.11", features = ["armor"] }
+zeroize = { version = "1", features = ["derive"] }
+git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
+walkdir = "2"
+tokio = { version = "1", features = ["time"] }
+tempfile = "3"

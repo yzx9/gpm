@@ -27,7 +27,7 @@ dist-ssr
 .direnv/
 
 # rust
-src-tauri/target/
+target/
 
 # tauri
 # Ignore auto-generated schemas

@@ -19,8 +19,6 @@ jobs:
           targets: "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android"
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "src-tauri -> target"
 
       - uses: pnpm/action-setup@v4
 

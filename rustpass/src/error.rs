@@ -26,22 +26,22 @@ pub enum ErrorCode {
     EntryNotFound,
     /// Filesystem I/O error.
     IoError,
-    /// Clipboard operation failed.
-    ClipboardError,
     /// Configuration read/write error.
     ConfigError,
+    /// General store error.
+    StoreError,
 }
 
 /// Safe error type that never contains secret content.
 #[derive(Debug, Clone, Serialize)]
-pub struct AppError {
+pub struct Error {
     /// Machine-readable error code string (e.g. `"CLONE_FAILED"`).
     pub code: String,
     /// Human-readable error message (no secrets).
     pub message: String,
 }
 
-impl AppError {
+impl Error {
     /// Create a new error from a code and message.
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
@@ -55,8 +55,8 @@ impl AppError {
                 ErrorCode::NetworkError => "NETWORK_ERROR",
                 ErrorCode::EntryNotFound => "ENTRY_NOT_FOUND",
                 ErrorCode::IoError => "IO_ERROR",
-                ErrorCode::ClipboardError => "CLIPBOARD_ERROR",
                 ErrorCode::ConfigError => "CONFIG_ERROR",
+                ErrorCode::StoreError => "STORE_ERROR",
             }
             .to_string(),
             message: message.into(),
@@ -64,21 +64,21 @@ impl AppError {
     }
 }
 
-impl std::fmt::Display for AppError {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
     }
 }
 
-impl std::error::Error for AppError {}
+impl std::error::Error for Error {}
 
-impl From<std::io::Error> for AppError {
+impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        AppError::new(ErrorCode::IoError, format!("Filesystem error: {e}"))
+        Error::new(ErrorCode::IoError, format!("Filesystem error: {e}"))
     }
 }
 
-impl From<git2::Error> for AppError {
+impl From<git2::Error> for Error {
     fn from(e: git2::Error) -> Self {
         let msg = e.message().to_string();
         let code = if msg.contains("authentication")
@@ -100,13 +100,13 @@ impl From<git2::Error> for AppError {
         } else {
             ErrorCode::CloneFailed
         };
-        AppError::new(code, msg)
+        Error::new(code, msg)
     }
 }
 
-impl From<serde_json::Error> for AppError {
+impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
-        AppError::new(ErrorCode::ConfigError, format!("Config error: {e}"))
+        Error::new(ErrorCode::ConfigError, format!("Config error: {e}"))
     }
 }
 
@@ -125,8 +125,8 @@ mod tests {
             ErrorCode::NetworkError => "NETWORK_ERROR",
             ErrorCode::EntryNotFound => "ENTRY_NOT_FOUND",
             ErrorCode::IoError => "IO_ERROR",
-            ErrorCode::ClipboardError => "CLIPBOARD_ERROR",
             ErrorCode::ConfigError => "CONFIG_ERROR",
+            ErrorCode::StoreError => "STORE_ERROR",
         }
     }
 
@@ -142,8 +142,8 @@ mod tests {
             ErrorCode::NetworkError,
             ErrorCode::EntryNotFound,
             ErrorCode::IoError,
-            ErrorCode::ClipboardError,
             ErrorCode::ConfigError,
+            ErrorCode::StoreError,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn app_error_new_maps_codes() {
+    fn error_new_maps_codes() {
         let variants = [
             ErrorCode::CloneFailed,
             ErrorCode::PullFfFailed,
@@ -167,23 +167,23 @@ mod tests {
             ErrorCode::NetworkError,
             ErrorCode::EntryNotFound,
             ErrorCode::IoError,
-            ErrorCode::ClipboardError,
             ErrorCode::ConfigError,
+            ErrorCode::StoreError,
         ];
         for variant in variants {
-            let err = AppError::new(variant, "test message");
+            let err = Error::new(variant, "test message");
             assert_eq!(
                 err.code,
                 expected_code_string(variant),
-                "AppError::new code mismatch for {variant:?}"
+                "Error::new code mismatch for {variant:?}"
             );
             assert_eq!(err.message, "test message");
         }
     }
 
     #[test]
-    fn app_error_display_format() {
-        let err = AppError::new(ErrorCode::DecryptFailed, "bad key");
+    fn error_display_format() {
+        let err = Error::new(ErrorCode::DecryptFailed, "bad key");
         let displayed = format!("{err}");
         assert_eq!(displayed, "DECRYPT_FAILED: bad key");
     }
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn from_io_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
-        let app_err: AppError = io_err.into();
+        let app_err: Error = io_err.into();
         assert_eq!(app_err.code, "IO_ERROR");
         assert!(
             app_err.message.contains("file missing"),
@@ -202,15 +202,11 @@ mod tests {
 
     #[test]
     fn from_git2_error_maps_correctly() {
-        // Opening a non-existent path produces a real git2::Error.
-        // The exact message varies by platform and libgit2 version, but it
-        // should not match any of the PullFfFailed or NetworkError patterns,
-        // so it falls through to CloneFailed.
         let err = git2::Repository::open("/nonexistent/path/that/does/not/exist");
         let Err(git_err) = err else {
             panic!("expected error opening nonexistent repo");
         };
-        let app_err: AppError = git_err.into();
+        let app_err: Error = git_err.into();
         assert_eq!(
             app_err.code, "CLONE_FAILED",
             "unmatched git2 error should map to CLONE_FAILED"
@@ -219,9 +215,8 @@ mod tests {
 
     #[test]
     fn from_serde_json_error() {
-        // Parsing invalid JSON produces a real serde_json::Error.
         let serde_err = serde_json::from_str::<serde_json::Value>("{invalid").unwrap_err();
-        let app_err: AppError = serde_err.into();
+        let app_err: Error = serde_err.into();
         assert_eq!(app_err.code, "CONFIG_ERROR");
         assert!(
             app_err.message.contains("Config error:"),

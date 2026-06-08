@@ -5,7 +5,7 @@ default:
 
 # Run backend (Rust) integration tests
 test-be:
-  cd src-tauri && cargo test --all-features
+  cargo test --all-features
 
 # Run frontend unit tests
 test-fe:
@@ -16,12 +16,12 @@ test: test-be test-fe
 
 # Clippy + vue-tsc type check
 lint:
-  cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+  cargo clippy --all-targets --all-features -- -D warnings
   npx vue-tsc --noEmit
 
 # Format Rust + Vue code
 fmt:
-  cd src-tauri && cargo fmt
+  cargo fmt
   prettier --write src
 
 # Desktop dev server with hot reload

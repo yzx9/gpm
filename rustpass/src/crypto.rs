@@ -7,9 +7,10 @@ use std::path::Path;
 
 use age::Decryptor;
 
-use crate::error::{AppError, ErrorCode};
+use crate::error::{Error, ErrorCode};
 
-/// Decrypt an .age file using the given identity bytes.
+/// Decrypt an `.age` file using the given identity bytes.
+///
 /// Returns the raw decrypted bytes. The caller is responsible for zeroizing
 /// the identity after calling this function.
 ///
@@ -17,9 +18,9 @@ use crate::error::{AppError, ErrorCode};
 ///
 /// Returns an error if the file cannot be read, the identity format is invalid,
 /// or decryption fails.
-pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
+pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, Error> {
     let encrypted = std::fs::read(file_path).map_err(|e| {
-        AppError::new(
+        Error::new(
             ErrorCode::IoError,
             format!("Failed to read entry file: {e}"),
         )
@@ -34,24 +35,24 @@ pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, 
 ///
 /// Returns an error if the identity format is invalid, contains no valid
 /// identities, the encrypted data cannot be parsed, or decryption fails.
-pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
+pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>, Error> {
     // Parse the identity from buffer — validates AGE-SECRET-KEY-... format
     let identity_file = age::IdentityFile::from_buffer(identity_bytes).map_err(|_| {
-        AppError::new(
+        Error::new(
             ErrorCode::InvalidIdentity,
             "Identity is not valid AGE-SECRET-KEY-... format",
         )
     })?;
 
     let identities = identity_file.into_identities().map_err(|_| {
-        AppError::new(
+        Error::new(
             ErrorCode::InvalidIdentity,
             "Identity file contains no valid identities",
         )
     })?;
 
     if identities.is_empty() {
-        return Err(AppError::new(
+        return Err(Error::new(
             ErrorCode::InvalidIdentity,
             "Identity file contains no valid identities",
         ));
@@ -59,7 +60,7 @@ pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>,
 
     // Build a decryptor from the age format (armored or binary)
     let Ok(decryptor) = Decryptor::new(encrypted) else {
-        return Err(AppError::new(
+        return Err(Error::new(
             ErrorCode::DecryptFailed,
             "Failed to parse encrypted data",
         ));
@@ -70,14 +71,14 @@ pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>,
     match decryptor.decrypt(identities.iter().map(AsRef::as_ref)) {
         Ok(mut reader) => {
             if reader.read_to_end(&mut output).is_err() {
-                return Err(AppError::new(
+                return Err(Error::new(
                     ErrorCode::DecryptFailed,
                     "Decryption failed — wrong identity or corrupted data",
                 ));
             }
         }
         Err(_) => {
-            return Err(AppError::new(
+            return Err(Error::new(
                 ErrorCode::DecryptFailed,
                 "Decryption failed — wrong identity or corrupted data",
             ));
@@ -123,17 +124,14 @@ mod tests {
         let (identity, recipient) = generate_keypair();
         let plaintext = b"hunter2\nusername: bob";
 
-        // Write encrypted content to a temp file
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entry.age");
         let ciphertext = encrypt(plaintext, &recipient);
         std::fs::write(&file_path, &ciphertext).unwrap();
 
-        // decrypt_file should read the file and decrypt successfully
         let result = decrypt_file(&file_path, identity.as_bytes()).unwrap();
         assert_eq!(result, plaintext);
 
-        // Cross-check: decrypt_bytes on the same ciphertext must produce the same output
         let bytes_result = decrypt_bytes(&ciphertext, identity.as_bytes()).unwrap();
         assert_eq!(result, bytes_result);
     }
