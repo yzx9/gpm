@@ -23,6 +23,8 @@ mod tests {
             .save_repo_config(
                 "https://example.com/repo.git",
                 Some("pat-token-123"),
+                None,
+                None,
                 "/local/repo/path",
             )
             .expect("save_repo_config failed");
@@ -50,6 +52,8 @@ mod tests {
             .save_repo_config(
                 "https://first.example.com/repo.git",
                 Some("first-pat"),
+                None,
+                None,
                 "/first",
             )
             .expect("initial save_repo_config failed");
@@ -65,7 +69,13 @@ mod tests {
             .save_identity(b"AGE-SECRET-KEY-1SECOND")
             .expect("second save_identity failed");
         config
-            .save_repo_config("https://second.example.com/repo.git", None, "/second")
+            .save_repo_config(
+                "https://second.example.com/repo.git",
+                None,
+                None,
+                None,
+                "/second",
+            )
             .expect("second save_repo_config failed");
         assert!(
             config.is_configured(),

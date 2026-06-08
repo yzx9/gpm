@@ -30,6 +30,8 @@ pub enum ErrorCode {
     ConfigError,
     /// General store error.
     StoreError,
+    /// SSH key was invalid or could not be parsed.
+    SshKeyInvalid,
 }
 
 /// Safe error type that never contains secret content.
@@ -57,6 +59,7 @@ impl Error {
                 ErrorCode::IoError => "IO_ERROR",
                 ErrorCode::ConfigError => "CONFIG_ERROR",
                 ErrorCode::StoreError => "STORE_ERROR",
+                ErrorCode::SshKeyInvalid => "SSH_KEY_INVALID",
             }
             .to_string(),
             message: message.into(),
@@ -127,6 +130,7 @@ mod tests {
             ErrorCode::IoError => "IO_ERROR",
             ErrorCode::ConfigError => "CONFIG_ERROR",
             ErrorCode::StoreError => "STORE_ERROR",
+            ErrorCode::SshKeyInvalid => "SSH_KEY_INVALID",
         }
     }
 
@@ -144,6 +148,7 @@ mod tests {
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
+            ErrorCode::SshKeyInvalid,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -169,6 +174,7 @@ mod tests {
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
+            ErrorCode::SshKeyInvalid,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- SSH key authentication for Git operations (`git@host:repo` and `ssh://` URLs)
+
 ## [v0.1.0] - 2026-06-08
 
 In this initial release, we have implement a read-only age-only gopass password client for Android, built with Tauri v2 + Rust + Vue 3.

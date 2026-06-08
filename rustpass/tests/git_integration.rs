@@ -28,7 +28,7 @@ mod tests {
         git::clone_repo(
             bare_dir.path().to_str().expect("bare path is valid utf-8"),
             &dest_path,
-            None,
+            &git::GitAuth::None,
         )
         .expect("clone should succeed");
 
@@ -56,7 +56,7 @@ mod tests {
         git::clone_repo(
             bare_dir.path().to_str().expect("bare path is valid utf-8"),
             dest.path(),
-            None,
+            &git::GitAuth::None,
         )
         .expect("clone should succeed");
 
@@ -95,7 +95,8 @@ mod tests {
             "add second entry",
         );
 
-        let result = git::pull_repo(clone_dir.path(), None).expect("pull should succeed");
+        let result =
+            git::pull_repo(clone_dir.path(), &git::GitAuth::None).expect("pull should succeed");
 
         assert_ne!(
             result.head,
@@ -115,7 +116,8 @@ mod tests {
         let (_bare_dir, clone_dir) =
             create_test_git_repo(vec![("sole.age", b"only-password")], &recipient);
 
-        let result = git::pull_repo(clone_dir.path(), None).expect("pull should succeed");
+        let result =
+            git::pull_repo(clone_dir.path(), &git::GitAuth::None).expect("pull should succeed");
         assert!(
             !result.changed,
             "pull should report no changes when upstream is unchanged"
@@ -126,7 +128,7 @@ mod tests {
     fn pull_nonexistent_repo_errors() {
         let nowhere = tempfile::tempdir().expect("failed to create temp dir");
 
-        let result = git::pull_repo(nowhere.path(), None);
+        let result = git::pull_repo(nowhere.path(), &git::GitAuth::None);
         let err = result.expect_err("pull on non-repo dir should fail");
         assert_eq!(
             err.code, "NO_REPO",
@@ -144,7 +146,7 @@ mod tests {
         let result = git::clone_repo(
             fake_url.to_str().expect("path is valid utf-8"),
             dest.path(),
-            None,
+            &git::GitAuth::None,
         );
         let err = result.expect_err("clone from nonexistent remote should fail");
         assert_eq!(
@@ -179,7 +181,7 @@ mod tests {
         git::clone_repo(
             bare_dir.path().to_str().expect("bare path is valid utf-8"),
             dest.path(),
-            None,
+            &git::GitAuth::None,
         )
         .expect("clone should succeed");
 

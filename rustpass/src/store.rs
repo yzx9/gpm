@@ -61,6 +61,8 @@ impl Store {
         &self,
         repo_url: &str,
         pat: Option<&str>,
+        ssh_key: Option<&str>,
+        ssh_passphrase: Option<&str>,
         identity: &str,
     ) -> Result<(), Error> {
         // Validate identity format
@@ -71,6 +73,17 @@ impl Store {
                 "Identity must start with AGE-SECRET-KEY-...",
             ));
         }
+
+        // Build auth from provided credentials
+        let auth = match (ssh_key, pat) {
+            (Some(key), _) => git::GitAuth::Ssh {
+                username: "git".to_string(),
+                private_key: key.to_string(),
+                passphrase: ssh_passphrase.map(String::from),
+            },
+            (_, Some(token)) => git::GitAuth::Pat(token.to_string()),
+            _ => git::GitAuth::None,
+        };
 
         // Determine local repo path
         let repo_dir = self.config.config_dir().join("repo");
@@ -87,11 +100,12 @@ impl Store {
         self.config.save_identity(identity_bytes)?;
 
         // Clone the repo
-        git::clone_repo(repo_url, &repo_dir, pat)?;
+        git::clone_repo(repo_url, &repo_dir, &auth)?;
 
         // Save repo config
         let local_path = repo_dir.to_string_lossy().to_string();
-        self.config.save_repo_config(repo_url, pat, &local_path)?;
+        self.config
+            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)?;
 
         Ok(())
     }
@@ -159,7 +173,8 @@ impl Store {
     pub fn sync(&self) -> Result<SyncResult, Error> {
         let repo_config = self.config.load_repo_config()?;
         let repo_path = Path::new(&repo_config.local_path);
-        git::pull_repo(repo_path, repo_config.pat.as_deref())
+        let auth = repo_config.to_git_auth();
+        git::pull_repo(repo_path, &auth)
     }
 
     /// Reset all configuration and local data.

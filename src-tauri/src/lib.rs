@@ -72,9 +72,17 @@ fn setup(
     state: tauri::State<'_, AppState>,
     repo_url: String,
     pat: Option<String>,
+    ssh_key: Option<String>,
+    ssh_passphrase: Option<String>,
     identity: String,
 ) -> Result<(), Error> {
-    state.store.configure(&repo_url, pat.as_deref(), &identity)
+    state.store.configure(
+        &repo_url,
+        pat.as_deref(),
+        ssh_key.as_deref(),
+        ssh_passphrase.as_deref(),
+        &identity,
+    )
 }
 
 /// List all .age entries in the configured repository.

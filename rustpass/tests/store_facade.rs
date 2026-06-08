@@ -32,6 +32,8 @@ mod tests {
             .configure(
                 bare_dir.path().to_str().expect("valid utf-8"),
                 None,
+                None,
+                None,
                 &identity,
             )
             .expect("configure should succeed");
@@ -78,6 +80,8 @@ mod tests {
             .configure(
                 bare_dir.path().to_str().expect("valid utf-8"),
                 None,
+                None,
+                None,
                 &identity,
             )
             .expect("configure should succeed");
@@ -108,6 +112,8 @@ mod tests {
             .configure(
                 bare_dir1.path().to_str().expect("valid utf-8"),
                 None,
+                None,
+                None,
                 &identity1,
             )
             .expect("first configure should succeed");
@@ -118,6 +124,8 @@ mod tests {
         store
             .configure(
                 bare_dir2.path().to_str().expect("valid utf-8"),
+                None,
+                None,
                 None,
                 &identity2,
             )
@@ -145,7 +153,13 @@ mod tests {
         let config_dir = tempfile::tempdir().expect("failed to create config dir");
         let store = Store::new(config_dir.path().to_path_buf());
 
-        let result = store.configure("https://example.com/repo.git", None, "not-a-valid-identity");
+        let result = store.configure(
+            "https://example.com/repo.git",
+            None,
+            None,
+            None,
+            "not-a-valid-identity",
+        );
         assert!(
             result.is_err(),
             "configure with invalid identity should fail"
@@ -166,6 +180,8 @@ mod tests {
         store
             .configure(
                 bare_dir.path().to_str().expect("valid utf-8"),
+                None,
+                None,
                 None,
                 &identity,
             )
@@ -189,6 +205,8 @@ mod tests {
             .configure(
                 bare_dir.path().to_str().expect("valid utf-8"),
                 None,
+                None,
+                None,
                 &identity,
             )
             .expect("configure should succeed");
@@ -211,6 +229,8 @@ mod tests {
             .configure(
                 bare_dir.path().to_str().expect("valid utf-8"),
                 None,
+                None,
+                None,
                 &identity,
             )
             .expect("configure should succeed");
@@ -230,6 +250,8 @@ mod tests {
         store
             .configure(
                 bare_dir.path().to_str().expect("valid utf-8"),
+                None,
+                None,
                 None,
                 &identity,
             )
@@ -254,6 +276,8 @@ mod tests {
         store
             .configure(
                 bare_dir.path().to_str().expect("valid utf-8"),
+                None,
+                None,
                 None,
                 &identity,
             )

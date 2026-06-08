@@ -14,7 +14,7 @@
 //! use std::path::PathBuf;
 //!
 //! let store = Store::new(PathBuf::from("/path/to/config"));
-//! store.configure("https://example.com/repo.git", None, "AGE-SECRET-KEY-...")?;
+//! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...")?;
 //!
 //! for entry in store.list()? {
 //!     println!("{}", entry.name);

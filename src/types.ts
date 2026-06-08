@@ -28,6 +28,8 @@ export interface PullResult {
 export interface RepoConfig {
   url: string;
   pat: string | null;
+  ssh_key: string | null;
+  ssh_passphrase: string | null;
   local_path: string;
 }
 

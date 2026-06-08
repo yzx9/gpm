@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError } from "../types";
@@ -12,6 +12,8 @@ const router = useRouter();
 
 const repoUrl = ref("");
 const pat = ref("");
+const sshKey = ref("");
+const sshPassphrase = ref("");
 const identity = ref("");
 const loading = ref(false);
 const error = ref("");
@@ -22,6 +24,14 @@ const progressSteps = [
   "Preparing store...",
 ];
 let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+const isSshUrl = computed(() => {
+  const url = repoUrl.value.trim();
+  return (
+    url.startsWith("ssh://") ||
+    (url.includes("@") && url.includes(":") && !url.startsWith("http"))
+  );
+});
 
 function startProgress() {
   progressStep.value = 0;
@@ -41,8 +51,17 @@ function stopProgress() {
 
 function validate(): string | null {
   if (!repoUrl.value.trim()) return "Repository URL is required";
-  if (!repoUrl.value.trim().startsWith("https://"))
-    return "Only HTTPS URLs are supported";
+  const url = repoUrl.value.trim();
+  const isHttps = url.startsWith("https://");
+  const isSsh =
+    url.startsWith("ssh://") ||
+    (url.includes("@") && url.includes(":") && !url.startsWith("http"));
+  if (!isHttps && !isSsh) {
+    return "URL must be HTTPS or SSH format (e.g. git@host:user/repo.git)";
+  }
+  if (isSsh && !sshKey.value.trim()) {
+    return "SSH private key is required for SSH URLs";
+  }
   if (!identity.value.trim()) return "Age identity is required";
   if (!identity.value.trim().startsWith("AGE-SECRET-KEY-"))
     return "Identity must start with AGE-SECRET-KEY-...";
@@ -63,7 +82,9 @@ async function onSubmit() {
   try {
     await invoke("setup", {
       repoUrl: repoUrl.value,
-      pat: pat.value || null,
+      pat: isSshUrl.value ? null : pat.value || null,
+      sshKey: isSshUrl.value ? sshKey.value : null,
+      sshPassphrase: isSshUrl.value ? sshPassphrase.value || null : null,
       identity: identity.value,
     });
     router.push({ name: "entries" });
@@ -105,9 +126,13 @@ async function onSubmit() {
             :disabled="loading"
             class="input-base"
           />
+          <small class="text-xs text-muted"
+            >HTTPS or SSH (e.g. git@github.com:user/repo.git)</small
+          >
         </div>
 
-        <div class="flex flex-col gap-1">
+        <!-- PAT field (shown for HTTPS URLs) -->
+        <div v-if="!isSshUrl" class="flex flex-col gap-1">
           <label for="pat" class="text-sm font-medium"
             >Personal Access Token</label
           >
@@ -124,6 +149,42 @@ async function onSubmit() {
             >HTTPS PAT for git authentication. Leave empty for public
             repos.</small
           >
+        </div>
+
+        <!-- SSH key fields (shown for SSH URLs) -->
+        <div v-if="isSshUrl" class="flex flex-col gap-1">
+          <label for="ssh-key" class="text-sm font-medium"
+            >SSH Private Key</label
+          >
+          <textarea
+            id="ssh-key"
+            v-model="sshKey"
+            placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+            rows="5"
+            required
+            autocomplete="off"
+            spellcheck="false"
+            :disabled="loading"
+            class="input-base"
+          />
+          <small class="text-xs text-muted"
+            >Paste your SSH private key (OpenSSH or PEM format)</small
+          >
+        </div>
+
+        <div v-if="isSshUrl" class="flex flex-col gap-1">
+          <label for="ssh-passphrase" class="text-sm font-medium"
+            >SSH Key Passphrase</label
+          >
+          <input
+            id="ssh-passphrase"
+            v-model="sshPassphrase"
+            type="password"
+            placeholder="Optional — if key is encrypted"
+            autocomplete="off"
+            :disabled="loading"
+            class="input-base"
+          />
         </div>
 
         <div class="flex flex-col gap-1">

@@ -9,28 +9,74 @@ use git2::{FetchOptions, RemoteCallbacks, Repository};
 use crate::error::{Error, ErrorCode};
 use crate::store::SyncResult;
 
+/// Credentials for Git remote authentication.
+#[derive(Debug, Clone)]
+pub enum GitAuth {
+    /// No authentication (public repo).
+    None,
+    /// HTTPS PAT (personal access token).
+    Pat(String),
+    /// SSH key from memory.
+    Ssh {
+        /// SSH username (typically `"git"`).
+        username: String,
+        /// PEM or OpenSSH private key.
+        private_key: String,
+        /// Optional passphrase for encrypted key.
+        passphrase: Option<String>,
+    },
+}
+
+/// Build credential callbacks based on the authentication method.
+fn build_remote_callbacks(auth: &GitAuth) -> RemoteCallbacks<'_> {
+    let mut callbacks = RemoteCallbacks::new();
+    match auth {
+        GitAuth::None => {}
+        GitAuth::Pat(token) => {
+            let token = token.clone();
+            callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
+                git2::Cred::userpass_plaintext(&token, "")
+                    .or_else(|_| git2::Cred::userpass_plaintext("", &token))
+            });
+        }
+        GitAuth::Ssh {
+            username,
+            private_key,
+            passphrase,
+        } => {
+            let username = username.clone();
+            let private_key = private_key.clone();
+            let passphrase = passphrase.clone();
+            callbacks.credentials(move |_url, username_from_url, _allowed_types| {
+                let user = username_from_url.unwrap_or(&username);
+                git2::Cred::ssh_key_from_memory(user, None, &private_key, passphrase.as_deref())
+                    .map_err(|e| {
+                        git2::Error::from_str(&format!(
+                            "SSH key error: {}. Ensure the key is in OpenSSH or PEM format.",
+                            e.message()
+                        ))
+                    })
+            });
+        }
+    }
+    callbacks
+}
+
 /// Clone a git repository to a local directory.
 ///
-/// For HTTPS URLs, uses PAT credential callback.
+/// Supports HTTPS (PAT) and SSH key authentication via [`GitAuth`].
 ///
 /// # Errors
 ///
 /// Returns an error if the clone fails due to authentication, network, or
 /// filesystem issues.
-pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), Error> {
+pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
     // Remove existing directory if present (re-clone)
     if dest.exists() {
         std::fs::remove_dir_all(dest)?;
     }
 
-    let mut callbacks = RemoteCallbacks::new();
-    if let Some(token) = pat {
-        let token = token.to_string();
-        callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
-            git2::Cred::userpass_plaintext(&token, "")
-                .or_else(|_| git2::Cred::userpass_plaintext("", &token))
-        });
-    }
+    let callbacks = build_remote_callbacks(auth);
 
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
@@ -40,13 +86,7 @@ pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), Error
 
     builder.clone(url, dest).map_err(|e| {
         let msg = e.message().to_string();
-        if msg.contains("authentication") || msg.contains("unsupported URL") {
-            Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
-        } else if msg.contains("unable to connect") || msg.contains("timeout") {
-            Error::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
-        } else {
-            Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
-        }
+        classify_git_error(&msg)
     })?;
 
     Ok(())
@@ -60,7 +100,7 @@ pub fn clone_repo(url: &str, dest: &Path, pat: Option<&str>) -> Result<(), Error
 ///
 /// Returns an error if the repository cannot be found, the remote is
 /// unreachable, or the branches have diverged (non-fast-forward).
-pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<SyncResult, Error> {
+pub fn pull_repo(repo_path: &Path, auth: &GitAuth) -> Result<SyncResult, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
 
@@ -71,15 +111,7 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<SyncResult, Erro
         )
     })?;
 
-    // Set up credential callback for HTTPS PAT
-    let mut callbacks = RemoteCallbacks::new();
-    if let Some(token) = pat {
-        let token = token.to_string();
-        callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
-            git2::Cred::userpass_plaintext(&token, "")
-                .or_else(|_| git2::Cred::userpass_plaintext("", &token))
-        });
-    }
+    let callbacks = build_remote_callbacks(auth);
 
     // Capture HEAD before fetch so we can detect changes.
     // The fetch refspec `refs/heads/*:refs/heads/*` updates local branches
@@ -135,6 +167,20 @@ pub fn pull_repo(repo_path: &Path, pat: Option<&str>) -> Result<SyncResult, Erro
     })
 }
 
+/// Classify a git2 error message into the appropriate [`Error`].
+fn classify_git_error(msg: &str) -> Error {
+    if msg.contains("authentication")
+        || msg.contains("unsupported URL")
+        || msg.contains("SSH key error")
+    {
+        Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
+    } else if msg.contains("unable to connect") || msg.contains("timeout") {
+        Error::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
+    } else {
+        Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
+    }
+}
+
 /// Find the default branch name (main or master).
 #[cfg(test)]
 fn find_default_branch(repo: &Repository) -> Result<String, Error> {
@@ -177,7 +223,8 @@ fn create_empty_commit(repo: &Repository, sig: &git2::Signature<'_>) -> git2::Oi
     let mut index = repo.index().expect("failed to get index");
     let tree_id = index.write_tree().expect("failed to write tree");
     let tree = repo.find_tree(tree_id).expect("failed to find tree");
-    repo.commit(Some("HEAD"), sig, sig, "initial commit", &tree, &[])
+    let parents: &[&git2::Commit<'_>] = &[];
+    repo.commit(Some("HEAD"), sig, sig, "initial commit", &tree, parents)
         .expect("failed to create commit")
 }
 
@@ -196,6 +243,84 @@ mod tests {
         repo.config()
             .and_then(|c| c.get_string("init.defaultBranch"))
             .unwrap_or_else(|_| "master".to_string())
+    }
+
+    #[test]
+    fn git_auth_none_debug() {
+        let auth = GitAuth::None;
+        assert_eq!(format!("{auth:?}"), "None");
+    }
+
+    #[test]
+    fn git_auth_pat_debug_masks_token() {
+        let auth = GitAuth::Pat("secret-token".to_string());
+        let debug = format!("{auth:?}");
+        assert_eq!(debug, "Pat(\"secret-token\")");
+    }
+
+    #[test]
+    fn git_auth_ssh_debug_format() {
+        let auth = GitAuth::Ssh {
+            username: "git".to_string(),
+            private_key: "secret-key-data".to_string(),
+            passphrase: Some("secret-pass".to_string()),
+        };
+        let debug = format!("{auth:?}");
+        assert!(
+            debug.contains("Ssh"),
+            "SSH variant debug should contain 'Ssh': {debug}"
+        );
+    }
+
+    #[test]
+    fn git_auth_ssh_without_passphrase() {
+        let auth = GitAuth::Ssh {
+            username: "git".to_string(),
+            private_key: "key-data".to_string(),
+            passphrase: None,
+        };
+        let debug = format!("{auth:?}");
+        assert!(
+            debug.contains("Ssh"),
+            "SSH variant debug should contain 'Ssh': {debug}"
+        );
+    }
+
+    #[test]
+    fn classify_git_error_ssh_key() {
+        let err = classify_git_error("SSH key error: invalid format");
+        assert_eq!(
+            err.code, "CLONE_FAILED",
+            "SSH key errors should map to CLONE_FAILED"
+        );
+        assert!(
+            err.message.contains("SSH key error"),
+            "message should preserve SSH context"
+        );
+    }
+
+    #[test]
+    fn classify_git_error_auth() {
+        let err = classify_git_error("authentication required but no callback set");
+        assert_eq!(err.code, "CLONE_FAILED");
+    }
+
+    #[test]
+    fn classify_git_error_network() {
+        let err = classify_git_error("unable to connect to host");
+        assert_eq!(err.code, "NETWORK_ERROR");
+    }
+
+    #[test]
+    fn classify_git_error_unsupported_url() {
+        let err = classify_git_error("unsupported URL protocol");
+        assert_eq!(err.code, "CLONE_FAILED");
+    }
+
+    #[test]
+    fn classify_git_error_generic() {
+        let err = classify_git_error("some unknown error");
+        assert_eq!(err.code, "CLONE_FAILED");
     }
 
     #[test]

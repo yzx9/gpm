@@ -37,7 +37,13 @@ describe("SetupPage", () => {
 
   async function fillForm(
     wrapper: ReturnType<typeof mount>,
-    opts: { repoUrl?: string; pat?: string; identity?: string } = {},
+    opts: {
+      repoUrl?: string;
+      pat?: string;
+      sshKey?: string;
+      sshPassphrase?: string;
+      identity?: string;
+    } = {},
   ) {
     const defaults = {
       repoUrl: "https://github.com/user/passwords.git",
@@ -50,10 +56,25 @@ describe("SetupPage", () => {
       await wrapper.find('input[id="repo-url"]').setValue(vals.repoUrl);
     }
     if (vals.pat !== undefined) {
-      await wrapper.find('input[id="pat"]').setValue(vals.pat);
+      const patEl = wrapper.find('input[id="pat"]');
+      if (patEl.exists()) {
+        await patEl.setValue(vals.pat);
+      }
+    }
+    if (vals.sshKey !== undefined) {
+      const sshKeyEl = wrapper.find('textarea[id="ssh-key"]');
+      if (sshKeyEl.exists()) {
+        await sshKeyEl.setValue(vals.sshKey);
+      }
+    }
+    if (vals.sshPassphrase !== undefined) {
+      const sshPassEl = wrapper.find('input[id="ssh-passphrase"]');
+      if (sshPassEl.exists()) {
+        await sshPassEl.setValue(vals.sshPassphrase);
+      }
     }
     if (vals.identity !== undefined) {
-      await wrapper.find("textarea").setValue(vals.identity);
+      await wrapper.find('textarea[id="identity"]').setValue(vals.identity);
     }
   }
 
@@ -80,7 +101,7 @@ describe("SetupPage", () => {
       await submitForm(wrapper);
 
       expect(wrapper.find("[role='alert']").text()).toBe(
-        "Only HTTPS URLs are supported",
+        "URL must be HTTPS or SSH format (e.g. git@host:user/repo.git)",
       );
     });
 
@@ -122,6 +143,8 @@ describe("SetupPage", () => {
       expect(invoke).toHaveBeenCalledWith("setup", {
         repoUrl: "https://github.com/user/repo.git",
         pat: "my-token",
+        sshKey: null,
+        sshPassphrase: null,
         identity: "AGE-SECRET-KEY-1abc",
       });
     });
@@ -168,6 +191,127 @@ describe("SetupPage", () => {
       await submitForm(wrapper);
 
       expect(wrapper.find("[role='alert']").text()).toBe("Setup failed");
+    });
+  });
+
+  describe("SSH URL support", () => {
+    it("shows SSH key field for git@ URL", async () => {
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("git@github.com:user/repo.git");
+      await flushPromises();
+
+      expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(true);
+      expect(wrapper.find('input[id="ssh-passphrase"]').exists()).toBe(true);
+      expect(wrapper.find('input[id="pat"]').exists()).toBe(false);
+    });
+
+    it("shows SSH key field for ssh:// URL", async () => {
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("ssh://git@github.com/user/repo.git");
+      await flushPromises();
+
+      expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(true);
+      expect(wrapper.find('input[id="ssh-passphrase"]').exists()).toBe(true);
+      expect(wrapper.find('input[id="pat"]').exists()).toBe(false);
+    });
+
+    it("shows PAT field for HTTPS URL", async () => {
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("https://github.com/user/repo.git");
+      await flushPromises();
+
+      expect(wrapper.find('input[id="pat"]').exists()).toBe(true);
+      expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(false);
+      expect(wrapper.find('input[id="ssh-passphrase"]').exists()).toBe(false);
+    });
+
+    it("shows error when SSH key is empty for SSH URL", async () => {
+      const wrapper = mount(SetupPage);
+      await fillForm(wrapper, {
+        repoUrl: "git@github.com:user/repo.git",
+        sshKey: "",
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+      await submitForm(wrapper);
+
+      expect(wrapper.find("[role='alert']").text()).toBe(
+        "SSH private key is required for SSH URLs",
+      );
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it("accepts git@ SSH URL without error", async () => {
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      const wrapper = mount(SetupPage);
+      await fillForm(wrapper, {
+        repoUrl: "git@github.com:user/repo.git",
+        sshKey:
+          "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----",
+        sshPassphrase: "mypass",
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+      await submitForm(wrapper);
+
+      expect(wrapper.find("[role='alert']").exists()).toBe(false);
+    });
+
+    it("calls invoke with SSH args for git@ URL", async () => {
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      const wrapper = mount(SetupPage);
+      await fillForm(wrapper, {
+        repoUrl: "git@github.com:user/repo.git",
+        sshKey: "test-ssh-key",
+        sshPassphrase: "mypass",
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+      await submitForm(wrapper);
+
+      expect(invoke).toHaveBeenCalledWith("setup", {
+        repoUrl: "git@github.com:user/repo.git",
+        pat: null,
+        sshKey: "test-ssh-key",
+        sshPassphrase: "mypass",
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+    });
+
+    it("calls invoke with null pat for SSH URL", async () => {
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      const wrapper = mount(SetupPage);
+      await fillForm(wrapper, {
+        repoUrl: "git@github.com:user/repo.git",
+        sshKey: "test-key",
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+      await submitForm(wrapper);
+
+      expect(invoke).toHaveBeenCalledWith(
+        "setup",
+        expect.objectContaining({ pat: null, sshKey: "test-key" }),
+      );
+    });
+
+    it("passes null passphrase when empty for SSH URL", async () => {
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      const wrapper = mount(SetupPage);
+      await fillForm(wrapper, {
+        repoUrl: "git@github.com:user/repo.git",
+        sshKey: "test-key",
+        sshPassphrase: "",
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+      await submitForm(wrapper);
+
+      expect(invoke).toHaveBeenCalledWith(
+        "setup",
+        expect.objectContaining({ sshPassphrase: null }),
+      );
     });
   });
 });
