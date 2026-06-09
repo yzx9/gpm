@@ -1,0 +1,24 @@
+name: update-flake-lock
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 1" # Runs at UTC 00:00 every Monday
+
+permissions:
+  contents: write # to push the branch for the PR
+  pull-requests: write # to open the PR
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - name: Update flake.lock
+        uses: DeterminateSystems/update-flake-lock@v24
+        with:
+          pr-title: "build(deps): bump flake.lock"
+          commit-msg: "build(deps): bump flake.lock"
