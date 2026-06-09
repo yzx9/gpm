@@ -1,15 +1,82 @@
-name: Release Android APK
+name: Release
 
 on:
   push:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
-  build-and-release:
+  build:
     uses: ./.github/workflows/_build-android.yml
     with:
       build_type: release
-      create_release: true
       split_per_abi: true
     secrets: inherit
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk-release
+          path: apks/
+
+      - name: Rename APKs
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Map ABI directories to filename suffixes
+          declare -A abi_map=(
+            [arm64]=arm64-v8a
+            [arm]=armeabi-v7a
+            [x86_64]=x86_64
+            [x86]=x86
+            [universal]=universal
+          )
+
+          for abi_dir in "${!abi_map[@]}"; do
+            suffix="${abi_map[$abi_dir]}"
+            src="apks/${abi_dir}/release/app-${abi_dir}-release.apk"
+            if [ -f "$src" ]; then
+              cp "$src" "gpm-${VERSION}-${suffix}.apk"
+            fi
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "gpm ${{ github.ref_name }}"
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
+          files: |
+            gpm-${{ steps.version.outputs.version }}-arm64-v8a.apk
+            gpm-${{ steps.version.outputs.version }}-armeabi-v7a.apk
+            gpm-${{ steps.version.outputs.version }}-x86_64.apk
+            gpm-${{ steps.version.outputs.version }}-x86.apk
+            gpm-${{ steps.version.outputs.version }}-universal.apk
+          body: |
+            ## gpm ${{ steps.version.outputs.version }}
+
+            ### Installation
+            Download the appropriate APK for your device:
+
+            | File                    | Architecture | Devices                                            |
+            |-------------------------|--------------|----------------------------------------------------|
+            | `*-arm64-v8a.apk`       | arm64-v8a    | Most modern Android phones (**recommended**)       |
+            | `*-armeabi-v7a.apk`     | armeabi-v7a  | Older 32-bit ARM devices                           |
+            | `*-x86_64.apk`          | x86_64       | Android emulator                                   |
+            | `*-x86.apk`             | x86          | Android emulator (older)                           |
+            | `*-universal.apk`       | All          | Compatible with all devices, in case you're unsure |
+
+            If unsure, download `*-arm64-v8a.apk` for a physical device, or `*-universal.apk` as a fallback.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
