@@ -84,7 +84,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Check frontend formatting
-        run: npx prettier --check src
+        run: pnpm dlx prettier --check src
 
   clippy:
     runs-on: ubuntu-latest
@@ -138,4 +138,4 @@ jobs:
         run: pnpm install
 
       - name: vue-tsc type check
-        run: npx vue-tsc --noEmit
+        run: pnpm exec vue-tsc --noEmit

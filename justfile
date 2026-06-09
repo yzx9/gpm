@@ -17,7 +17,7 @@ test: test-be test-fe
 # Clippy + vue-tsc type check
 lint: _gen-icons
   cargo clippy --all-targets --all-features -- -D warnings
-  npx vue-tsc --noEmit
+  pnpm exec vue-tsc --noEmit
 
 # Format Rust + Vue code
 fmt:

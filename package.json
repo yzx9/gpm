@@ -2,8 +2,9 @@
   "name": "gpm",
   "private": true,
   "version": "0.1.0",
-  "packageManager": "pnpm@latest-11",
   "type": "module",
+  "author": "Zexin Yuan <gpm@yzx9.xyz> (https://github.com/yzx9)",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
@@ -29,5 +30,9 @@
     "vite": "^6.0.3",
     "vitest": "^4.1.8",
     "vue-tsc": "^2.1.10"
+  },
+  "packageManager": "pnpm@11.5.1",
+  "engines": {
+    "node": ">=22"
   }
 }
