@@ -232,41 +232,16 @@ describe("EntryListPage", () => {
     });
   });
 
-  describe("resetConfig", () => {
-    it("calls reset_config and navigates when confirmed", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sampleEntries) // list_entries
-        .mockResolvedValueOnce(undefined); // reset_config
-      vi.mocked(globalThis.confirm).mockReturnValue(true);
-      const wrapper = mountPage();
-      await flushPromises();
-
-      await wrapper
-        .find('button[aria-label="Reset configuration"]')
-        .trigger("click");
-      await flushPromises();
-
-      expect(invoke).toHaveBeenCalledWith("reset_config");
-      expect(mockPush).toHaveBeenCalledWith({ name: "setup" });
-    });
-
-    it("does nothing when user cancels confirm dialog", async () => {
+  describe("settings navigation", () => {
+    it("navigates to settings page when settings button clicked", async () => {
       vi.mocked(invoke).mockResolvedValue(sampleEntries);
-      vi.mocked(globalThis.confirm).mockReturnValue(false);
       const wrapper = mountPage();
       await flushPromises();
 
-      const invokeCount = (invoke as ReturnType<typeof vi.fn>).mock.calls
-        .length;
-      await wrapper
-        .find('button[aria-label="Reset configuration"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Settings"]').trigger("click");
       await flushPromises();
 
-      // No new invoke calls beyond the initial list_entries
-      expect((invoke as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
-        invokeCount,
-      );
+      expect(mockPush).toHaveBeenCalledWith({ name: "settings" });
     });
   });
 });

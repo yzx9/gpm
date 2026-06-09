@@ -18,24 +18,15 @@ There is no Android GUI client that can read age-encrypted gopass/password-store
 
 ## Features
 
-- Clone a gopass age-encrypted password store from a Git URL (HTTPS + PAT)
+- Clone a gopass age-encrypted password store from a Git URL (HTTPS + PAT or SSH key)
 - List all `.age` entries with display names
 - Search entries by name (frontend filtering, case-insensitive)
 - Copy password to clipboard (password never reaches WebView)
 - View password with 30-second auto-clear and page-leave cleanup
 - View notes metadata
 - Pull updates (fast-forward only) from the remote repo
-
-## Tech Stack
-
-| Layer           | Technology                                                           |
-| --------------- | -------------------------------------------------------------------- |
-| App framework   | Tauri v2                                                             |
-| Backend         | Rust (age, git2, zeroize, walkdir)                                   |
-| Frontend        | Vue 3 + TypeScript + Vite                                            |
-| Crypto          | [age](https://github.com/str4d/rage) (Rust reference implementation) |
-| Clipboard       | tauri-plugin-clipboard-manager                                       |
-| Package manager | pnpm                                                                 |
+- Generate ed25519 SSH keys on-device, or paste existing keys
+- View SSH public key and export private key from settings
 
 ## Getting Started
 

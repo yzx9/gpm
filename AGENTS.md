@@ -26,11 +26,12 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
 
 ### Frontend (Vue 3 + TypeScript) — `src/`
 
-Three-page SPA with Vue Router:
+Four-page SPA with Vue Router:
 
-- **SetupPage** — Git URL + PAT + age identity → clone repo
+- **SetupPage** — Git URL + auth (PAT/SSH key) + age identity → clone repo
 - **EntryListPage** — List/search entries, copy passwords, pull to refresh
 - **EntryDetailPage** — Show password with 30s auto-clear
+- **SettingsPage** — View public key, export private key, reset
 
 All Tauri IPC types live in `src/types.ts`.
 
@@ -38,6 +39,7 @@ All Tauri IPC types live in `src/types.ts`.
 
 - `lib.rs` — Tauri commands, state management, app entry
 - `crypto.rs` — Age decryption with zeroize-per-decrypt
+- `ssh.rs` — SSH key generation (ed25519), public key derivation, private key export
 - `store.rs` — Directory walking, .age file discovery, content parsing
 - `git.rs` — Clone + pull (ff-only) via git2
 - `secure_storage.rs` — Identity + config persistence
@@ -63,4 +65,4 @@ Integration tests in `src-tauri/tests/fixtures.rs` covering store parsing, conte
 - SPDX license headers on all source files
 - Nix flake provides the full dev environment (`direnv allow` to activate)
 - Single age identity only (multi-identity deferred)
-- HTTPS-only Git remotes (SSH deferred)
+- HTTPS and SSH Git remotes (SSH key generation + paste)

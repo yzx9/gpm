@@ -37,3 +37,16 @@ export interface AppError {
   code: string;
   message: string;
 }
+
+export interface SshKeyPairResult {
+  public_key: string;
+  private_key: string;
+}
+
+export interface SshPublicKeyResult {
+  public_key: string;
+}
+
+export interface SshPrivateKeyResult {
+  private_key: string;
+}

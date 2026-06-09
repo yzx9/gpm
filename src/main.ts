@@ -11,6 +11,7 @@ import "./assets/main.css";
 import SetupPage from "./pages/SetupPage.vue";
 import EntryListPage from "./pages/EntryListPage.vue";
 import EntryDetailPage from "./pages/EntryDetailPage.vue";
+import SettingsPage from "./pages/SettingsPage.vue";
 
 const routes = [
   { path: "/", redirect: "/setup" },
@@ -22,6 +23,7 @@ const routes = [
     component: EntryDetailPage,
     props: true,
   },
+  { path: "/settings", name: "settings", component: SettingsPage },
 ];
 
 const router = createRouter({

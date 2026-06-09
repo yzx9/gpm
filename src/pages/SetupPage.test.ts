@@ -314,4 +314,161 @@ describe("SetupPage", () => {
       );
     });
   });
+
+  describe("SSH key generation", () => {
+    it("shows generate tab when SSH URL and generate tab selected", async () => {
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("git@github.com:user/repo.git");
+      await flushPromises();
+
+      // Click "Generate Key" tab
+      const tabs = wrapper.findAll("button[type='button']");
+      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
+      expect(genTab).toBeDefined();
+      await genTab!.trigger("click");
+      await flushPromises();
+
+      // Should show generate button, not paste textarea
+      expect(wrapper.text()).toContain("Generate SSH Key");
+      expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(false);
+    });
+
+    it("generates key and displays public key", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIgenerated",
+        private_key:
+          "-----BEGIN OPENSSH PRIVATE KEY-----\ngen\n-----END OPENSSH PRIVATE KEY-----",
+      });
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("git@github.com:user/repo.git");
+      await flushPromises();
+
+      // Switch to Generate tab
+      const tabs = wrapper.findAll("button[type='button']");
+      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
+      await genTab!.trigger("click");
+      await flushPromises();
+
+      // Click generate button
+      const genButton = wrapper
+        .findAll("button[type='button']")
+        .find((b) => b.text().includes("Generate SSH Key"));
+      expect(genButton).toBeDefined();
+      await genButton!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("generate_ssh_key", {
+        passphrase: null,
+      });
+      expect(wrapper.text()).toContain(
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIgenerated",
+      );
+    });
+
+    it("shows error when key generation fails", async () => {
+      vi.mocked(invoke).mockRejectedValue({
+        code: "SSH_KEY_INVALID",
+        message: "Key generation failed",
+      });
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("git@github.com:user/repo.git");
+      await flushPromises();
+
+      // Switch to Generate tab and click generate
+      const tabs = wrapper.findAll("button[type='button']");
+      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
+      await genTab!.trigger("click");
+      await flushPromises();
+
+      const genButton = wrapper
+        .findAll("button[type='button']")
+        .find((b) => b.text().includes("Generate SSH Key"));
+      await genButton!.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain(
+        "Key generation failed",
+      );
+    });
+
+    it("can submit setup after generating key", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce({
+          public_key: "ssh-ed25519 AAAAtest",
+          private_key: "generated-private-key",
+        }) // generate_ssh_key
+        .mockResolvedValueOnce(undefined); // setup
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("git@github.com:user/repo.git");
+      await flushPromises();
+
+      // Generate key
+      const tabs = wrapper.findAll("button[type='button']");
+      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
+      await genTab!.trigger("click");
+      await flushPromises();
+
+      const genButton = wrapper
+        .findAll("button[type='button']")
+        .find((b) => b.text().includes("Generate SSH Key"));
+      await genButton!.trigger("click");
+      await flushPromises();
+
+      // Fill identity and submit
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await submitForm(wrapper);
+
+      expect(invoke).toHaveBeenCalledWith("setup", {
+        repoUrl: "git@github.com:user/repo.git",
+        pat: null,
+        sshKey: "generated-private-key",
+        sshPassphrase: null,
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+    });
+
+    it("passes passphrase to generate_ssh_key", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        public_key: "ssh-ed25519 AAAAtest",
+        private_key: "encrypted-key",
+      });
+      const wrapper = mount(SetupPage);
+      await wrapper
+        .find('input[id="repo-url"]')
+        .setValue("git@github.com:user/repo.git");
+      await flushPromises();
+
+      // Switch to generate tab
+      const tabs = wrapper.findAll("button[type='button']");
+      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
+      await genTab!.trigger("click");
+      await flushPromises();
+
+      // Set passphrase in generate tab
+      const passphraseInput = wrapper.find('input[id="ssh-gen-passphrase"]');
+      expect(passphraseInput.exists()).toBe(true);
+      await passphraseInput.setValue("my-passphrase");
+
+      // Click generate
+      const genButton = wrapper
+        .findAll("button[type='button']")
+        .find((b) => b.text().includes("Generate SSH Key"));
+      await genButton!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("generate_ssh_key", {
+        passphrase: "my-passphrase",
+      });
+    });
+  });
 });

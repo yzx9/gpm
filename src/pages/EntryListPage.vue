@@ -103,16 +103,8 @@ function openEntry(entry: Entry) {
   router.push({ name: "entry", params: { pathMatch: entry.path } });
 }
 
-async function resetConfig() {
-  if (!confirm("Reset gpm? This will remove all local data and configuration."))
-    return;
-  try {
-    await invoke("reset_config");
-    router.push({ name: "setup" });
-  } catch (e) {
-    const appError = e as AppError;
-    error.value = appError?.message || "Reset failed";
-  }
+function openSettings() {
+  router.push({ name: "settings" });
 }
 
 onMounted(() => {
@@ -145,12 +137,12 @@ onBeforeUnmount(() => {
           <span aria-hidden="true">{{ pulling ? "⏳" : "↓" }}</span> Pull
         </button>
         <button
-          @click="resetConfig"
-          class="btn-sm btn-danger"
-          aria-label="Reset configuration"
-          title="Reset configuration"
+          @click="openSettings"
+          class="btn-sm"
+          aria-label="Settings"
+          title="Settings"
         >
-          <span aria-hidden="true">⚙</span> Reset
+          <span aria-hidden="true">⚙</span>
         </button>
       </div>
     </header>
@@ -290,11 +282,6 @@ onBeforeUnmount(() => {
 .btn-sm:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.btn-danger {
-  border-color: var(--color-danger-edge);
-  color: #c66;
 }
 
 .btn-retry {

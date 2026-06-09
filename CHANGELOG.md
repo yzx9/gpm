@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - SSH key authentication for Git operations (`git@host:repo` and `ssh://` URLs)
+- On-device ed25519 SSH key generation with optional passphrase
+- Settings page with public key display and private key export
 
 ## [v0.1.0] - 2026-06-08
 

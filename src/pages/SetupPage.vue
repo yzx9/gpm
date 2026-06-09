@@ -6,7 +6,7 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError } from "../types";
+import type { AppError, SshKeyPairResult } from "../types";
 
 const router = useRouter();
 
@@ -24,6 +24,11 @@ const progressSteps = [
   "Preparing store...",
 ];
 let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+// SSH key generation state
+const sshKeySource = ref<"paste" | "generate">("paste");
+const generatedPublicKey = ref("");
+const generating = ref(false);
 
 const isSshUrl = computed(() => {
   const url = repoUrl.value.trim();
@@ -66,6 +71,31 @@ function validate(): string | null {
   if (!identity.value.trim().startsWith("AGE-SECRET-KEY-"))
     return "Identity must start with AGE-SECRET-KEY-...";
   return null;
+}
+
+async function generateKey() {
+  generating.value = true;
+  error.value = "";
+  try {
+    const result = await invoke<SshKeyPairResult>("generate_ssh_key", {
+      passphrase: sshPassphrase.value || null,
+    });
+    sshKey.value = result.private_key;
+    generatedPublicKey.value = result.public_key;
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Key generation failed";
+  } finally {
+    generating.value = false;
+  }
+}
+
+async function copyPublicKey() {
+  try {
+    await navigator.clipboard.writeText(generatedPublicKey.value);
+  } catch {
+    // Fallback — select text for manual copy
+  }
 }
 
 async function onSubmit() {
@@ -152,40 +182,121 @@ async function onSubmit() {
         </div>
 
         <!-- SSH key fields (shown for SSH URLs) -->
-        <div v-if="isSshUrl" class="flex flex-col gap-1">
-          <label for="ssh-key" class="text-sm font-medium"
-            >SSH Private Key</label
+        <template v-if="isSshUrl">
+          <!-- Tab toggle: Paste / Generate -->
+          <div
+            class="flex gap-1 border border-[var(--color-edge)] rounded-[var(--radius-md)] overflow-hidden"
           >
-          <textarea
-            id="ssh-key"
-            v-model="sshKey"
-            placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
-            rows="5"
-            required
-            autocomplete="off"
-            spellcheck="false"
-            :disabled="loading"
-            class="input-base"
-          />
-          <small class="text-xs text-muted"
-            >Paste your SSH private key (OpenSSH or PEM format)</small
-          >
-        </div>
+            <button
+              type="button"
+              :class="[
+                'flex-1 py-2 text-sm font-medium transition-colors',
+                sshKeySource === 'paste'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface',
+              ]"
+              @click="sshKeySource = 'paste'"
+            >
+              Paste Key
+            </button>
+            <button
+              type="button"
+              :class="[
+                'flex-1 py-2 text-sm font-medium transition-colors',
+                sshKeySource === 'generate'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface',
+              ]"
+              @click="sshKeySource = 'generate'"
+            >
+              Generate Key
+            </button>
+          </div>
 
-        <div v-if="isSshUrl" class="flex flex-col gap-1">
-          <label for="ssh-passphrase" class="text-sm font-medium"
-            >SSH Key Passphrase</label
-          >
-          <input
-            id="ssh-passphrase"
-            v-model="sshPassphrase"
-            type="password"
-            placeholder="Optional — if key is encrypted"
-            autocomplete="off"
-            :disabled="loading"
-            class="input-base"
-          />
-        </div>
+          <!-- Paste key -->
+          <template v-if="sshKeySource === 'paste'">
+            <div class="flex flex-col gap-1">
+              <label for="ssh-key" class="text-sm font-medium"
+                >SSH Private Key</label
+              >
+              <textarea
+                id="ssh-key"
+                v-model="sshKey"
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+                rows="5"
+                required
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="loading"
+                class="input-base"
+              />
+              <small class="text-xs text-muted"
+                >Paste your SSH private key (OpenSSH or PEM format)</small
+              >
+            </div>
+            <div class="flex flex-col gap-1">
+              <label for="ssh-passphrase" class="text-sm font-medium"
+                >SSH Key Passphrase</label
+              >
+              <input
+                id="ssh-passphrase"
+                v-model="sshPassphrase"
+                type="password"
+                placeholder="Optional — if key is encrypted"
+                autocomplete="off"
+                :disabled="loading"
+                class="input-base"
+              />
+            </div>
+          </template>
+
+          <!-- Generate key -->
+          <template v-if="sshKeySource === 'generate'">
+            <div class="flex flex-col gap-1">
+              <label for="ssh-gen-passphrase" class="text-sm font-medium"
+                >Key Passphrase (optional)</label
+              >
+              <input
+                id="ssh-gen-passphrase"
+                v-model="sshPassphrase"
+                type="password"
+                placeholder="Optional — encrypt the generated key"
+                autocomplete="off"
+                :disabled="loading || generating"
+                class="input-base"
+              />
+            </div>
+            <button
+              type="button"
+              :disabled="generating || loading"
+              class="btn-secondary"
+              @click="generateKey"
+            >
+              <span v-if="generating" class="spinner" aria-hidden="true"></span>
+              <span v-if="generating">Generating...</span>
+              <span v-else>🔑 Generate SSH Key</span>
+            </button>
+
+            <!-- Public key display after generation -->
+            <div v-if="generatedPublicKey" class="flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm font-medium text-success"
+                  >✓ Public Key</span
+                >
+                <button type="button" class="btn-copy" @click="copyPublicKey">
+                  📋 Copy
+                </button>
+              </div>
+              <pre class="public-key-display" @click="copyPublicKey">{{
+                generatedPublicKey
+              }}</pre>
+              <small class="text-xs text-muted"
+                >Add this public key to your Git provider (e.g. GitHub →
+                Settings → SSH keys)</small
+              >
+            </div>
+          </template>
+        </template>
 
         <div class="flex flex-col gap-1">
           <label for="identity" class="text-sm font-medium">Age Identity</label>
@@ -269,12 +380,75 @@ async function onSubmit() {
   cursor: not-allowed;
 }
 
+.btn-secondary {
+  padding: 0.75rem;
+  background: var(--color-surface);
+  color: inherit;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  min-height: 48px;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-hover);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-copy {
+  padding: 0.3rem 0.6rem;
+  font-size: var(--text-xs);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  min-height: 36px;
+}
+
+.btn-copy:hover {
+  background: var(--color-hover);
+}
+
+.public-key-display {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  font-size: var(--text-xs);
+  font-family: monospace;
+  word-break: break-all;
+  white-space: pre-wrap;
+  cursor: pointer;
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 0;
+}
+
 .spinner-white {
   display: inline-block;
   width: 14px;
   height: 14px;
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-edge);
+  border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
   margin-right: 0.4rem;

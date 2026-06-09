@@ -113,6 +113,12 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+impl From<ssh_key::Error> for Error {
+    fn from(e: ssh_key::Error) -> Self {
+        Error::new(ErrorCode::SshKeyInvalid, format!("SSH key error: {e}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

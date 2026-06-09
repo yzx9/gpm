@@ -52,6 +52,8 @@ pub mod error;
 pub mod git;
 /// Decrypted secret type (gopass.Secret aligned).
 pub mod secret;
+/// SSH key generation and management.
+pub mod ssh;
 /// High-level store facade (gopass.Store aligned).
 pub mod store;
 

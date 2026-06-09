@@ -20,6 +20,7 @@
 )]
 
 use rustpass::error::ErrorCode;
+use rustpass::ssh;
 use rustpass::{Entry, Error, RepoConfig, Store, SyncResult};
 use serde::Serialize;
 
@@ -43,6 +44,25 @@ struct CopyResult {
 struct SensitiveContent {
     password: String,
     notes: String,
+}
+
+/// Returned by `generate_ssh_key` — contains both keys for setup form.
+#[derive(Debug, Clone, Serialize)]
+struct SshKeyPairResult {
+    public_key: String,
+    private_key: String,
+}
+
+/// Returned by `get_ssh_public_key` — public key only, safe to display.
+#[derive(Debug, Clone, Serialize)]
+struct SshPublicKeyResult {
+    public_key: String,
+}
+
+/// Returned by `export_ssh_private_key` — secret, strict Vue lifecycle required.
+#[derive(Debug, Clone, Serialize)]
+struct SshPrivateKeyResult {
+    private_key: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +186,45 @@ fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), Error> {
     state.store.reset()
 }
 
+/// Generate a new ed25519 SSH keypair for setup.
+///
+/// Private key crosses IPC — equivalent security to pasting a key.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn generate_ssh_key(passphrase: Option<String>) -> Result<SshKeyPairResult, Error> {
+    let pair = ssh::generate_keypair(passphrase.as_deref())?;
+    Ok(SshKeyPairResult {
+        public_key: pair.public_key,
+        private_key: pair.private_key.to_string(),
+    })
+}
+
+/// Get the public key derived from the stored SSH private key.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn get_ssh_public_key(state: tauri::State<'_, AppState>) -> Result<SshPublicKeyResult, Error> {
+    let config = state.store.config()?;
+    let private_key = config
+        .ssh_key
+        .ok_or_else(|| Error::new(ErrorCode::SshKeyInvalid, "No SSH key configured"))?;
+    let public_key = ssh::get_public_key(&private_key)?;
+    Ok(SshPublicKeyResult { public_key })
+}
+
+/// Export the stored SSH private key (secret — requires confirmation in UI).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn export_ssh_private_key(state: tauri::State<'_, AppState>) -> Result<SshPrivateKeyResult, Error> {
+    let config = state.store.config()?;
+    let private_key_pem = config
+        .ssh_key
+        .ok_or_else(|| Error::new(ErrorCode::SshKeyInvalid, "No SSH key configured"))?;
+    let private_key = ssh::export_private_key(&private_key_pem)?;
+    Ok(SshPrivateKeyResult {
+        private_key: private_key.to_string(),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
@@ -199,6 +258,9 @@ pub fn run() {
             show_password,
             get_config,
             reset_config,
+            generate_ssh_key,
+            get_ssh_public_key,
+            export_ssh_private_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
