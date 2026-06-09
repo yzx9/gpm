@@ -1,5 +1,15 @@
 # Development Guide
 
+## Tech Stack
+
+| Layer         | Technology                                                           |
+| ------------- | -------------------------------------------------------------------- |
+| App framework | Tauri v2                                                             |
+| Backend       | Rust (age, git2, ssh-key, zeroize, walkdir)                          |
+| Frontend      | Vue 3 + TypeScript + Vite + pnpm                                     |
+| Crypto        | [age](https://github.com/str4d/rage) (Rust reference implementation) |
+| Clipboard     | tauri-plugin-clipboard-manager                                       |
+
 ## Setup
 
 ### Clone
@@ -11,13 +21,8 @@ cd gpm
 
 ### Dev environment
 
-We recommend using [Nix](https://nixos.org/download/) for a consistent, reproducible dev environment across all platforms. The provided `flake.nix` sets up everything you need:
-
-- **Rust toolchain** via `fenix` with 4 Android cross-compilation targets (`aarch64`, `armv7`, `x86_64`, `i686`)
-- **Android SDK/NDK** via `androidenv` — platforms 28 + 36, NDK, build-tools, cmake
-- **JDK 17**
-- **Frontend tooling**: Node.js, pnpm
-- **Utilities**: just, prettier, etc.
+We recommend using [Nix](https://nixos.org/download/) for a consistent, reproducible dev environment across all platforms.
+The provided `flake.nix` sets up everything you need.
 
 Install [direnv](https://direnv.net/) (with its [shell hook](https://direnv.net/docs/hook.html)) to auto-load the environment when you `cd` into the project:
 
@@ -32,11 +37,11 @@ On first run, Nix builds the dev shell (this may take a few minutes). Once done,
 
 You'll need to install these yourself:
 
-**Rust**
+**Rust toolchain**
 
-- [rustup](https://rustup.rs/) with stable toolchain + Android targets: `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
+- [rustup](https://rustup.rs/) with stable toolchain + 4 Android cross-compilation targets: `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
 
-**Frontend**
+**Frontend tooling**
 
 - [Node.js](https://nodejs.org/)
 - [pnpm](https://pnpm.io/)
@@ -84,7 +89,18 @@ just android-install   # Build + install debug APK to connected device
 just android-install-release # Build + install release APK to connected device
 ```
 
+<details>
+<summary><strong>Without just (manual commands)</strong></summary>
+
 If you don't want to use `just`, you can see the individual commands in `justfile` and run them manually.
+
+Android builds require launcher icons in `src-tauri/gen/android/app/src/main/res/mipmap-*/`, which are not tracked in git (they are regenerated on each build). If you use `just`, this is handled automatically. If you run `pnpm tauri android build` directly, generate icons first:
+
+```bash
+pnpm tauri icon assets/app-icon.png
+```
+
+</details>
 
 ## Known Issues
 

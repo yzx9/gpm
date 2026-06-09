@@ -54,6 +54,7 @@ jobs:
       - name: Build APKs
         run: |
           pnpm install
+          pnpm tauri icon assets/app-icon.png
           if [ "${{ inputs.split_per_abi }}" = "true" ]; then
             pnpm tauri android build --apk --split-per-abi ${{ inputs.build_type == 'debug' && '--debug' || '' }}
             pnpm tauri android build --apk ${{ inputs.build_type == 'debug' && '--debug' || '' }}

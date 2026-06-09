@@ -4,7 +4,7 @@ default:
   @just --list
 
 # Run backend (Rust) integration tests
-test-be:
+test-be: _gen-icons
   cargo test --all-features
 
 # Run frontend unit tests
@@ -15,7 +15,7 @@ test-fe:
 test: test-be test-fe
 
 # Clippy + vue-tsc type check
-lint:
+lint: _gen-icons
   cargo clippy --all-targets --all-features -- -D warnings
   npx vue-tsc --noEmit
 
@@ -25,11 +25,11 @@ fmt:
   prettier --write src
 
 # Desktop dev server with hot reload
-dev:
+dev: _gen-icons
   pnpm tauri dev
 
 # Build debug APK (optional: specify arch e.g. aarch64, armv7, i686, x86_64; builds universal if omitted)
-android-debug target='':
+android-debug target='': _gen-icons
   @if [ -z "{{ target }}" ]; then \
     pnpm tauri android build --debug; \
   else \
@@ -37,16 +37,16 @@ android-debug target='':
   fi
 
 # Build release APKs (per-arch + universal, signed if keystore.properties exists)
-android-release:
+android-release: _gen-icons
   pnpm tauri android build --apk --split-per-abi
   pnpm tauri android build --apk
 
 # Android dev server (requires connected device or emulator)
-android-dev:
+android-dev: _gen-icons
   pnpm tauri android dev
 
 # Install debug APK to connected device (auto-detects arch, or specify e.g. aarch64)
-android-install target='':
+android-install target='': _gen-icons
   @if [ -z "{{ target }}" ]; then \
     ABI=$$(adb shell getprop ro.product.cpu.abi 2>/dev/null); \
     case "$$ABI" in \
@@ -75,3 +75,7 @@ android-install-release: android-release
   esac; \
   echo "Installing for ABI: $${ARCH:-unknown}"; \
   adb install "src-tauri/gen/android/app/build/outputs/apk/$$APK"
+
+# [private] Regenerate app icons if source is newer
+_gen-icons:
+  [ src-tauri/icons/128x128.png -nt assets/app-icon.png ] || pnpm tauri icon assets/app-icon.png

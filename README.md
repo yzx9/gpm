@@ -39,78 +39,7 @@ There is no Android GUI client that can read age-encrypted gopass/password-store
 
 ## Getting Started
 
-### Prerequisites
-
-- [nix](https://nixos.org/) (or manually: Rust, Node.js 22, pnpm)
-- [direnv](https://direnv.net/) (optional, for nix shell)
-
-### Install dependencies
-
-```bash
-# With nix + direnv
-direnv allow
-
-# Install frontend dependencies
-pnpm install
-```
-
-### Development
-
-```bash
-# Desktop dev mode
-pnpm tauri dev
-
-# Run Rust tests (14 tests)
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-### Android (Phase 3)
-
-```bash
-pnpm tauri android init
-pnpm tauri android dev
-```
-
-## Project Structure
-
-```
-gpm/
-├── src/                          # Vue 3 frontend
-│   ├── main.ts                   # Router + app entry
-│   ├── App.vue                   # Root component
-│   ├── types.ts                  # Tauri IPC type definitions
-│   └── pages/
-│       ├── SetupPage.vue         # Git URL + PAT + identity → clone
-│       ├── EntryListPage.vue     # List, search, copy, pull
-│       └── EntryDetailPage.vue   # Show password (30s auto-clear)
-├── src-tauri/                    # Rust backend
-│   ├── Cargo.toml
-│   ├── tauri.conf.json
-│   ├── src/
-│   │   ├── lib.rs                # Tauri commands + app entry
-│   │   ├── crypto.rs             # Age decryption
-│   │   ├── store.rs              # Directory walking, content parsing
-│   │   ├── git.rs                # Clone + pull (ff-only)
-│   │   ├── secure_storage.rs     # Identity + config storage
-│   │   └── error.rs              # Safe error types
-│   └── tests/
-│       └── fixtures.rs           # 14 integration tests
-├── flake.nix                     # Nix dev shell
-└── package.json                  # Frontend dependencies
-```
-
-## Rust Command API
-
-| Command         | Description                              | Secrets cross IPC?  |
-| --------------- | ---------------------------------------- | ------------------- |
-| `setup`         | Clone repo + save identity + config      | No                  |
-| `list_entries`  | Walk repo, return `.age` entries         | No                  |
-| `pull_repo`     | Fetch + fast-forward merge               | No                  |
-| `copy_password` | Decrypt → clipboard → zeroize            | **No** (primary op) |
-| `show_password` | Decrypt → return to Vue (30s auto-clear) | Yes (secondary op)  |
-| `is_configured` | Check if setup is complete               | No                  |
-| `get_config`    | Return repo URL + path                   | No                  |
-| `reset_config`  | Clear all local data                     | No                  |
+See [DEVELOPMENT.md](./DEVELOPMENT.md) for development environment setup, commands, and known issues.
 
 ## License
 
