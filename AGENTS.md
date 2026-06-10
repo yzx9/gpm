@@ -1,9 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project
-
 gpm is an Android-first, age-only gopass password client built with Tauri v2 + Rust + Vue 3. It provides a read-only GUI for age-encrypted gopass repositories (clone, list, search, decrypt, copy). No GPG, no editing, no cloud sync.
 
 ## Commands
@@ -49,7 +45,7 @@ All Tauri IPC types live in `src/types.ts`.
 
 Local Tauri plugin crate (not published). Provides Android safe-area insets to the frontend via standard plugin IPC + event system.
 
-### Security Model
+## Security Model
 
 - `copy_password` is the primary operation — password never reaches WebView
 - `show_password` is secondary — 30s auto-clear with lifecycle cleanup
@@ -70,3 +66,13 @@ Integration tests in `src-tauri/tests/fixtures.rs` covering store parsing, conte
 - Nix flake provides the full dev environment (`direnv allow` to activate)
 - Single age identity only (multi-identity deferred)
 - HTTPS and SSH Git remotes (SSH key generation + paste)
+
+## Compact Instructions
+
+When compressing, preserve in priority order:
+
+1. Architecture decisions (NEVER summarize)
+2. Modified files and their key changes
+3. Current verification status (pass/fail)
+4. Open TODOs and rollback notes
+5. Tool outputs (can delete, keep pass/fail only)
