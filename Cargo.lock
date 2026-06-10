@@ -49,18 +49,27 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a07d86e4272c093c88caf7864a2d09af52a5159180848ca4832a3cdbd7d014d5"
 dependencies = [
+ "aes",
+ "aes-gcm",
  "age-core",
  "base64 0.21.7",
+ "bcrypt-pbkdf",
  "bech32",
+ "cbc",
  "chacha20poly1305",
+ "cipher",
  "cookie-factory",
+ "ctr",
+ "curve25519-dalek",
  "hmac",
  "i18n-embed",
  "i18n-embed-fl",
  "lazy_static",
  "nom 7.1.3",
+ "num-traits",
  "pin-project",
  "rand",
+ "rsa",
  "rust-embed",
  "scrypt",
  "sha2",
@@ -680,6 +689,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
 dependencies = [
  "generic-array",
+ "rand_core",
  "typenum",
 ]
 

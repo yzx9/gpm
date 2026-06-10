@@ -19,6 +19,7 @@ There is no Android GUI client that can read age-encrypted gopass/password-store
 ## Features
 
 - Clone a gopass age-encrypted password store from a Git URL (HTTPS + PAT or SSH key)
+- Decrypt entries encrypted to native x25519 keys (`age1...`) or SSH keys (`ssh-ed25519`, `ssh-rsa`)
 - List all `.age` entries with display names
 - Search entries by name (frontend filtering, case-insensitive)
 - Copy password to clipboard (password never reaches WebView)

@@ -54,4 +54,5 @@ export interface SshPrivateKeyResult {
 export interface RecipientInfo {
   public_key: string;
   comment: string | null;
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa";
 }

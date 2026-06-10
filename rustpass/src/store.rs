@@ -133,12 +133,16 @@ impl Store {
     /// Returns an error if the identity format is invalid, the identity does
     /// not match any recipient, or the config cannot be persisted.
     pub fn save_identity(&self, identity: &str) -> Result<(), Error> {
-        // Validate identity format
+        // Validate identity format (x25519 or SSH private key)
         let identity_bytes = identity.trim().as_bytes();
-        if !identity.trim().starts_with("AGE-SECRET-KEY-") {
+        let trimmed = identity.trim();
+        if !trimmed.starts_with("AGE-SECRET-KEY-")
+            && !trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+            && !trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
+        {
             return Err(Error::new(
                 ErrorCode::InvalidIdentity,
-                "Identity must start with AGE-SECRET-KEY-...",
+                "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
             ));
         }
 
@@ -182,12 +186,16 @@ impl Store {
         ssh_passphrase: Option<&str>,
         identity: &str,
     ) -> Result<(), Error> {
-        // Validate identity format
+        // Validate identity format (x25519 or SSH private key)
         let identity_bytes = identity.trim().as_bytes();
-        if !identity.trim().starts_with("AGE-SECRET-KEY-") {
+        let trimmed = identity.trim();
+        if !trimmed.starts_with("AGE-SECRET-KEY-")
+            && !trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+            && !trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
+        {
             return Err(Error::new(
                 ErrorCode::InvalidIdentity,
-                "Identity must start with AGE-SECRET-KEY-...",
+                "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
             ));
         }
 

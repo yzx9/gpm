@@ -56,6 +56,20 @@ const isSshUrl = computed(() => {
   );
 });
 
+const hasSshRecipients = computed(() =>
+  recipients.value.some(
+    (r) => r.key_type === "ssh_ed25519" || r.key_type === "ssh_rsa",
+  ),
+);
+
+const canReuseSshKey = computed(
+  () => isSshUrl.value && hasSshRecipients.value && sshKey.value.trim(),
+);
+
+function useSshKeyForIdentity() {
+  identity.value = sshKey.value;
+}
+
 // ── Step 1 functions ────────────────────────────────────────────────────
 
 function startProgress() {
@@ -163,8 +177,13 @@ async function fetchRecipients() {
 
 function validateStep2(): string | null {
   if (!identity.value.trim()) return "Age identity is required";
-  if (!identity.value.trim().startsWith("AGE-SECRET-KEY-"))
-    return "Identity must start with AGE-SECRET-KEY-...";
+  const trimmed = identity.value.trim();
+  const isAgeKey = trimmed.startsWith("AGE-SECRET-KEY-");
+  const isSshKey =
+    trimmed.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----") ||
+    trimmed.startsWith("-----BEGIN RSA PRIVATE KEY-----");
+  if (!isAgeKey && !isSshKey)
+    return "Identity must be an age key (AGE-SECRET-KEY-...) or SSH private key";
   if (recipients.value.length > 0 && !selectedRecipient.value)
     return "Please select a recipient";
   return null;
@@ -468,9 +487,16 @@ watch(step, (s) => {
               readonly
             />
             <div class="flex flex-col gap-0.5 min-w-0">
-              <code class="text-xs font-mono break-all">{{
-                truncateKey(r.public_key)
-              }}</code>
+              <div class="flex items-center gap-1.5">
+                <code class="text-xs font-mono break-all">{{
+                  truncateKey(r.public_key)
+                }}</code>
+                <span
+                  v-if="r.key_type !== 'x25519'"
+                  class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--color-edge)] text-muted"
+                  >SSH</span
+                >
+              </div>
               <span v-if="r.comment" class="text-xs text-muted">{{
                 r.comment
               }}</span>
@@ -485,13 +511,23 @@ watch(step, (s) => {
           No recipients file found. You can still provide your identity.
         </div>
 
+        <!-- SSH key reuse offer -->
+        <button
+          v-if="canReuseSshKey && !identity.trim()"
+          type="button"
+          class="btn-secondary text-sm"
+          @click="useSshKeyForIdentity"
+        >
+          🔑 Use my SSH key for decryption
+        </button>
+
         <div class="flex flex-col gap-1">
           <label for="identity" class="text-sm font-medium">Age Identity</label>
           <textarea
             id="identity"
             v-model="identity"
-            placeholder="AGE-SECRET-KEY-..."
-            rows="3"
+            placeholder="AGE-SECRET-KEY-...&#10;or paste an SSH private key"
+            rows="5"
             required
             autocomplete="off"
             spellcheck="false"
@@ -499,7 +535,8 @@ watch(step, (s) => {
             class="input-base"
           />
           <small class="text-xs text-muted"
-            >Paste your age secret key (starts with AGE-SECRET-KEY-)</small
+            >Paste your age secret key (AGE-SECRET-KEY-...) or SSH private
+            key</small
           >
         </div>
 

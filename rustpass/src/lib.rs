@@ -63,6 +63,6 @@ pub mod store;
 pub use config::{Config, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
-pub use recipient::Recipient;
+pub use recipient::{KeyType, Recipient};
 pub use secret::Secret;
 pub use store::{Store, SyncResult};

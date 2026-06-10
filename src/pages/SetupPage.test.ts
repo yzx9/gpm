@@ -299,7 +299,7 @@ describe("SetupPage", () => {
       );
     });
 
-    it("shows error when identity lacks AGE-SECRET-KEY- prefix", async () => {
+    it("shows error when identity format is invalid", async () => {
       const wrapper = await mountAtStep2([]);
 
       await wrapper.find('textarea[id="identity"]').setValue("not-a-valid-key");
@@ -307,7 +307,7 @@ describe("SetupPage", () => {
       await flushPromises();
 
       expect(wrapper.find("[role='alert']").text()).toBe(
-        "Identity must start with AGE-SECRET-KEY-...",
+        "Identity must be an age key (AGE-SECRET-KEY-...) or SSH private key",
       );
     });
 

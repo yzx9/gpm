@@ -7,6 +7,10 @@
 //! Reads `.gopass-recipients` or `.age-recipients` files from a cloned
 //! repository and provides utilities to validate that an age identity
 //! matches a known recipient.
+//!
+//! Supports both native x25519 age keys (`age1...` / `AGE-SECRET-KEY-...`)
+//! and SSH keys (`ssh-ed25519` / `ssh-rsa` as recipients, OpenSSH private
+//! keys as identities).
 
 use std::path::Path;
 use std::str::FromStr;
@@ -15,14 +19,37 @@ use serde::Serialize;
 
 use crate::error::{Error, ErrorCode};
 
-/// A recipient (age public key) discovered in the store.
+/// The type of an age identity/recipient key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyType {
+    /// Native x25519 age key (age1... / AGE-SECRET-KEY-...).
+    X25519,
+    /// SSH ed25519 key (ssh-ed25519 ...).
+    SshEd25519,
+    /// SSH RSA key (ssh-rsa ...).
+    SshRsa,
+}
+
+impl KeyType {
+    /// Returns the default key type (X25519) for serde default.
+    #[allow(dead_code)]
+    fn default_value() -> Self {
+        Self::X25519
+    }
+}
+
+/// A recipient (public key) discovered in the store.
 #[derive(Debug, Clone, Serialize)]
 pub struct Recipient {
-    /// Age public key string (starts with `age1...`).
+    /// Public key string as it appears in the recipients file.
     pub public_key: String,
     /// Optional comment from the recipients file.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub comment: Option<String>,
+    /// The type of this recipient key.
+    #[serde(default = "KeyType::default_value")]
+    pub key_type: KeyType,
 }
 
 /// Read recipients from a cloned gopass repository.
@@ -53,6 +80,8 @@ pub fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> {
 ///
 /// Each line can be:
 /// - An age public key (`age1...`), optionally followed by `# comment`
+/// - An SSH public key (`ssh-ed25519 ...` or `ssh-rsa ...`), optionally
+///   followed by `# comment` or with an inline comment after the key data
 /// - A comment line starting with `#`
 /// - Empty (skipped)
 fn parse_recipients(content: &str) -> Vec<Recipient> {
@@ -65,48 +94,136 @@ fn parse_recipients(content: &str) -> Vec<Recipient> {
             }
 
             // Split on first '#' to extract comment
-            let (key_part, comment) = if let Some(idx) = trimmed.find('#') {
+            let (key_part, hash_comment) = if let Some(idx) = trimmed.find('#') {
                 let (k, c) = trimmed.split_at(idx);
                 (k.trim(), Some(c[1..].trim().to_string()))
             } else {
                 (trimmed, None)
             };
 
-            // Only accept lines that look like age public keys
             if key_part.starts_with("age1") {
                 Some(Recipient {
                     public_key: key_part.to_string(),
-                    comment,
+                    comment: hash_comment,
+                    key_type: KeyType::X25519,
                 })
             } else {
-                None
+                parse_ssh_recipient_line(key_part, hash_comment)
             }
         })
         .collect()
 }
 
+/// Parse an SSH recipient line like `ssh-ed25519 AAAA... user@host`.
+///
+/// The inline comment (e.g. `user@host`) is extracted if no hash comment
+/// was already found.
+fn parse_ssh_recipient_line(key_part: &str, hash_comment: Option<String>) -> Option<Recipient> {
+    let key_type = if key_part.starts_with("ssh-ed25519 ") {
+        KeyType::SshEd25519
+    } else if key_part.starts_with("ssh-rsa ") {
+        KeyType::SshRsa
+    } else {
+        return None;
+    };
+
+    // SSH public key format: `key_type base64_data [inline_comment]`
+    // The full key portion is `key_type base64_data`.
+    // Validate by parsing with the age crate.
+    let parts: Vec<&str> = key_part.splitn(3, ' ').collect();
+    let key_type_str = parts.first()?;
+    let base64_data = parts.get(1)?;
+
+    // Full key without inline comment: "key_type base64_data"
+    let full_key = format!("{key_type_str} {base64_data}");
+
+    // Validate that the age crate can parse this recipient
+    if age::ssh::Recipient::from_str(&full_key).is_err() {
+        return None;
+    }
+
+    // Use inline comment if no hash comment
+    let comment = hash_comment.or_else(|| parts.get(2).map(ToString::to_string));
+
+    Some(Recipient {
+        public_key: full_key,
+        comment,
+        key_type,
+    })
+}
+
 /// Derive the recipient (public key) from an age identity (private key).
 ///
-/// Takes a string starting with `AGE-SECRET-KEY-...` and returns the
-/// corresponding `age1...` public key.
+/// Supports both native x25519 identities (`AGE-SECRET-KEY-...`) and SSH
+/// private keys (OpenSSH or PEM format). For SSH keys, the corresponding
+/// SSH public key string is derived.
 ///
 /// # Errors
 ///
-/// Returns an error if the identity format is invalid or cannot be parsed.
+/// Returns an error if the identity format is invalid, cannot be parsed,
+/// is encrypted, or uses an unsupported key type.
 pub fn identity_to_recipient(identity: &str) -> Result<String, Error> {
     let trimmed = identity.trim();
-    if !trimmed.starts_with("AGE-SECRET-KEY-") {
-        return Err(Error::new(
+
+    if trimmed.starts_with("AGE-SECRET-KEY-") {
+        // x25519 path
+        let sk = age::x25519::Identity::from_str(trimmed).map_err(|_| {
+            Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key")
+        })?;
+        Ok(sk.to_public().to_string())
+    } else if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+        || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
+    {
+        // SSH path
+        let buf = std::io::BufReader::new(trimmed.as_bytes());
+        let ssh_identity = age::ssh::Identity::from_buffer(buf, None).map_err(|e| {
+            Error::new(
+                ErrorCode::InvalidIdentity,
+                format!("Cannot parse SSH private key: {e}"),
+            )
+        })?;
+
+        match &ssh_identity {
+            age::ssh::Identity::Encrypted(_) => Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                "Encrypted SSH keys are not yet supported as age identities",
+            )),
+            age::ssh::Identity::Unsupported(u) => Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                format!("Unsupported SSH key type: {u:?}"),
+            )),
+            age::ssh::Identity::Unencrypted(_) => {
+                let recipient = age::ssh::Recipient::try_from(ssh_identity).map_err(|e| {
+                    Error::new(
+                        ErrorCode::InvalidIdentity,
+                        format!("Cannot derive recipient from SSH key: {e:?}"),
+                    )
+                })?;
+                Ok(recipient.to_string())
+            }
+        }
+    } else {
+        Err(Error::new(
             ErrorCode::InvalidIdentity,
-            "Identity must start with AGE-SECRET-KEY-...",
-        ));
+            "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
+        ))
     }
+}
 
-    // Parse the x25519 identity directly and derive the public key
-    let sk = age::x25519::Identity::from_str(trimmed)
-        .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key"))?;
-
-    Ok(sk.to_public().to_string())
+/// Detect the key type of an identity string.
+///
+/// Returns `KeyType::X25519` for age native keys and the appropriate SSH
+/// variant for SSH private keys.
+#[must_use]
+pub fn detect_identity_type(identity: &str) -> KeyType {
+    let trimmed = identity.trim();
+    if trimmed.starts_with("AGE-SECRET-KEY-") {
+        KeyType::X25519
+    } else if trimmed.contains("ssh-ed25519") {
+        KeyType::SshEd25519
+    } else {
+        KeyType::SshRsa
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +240,7 @@ mod tests {
             "age1ycefkjae3lkfue8sd9afkje3lkjfs9akjehr98sdf"
         );
         assert_eq!(recipients.first().unwrap().comment, None);
+        assert_eq!(recipients.first().unwrap().key_type, KeyType::X25519);
     }
 
     #[test]
@@ -146,11 +264,52 @@ mod tests {
     }
 
     #[test]
-    fn parse_recipients_skip_non_age_lines() {
-        let content = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...\nage1validkey\nsome-random-text\n";
+    #[allow(clippy::indexing_slicing)]
+    fn parse_recipients_ssh_ed25519() {
+        let content =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsKLqeplhpW+uObz5dvMgjz1OxfM/XXUB+VHtZ6isGN alice@rust\n";
         let recipients = parse_recipients(content);
         assert_eq!(recipients.len(), 1);
-        assert_eq!(recipients.first().unwrap().public_key, "age1validkey");
+        let r = &recipients[0];
+        assert_eq!(r.key_type, KeyType::SshEd25519);
+        assert!(r.public_key.starts_with("ssh-ed25519 "));
+        assert_eq!(r.comment, Some("alice@rust".to_string()));
+    }
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn parse_recipients_ssh_rsa() {
+        let content = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE7nIXTGNuaRBN9toI/wNALuQec8mvlt0iJ7o3OaD2UvoKHJ7S8rmIn4FiQDUed/Vac3OhUibei1k+TBmm16u2Rj3klgWZOIDgi8d4vXKI5N3YBhxr3jsQ+kz1c+iZ4z/tTtz306+4K46XViVMWwyyg9j82Jn41mOAy9vdeDIfQ5fLeaGqn5KwlT61GNkZ+ozWK/ZNlQIlNCcoXxhJULIs9XrtczWyVBAea1nlDo0WHODePxoJjmsNHrpQXn5mf9O83xs10qfTUjnRUt48jRmedFy4tcra3QGmSTQ3KZne+wXXSb0cIpXLGvZjQSPHgG1hc4r3uBpiSzvesGLv79XL alice@rust\n";
+        let recipients = parse_recipients(content);
+        assert_eq!(recipients.len(), 1);
+        let r = &recipients[0];
+        assert_eq!(r.key_type, KeyType::SshRsa);
+        assert!(r.public_key.starts_with("ssh-rsa "));
+        assert_eq!(r.comment, Some("alice@rust".to_string()));
+    }
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn parse_recipients_mixed_types() {
+        let content = "\
+# Mixed recipients
+age1abc123...
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsKLqeplhpW+uObz5dvMgjz1OxfM/XXUB+VHtZ6isGN alice@rust
+some-random-text
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE7nIXTGNuaRBN9toI/wNALuQec8mvlt0iJ7o3OaD2UvoKHJ7S8rmIn4FiQDUed/Vac3OhUibei1k+TBmm16u2Rj3klgWZOIDgi8d4vXKI5N3YBhxr3jsQ+kz1c+iZ4z/tTtz306+4K46XViVMWwyyg9j82Jn41mOAy9vdeDIfQ5fLeaGqn5KwlT61GNkZ+ozWK/ZNlQIlNCcoXxhJULIs9XrtczWyVBAea1nlDo0WHODePxoJjmsNHrpQXn5mf9O83xs10qfTUjnRUt48jRmedFy4tcra3QGmSTQ3KZne+wXXSb0cIpXLGvZjQSPHgG1hc4r3uBpiSzvesGLv79XL bob
+";
+        let recipients = parse_recipients(content);
+        assert_eq!(recipients.len(), 3);
+        assert_eq!(recipients[0].key_type, KeyType::X25519);
+        assert_eq!(recipients[1].key_type, KeyType::SshEd25519);
+        assert_eq!(recipients[2].key_type, KeyType::SshRsa);
+    }
+
+    #[test]
+    fn parse_recipients_skip_non_recipient_lines() {
+        let content = "some-random-text\nnope\n";
+        let recipients = parse_recipients(content);
+        assert!(recipients.is_empty());
     }
 
     #[test]
@@ -201,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_to_recipient_derives_correct_key() {
+    fn identity_to_recipient_derives_correct_x25519_key() {
         use age::secrecy::ExposeSecret;
         use age::x25519::Identity;
         let sk = Identity::generate();
@@ -211,6 +370,67 @@ mod tests {
 
         let derived = identity_to_recipient(&identity_str).unwrap();
         assert_eq!(derived, expected_recipient);
+    }
+
+    #[test]
+    fn identity_to_recipient_derives_ssh_ed25519_key() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML
+agAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ
+AAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz
+1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=
+-----END OPENSSH PRIVATE KEY-----";
+        let derived = identity_to_recipient(sk).unwrap();
+        assert!(derived.starts_with("ssh-ed25519 "));
+    }
+
+    #[test]
+    fn identity_to_recipient_derives_ssh_rsa_key() {
+        let sk = "-----BEGIN RSA PRIVATE KEY-----
+MIIEogIBAAKCAQEAxO5yF0xjbmkQTfbaCP8DQC7kHnPJr5bdIie6Nzmg9lL6Chye
+0vK5iJ+BYkA1Hnf1WnNzoVIm3otZPkwZptertkY95JYFmTiA4IvHeL1yiOTd2AYc
+a947EPpM9XPomeM/7U7c99OvuCuOl1YlTFsMsoPY/NiZ+NZjgMvb3XgyH0OXy3mh
+qp+SsJU+tRjZGfqM1iv2TZUCJTQnKF8YSVCyLPV67XM1slQQHmtZ5Q6NFhzg3j8a
+CY5rDR66UF5+Zn/TvN8bNdKn01I50VLePI0ZnnRcuLXK2t0Bpkk0NymZ3vsF10m9
+HCKVyxr2Y0Ejx4BtYXOK97gaYks73rBi7+/VywIDAQABAoIBADGsf8TWtOH9yGoS
+ES9hu90ttsbjqAUNhdv+r18Mv0hC5+UzEPDe3uPScB1rWrrDwXS+WHVhtoI+HhWz
+tmi6UArbLvOA0Aq1EPUS7Q7Mop5bNIYwDG09EiMXL+BeC1b91nsygFRW5iULf502
+0pOvB8XjshEdRcFZuqGbSmtTzTjLLxYS/aboBtZLHrH4cRlFMpHWCSuJng8Psahp
+SnJbkjL7fHG81dlH+M3qm5EwdDJ1UmNkBfoSfGRs2pupk2cSJaL+SPkvNX+6Xyoy
+yvfnbJzKUTcV6rf+0S0P0yrWK3zRK9maPJ1N60lFui9LvFsunCLkSAluGKiMwEjb
+fm40F4kCgYEA+QzIeIGMwnaOQdAW4oc7hX5MgRPXJ836iALy56BCkZpZMjZ+VKpk
+8P4E1HrEywpgqHMox08hfCTGX3Ph6fFIlS1/mkLojcgkrqmg1IrRvh8vvaZqzaAf
+GKEhxxRta9Pvm44E2nUY97iCKzE3Vfh+FIyQLRuc+0COu49Me4HPtBUCgYEAym1T
+vNZKPfC/eTMh+MbWMsQArOePdoHQyRC38zeWrLaDFOUVzwzEvCQ0IzSs0PnLWkZ4
+xx60wBg5ZdU4iH4cnOYgjavQrbRFrCmZ1KDUm2+NAMw3avcLQqu41jqzyAlkktUL
+fZzyqHIBmKYLqut5GslkGnQVg6hB4psutHhiel8CgYA3yy9WH9/C6QBxqgaWdSlW
+fLby69j1p+WKdu6oCXUgXW3CHActPIckniPC3kYcHpUM58+o5wdfYnW2iKWB3XYf
+RXQiwP6MVNwy7PmE5Byc9Sui1xdyPX75648/pEnnMDGrraNUtYsEZCd1Oa9l6SeF
+vv/Fuzvt5caUKkQ+HxTDCQKBgFhqUiXr7zeIvQkiFVeE+a/ovmbHKXlYkCoSPFZm
+VFCR00VAHjt2V0PaCE/MRSNtx61hlIVcWxSAQCnDbNLpSnQZa+SVRCtqzve4n/Eo
+YlSV75+GkzoMN4XiXXRs5XOc7qnXlhJCiBac3Segdv4rpZTWm/uV8oOz7TseDtNS
+tai/AoGAC0CiIJAzmmXscXNS/stLrL9bb3Yb+VZi9zN7Cb/w7B0IJ35N5UOFmKWA
+QIGpMU4gh6p52S1eLttpIf2+39rEDzo8pY6BVmEp3fKN3jWmGS4mJQ31tWefupC+
+fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
+-----END RSA PRIVATE KEY-----";
+        let derived = identity_to_recipient(sk).unwrap();
+        assert!(derived.starts_with("ssh-rsa "));
+    }
+
+    #[test]
+    fn identity_to_recipient_rejects_encrypted_ssh_key() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABC0OgNmiw
+QW/kJ8kCmmTA2TAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHsKLqeplhpW+uOb
+z5dvMgjz1OxfM/XXUB+VHtZ6isGNAAAAkPhBKsZoNmaeuWYJQxOl+ofEmue/sFJnW+4IOt
+oTrS/orMBJ4b/phQcv/ejWYJ4RYYVhSLiI6hf0KwNGefxI90E8iG/yDOKcrxb34tqDEYrY
+FARDaJVRd9QtWLEqoP7pgdBR2BTP7aK1y6Mx3eFDgiQI9f/0Sjxd8V0apOPXv4i4kuQ1Nt
+LF7kNlDznn/nyZlg==
+-----END OPENSSH PRIVATE KEY-----";
+        let result = identity_to_recipient(sk);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "INVALID_IDENTITY");
     }
 
     #[test]
@@ -225,6 +445,7 @@ mod tests {
         let r = Recipient {
             public_key: "age1test".to_string(),
             comment: Some("Alice".to_string()),
+            key_type: KeyType::X25519,
         };
         let debug = format!("{r:?}");
         assert!(debug.contains("age1test"));

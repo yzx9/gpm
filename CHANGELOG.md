@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two-step setup wizard: clone repo first, then select a recipient and provide matching age identity
 - Recipient discovery from `.gopass-recipients` / `.age-recipients` files in cloned repositories
 - Identity validation on setup: derived public key is checked against known recipients
+- SSH key recipient support: decrypt entries encrypted to `ssh-ed25519` or `ssh-rsa` public keys using the corresponding SSH private key as identity
+- Recipient type detection (x25519, SSH ed25519, SSH RSA) with SSH badge in setup wizard
+- SSH key reuse: one-click "Use my SSH key for decryption" when Git auth and age recipient use the same key
 
 ## [v0.1.0] - 2026-06-08
 

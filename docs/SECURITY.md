@@ -52,6 +52,10 @@ Mitigations:
 
 ## Known Limitations
 
+### Encrypted SSH private keys as age identities
+
+gpm accepts SSH private keys (`ssh-ed25519`, `ssh-rsa`) as age identities for decryption, but does **not** support passphrase-encrypted SSH keys. Users with encrypted keys must provide an unencrypted key or convert their key. This is a deliberate scope limitation — passphrase support may be added in a future release.
+
 ### JavaScript memory persistence
 
 Setting `password.value = null` clears the Vue ref but does **not** zero the

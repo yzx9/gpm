@@ -21,7 +21,7 @@
 
 use rustpass::error::ErrorCode;
 use rustpass::ssh;
-use rustpass::{Entry, Error, Recipient, RepoConfig, Store, SyncResult};
+use rustpass::{Entry, Error, KeyType, Recipient, RepoConfig, Store, SyncResult};
 use serde::Serialize;
 
 use tauri::Manager;
@@ -70,6 +70,7 @@ struct SshPrivateKeyResult {
 struct RecipientInfo {
     public_key: String,
     comment: Option<String>,
+    key_type: String,
 }
 
 impl From<Recipient> for RecipientInfo {
@@ -77,6 +78,11 @@ impl From<Recipient> for RecipientInfo {
         Self {
             public_key: r.public_key,
             comment: r.comment,
+            key_type: match r.key_type {
+                KeyType::X25519 => "x25519".to_string(),
+                KeyType::SshEd25519 => "ssh_ed25519".to_string(),
+                KeyType::SshRsa => "ssh_rsa".to_string(),
+            },
         }
     }
 }

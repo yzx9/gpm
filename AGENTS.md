@@ -24,22 +24,30 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
 
 Four-page SPA with Vue Router:
 
-- **SetupPage** — Git URL + auth (PAT/SSH key) + age identity → clone repo
+- **SetupPage** — Git URL + auth (PAT/SSH key) + age identity (x25519 or SSH private key) → clone repo
 - **EntryListPage** — List/search entries, copy passwords, pull to refresh
 - **EntryDetailPage** — Show password with 30s auto-clear
 - **SettingsPage** — View public key, export private key, reset
 
 All Tauri IPC types live in `src/types.ts`.
 
-### Backend (Rust) — `src-tauri/src/`
+### Backend (Rust library) — `rustpass/src/`
 
-- `lib.rs` — Tauri commands, state management, app entry
-- `crypto.rs` — Age decryption with zeroize-per-decrypt
+- `lib.rs` — Crate root, re-exports core types
+- `crypto.rs` — Age decryption with zeroize-per-decrypt (x25519 and SSH identities)
 - `ssh.rs` — SSH key generation (ed25519), public key derivation, private key export
-- `store.rs` — Directory walking, .age file discovery, content parsing
+- `recipient.rs` — Recipient discovery, `KeyType` enum (X25519, SshEd25519, SshRsa), identity-to-recipient conversion
+- `store.rs` — Two-step setup, directory walking, .age file discovery, content parsing
 - `git.rs` — Clone + pull (ff-only) via git2
-- `secure_storage.rs` — Identity + config persistence
+- `config.rs` — Identity + config persistence
 - `error.rs` — Safe error types (no secrets in messages)
+- `entry.rs` — Entry type (path, name)
+- `secret.rs` — Decrypted secret type (password, body)
+
+### Tauri app — `src-tauri/src/`
+
+- `lib.rs` — Tauri commands, state management, app entry, IPC types
+- `main.rs` — Desktop entry point
 
 ### Tauri Plugins — `gpm-plugin-safe-area/`
 
@@ -64,8 +72,9 @@ Integration tests in `src-tauri/tests/fixtures.rs` covering store parsing, conte
 - Rust lint config in `lib.rs` has extensive `#![warn(...)]` attributes — Clippy warnings are errors
 - SPDX license headers on all source files
 - Nix flake provides the full dev environment (`direnv allow` to activate)
-- Single age identity only (multi-identity deferred)
+- Single age identity only (multi-identity deferred); supports x25519 native keys and SSH private keys (ed25519, RSA)
 - HTTPS and SSH Git remotes (SSH key generation + paste)
+- Encrypted SSH private keys as age identities are rejected (passphrase support deferred)
 
 ## Compact Instructions
 
