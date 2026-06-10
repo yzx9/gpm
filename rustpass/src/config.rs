@@ -135,6 +135,12 @@ impl Config {
         self.identity_path().exists() && self.repo_config_path().exists()
     }
 
+    /// Check if repo config exists (identity may or may not be present).
+    #[must_use]
+    pub fn repo_config_exists(&self) -> bool {
+        self.repo_config_path().exists()
+    }
+
     /// Clear all stored configuration.
     ///
     /// # Errors

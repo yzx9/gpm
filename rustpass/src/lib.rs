@@ -50,6 +50,8 @@ pub mod entry;
 pub mod error;
 /// Git clone and pull operations.
 pub mod git;
+/// Recipient discovery and identity validation.
+pub mod recipient;
 /// Decrypted secret type (gopass.Secret aligned).
 pub mod secret;
 /// SSH key generation and management.
@@ -61,5 +63,6 @@ pub mod store;
 pub use config::{Config, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
+pub use recipient::Recipient;
 pub use secret::Secret;
 pub use store::{Store, SyncResult};

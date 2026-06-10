@@ -13,6 +13,7 @@ use crate::crypto;
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::git;
+use crate::recipient::{self, Recipient};
 use crate::secret::Secret;
 
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.
@@ -46,6 +47,122 @@ impl Store {
     #[must_use]
     pub fn is_configured(&self) -> bool {
         self.config.is_configured()
+    }
+
+    /// Check if the repo has been cloned (identity may not be saved yet).
+    ///
+    /// Returns `true` when step 1 of setup (clone) is complete, even if
+    /// the age identity has not yet been provided.
+    #[must_use]
+    pub fn is_repo_ready(&self) -> bool {
+        self.config.repo_config_exists()
+    }
+
+    /// Step 1 of two-step setup: clone the repository and save repo config.
+    ///
+    /// Does **not** save the age identity — that is done via
+    /// [`save_identity`](Store::save_identity). Clears any existing
+    /// configuration before cloning.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the clone fails or the config cannot be persisted.
+    pub fn clone_only(
+        &self,
+        repo_url: &str,
+        pat: Option<&str>,
+        ssh_key: Option<&str>,
+        ssh_passphrase: Option<&str>,
+    ) -> Result<(), Error> {
+        // Build auth from provided credentials
+        let auth = match (ssh_key, pat) {
+            (Some(key), _) => git::GitAuth::Ssh {
+                username: "git".to_string(),
+                private_key: key.to_string(),
+                passphrase: ssh_passphrase.map(String::from),
+            },
+            (_, Some(token)) => git::GitAuth::Pat(token.to_string()),
+            _ => git::GitAuth::None,
+        };
+
+        // Determine local repo path
+        let repo_dir = self.config.config_dir().join("repo");
+
+        // Clear any existing configuration
+        self.config.clear_all()?;
+
+        // Remove existing repo directory if present
+        if repo_dir.exists() {
+            std::fs::remove_dir_all(&repo_dir)?;
+        }
+
+        // Clone the repo
+        git::clone_repo(repo_url, &repo_dir, &auth)?;
+
+        // Save repo config (without identity)
+        let local_path = repo_dir.to_string_lossy().to_string();
+        self.config
+            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)?;
+
+        Ok(())
+    }
+
+    /// Read recipients from the cloned repository.
+    ///
+    /// Returns an empty list if no recipients file exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo is not configured or the recipients file
+    /// cannot be read.
+    pub fn list_recipients(&self) -> Result<Vec<Recipient>, Error> {
+        let repo_config = self.config.load_repo_config()?;
+        let repo_path = Path::new(&repo_config.local_path);
+        recipient::list_recipients(repo_path)
+    }
+
+    /// Step 2 of two-step setup: save the age identity.
+    ///
+    /// Validates that the identity format is correct and that its derived
+    /// public key matches one of the recipients in the cloned repository.
+    /// If no recipients file exists, the identity is accepted without
+    /// recipient validation (e.g., for empty repos).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the identity format is invalid, the identity does
+    /// not match any recipient, or the config cannot be persisted.
+    pub fn save_identity(&self, identity: &str) -> Result<(), Error> {
+        // Validate identity format
+        let identity_bytes = identity.trim().as_bytes();
+        if !identity.trim().starts_with("AGE-SECRET-KEY-") {
+            return Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                "Identity must start with AGE-SECRET-KEY-...",
+            ));
+        }
+
+        // Derive the public key from the identity
+        let derived_recipient = recipient::identity_to_recipient(identity)?;
+
+        // Validate against known recipients (if any)
+        let known_recipients = self.list_recipients().unwrap_or_default();
+        if !known_recipients.is_empty() {
+            let matches = known_recipients
+                .iter()
+                .any(|r| r.public_key == derived_recipient);
+            if !matches {
+                return Err(Error::new(
+                    ErrorCode::InvalidIdentity,
+                    "Identity does not match any recipient in the repository",
+                ));
+            }
+        }
+
+        // Save identity
+        self.config.save_identity(identity_bytes)?;
+
+        Ok(())
     }
 
     /// Configure the store: validate identity, clone repo, save config.

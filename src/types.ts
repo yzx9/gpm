@@ -50,3 +50,8 @@ export interface SshPublicKeyResult {
 export interface SshPrivateKeyResult {
   private_key: string;
 }
+
+export interface RecipientInfo {
+  public_key: string;
+  comment: string | null;
+}

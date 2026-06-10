@@ -3,32 +3,50 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, SshKeyPairResult } from "../types";
+import type { AppError, RecipientInfo, SshKeyPairResult } from "../types";
 
 const router = useRouter();
 
+// ── Step state ──────────────────────────────────────────────────────────
+const step = ref(1);
+
+// Auto-advance to step 2 if repo is already cloned (identity missing)
+onMounted(async () => {
+  try {
+    const ready = await invoke<boolean>("is_repo_ready");
+    if (ready) {
+      step.value = 2;
+    }
+  } catch {
+    // Not ready — stay on step 1
+  }
+});
+
+// ── Step 1 state: clone ─────────────────────────────────────────────────
 const repoUrl = ref("");
 const pat = ref("");
 const sshKey = ref("");
 const sshPassphrase = ref("");
-const identity = ref("");
 const loading = ref(false);
 const error = ref("");
 const progressStep = ref(0);
-const progressSteps = [
-  "Cloning repository...",
-  "Verifying encryption...",
-  "Preparing store...",
-];
+const progressSteps = ["Cloning repository..."];
 let progressTimer: ReturnType<typeof setInterval> | null = null;
 
 // SSH key generation state
 const sshKeySource = ref<"paste" | "generate">("paste");
 const generatedPublicKey = ref("");
 const generating = ref(false);
+
+// ── Step 2 state: identity ──────────────────────────────────────────────
+const recipients = ref<RecipientInfo[]>([]);
+const selectedRecipient = ref("");
+const identity = ref("");
+const loadingRecipients = ref(false);
+const loadingIdentity = ref(false);
 
 const isSshUrl = computed(() => {
   const url = repoUrl.value.trim();
@@ -37,6 +55,8 @@ const isSshUrl = computed(() => {
     (url.includes("@") && url.includes(":") && !url.startsWith("http"))
   );
 });
+
+// ── Step 1 functions ────────────────────────────────────────────────────
 
 function startProgress() {
   progressStep.value = 0;
@@ -54,7 +74,7 @@ function stopProgress() {
   }
 }
 
-function validate(): string | null {
+function validateStep1(): string | null {
   if (!repoUrl.value.trim()) return "Repository URL is required";
   const url = repoUrl.value.trim();
   const isHttps = url.startsWith("https://");
@@ -67,9 +87,6 @@ function validate(): string | null {
   if (isSsh && !sshKey.value.trim()) {
     return "SSH private key is required for SSH URLs";
   }
-  if (!identity.value.trim()) return "Age identity is required";
-  if (!identity.value.trim().startsWith("AGE-SECRET-KEY-"))
-    return "Identity must start with AGE-SECRET-KEY-...";
   return null;
 }
 
@@ -98,9 +115,9 @@ async function copyPublicKey() {
   }
 }
 
-async function onSubmit() {
+async function onClone() {
   error.value = "";
-  const validationError = validate();
+  const validationError = validateStep1();
   if (validationError) {
     error.value = validationError;
     return;
@@ -110,11 +127,60 @@ async function onSubmit() {
   startProgress();
 
   try {
-    await invoke("setup", {
+    await invoke("clone_repo", {
       repoUrl: repoUrl.value,
       pat: isSshUrl.value ? null : pat.value || null,
       sshKey: isSshUrl.value ? sshKey.value : null,
       sshPassphrase: isSshUrl.value ? sshPassphrase.value || null : null,
+    });
+    step.value = 2;
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Clone failed";
+  } finally {
+    stopProgress();
+    loading.value = false;
+  }
+}
+
+// ── Step 2 functions ────────────────────────────────────────────────────
+
+async function fetchRecipients() {
+  loadingRecipients.value = true;
+  try {
+    recipients.value = await invoke<RecipientInfo[]>("list_recipients");
+    // Auto-select first recipient if only one exists
+    if (recipients.value.length === 1) {
+      selectedRecipient.value = recipients.value[0].public_key;
+    }
+  } catch {
+    // Recipients may not exist (empty repo) — that's fine
+    recipients.value = [];
+  } finally {
+    loadingRecipients.value = false;
+  }
+}
+
+function validateStep2(): string | null {
+  if (!identity.value.trim()) return "Age identity is required";
+  if (!identity.value.trim().startsWith("AGE-SECRET-KEY-"))
+    return "Identity must start with AGE-SECRET-KEY-...";
+  if (recipients.value.length > 0 && !selectedRecipient.value)
+    return "Please select a recipient";
+  return null;
+}
+
+async function onCompleteSetup() {
+  error.value = "";
+  const validationError = validateStep2();
+  if (validationError) {
+    error.value = validationError;
+    return;
+  }
+
+  loadingIdentity.value = true;
+  try {
+    await invoke("complete_setup", {
       identity: identity.value,
     });
     router.push({ name: "entries" });
@@ -122,10 +188,26 @@ async function onSubmit() {
     const appError = e as AppError;
     error.value = appError?.message || "Setup failed";
   } finally {
-    stopProgress();
-    loading.value = false;
+    loadingIdentity.value = false;
   }
 }
+
+function goBack() {
+  error.value = "";
+  step.value = 1;
+}
+
+function truncateKey(key: string): string {
+  if (key.length <= 24) return key;
+  return `${key.slice(0, 12)}…${key.slice(-8)}`;
+}
+
+// Fetch recipients when entering step 2
+watch(step, (s) => {
+  if (s === 2) {
+    fetchRecipients();
+  }
+});
 </script>
 
 <template>
@@ -141,7 +223,31 @@ async function onSubmit() {
         Age-only gopass password client
       </p>
 
-      <form @submit.prevent="onSubmit" class="flex flex-col gap-4">
+      <!-- Step indicator -->
+      <div class="flex items-center justify-center gap-2 mb-6">
+        <span
+          :class="[
+            'inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold',
+            step >= 1 ? 'bg-accent text-white' : 'bg-edge text-muted',
+          ]"
+          >1</span
+        >
+        <div :class="['h-0.5 w-8', step >= 2 ? 'bg-accent' : 'bg-edge']"></div>
+        <span
+          :class="[
+            'inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold',
+            step >= 2 ? 'bg-accent text-white' : 'bg-edge text-muted',
+          ]"
+          >2</span
+        >
+      </div>
+
+      <!-- ═══════ Step 1: Clone ═══════ -->
+      <form
+        v-if="step === 1"
+        @submit.prevent="onClone"
+        class="flex flex-col gap-4"
+      >
         <div class="flex flex-col gap-1">
           <label for="repo-url" class="text-sm font-medium"
             >Git Repository URL</label
@@ -298,6 +404,87 @@ async function onSubmit() {
           </template>
         </template>
 
+        <div
+          v-if="error"
+          class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm"
+          role="alert"
+        >
+          {{ error }}
+        </div>
+
+        <button type="submit" :disabled="loading" class="btn-primary">
+          <span v-if="loading" class="spinner-white" aria-hidden="true"></span>
+          <span v-if="loading">{{ progressSteps[progressStep] }}</span>
+          <span v-else>Clone Repository</span>
+        </button>
+      </form>
+
+      <!-- ═══════ Step 2: Identity ═══════ -->
+      <form
+        v-if="step === 2"
+        @submit.prevent="onCompleteSetup"
+        class="flex flex-col gap-4"
+      >
+        <!-- Back button -->
+        <button
+          type="button"
+          class="self-start text-sm text-muted hover:text-accent transition-colors"
+          @click="goBack"
+        >
+          ← Back
+        </button>
+
+        <h2 class="text-lg font-semibold">Select Recipient</h2>
+        <p class="text-xs text-muted">
+          This repository encrypts secrets to the following recipients. Select
+          yours and paste the matching identity key.
+        </p>
+
+        <!-- Recipients list -->
+        <div
+          v-if="loadingRecipients"
+          class="text-center py-4 text-sm text-muted"
+        >
+          Loading recipients…
+        </div>
+
+        <div v-else-if="recipients.length > 0" class="flex flex-col gap-2">
+          <div
+            v-for="r in recipients"
+            :key="r.public_key"
+            :class="[
+              'flex items-start gap-3 p-3 rounded-[var(--radius-md)] border cursor-pointer transition-colors',
+              selectedRecipient === r.public_key
+                ? 'border-accent bg-accent-soft'
+                : 'border-[var(--color-edge)] bg-[var(--color-input)] hover:bg-hover',
+            ]"
+            @click="selectedRecipient = r.public_key"
+          >
+            <input
+              type="radio"
+              :checked="selectedRecipient === r.public_key"
+              class="mt-0.5 accent-[var(--color-accent)]"
+              tabindex="-1"
+              readonly
+            />
+            <div class="flex flex-col gap-0.5 min-w-0">
+              <code class="text-xs font-mono break-all">{{
+                truncateKey(r.public_key)
+              }}</code>
+              <span v-if="r.comment" class="text-xs text-muted">{{
+                r.comment
+              }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-else
+          class="text-sm text-muted p-3 bg-[var(--color-input)] rounded-[var(--radius-md)]"
+        >
+          No recipients file found. You can still provide your identity.
+        </div>
+
         <div class="flex flex-col gap-1">
           <label for="identity" class="text-sm font-medium">Age Identity</label>
           <textarea
@@ -308,7 +495,7 @@ async function onSubmit() {
             required
             autocomplete="off"
             spellcheck="false"
-            :disabled="loading"
+            :disabled="loadingIdentity"
             class="input-base"
           />
           <small class="text-xs text-muted"
@@ -330,10 +517,14 @@ async function onSubmit() {
           {{ error }}
         </div>
 
-        <button type="submit" :disabled="loading" class="btn-primary">
-          <span v-if="loading" class="spinner-white" aria-hidden="true"></span>
-          <span v-if="loading">{{ progressSteps[progressStep] }}</span>
-          <span v-else>Clone &amp; Setup</span>
+        <button type="submit" :disabled="loadingIdentity" class="btn-primary">
+          <span
+            v-if="loadingIdentity"
+            class="spinner-white"
+            aria-hidden="true"
+          ></span>
+          <span v-if="loadingIdentity">Verifying…</span>
+          <span v-else>Complete Setup</span>
         </button>
       </form>
     </div>

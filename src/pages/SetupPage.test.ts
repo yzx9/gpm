@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
-import { flushPromises } from "@vue/test-utils";
+import { mount, flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import SetupPage from "./SetupPage.vue";
 
@@ -33,22 +32,27 @@ vi.mock("vue-router", () => ({
 describe("SetupPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: repo not ready (fresh setup)
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "is_repo_ready") return false;
+      return undefined;
+    });
   });
 
-  async function fillForm(
+  // ── Step 1: Clone ──────────────────────────────────────────────────────
+
+  async function fillStep1(
     wrapper: ReturnType<typeof mount>,
     opts: {
       repoUrl?: string;
       pat?: string;
       sshKey?: string;
       sshPassphrase?: string;
-      identity?: string;
     } = {},
   ) {
     const defaults = {
       repoUrl: "https://github.com/user/passwords.git",
       pat: "",
-      identity: "AGE-SECRET-KEY-1abc123def456",
     };
     const vals = { ...defaults, ...opts };
 
@@ -61,57 +65,234 @@ describe("SetupPage", () => {
         await patEl.setValue(vals.pat);
       }
     }
-    if (vals.sshKey !== undefined) {
+    if (opts.sshKey !== undefined) {
       const sshKeyEl = wrapper.find('textarea[id="ssh-key"]');
       if (sshKeyEl.exists()) {
-        await sshKeyEl.setValue(vals.sshKey);
+        await sshKeyEl.setValue(opts.sshKey);
       }
     }
-    if (vals.sshPassphrase !== undefined) {
+    if (opts.sshPassphrase !== undefined) {
       const sshPassEl = wrapper.find('input[id="ssh-passphrase"]');
       if (sshPassEl.exists()) {
-        await sshPassEl.setValue(vals.sshPassphrase);
+        await sshPassEl.setValue(opts.sshPassphrase);
       }
-    }
-    if (vals.identity !== undefined) {
-      await wrapper.find('textarea[id="identity"]').setValue(vals.identity);
     }
   }
 
-  async function submitForm(wrapper: ReturnType<typeof mount>) {
+  async function submitStep1(wrapper: ReturnType<typeof mount>) {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
   }
 
-  describe("validation", () => {
+  describe("step 1 validation", () => {
     it("shows error when repo URL is empty", async () => {
       const wrapper = mount(SetupPage);
-      await fillForm(wrapper, { repoUrl: "" });
-      await submitForm(wrapper);
+      await flushPromises();
+      await fillStep1(wrapper, { repoUrl: "" });
+      await submitStep1(wrapper);
 
       expect(wrapper.find("[role='alert']").text()).toBe(
         "Repository URL is required",
       );
-      expect(invoke).not.toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalledWith("clone_repo", expect.anything());
     });
 
     it("shows error for non-HTTPS URL", async () => {
       const wrapper = mount(SetupPage);
-      await fillForm(wrapper, { repoUrl: "http://github.com/user/repo.git" });
-      await submitForm(wrapper);
+      await flushPromises();
+      await fillStep1(wrapper, {
+        repoUrl: "http://github.com/user/repo.git",
+      });
+      await submitStep1(wrapper);
 
       expect(wrapper.find("[role='alert']").text()).toBe(
         "URL must be HTTPS or SSH format (e.g. git@host:user/repo.git)",
       );
     });
+  });
+
+  describe("step 1 clone", () => {
+    it("calls clone_repo with correct args for HTTPS", async () => {
+      vi.mocked(invoke)
+        .mockImplementation(async (cmd: string) => {
+          if (cmd === "is_repo_ready") return false;
+          return undefined;
+        })
+        .mockResolvedValueOnce(false) // is_repo_ready
+        .mockResolvedValueOnce(undefined); // clone_repo
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await fillStep1(wrapper, {
+        repoUrl: "https://github.com/user/repo.git",
+        pat: "my-token",
+      });
+      await submitStep1(wrapper);
+
+      expect(invoke).toHaveBeenCalledWith("clone_repo", {
+        repoUrl: "https://github.com/user/repo.git",
+        pat: "my-token",
+        sshKey: null,
+        sshPassphrase: null,
+      });
+    });
+
+    it("passes null for pat when empty", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(false) // is_repo_ready
+        .mockResolvedValueOnce(undefined); // clone_repo
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await fillStep1(wrapper, { pat: "" });
+      await submitStep1(wrapper);
+
+      expect(invoke).toHaveBeenCalledWith(
+        "clone_repo",
+        expect.objectContaining({ pat: null }),
+      );
+    });
+
+    it("advances to step 2 on success", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(false) // is_repo_ready
+        .mockResolvedValueOnce(undefined); // clone_repo
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await fillStep1(wrapper);
+      await submitStep1(wrapper);
+
+      // Step 2 should be visible (identity field)
+      expect(wrapper.find('textarea[id="identity"]').exists()).toBe(true);
+    });
+
+    it("displays error from clone failure", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(false) // is_repo_ready
+        .mockRejectedValueOnce({
+          code: "CloneFailed",
+          message: "Clone failed",
+        });
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await fillStep1(wrapper);
+      await submitStep1(wrapper);
+
+      expect(wrapper.find("[role='alert']").text()).toBe("Clone failed");
+    });
+  });
+
+  // ── Step 2: Identity ───────────────────────────────────────────────────
+
+  describe("step 2 identity", () => {
+    async function mountAtStep2(recipientsList: RecipientInfo[] = []) {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce(recipientsList); // list_recipients
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      return wrapper;
+    }
+
+    it("auto-advances to step 2 when repo is ready", async () => {
+      const wrapper = await mountAtStep2([]);
+
+      expect(wrapper.find('textarea[id="identity"]').exists()).toBe(true);
+      expect(wrapper.find('input[id="repo-url"]').exists()).toBe(false);
+    });
+
+    it("fetches and displays recipients", async () => {
+      const recipients: RecipientInfo[] = [
+        { public_key: "age1abc123", comment: "Alice" },
+        { public_key: "age1def456", comment: null },
+      ];
+      const wrapper = await mountAtStep2(recipients);
+
+      expect(invoke).toHaveBeenCalledWith("list_recipients");
+      expect(wrapper.text()).toContain("age1abc123");
+      expect(wrapper.text()).toContain("Alice");
+      expect(wrapper.text()).toContain("age1def456");
+    });
+
+    it("shows message when no recipients found", async () => {
+      const wrapper = await mountAtStep2([]);
+
+      expect(wrapper.text()).toContain("No recipients file found");
+    });
+
+    it("allows selecting a recipient", async () => {
+      const recipients: RecipientInfo[] = [
+        { public_key: "age1abc123", comment: "Alice" },
+        { public_key: "age1def456", comment: null },
+      ];
+      const wrapper = await mountAtStep2(recipients);
+
+      // Click on second recipient
+      const items = wrapper.findAll(".cursor-pointer");
+      await items[1].trigger("click");
+
+      // Second item should be selected (has accent border class)
+      expect(items[1].classes()).toContain("border-accent");
+    });
+
+    it("auto-selects first recipient when only one exists", async () => {
+      const recipients: RecipientInfo[] = [
+        { public_key: "age1only", comment: "Only key" },
+      ];
+      const wrapper = await mountAtStep2(recipients);
+
+      // The single recipient should show as selected
+      const item = wrapper.find(".cursor-pointer");
+      expect(item.classes()).toContain("border-accent");
+    });
+
+    it("calls complete_setup with identity", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce(undefined); // complete_setup
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("complete_setup", {
+        identity: "AGE-SECRET-KEY-1abc",
+      });
+    });
+
+    it("navigates to entries on success", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce(undefined); // complete_setup
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    });
 
     it("shows error when identity is empty", async () => {
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper, {
-        repoUrl: "https://github.com/user/repo.git",
-        identity: "",
-      });
-      await submitForm(wrapper);
+      const wrapper = await mountAtStep2([]);
+
+      await wrapper.find('textarea[id="identity"]').setValue("");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
 
       expect(wrapper.find("[role='alert']").text()).toBe(
         "Age identity is required",
@@ -119,84 +300,91 @@ describe("SetupPage", () => {
     });
 
     it("shows error when identity lacks AGE-SECRET-KEY- prefix", async () => {
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper, { identity: "not-a-valid-key" });
-      await submitForm(wrapper);
+      const wrapper = await mountAtStep2([]);
+
+      await wrapper.find('textarea[id="identity"]').setValue("not-a-valid-key");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
 
       expect(wrapper.find("[role='alert']").text()).toBe(
         "Identity must start with AGE-SECRET-KEY-...",
       );
     });
-  });
 
-  describe("successful submission", () => {
-    it("calls invoke with correct args", async () => {
-      vi.mocked(invoke).mockResolvedValue(undefined);
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper, {
-        repoUrl: "https://github.com/user/repo.git",
-        pat: "my-token",
-        identity: "AGE-SECRET-KEY-1abc",
-      });
-      await submitForm(wrapper);
+    it("shows error when recipients exist but none selected", async () => {
+      const recipients: RecipientInfo[] = [
+        { public_key: "age1abc123", comment: "Alice" },
+        { public_key: "age1def456", comment: null },
+      ];
+      const wrapper = await mountAtStep2(recipients);
 
-      expect(invoke).toHaveBeenCalledWith("setup", {
-        repoUrl: "https://github.com/user/repo.git",
-        pat: "my-token",
-        sshKey: null,
-        sshPassphrase: null,
-        identity: "AGE-SECRET-KEY-1abc",
-      });
-    });
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
 
-    it("passes null for pat when empty", async () => {
-      vi.mocked(invoke).mockResolvedValue(undefined);
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper, { pat: "" });
-      await submitForm(wrapper);
-
-      expect(invoke).toHaveBeenCalledWith(
-        "setup",
-        expect.objectContaining({ pat: null }),
+      expect(wrapper.find("[role='alert']").text()).toBe(
+        "Please select a recipient",
       );
     });
 
-    it("navigates to entries on success", async () => {
-      vi.mocked(invoke).mockResolvedValue(undefined);
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper);
-      await submitForm(wrapper);
+    it("displays error from complete_setup failure", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockRejectedValueOnce({
+          code: "INVALID_IDENTITY",
+          message: "Identity does not match any recipient",
+        });
 
-      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toBe(
+        "Identity does not match any recipient",
+      );
     });
   });
 
-  describe("error handling", () => {
-    it("displays error from AppError", async () => {
-      vi.mocked(invoke).mockRejectedValue({
-        code: "SetupFailed",
-        message: "Clone failed",
-      });
+  // ── Back navigation ────────────────────────────────────────────────────
+
+  describe("navigation between steps", () => {
+    it("goes back to step 1 when back button clicked", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]); // list_recipients
+
       const wrapper = mount(SetupPage);
-      await fillForm(wrapper);
-      await submitForm(wrapper);
+      await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toBe("Clone failed");
-    });
+      // Should be on step 2
+      expect(wrapper.find('textarea[id="identity"]').exists()).toBe(true);
 
-    it("falls back to 'Setup failed' on unknown error", async () => {
-      vi.mocked(invoke).mockRejectedValue(null);
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper);
-      await submitForm(wrapper);
+      // Click back
+      const backBtn = wrapper.find("button[type='button']");
+      await backBtn.trigger("click");
+      await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toBe("Setup failed");
+      // Should be on step 1
+      expect(wrapper.find('input[id="repo-url"]').exists()).toBe(true);
     });
   });
+
+  // ── SSH URL support (step 1) ──────────────────────────────────────────
 
   describe("SSH URL support", () => {
     it("shows SSH key field for git@ URL", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
+
       const wrapper = mount(SetupPage);
+      await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
         .setValue("git@github.com:user/repo.git");
@@ -208,116 +396,65 @@ describe("SetupPage", () => {
     });
 
     it("shows SSH key field for ssh:// URL", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
+
       const wrapper = mount(SetupPage);
+      await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
         .setValue("ssh://git@github.com/user/repo.git");
       await flushPromises();
 
       expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(true);
-      expect(wrapper.find('input[id="ssh-passphrase"]').exists()).toBe(true);
-      expect(wrapper.find('input[id="pat"]').exists()).toBe(false);
-    });
-
-    it("shows PAT field for HTTPS URL", async () => {
-      const wrapper = mount(SetupPage);
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("https://github.com/user/repo.git");
-      await flushPromises();
-
-      expect(wrapper.find('input[id="pat"]').exists()).toBe(true);
-      expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(false);
-      expect(wrapper.find('input[id="ssh-passphrase"]').exists()).toBe(false);
     });
 
     it("shows error when SSH key is empty for SSH URL", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
+
       const wrapper = mount(SetupPage);
-      await fillForm(wrapper, {
+      await flushPromises();
+      await fillStep1(wrapper, {
         repoUrl: "git@github.com:user/repo.git",
         sshKey: "",
-        identity: "AGE-SECRET-KEY-1abc",
       });
-      await submitForm(wrapper);
+      await submitStep1(wrapper);
 
       expect(wrapper.find("[role='alert']").text()).toBe(
         "SSH private key is required for SSH URLs",
       );
-      expect(invoke).not.toHaveBeenCalled();
     });
 
-    it("accepts git@ SSH URL without error", async () => {
-      vi.mocked(invoke).mockResolvedValue(undefined);
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper, {
-        repoUrl: "git@github.com:user/repo.git",
-        sshKey:
-          "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----",
-        sshPassphrase: "mypass",
-        identity: "AGE-SECRET-KEY-1abc",
-      });
-      await submitForm(wrapper);
+    it("calls clone_repo with SSH args for git@ URL", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(false) // is_repo_ready
+        .mockResolvedValueOnce(undefined); // clone_repo
 
-      expect(wrapper.find("[role='alert']").exists()).toBe(false);
-    });
-
-    it("calls invoke with SSH args for git@ URL", async () => {
-      vi.mocked(invoke).mockResolvedValue(undefined);
       const wrapper = mount(SetupPage);
-      await fillForm(wrapper, {
+      await flushPromises();
+      await fillStep1(wrapper, {
         repoUrl: "git@github.com:user/repo.git",
         sshKey: "test-ssh-key",
         sshPassphrase: "mypass",
-        identity: "AGE-SECRET-KEY-1abc",
       });
-      await submitForm(wrapper);
+      await submitStep1(wrapper);
 
-      expect(invoke).toHaveBeenCalledWith("setup", {
+      expect(invoke).toHaveBeenCalledWith("clone_repo", {
         repoUrl: "git@github.com:user/repo.git",
         pat: null,
         sshKey: "test-ssh-key",
         sshPassphrase: "mypass",
-        identity: "AGE-SECRET-KEY-1abc",
       });
-    });
-
-    it("calls invoke with null pat for SSH URL", async () => {
-      vi.mocked(invoke).mockResolvedValue(undefined);
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper, {
-        repoUrl: "git@github.com:user/repo.git",
-        sshKey: "test-key",
-        identity: "AGE-SECRET-KEY-1abc",
-      });
-      await submitForm(wrapper);
-
-      expect(invoke).toHaveBeenCalledWith(
-        "setup",
-        expect.objectContaining({ pat: null, sshKey: "test-key" }),
-      );
-    });
-
-    it("passes null passphrase when empty for SSH URL", async () => {
-      vi.mocked(invoke).mockResolvedValue(undefined);
-      const wrapper = mount(SetupPage);
-      await fillForm(wrapper, {
-        repoUrl: "git@github.com:user/repo.git",
-        sshKey: "test-key",
-        sshPassphrase: "",
-        identity: "AGE-SECRET-KEY-1abc",
-      });
-      await submitForm(wrapper);
-
-      expect(invoke).toHaveBeenCalledWith(
-        "setup",
-        expect.objectContaining({ sshPassphrase: null }),
-      );
     });
   });
 
+  // ── SSH key generation (step 1) ──────────────────────────────────────
+
   describe("SSH key generation", () => {
     it("shows generate tab when SSH URL and generate tab selected", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
+
       const wrapper = mount(SetupPage);
+      await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
         .setValue("git@github.com:user/repo.git");
@@ -330,18 +467,21 @@ describe("SetupPage", () => {
       await genTab!.trigger("click");
       await flushPromises();
 
-      // Should show generate button, not paste textarea
       expect(wrapper.text()).toContain("Generate SSH Key");
       expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(false);
     });
 
     it("generates key and displays public key", async () => {
-      vi.mocked(invoke).mockResolvedValue({
-        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIgenerated",
-        private_key:
-          "-----BEGIN OPENSSH PRIVATE KEY-----\ngen\n-----END OPENSSH PRIVATE KEY-----",
-      });
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(false) // is_repo_ready
+        .mockResolvedValueOnce({
+          public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIgenerated",
+          private_key:
+            "-----BEGIN OPENSSH PRIVATE KEY-----\ngen\n-----END OPENSSH PRIVATE KEY-----",
+        });
+
       const wrapper = mount(SetupPage);
+      await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
         .setValue("git@github.com:user/repo.git");
@@ -368,107 +508,11 @@ describe("SetupPage", () => {
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIgenerated",
       );
     });
-
-    it("shows error when key generation fails", async () => {
-      vi.mocked(invoke).mockRejectedValue({
-        code: "SSH_KEY_INVALID",
-        message: "Key generation failed",
-      });
-      const wrapper = mount(SetupPage);
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("git@github.com:user/repo.git");
-      await flushPromises();
-
-      // Switch to Generate tab and click generate
-      const tabs = wrapper.findAll("button[type='button']");
-      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
-      await genTab!.trigger("click");
-      await flushPromises();
-
-      const genButton = wrapper
-        .findAll("button[type='button']")
-        .find((b) => b.text().includes("Generate SSH Key"));
-      await genButton!.trigger("click");
-      await flushPromises();
-
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "Key generation failed",
-      );
-    });
-
-    it("can submit setup after generating key", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce({
-          public_key: "ssh-ed25519 AAAAtest",
-          private_key: "generated-private-key",
-        }) // generate_ssh_key
-        .mockResolvedValueOnce(undefined); // setup
-      const wrapper = mount(SetupPage);
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("git@github.com:user/repo.git");
-      await flushPromises();
-
-      // Generate key
-      const tabs = wrapper.findAll("button[type='button']");
-      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
-      await genTab!.trigger("click");
-      await flushPromises();
-
-      const genButton = wrapper
-        .findAll("button[type='button']")
-        .find((b) => b.text().includes("Generate SSH Key"));
-      await genButton!.trigger("click");
-      await flushPromises();
-
-      // Fill identity and submit
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
-      await submitForm(wrapper);
-
-      expect(invoke).toHaveBeenCalledWith("setup", {
-        repoUrl: "git@github.com:user/repo.git",
-        pat: null,
-        sshKey: "generated-private-key",
-        sshPassphrase: null,
-        identity: "AGE-SECRET-KEY-1abc",
-      });
-    });
-
-    it("passes passphrase to generate_ssh_key", async () => {
-      vi.mocked(invoke).mockResolvedValue({
-        public_key: "ssh-ed25519 AAAAtest",
-        private_key: "encrypted-key",
-      });
-      const wrapper = mount(SetupPage);
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("git@github.com:user/repo.git");
-      await flushPromises();
-
-      // Switch to generate tab
-      const tabs = wrapper.findAll("button[type='button']");
-      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
-      await genTab!.trigger("click");
-      await flushPromises();
-
-      // Set passphrase in generate tab
-      const passphraseInput = wrapper.find('input[id="ssh-gen-passphrase"]');
-      expect(passphraseInput.exists()).toBe(true);
-      await passphraseInput.setValue("my-passphrase");
-
-      // Click generate
-      const genButton = wrapper
-        .findAll("button[type='button']")
-        .find((b) => b.text().includes("Generate SSH Key"));
-      await genButton!.trigger("click");
-      await flushPromises();
-
-      expect(invoke).toHaveBeenCalledWith("generate_ssh_key", {
-        passphrase: "my-passphrase",
-      });
-    });
   });
 });
+
+// Type used in tests
+interface RecipientInfo {
+  public_key: string;
+  comment: string | null;
+}

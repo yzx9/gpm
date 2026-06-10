@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SSH key authentication for Git operations (`git@host:repo` and `ssh://` URLs)
 - On-device ed25519 SSH key generation with optional passphrase
 - Settings page with public key display and private key export
+- Two-step setup wizard: clone repo first, then select a recipient and provide matching age identity
+- Recipient discovery from `.gopass-recipients` / `.age-recipients` files in cloned repositories
+- Identity validation on setup: derived public key is checked against known recipients
 
 ## [v0.1.0] - 2026-06-08
 

@@ -21,7 +21,7 @@
 
 use rustpass::error::ErrorCode;
 use rustpass::ssh;
-use rustpass::{Entry, Error, RepoConfig, Store, SyncResult};
+use rustpass::{Entry, Error, Recipient, RepoConfig, Store, SyncResult};
 use serde::Serialize;
 
 use tauri::Manager;
@@ -65,6 +65,22 @@ struct SshPrivateKeyResult {
     private_key: String,
 }
 
+/// Returned by `list_recipients` — public key info for setup step 2.
+#[derive(Debug, Clone, Serialize)]
+struct RecipientInfo {
+    public_key: String,
+    comment: Option<String>,
+}
+
+impl From<Recipient> for RecipientInfo {
+    fn from(r: Recipient) -> Self {
+        Self {
+            public_key: r.public_key,
+            comment: r.comment,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // App state
 // ---------------------------------------------------------------------------
@@ -83,6 +99,46 @@ struct AppState {
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
 fn is_configured(state: tauri::State<'_, AppState>) -> Result<bool, Error> {
     Ok(state.store.is_configured())
+}
+
+/// Check if the repo has been cloned (step 1 done, identity may be missing).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+fn is_repo_ready(state: tauri::State<'_, AppState>) -> Result<bool, Error> {
+    Ok(state.store.is_repo_ready())
+}
+
+/// Step 1 of setup: clone the repo and save repo config (no identity).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn clone_repo(
+    state: tauri::State<'_, AppState>,
+    repo_url: String,
+    pat: Option<String>,
+    ssh_key: Option<String>,
+    ssh_passphrase: Option<String>,
+) -> Result<(), Error> {
+    state.store.clone_only(
+        &repo_url,
+        pat.as_deref(),
+        ssh_key.as_deref(),
+        ssh_passphrase.as_deref(),
+    )
+}
+
+/// Read recipients from the cloned repository for setup step 2.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn list_recipients(state: tauri::State<'_, AppState>) -> Result<Vec<RecipientInfo>, Error> {
+    let recipients = state.store.list_recipients()?;
+    Ok(recipients.into_iter().map(RecipientInfo::from).collect())
+}
+
+/// Step 2 of setup: save the age identity and complete configuration.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn complete_setup(state: tauri::State<'_, AppState>, identity: String) -> Result<(), Error> {
+    state.store.save_identity(&identity)
 }
 
 /// Full setup: validate identity, clone repo, save config.
@@ -252,6 +308,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             is_configured,
+            is_repo_ready,
+            clone_repo,
+            list_recipients,
+            complete_setup,
             setup,
             list_entries,
             pull_repo,
