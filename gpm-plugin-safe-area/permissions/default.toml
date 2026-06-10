@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Allow reading safe-area insets for system bar padding."
+permissions = ["allow-get-insets"]

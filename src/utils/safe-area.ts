@@ -2,28 +2,45 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Read safe-area insets from the Android-side JS interface and set CSS variables.
- *
- * On Android, `MainActivity` exposes `window.GpmInsets` with `getTop()` and
- * `getBottom()` returning the status bar / navigation bar heights in CSS pixels.
- * On desktop the interface is absent and this function is a no-op — the CSS
- * `var()` fallback of `0px` applies.
- */
-export function applySafeAreaInsets() {
-  const insets = (
-    window as unknown as {
-      GpmInsets?: { getTop: () => number; getBottom: () => number };
-    }
-  ).GpmInsets;
-  if (!insets) return;
+import { invoke, addPluginListener } from "@tauri-apps/api/core";
 
+interface SafeAreaInsets {
+  top: number;
+  bottom: number;
+}
+
+function applyInsets(insets: SafeAreaInsets): void {
   document.documentElement.style.setProperty(
     "--safe-area-inset-top",
-    `${insets.getTop()}px`,
+    `${insets.top}px`,
   );
   document.documentElement.style.setProperty(
     "--safe-area-inset-bottom",
-    `${insets.getBottom()}px`,
+    `${insets.bottom}px`,
   );
+}
+
+/**
+ * Apply safe-area insets and listen for dynamic changes.
+ *
+ * On Android, the `safe-area` Tauri plugin provides insets via:
+ * 1. An initial `get_insets` call
+ * 2. A `safe-area-changed` event on rotation, keyboard show/hide, etc.
+ *
+ * On desktop, the plugin is absent; the `invoke` rejects and
+ * CSS `var()` fallbacks of `0px` apply.
+ */
+export async function applySafeAreaInsets(): Promise<void> {
+  try {
+    const insets = await invoke<SafeAreaInsets>("plugin:safe-area|get_insets");
+    applyInsets(insets);
+
+    await addPluginListener<SafeAreaInsets>(
+      "safe-area",
+      "safe-area-changed",
+      applyInsets,
+    );
+  } catch {
+    // Desktop: plugin not registered, CSS fallback applies
+  }
 }

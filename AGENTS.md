@@ -45,6 +45,10 @@ All Tauri IPC types live in `src/types.ts`.
 - `secure_storage.rs` — Identity + config persistence
 - `error.rs` — Safe error types (no secrets in messages)
 
+### Tauri Plugins — `gpm-plugin-safe-area/`
+
+Local Tauri plugin crate (not published). Provides Android safe-area insets to the frontend via standard plugin IPC + event system.
+
 ### Security Model
 
 - `copy_password` is the primary operation — password never reaches WebView

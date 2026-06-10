@@ -239,6 +239,7 @@ fn export_ssh_private_key(state: tauri::State<'_, AppState>) -> Result<SshPrivat
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(gpm_plugin_safe_area::init())
         .setup(|app| {
             let config_dir = app
                 .path()

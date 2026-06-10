@@ -7,6 +7,7 @@ import { vi } from "vitest";
 // Mock Tauri invoke — default no-op, tests override per-call
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
+  addPluginListener: vi.fn().mockResolvedValue(() => {}),
 }));
 
 // Mock vue-router
