@@ -1655,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "gpm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "gpm-plugin-safe-area",
  "rustpass",
@@ -1670,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "gpm-plugin-safe-area"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tauri",
  "tauri-plugin",
@@ -3645,7 +3645,7 @@ dependencies = [
 
 [[package]]
 name = "rustpass"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "age",
  "git2",

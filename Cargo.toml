@@ -3,7 +3,7 @@ resolver = "2"
 members = ["rustpass", "src-tauri", "gpm-plugin-safe-area"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Zexin Yuan"]
 edition = "2021"
 license = "Apache-2.0"
