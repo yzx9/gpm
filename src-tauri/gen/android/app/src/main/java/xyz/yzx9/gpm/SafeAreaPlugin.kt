@@ -26,9 +26,9 @@ class SafeAreaPlugin(private val activity: Activity) : Plugin(activity) {
 
         ViewCompat.setOnApplyWindowInsetsListener(decorView) { _, insets ->
             statusBarInset =
-                insets.getInsets(WindowInsetsCompat.Type.statusBars()).top / density
+                (insets.getInsets(WindowInsetsCompat.Type.statusBars()).top / density).toDouble()
             navBarInset =
-                insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom / density
+                (insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom / density).toDouble()
 
             if (hasListener("safe-area-changed")) {
                 val payload = JSObject()
