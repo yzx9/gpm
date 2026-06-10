@@ -69,12 +69,12 @@ Integration tests in `src-tauri/tests/fixtures.rs` covering store parsing, conte
 
 ## Conventions
 
-- Rust lint config in `lib.rs` has extensive `#![warn(...)]` attributes — Clippy warnings are errors
 - SPDX license headers on all source files
 - Nix flake provides the full dev environment (`direnv allow` to activate)
 - Single age identity only (multi-identity deferred); supports x25519 native keys and SSH private keys (ed25519, RSA)
 - HTTPS and SSH Git remotes (SSH key generation + paste)
 - Encrypted SSH private keys as age identities are rejected (passphrase support deferred)
+- `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `SafeAreaPlugin.kt`). Do not assume its contents are auto-generated or disposable.
 
 ## Compact Instructions
 
