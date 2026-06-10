@@ -83,7 +83,8 @@
 
             # Frontend
             nodejs
-            pnpm
+            # workardoun: NixOS/nixpkgs#525627
+            (pnpm.override { nodejs-slim = pkgs.nodejs-slim_latest; }) # TODO: remove after next bump of flake.lock
 
             # Android
             jdk17
