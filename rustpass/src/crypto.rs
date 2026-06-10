@@ -40,9 +40,8 @@ pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, 
 /// Returns an error if the identity format is invalid, contains no valid
 /// identities, the encrypted data cannot be parsed, or decryption fails.
 pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>, Error> {
-    let identity_str = std::str::from_utf8(identity_bytes).map_err(|_| {
-        Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8")
-    })?;
+    let identity_str = std::str::from_utf8(identity_bytes)
+        .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
     let trimmed = identity_str.trim();
 
     let identities: Vec<Box<dyn age::Identity>> = if trimmed.starts_with("AGE-SECRET-KEY-") {

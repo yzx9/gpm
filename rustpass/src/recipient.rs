@@ -167,9 +167,8 @@ pub fn identity_to_recipient(identity: &str) -> Result<String, Error> {
 
     if trimmed.starts_with("AGE-SECRET-KEY-") {
         // x25519 path
-        let sk = age::x25519::Identity::from_str(trimmed).map_err(|_| {
-            Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key")
-        })?;
+        let sk = age::x25519::Identity::from_str(trimmed)
+            .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key"))?;
         Ok(sk.to_public().to_string())
     } else if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
         || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
