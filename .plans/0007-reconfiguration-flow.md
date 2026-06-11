@@ -1,4 +1,4 @@
-# 0010: Add re-configuration flow
+# Add re-configuration flow
 
 **Priority:** P2
 **Status:** TODO

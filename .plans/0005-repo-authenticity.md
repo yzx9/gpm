@@ -1,4 +1,4 @@
-# 0004: Add git commit signature verification / repo authenticity
+# Add git commit signature verification / repo authenticity
 
 **Priority:** P3
 **Status:** TODO

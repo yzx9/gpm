@@ -1,4 +1,4 @@
-# 0009: Custom SecureClipboard (ByteArray-based)
+# Custom SecureClipboard (ByteArray-based)
 
 **Priority:** P3
 **Status:** TODO
@@ -64,4 +64,4 @@ class SecureClipboardPlugin : Plugin() {
 
 ## Depends on
 
-None — independent. Can be combined with 0008-android-keystore.md if both touch the Kotlin plugin layer.
+None — independent. Can be combined with 0004-keystore-biometric.md if both touch the Kotlin plugin layer.
