@@ -498,12 +498,6 @@ impl Store {
         self.config.clear_all()
     }
 
-    /// Get the config directory path (for timer recreation of Store).
-    #[must_use]
-    pub fn config_dir(&self) -> PathBuf {
-        self.config.config_dir().to_path_buf()
-    }
-
     /// Get the current repository configuration.
     ///
     /// # Errors
