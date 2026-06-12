@@ -69,6 +69,7 @@ Integration tests in `src-tauri/tests/fixtures.rs` covering store parsing, conte
 
 ## Conventions
 
+- Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
 - SPDX license headers on all source files
 - Nix flake provides the full dev environment (`direnv allow` to activate)
 - Single age identity only (multi-identity deferred); supports x25519 native keys and SSH private keys (ed25519, RSA)
