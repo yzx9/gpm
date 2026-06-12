@@ -50,6 +50,8 @@ pub mod entry;
 pub mod error;
 /// Git clone and pull operations.
 pub mod git;
+/// Identity type classification.
+pub mod identity;
 /// Recipient discovery and identity validation.
 pub mod recipient;
 /// Decrypted secret type (gopass.Secret aligned).

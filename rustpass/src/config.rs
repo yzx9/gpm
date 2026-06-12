@@ -4,7 +4,20 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::crypto;
 use crate::error::{Error, ErrorCode};
+use crate::identity::classify_identity;
+use crate::identity::IdentityType;
+
+/// Atomic write: write data to a temp file then rename over the target.
+///
+/// Prevents identity file corruption if the write fails mid-operation.
+fn save_identity_raw(path: &Path, data: &[u8]) -> Result<(), Error> {
+    let temp_path = path.with_extension("tmp");
+    std::fs::write(&temp_path, data)?;
+    std::fs::rename(&temp_path, path)?;
+    Ok(())
+}
 
 /// Configuration and identity persistence for a password store.
 ///
@@ -39,16 +52,36 @@ impl Config {
 
     /// Save the age identity to local storage.
     ///
+    /// If `passphrase` is `Some`, the identity is encrypted with age scrypt
+    /// before writing. If `None`, the identity is stored as plaintext.
+    /// Uses atomic write (temp file + rename) to prevent corruption.
+    ///
     /// The caller is responsible for zeroizing the identity bytes after this call.
     ///
     /// # Errors
     ///
-    /// Returns an error if the config directory cannot be created or the file
-    /// cannot be written.
-    pub fn save_identity(&self, identity: &[u8]) -> Result<(), Error> {
+    /// Returns an error if the config directory cannot be created, encryption
+    /// fails, or the file cannot be written.
+    pub fn save_identity(&self, identity: &[u8], passphrase: Option<&str>) -> Result<(), Error> {
         std::fs::create_dir_all(&self.config_dir)?;
-        std::fs::write(self.identity_path(), identity)?;
-        Ok(())
+
+        let data = match passphrase {
+            Some(pw) if !pw.is_empty() => crypto::encrypt_identity(pw, identity)?,
+            _ => identity.to_vec(),
+        };
+
+        save_identity_raw(&self.identity_path(), &data)
+    }
+
+    /// Check if the stored identity file is passphrase-encrypted.
+    ///
+    /// Returns `false` if no identity file exists.
+    #[must_use]
+    pub fn is_identity_encrypted(&self) -> bool {
+        match self.load_identity() {
+            Ok(bytes) => classify_identity(&bytes) == IdentityType::AgeEncrypted,
+            Err(_) => false,
+        }
     }
 
     /// Load the age identity from local storage.
@@ -209,10 +242,52 @@ mod tests {
         let (config, _dir) = create_config();
         let identity = b"AGE-SECRET-KEY-1TEST1234567890";
 
-        config.save_identity(identity).unwrap();
+        config.save_identity(identity, None).unwrap();
         let loaded = config.load_identity().unwrap();
 
         assert_eq!(loaded, identity);
+    }
+
+    #[test]
+    fn save_load_encrypted_identity_roundtrip() {
+        let (config, _dir) = create_config();
+        let identity = b"AGE-SECRET-KEY-1TEST1234567890";
+
+        config
+            .save_identity(identity, Some("test-passphrase"))
+            .unwrap();
+
+        assert!(
+            config.is_identity_encrypted(),
+            "identity should be encrypted"
+        );
+
+        let loaded = config.load_identity().unwrap();
+        assert!(loaded.starts_with(b"-----BEGIN AGE ENCRYPTED FILE-----"));
+
+        let decrypted = crypto::decrypt_identity("test-passphrase", &loaded).unwrap();
+        assert_eq!(decrypted, identity);
+    }
+
+    #[test]
+    fn save_identity_empty_passphrase_stores_plaintext() {
+        let (config, _dir) = create_config();
+        let identity = b"AGE-SECRET-KEY-1TEST1234567890";
+
+        config.save_identity(identity, Some("")).unwrap();
+        assert!(
+            !config.is_identity_encrypted(),
+            "empty passphrase should store plaintext"
+        );
+
+        let loaded = config.load_identity().unwrap();
+        assert_eq!(loaded, identity);
+    }
+
+    #[test]
+    fn is_identity_encrypted_false_when_no_identity() {
+        let (config, _dir) = create_config();
+        assert!(!config.is_identity_encrypted());
     }
 
     #[test]
@@ -227,7 +302,7 @@ mod tests {
     fn delete_identity_removes_file() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity").unwrap();
+        config.save_identity(b"test-identity", None).unwrap();
         assert!(config.identity_path().exists());
 
         config.delete_identity().unwrap();
@@ -304,7 +379,7 @@ mod tests {
     fn is_configured_true_after_setup() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity").unwrap();
+        config.save_identity(b"test-identity", None).unwrap();
         config
             .save_repo_config(
                 "https://example.com/repo.git",
@@ -322,7 +397,7 @@ mod tests {
     fn clear_all_removes_everything() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity").unwrap();
+        config.save_identity(b"test-identity", None).unwrap();
         config
             .save_repo_config(
                 "https://example.com/repo.git",
@@ -347,8 +422,8 @@ mod tests {
     fn overwrite_identity() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"first-identity").unwrap();
-        config.save_identity(b"second-identity").unwrap();
+        config.save_identity(b"first-identity", None).unwrap();
+        config.save_identity(b"second-identity", None).unwrap();
 
         let loaded = config.load_identity().unwrap();
         assert_eq!(loaded, b"second-identity");
@@ -358,7 +433,7 @@ mod tests {
     fn partial_setup_identity_only() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity").unwrap();
+        config.save_identity(b"test-identity", None).unwrap();
         assert!(
             !config.is_configured(),
             "should not be configured without repo config"
@@ -561,7 +636,7 @@ mod tests {
         let config = Config::new(nested.clone());
 
         assert!(!nested.exists(), "precondition: dir does not exist");
-        config.save_identity(b"test").unwrap();
+        config.save_identity(b"test", None).unwrap();
         assert!(
             nested.exists(),
             "save_identity should create the config dir"

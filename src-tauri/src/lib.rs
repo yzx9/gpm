@@ -19,12 +19,16 @@
     clippy::pedantic
 )]
 
+use std::sync::Mutex;
+use std::time::Duration;
+
 use rustpass::error::ErrorCode;
 use rustpass::ssh;
 use rustpass::{Entry, Error, KeyType, Recipient, RepoConfig, Store, SyncResult};
 use serde::Serialize;
+use tokio::task::JoinHandle;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 // ---------------------------------------------------------------------------
@@ -73,6 +77,17 @@ struct RecipientInfo {
     key_type: String,
 }
 
+/// Returned by `get_auth_state` — atomic auth snapshot for router guard.
+#[derive(Debug, Clone, Serialize)]
+struct AuthState {
+    /// True if both identity and repo config exist.
+    configured: bool,
+    /// True if the stored identity is passphrase-encrypted.
+    encrypted: bool,
+    /// True if the identity cache is populated (passphrase provided).
+    unlocked: bool,
+}
+
 impl From<Recipient> for RecipientInfo {
     fn from(r: Recipient) -> Self {
         Self {
@@ -94,11 +109,24 @@ impl From<Recipient> for RecipientInfo {
 /// Application state shared across all Tauri commands.
 struct AppState {
     store: Store,
+    /// Auto-lock timer handle (cancel-and-respawn pattern).
+    lock_timer: Mutex<Option<JoinHandle<()>>>,
 }
 
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
+
+/// Get the authentication state as a single atomic snapshot.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+fn get_auth_state(state: tauri::State<'_, AppState>) -> Result<AuthState, Error> {
+    Ok(AuthState {
+        configured: state.store.is_configured(),
+        encrypted: state.store.is_identity_encrypted(),
+        unlocked: state.store.is_unlocked(),
+    })
+}
 
 /// Check if the app has been configured (identity + repo exist).
 #[tauri::command]
@@ -143,8 +171,12 @@ fn list_recipients(state: tauri::State<'_, AppState>) -> Result<Vec<RecipientInf
 /// Step 2 of setup: save the age identity and complete configuration.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn complete_setup(state: tauri::State<'_, AppState>, identity: String) -> Result<(), Error> {
-    state.store.save_identity(&identity)
+fn complete_setup(
+    state: tauri::State<'_, AppState>,
+    identity: String,
+    passphrase: Option<String>,
+) -> Result<(), Error> {
+    state.store.save_identity(&identity, passphrase.as_deref())
 }
 
 /// Full setup: validate identity, clone repo, save config.
@@ -165,6 +197,66 @@ fn setup(
         ssh_passphrase.as_deref(),
         &identity,
     )
+}
+
+/// Unlock a passphrase-encrypted identity (async — scrypt is slow).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn unlock(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    passphrase: String,
+) -> Result<(), Error> {
+    // Run scrypt decryption on blocking thread
+    let store_dir = state.store.config_dir();
+    let pw = passphrase;
+    let result = tokio::task::spawn_blocking(move || {
+        let s = Store::new(store_dir);
+        s.unlock(&pw)
+    })
+    .await
+    .map_err(|e| Error::new(ErrorCode::StoreError, format!("Unlock task failed: {e}")))?;
+
+    result?;
+
+    // Start auto-lock timer
+    reset_lock_timer(&state, &app);
+
+    Ok(())
+}
+
+/// Lock the store: clear cached identity and cancel auto-lock timer.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+fn lock(state: tauri::State<'_, AppState>) -> Result<(), Error> {
+    // Cancel timer
+    if let Ok(mut timer) = state.lock_timer.lock() {
+        if let Some(handle) = timer.take() {
+            handle.abort();
+        }
+    }
+    state.store.lock();
+    Ok(())
+}
+
+/// Set a passphrase on an existing plaintext identity.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_passphrase(state: tauri::State<'_, AppState>, passphrase: String) -> Result<(), Error> {
+    state.store.set_passphrase(&passphrase)
+}
+
+/// Change the passphrase on an encrypted identity.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn change_passphrase(
+    state: tauri::State<'_, AppState>,
+    old_passphrase: String,
+    new_passphrase: String,
+) -> Result<(), Error> {
+    state
+        .store
+        .change_passphrase(&old_passphrase, &new_passphrase)
 }
 
 /// List all .age entries in the configured repository.
@@ -192,10 +284,8 @@ async fn copy_password(
 ) -> Result<CopyResult, Error> {
     let secret = state.store.get(&entry_path)?;
 
-    // Derive display name from entry path
     let entry_name = entry_path.trim_end_matches(".age").to_string();
 
-    // Copy password to clipboard via Tauri plugin
     app.clipboard()
         .write_text(secret.password().to_string())
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("Clipboard error: {e}")))?;
@@ -204,10 +294,13 @@ async fn copy_password(
     let clear_handle = app.clone();
     let pw = secret.password().to_string();
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        tokio::time::sleep(Duration::from_secs(30)).await;
         let _ = clear_handle.clipboard().write_text(String::new());
         drop(pw);
     });
+
+    // Reset auto-lock timer
+    reset_lock_timer(&state, &app);
 
     Ok(CopyResult {
         success: true,
@@ -226,12 +319,10 @@ fn show_password(
 ) -> Result<SensitiveContent, Error> {
     let secret = state.store.get(&entry_path)?;
 
-    let result = SensitiveContent {
+    Ok(SensitiveContent {
         password: secret.password().to_string(),
         notes: secret.body().to_string(),
-    };
-
-    Ok(result)
+    })
 }
 
 /// Get the current repo config (for display in settings).
@@ -245,12 +336,16 @@ fn get_config(state: tauri::State<'_, AppState>) -> Result<RepoConfig, Error> {
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), Error> {
+    // Cancel timer
+    if let Ok(mut timer) = state.lock_timer.lock() {
+        if let Some(handle) = timer.take() {
+            handle.abort();
+        }
+    }
     state.store.reset()
 }
 
 /// Generate a new ed25519 SSH keypair for setup.
-///
-/// Private key crosses IPC — equivalent security to pasting a key.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn generate_ssh_key(passphrase: Option<String>) -> Result<SshKeyPairResult, Error> {
@@ -288,6 +383,42 @@ fn export_ssh_private_key(state: tauri::State<'_, AppState>) -> Result<SshPrivat
 }
 
 // ---------------------------------------------------------------------------
+// Timer helpers
+// ---------------------------------------------------------------------------
+
+/// Reset the auto-lock timer (cancel-and-respawn pattern).
+fn reset_lock_timer(state: &tauri::State<'_, AppState>, app: &tauri::AppHandle) {
+    let Ok(mut timer) = state.lock_timer.lock() else {
+        return;
+    };
+
+    // Cancel existing timer
+    if let Some(handle) = timer.take() {
+        handle.abort();
+    }
+
+    // Spawn new timer
+    let app_handle = app.clone();
+    let config_dir = state.store.config_dir();
+
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(
+            rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS,
+        ))
+        .await;
+
+        // Lock the store
+        let store = Store::new(config_dir);
+        store.lock();
+
+        // Emit lock event so frontend can redirect
+        let _ = app_handle.emit("identity-locked", ());
+    });
+
+    *timer = Some(handle);
+}
+
+// ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
 
@@ -309,16 +440,22 @@ pub fn run() {
                 .expect("Cannot determine app config directory");
             app.manage(AppState {
                 store: Store::new(config_dir),
+                lock_timer: Mutex::new(None),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_auth_state,
             is_configured,
             is_repo_ready,
             clone_repo,
             list_recipients,
             complete_setup,
             setup,
+            unlock,
+            lock,
+            set_passphrase,
+            change_passphrase,
             list_entries,
             pull_repo,
             copy_password,

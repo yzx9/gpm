@@ -8,6 +8,7 @@ import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError,
+  AuthState,
   RepoConfig,
   SshPublicKeyResult,
   SshPrivateKeyResult,
@@ -27,6 +28,14 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 const isSsh = ref(false);
 
+// ── Passphrase management state ──────────────────────────────────────────
+const isIdentityEncrypted = ref(false);
+const showSetPassphrase = ref(false);
+const showChangePassphrase = ref(false);
+const newPassphrase = ref("");
+const oldPassphrase = ref("");
+const passphraseLoading = ref(false);
+
 function showToast(message: string) {
   toast.value = message;
   if (toastTimer) clearTimeout(toastTimer);
@@ -42,6 +51,8 @@ async function loadConfig() {
   try {
     config.value = await invoke<RepoConfig>("get_config");
     isSsh.value = config.value.ssh_key !== null;
+    const auth = await invoke<AuthState>("get_auth_state");
+    isIdentityEncrypted.value = auth.encrypted;
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load config";
@@ -86,6 +97,51 @@ async function copyText(text: string) {
     showToast("✓ Copied to clipboard");
   } catch {
     showToast("Copy failed");
+  }
+}
+
+async function onSetPassphrase() {
+  error.value = "";
+  if (!newPassphrase.value) {
+    error.value = "Passphrase must not be empty";
+    return;
+  }
+  passphraseLoading.value = true;
+  try {
+    await invoke("set_passphrase", { passphrase: newPassphrase.value });
+    isIdentityEncrypted.value = true;
+    showSetPassphrase.value = false;
+    newPassphrase.value = "";
+    showToast("✓ Passphrase set — identity is now encrypted");
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to set passphrase";
+  } finally {
+    passphraseLoading.value = false;
+  }
+}
+
+async function onChangePassphrase() {
+  error.value = "";
+  if (!oldPassphrase.value || !newPassphrase.value) {
+    error.value = "Both passphrases are required";
+    return;
+  }
+  passphraseLoading.value = true;
+  try {
+    await invoke("change_passphrase", {
+      oldPassphrase: oldPassphrase.value,
+      newPassphrase: newPassphrase.value,
+    });
+    showChangePassphrase.value = false;
+    oldPassphrase.value = "";
+    newPassphrase.value = "";
+    showToast("✓ Passphrase changed");
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to change passphrase";
+  } finally {
+    passphraseLoading.value = false;
   }
 }
 
@@ -198,6 +254,95 @@ onMounted(() => {
         </div>
       </section>
 
+      <!-- Passphrase management -->
+      <section class="settings-card">
+        <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
+
+        <!-- Not encrypted: set passphrase -->
+        <template v-if="!isIdentityEncrypted">
+          <p class="text-xs text-muted mb-2">
+            The identity is stored in plaintext. Set a passphrase to encrypt it.
+          </p>
+          <button
+            v-if="!showSetPassphrase"
+            type="button"
+            class="btn-action"
+            @click="showSetPassphrase = true"
+          >
+            🔒 Set Passphrase
+          </button>
+          <div v-if="showSetPassphrase" class="flex flex-col gap-2">
+            <input
+              v-model="newPassphrase"
+              type="password"
+              placeholder="New passphrase"
+              autocomplete="new-password"
+              class="input-base"
+              :disabled="passphraseLoading"
+            />
+            <button
+              type="button"
+              class="btn-action"
+              :disabled="passphraseLoading"
+              @click="onSetPassphrase"
+            >
+              <span
+                v-if="passphraseLoading"
+                class="spinner"
+                aria-hidden="true"
+              ></span>
+              Encrypt Identity
+            </button>
+          </div>
+        </template>
+
+        <!-- Encrypted: change passphrase -->
+        <template v-else>
+          <p class="text-xs text-muted mb-2">
+            ✓ Identity is passphrase-encrypted.
+          </p>
+          <button
+            v-if="!showChangePassphrase"
+            type="button"
+            class="btn-action"
+            @click="showChangePassphrase = true"
+          >
+            🔑 Change Passphrase
+          </button>
+          <div v-if="showChangePassphrase" class="flex flex-col gap-2">
+            <input
+              v-model="oldPassphrase"
+              type="password"
+              placeholder="Current passphrase"
+              autocomplete="current-password"
+              class="input-base"
+              :disabled="passphraseLoading"
+            />
+            <input
+              v-model="newPassphrase"
+              type="password"
+              placeholder="New passphrase"
+              autocomplete="new-password"
+              class="input-base"
+              :disabled="passphraseLoading"
+            />
+            <button
+              type="button"
+              class="btn-action"
+              :disabled="passphraseLoading"
+              @click="onChangePassphrase"
+            >
+              <span
+                v-if="passphraseLoading"
+                class="spinner"
+                aria-hidden="true"
+              ></span>
+              Change Passphrase
+            </button>
+          </div>
+        </template>
+      </section>
+
       <!-- Danger zone -->
       <section class="settings-card settings-card-danger">
         <h2 class="text-sm font-medium mb-2 text-danger">Danger Zone</h2>
@@ -305,5 +450,34 @@ onMounted(() => {
 
 .private-key-display {
   max-height: 250px;
+}
+
+.input-base {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-family: inherit;
+  background: var(--color-input);
+  color: inherit;
+  min-height: 48px;
+}
+
+.input-base:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-ring);
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-edge);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 0.4rem;
+  vertical-align: middle;
 }
 </style>

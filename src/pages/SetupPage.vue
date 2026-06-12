@@ -45,6 +45,7 @@ const generating = ref(false);
 const recipients = ref<RecipientInfo[]>([]);
 const selectedRecipient = ref("");
 const identity = ref("");
+const passphrase = ref("");
 const loadingRecipients = ref(false);
 const loadingIdentity = ref(false);
 
@@ -201,6 +202,7 @@ async function onCompleteSetup() {
   try {
     await invoke("complete_setup", {
       identity: identity.value,
+      passphrase: passphrase.value || null,
     });
     router.push({ name: "entries" });
   } catch (e) {
@@ -538,6 +540,31 @@ watch(step, (s) => {
             >Paste your age secret key (AGE-SECRET-KEY-...) or SSH private
             key</small
           >
+        </div>
+
+        <!-- Optional passphrase encryption -->
+        <div class="flex flex-col gap-1">
+          <label for="passphrase" class="text-sm font-medium"
+            >Passphrase (optional)</label
+          >
+          <input
+            id="passphrase"
+            v-model="passphrase"
+            type="password"
+            placeholder="Leave empty for plaintext storage"
+            autocomplete="new-password"
+            :disabled="loadingIdentity"
+            class="input-base"
+          />
+          <small class="text-xs text-muted"
+            >Encrypts the identity file at rest. Recommended for Android.</small
+          >
+          <p
+            v-if="!passphrase.trim()"
+            class="text-xs text-warning bg-warning-soft p-1.5 px-2.5 rounded-sm"
+          >
+            ⚠ Without a passphrase, the identity is stored in plaintext.
+          </p>
         </div>
 
         <p

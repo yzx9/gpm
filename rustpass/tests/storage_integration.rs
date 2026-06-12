@@ -17,7 +17,7 @@ mod tests {
 
         let identity = b"AGE-SECRET-KEY-1TEST1234567890ABCDEF";
         config
-            .save_identity(identity)
+            .save_identity(identity, None)
             .expect("save_identity failed");
         config
             .save_repo_config(
@@ -46,7 +46,7 @@ mod tests {
         let (config, _dir) = create_config();
 
         config
-            .save_identity(b"AGE-SECRET-KEY-1FIRST")
+            .save_identity(b"AGE-SECRET-KEY-1FIRST", None)
             .expect("initial save_identity failed");
         config
             .save_repo_config(
@@ -66,7 +66,7 @@ mod tests {
         );
 
         config
-            .save_identity(b"AGE-SECRET-KEY-1SECOND")
+            .save_identity(b"AGE-SECRET-KEY-1SECOND", None)
             .expect("second save_identity failed");
         config
             .save_repo_config(
@@ -120,7 +120,7 @@ mod tests {
         let config_a = Config::new(dir.path().to_path_buf());
         let identity = b"AGE-SECRET-KEY-1PERSIST123";
         config_a
-            .save_identity(identity)
+            .save_identity(identity, None)
             .expect("save_identity on first instance failed");
 
         let config_b = Config::new(dir.path().to_path_buf());

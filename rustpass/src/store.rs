@@ -3,18 +3,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use serde::Serialize;
 use walkdir::WalkDir;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::config::Config;
 use crate::crypto;
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::git;
+use crate::identity::{classify_identity, IdentityType};
 use crate::recipient::{self, Recipient};
 use crate::secret::Secret;
+
+/// Default auto-lock timeout in seconds (5 minutes).
+pub const DEFAULT_LOCK_TIMEOUT_SECS: u64 = 300;
 
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.
 #[derive(Debug, Clone, Serialize)]
@@ -29,9 +34,23 @@ pub struct SyncResult {
 ///
 /// Provides read-only operations on a gopass-compatible password store:
 /// [`list`](Store::list), [`get`](Store::get), and [`sync`](Store::sync) (pull).
-#[derive(Debug)]
+/// Supports optional passphrase-encrypted identity with in-memory caching.
 pub struct Store {
     config: Config,
+    /// Cached decrypted identity (populated after unlock).
+    cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
+}
+
+impl std::fmt::Debug for Store {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Store")
+            .field("config", &self.config)
+            .field(
+                "cached_identity",
+                &self.cached_identity.read().ok().map(|g| g.is_some()),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl Store {
@@ -40,6 +59,7 @@ impl Store {
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
             config: Config::new(config_dir),
+            cached_identity: RwLock::new(None),
         }
     }
 
@@ -50,12 +70,66 @@ impl Store {
     }
 
     /// Check if the repo has been cloned (identity may not be saved yet).
-    ///
-    /// Returns `true` when step 1 of setup (clone) is complete, even if
-    /// the age identity has not yet been provided.
     #[must_use]
     pub fn is_repo_ready(&self) -> bool {
         self.config.repo_config_exists()
+    }
+
+    /// Check if the stored identity is passphrase-encrypted.
+    #[must_use]
+    pub fn is_identity_encrypted(&self) -> bool {
+        self.config.is_identity_encrypted()
+    }
+
+    /// Check if the identity cache is populated (identity is unlocked).
+    #[must_use]
+    pub fn is_unlocked(&self) -> bool {
+        self.cached_identity
+            .read()
+            .is_ok_and(|guard| guard.is_some())
+    }
+
+    /// Unlock a passphrase-encrypted identity by decrypting and caching it.
+    ///
+    /// Calling `unlock()` when already unlocked is idempotent (re-decrypts
+    /// and overwrites the cache).
+    ///
+    /// # Errors
+    ///
+    /// Returns `IdentityNotEncrypted` if the identity is not encrypted.
+    /// Returns `WrongPassphrase` if the passphrase is incorrect.
+    /// Returns `NoIdentity` if no identity is configured.
+    pub fn unlock(&self, passphrase: &str) -> Result<(), Error> {
+        let encrypted_bytes = self.config.load_identity()?;
+
+        if classify_identity(&encrypted_bytes) != IdentityType::AgeEncrypted {
+            return Err(Error::new(
+                ErrorCode::IdentityNotEncrypted,
+                "Identity is not passphrase-encrypted",
+            ));
+        }
+
+        let decrypted = crypto::decrypt_identity(passphrase, &encrypted_bytes)?;
+        let zeroizing = Zeroizing::new(decrypted);
+
+        {
+            let mut cache = self
+                .cached_identity
+                .write()
+                .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
+            *cache = Some(zeroizing);
+        }
+
+        Ok(())
+    }
+
+    /// Lock the store: zeroize the cached identity.
+    ///
+    /// Idempotent — safe to call when already locked.
+    pub fn lock(&self) {
+        if let Ok(mut cache) = self.cached_identity.write() {
+            *cache = None;
+        }
     }
 
     /// Step 1 of two-step setup: clone the repository and save repo config.
@@ -74,7 +148,6 @@ impl Store {
         ssh_key: Option<&str>,
         ssh_passphrase: Option<&str>,
     ) -> Result<(), Error> {
-        // Build auth from provided credentials
         let auth = match (ssh_key, pat) {
             (Some(key), _) => git::GitAuth::Ssh {
                 username: "git".to_string(),
@@ -85,21 +158,15 @@ impl Store {
             _ => git::GitAuth::None,
         };
 
-        // Determine local repo path
         let repo_dir = self.config.config_dir().join("repo");
-
-        // Clear any existing configuration
         self.config.clear_all()?;
 
-        // Remove existing repo directory if present
         if repo_dir.exists() {
             std::fs::remove_dir_all(&repo_dir)?;
         }
 
-        // Clone the repo
         git::clone_repo(repo_url, &repo_dir, &auth)?;
 
-        // Save repo config (without identity)
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
             .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)?;
@@ -108,8 +175,6 @@ impl Store {
     }
 
     /// Read recipients from the cloned repository.
-    ///
-    /// Returns an empty list if no recipients file exists.
     ///
     /// # Errors
     ///
@@ -123,17 +188,13 @@ impl Store {
 
     /// Step 2 of two-step setup: save the age identity.
     ///
-    /// Validates that the identity format is correct and that its derived
-    /// public key matches one of the recipients in the cloned repository.
-    /// If no recipients file exists, the identity is accepted without
-    /// recipient validation (e.g., for empty repos).
+    /// If `passphrase` is provided, the identity is encrypted before storage.
     ///
     /// # Errors
     ///
     /// Returns an error if the identity format is invalid, the identity does
     /// not match any recipient, or the config cannot be persisted.
-    pub fn save_identity(&self, identity: &str) -> Result<(), Error> {
-        // Validate identity format (x25519 or SSH private key)
+    pub fn save_identity(&self, identity: &str, passphrase: Option<&str>) -> Result<(), Error> {
         let identity_bytes = identity.trim().as_bytes();
         let trimmed = identity.trim();
         if !trimmed.starts_with("AGE-SECRET-KEY-")
@@ -146,10 +207,8 @@ impl Store {
             ));
         }
 
-        // Derive the public key from the identity
         let derived_recipient = recipient::identity_to_recipient(identity)?;
 
-        // Validate against known recipients (if any)
         let known_recipients = self.list_recipients().unwrap_or_default();
         if !known_recipients.is_empty() {
             let matches = known_recipients
@@ -163,16 +222,11 @@ impl Store {
             }
         }
 
-        // Save identity
-        self.config.save_identity(identity_bytes)?;
-
+        self.config.save_identity(identity_bytes, passphrase)?;
         Ok(())
     }
 
     /// Configure the store: validate identity, clone repo, save config.
-    ///
-    /// This is the setup/init operation. It clears any existing configuration
-    /// before applying the new one.
     ///
     /// # Errors
     ///
@@ -186,7 +240,6 @@ impl Store {
         ssh_passphrase: Option<&str>,
         identity: &str,
     ) -> Result<(), Error> {
-        // Validate identity format (x25519 or SSH private key)
         let identity_bytes = identity.trim().as_bytes();
         let trimmed = identity.trim();
         if !trimmed.starts_with("AGE-SECRET-KEY-")
@@ -199,7 +252,6 @@ impl Store {
             ));
         }
 
-        // Build auth from provided credentials
         let auth = match (ssh_key, pat) {
             (Some(key), _) => git::GitAuth::Ssh {
                 username: "git".to_string(),
@@ -210,24 +262,17 @@ impl Store {
             _ => git::GitAuth::None,
         };
 
-        // Determine local repo path
         let repo_dir = self.config.config_dir().join("repo");
-
-        // Clear any existing configuration
         self.config.clear_all()?;
 
-        // Remove existing repo directory if present
         if repo_dir.exists() {
             std::fs::remove_dir_all(&repo_dir)?;
         }
 
-        // Save identity first (before clone, so decrypt can work)
-        self.config.save_identity(identity_bytes)?;
+        self.config.save_identity(identity_bytes, None)?;
 
-        // Clone the repo
         git::clone_repo(repo_url, &repo_dir, &auth)?;
 
-        // Save repo config
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
             .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)?;
@@ -236,8 +281,6 @@ impl Store {
     }
 
     /// List all `.age` entries in the configured repository.
-    ///
-    /// Aligned with `gopass.Store.List`.
     ///
     /// # Errors
     ///
@@ -251,18 +294,17 @@ impl Store {
 
     /// Decrypt and return a secret by entry name.
     ///
-    /// The entry name is the display name without `.age` extension
-    /// (e.g., `"cloud/aws/root"`). Aligned with `gopass.Store.Get`.
+    /// If the identity is encrypted, uses the cached (unlocked) identity.
+    /// If the identity is plaintext, loads directly from disk.
     ///
     /// # Errors
     ///
     /// Returns an error if the entry does not exist, the identity is missing,
-    /// or decryption fails.
+    /// the identity is encrypted but not unlocked, or decryption fails.
     pub fn get(&self, name: &str) -> Result<Secret, Error> {
         let repo_config = self.config.load_repo_config()?;
         let repo_path = Path::new(&repo_config.local_path);
 
-        // Resolve entry name to file path (append .age extension if needed)
         let entry_path = if Path::new(name)
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
@@ -273,23 +315,103 @@ impl Store {
         };
 
         let file_path = resolve_entry_path(repo_path, &entry_path)?;
-
-        // Load identity (caller must zeroize)
-        let mut identity_bytes = self.config.load_identity()?;
-
-        // Decrypt
+        let identity_bytes = self.get_identity_bytes()?;
         let decrypted = crypto::decrypt_file(&file_path, &identity_bytes)?;
-
-        // Zeroize identity immediately after decryption
-        identity_bytes.zeroize();
-
-        // Parse into Secret
         Secret::parse(&decrypted)
     }
 
-    /// Pull latest changes from the remote (fast-forward only).
+    /// Get identity bytes for decryption.
     ///
-    /// Aligned with `gopass.Store.Sync` (pull-only).
+    /// Checks cache first (for encrypted identities that have been unlocked),
+    /// then falls back to loading from disk (for plaintext identities).
+    fn get_identity_bytes(&self) -> Result<Vec<u8>, Error> {
+        // Check cache first
+        if let Ok(cache) = self.cached_identity.read() {
+            if let Some(ref cached) = *cache {
+                return Ok((**cached).clone());
+            }
+        }
+
+        // Load from disk
+        let raw_bytes = self.config.load_identity()?;
+
+        if classify_identity(&raw_bytes) == IdentityType::AgeEncrypted {
+            return Err(Error::new(
+                ErrorCode::IdentityEncrypted,
+                "Identity is encrypted — unlock with passphrase first",
+            ));
+        }
+
+        Ok(raw_bytes)
+    }
+
+    /// Set a passphrase on an existing plaintext identity.
+    ///
+    /// Encrypts the current identity file in place. Rejects empty passphrase.
+    ///
+    /// # Errors
+    ///
+    /// Returns `IdentityNotEncrypted` if passphrase is empty.
+    /// Returns `IdentityEncrypted` if identity is already encrypted.
+    pub fn set_passphrase(&self, passphrase: &str) -> Result<(), Error> {
+        if passphrase.is_empty() {
+            return Err(Error::new(
+                ErrorCode::IdentityNotEncrypted,
+                "Passphrase must not be empty",
+            ));
+        }
+
+        let raw_bytes = self.config.load_identity()?;
+
+        if classify_identity(&raw_bytes) == IdentityType::AgeEncrypted {
+            return Err(Error::new(
+                ErrorCode::IdentityEncrypted,
+                "Identity is already encrypted — use change_passphrase instead",
+            ));
+        }
+
+        self.config.save_identity(&raw_bytes, Some(passphrase))?;
+        Ok(())
+    }
+
+    /// Change the passphrase on an encrypted identity.
+    ///
+    /// Decrypts with the old passphrase, re-encrypts with the new one.
+    /// Both old and new must be non-empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns `IdentityNotEncrypted` if either passphrase is empty or identity is not encrypted.
+    /// Returns `WrongPassphrase` if old passphrase is incorrect.
+    pub fn change_passphrase(
+        &self,
+        old_passphrase: &str,
+        new_passphrase: &str,
+    ) -> Result<(), Error> {
+        if old_passphrase.is_empty() || new_passphrase.is_empty() {
+            return Err(Error::new(
+                ErrorCode::IdentityNotEncrypted,
+                "Passphrase must not be empty",
+            ));
+        }
+
+        let encrypted_bytes = self.config.load_identity()?;
+
+        if classify_identity(&encrypted_bytes) != IdentityType::AgeEncrypted {
+            return Err(Error::new(
+                ErrorCode::IdentityNotEncrypted,
+                "Identity is not encrypted — use set_passphrase instead",
+            ));
+        }
+
+        let plaintext = crypto::decrypt_identity(old_passphrase, &encrypted_bytes)?;
+        self.config
+            .save_identity(&plaintext, Some(new_passphrase))?;
+        self.lock();
+        Ok(())
+    }
+
+    /// Pull latest changes from the remote (fast-forward only).
     ///
     /// # Errors
     ///
@@ -302,13 +424,14 @@ impl Store {
         git::pull_repo(repo_path, &auth)
     }
 
-    /// Reset all configuration and local data.
+    /// Reset all configuration and local data. Clears the identity cache.
     ///
     /// # Errors
     ///
     /// Returns an error if the files cannot be removed.
     pub fn reset(&self) -> Result<(), Error> {
-        // Remove local repo if it exists
+        self.lock();
+
         if let Ok(repo_config) = self.config.load_repo_config() {
             let repo_path = Path::new(&repo_config.local_path);
             if repo_path.exists() {
@@ -316,6 +439,12 @@ impl Store {
             }
         }
         self.config.clear_all()
+    }
+
+    /// Get the config directory path (for timer recreation of Store).
+    #[must_use]
+    pub fn config_dir(&self) -> PathBuf {
+        self.config.config_dir().to_path_buf()
     }
 
     /// Get the current repository configuration.
@@ -358,10 +487,7 @@ pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, Error> {
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
             })
         })
-        .filter(|e| {
-            // Skip anything inside .git directory
-            !e.path().components().any(|c| c.as_os_str() == ".git")
-        })
+        .filter(|e| !e.path().components().any(|c| c.as_os_str() == ".git"))
         .filter_map(|e| {
             let rel = e.path().strip_prefix(repo_path).ok()?;
             let rel_str = rel.to_str()?.to_string();
@@ -393,7 +519,6 @@ pub fn resolve_entry_path(repo_path: &Path, entry_path: &str) -> Result<PathBuf,
         ));
     }
 
-    // Ensure the resolved path is still within the repo (path traversal guard)
     let canonical_repo = repo_path.canonicalize()?;
     let canonical_entry = full_path.canonicalize()?;
     if !canonical_entry.starts_with(&canonical_repo) {
@@ -411,10 +536,6 @@ mod tests {
     use super::*;
     use std::fs;
 
-    // -----------------------------------------------------------------------
-    // resolve_entry_path tests
-    // -----------------------------------------------------------------------
-
     #[test]
     fn resolve_entry_path_valid_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -423,37 +544,32 @@ mod tests {
         fs::write(file_path.join("aws.age"), b"encrypted").unwrap();
 
         let result = resolve_entry_path(dir.path(), "cloud/aws.age");
-        assert!(result.is_ok(), "expected Ok for valid file, got Err");
-        let resolved = result.unwrap();
-        assert_eq!(resolved, dir.path().join("cloud/aws.age"));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), dir.path().join("cloud/aws.age"));
     }
 
     #[test]
     fn resolve_entry_path_missing_file() {
         let dir = tempfile::tempdir().unwrap();
-
         let result = resolve_entry_path(dir.path(), "nonexistent.age");
-        assert!(result.is_err(), "expected Err for missing file, got Ok");
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENTRY_NOT_FOUND");
     }
 
     #[test]
     fn resolve_entry_path_traversal_dotdot() {
         let dir = tempfile::tempdir().unwrap();
         let result = resolve_entry_path(dir.path(), "../../../etc/passwd");
-        assert!(result.is_err(), "expected Err for traversal, got Ok");
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENTRY_NOT_FOUND");
     }
 
     #[test]
     fn resolve_entry_path_traversal_deep() {
         let dir = tempfile::tempdir().unwrap();
         let result = resolve_entry_path(dir.path(), "foo/../../bar/../../../etc");
-        assert!(result.is_err(), "expected Err for deep traversal, got Ok");
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENTRY_NOT_FOUND");
     }
 
     #[test]
@@ -470,28 +586,105 @@ mod tests {
         symlink(&external_file, &link_path).unwrap();
 
         let result = resolve_entry_path(repo_dir.path(), "escape.age");
-        assert!(result.is_err(), "expected Err for symlink escape, got Ok");
+        assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code, "ENTRY_NOT_FOUND");
-        assert!(
-            err.message.contains("outside repository"),
-            "expected 'outside repository' in error message, got: {}",
-            err.message,
-        );
+        assert!(err.message.contains("outside repository"));
     }
-
-    // -----------------------------------------------------------------------
-    // list_entries tests
-    // -----------------------------------------------------------------------
 
     #[test]
     fn list_entries_nonexistent_dir() {
         let missing = PathBuf::from("/tmp/gpm_no_such_dir_12345");
-        assert!(!missing.exists(), "test precondition violated: path exists");
-
+        assert!(!missing.exists());
         let result = list_entries(&missing);
-        assert!(result.is_err(), "expected Err for missing dir, got Ok");
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "NO_REPO");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "NO_REPO");
+    }
+
+    // ── unlock/lock tests ──────────────────────────────────────────────
+
+    #[test]
+    fn lock_clears_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf());
+        assert!(!store.is_unlocked());
+        store.lock();
+        assert!(!store.is_unlocked());
+    }
+
+    #[test]
+    fn unlock_requires_encrypted_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(b"AGE-SECRET-KEY-1TEST", None).unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        let err = store.unlock("passphrase").unwrap_err();
+        assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
+    }
+
+    #[test]
+    fn is_identity_encrypted_false_for_plaintext() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(b"AGE-SECRET-KEY-1TEST", None).unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        assert!(!store.is_identity_encrypted());
+    }
+
+    #[test]
+    fn is_identity_encrypted_true_after_encrypted_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", Some("pass123"))
+            .unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        assert!(store.is_identity_encrypted());
+    }
+
+    #[test]
+    fn set_passphrase_rejects_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(b"AGE-SECRET-KEY-1TEST", None).unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        let err = store.set_passphrase("").unwrap_err();
+        assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
+    }
+
+    #[test]
+    fn set_passphrase_rejects_already_encrypted() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", Some("old"))
+            .unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        let err = store.set_passphrase("new").unwrap_err();
+        assert_eq!(err.code, "IDENTITY_ENCRYPTED");
+    }
+
+    #[test]
+    fn change_passphrase_rejects_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", Some("old"))
+            .unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        assert_eq!(
+            store.change_passphrase("", "new").unwrap_err().code,
+            "IDENTITY_NOT_ENCRYPTED"
+        );
+        assert_eq!(
+            store.change_passphrase("old", "").unwrap_err().code,
+            "IDENTITY_NOT_ENCRYPTED"
+        );
     }
 }

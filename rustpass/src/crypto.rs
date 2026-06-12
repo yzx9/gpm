@@ -2,9 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 
+use age::secrecy::SecretString;
 use age::Decryptor;
 
 use crate::error::{Error, ErrorCode};
@@ -122,6 +123,133 @@ pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>,
             return Err(Error::new(
                 ErrorCode::DecryptFailed,
                 "Decryption failed — wrong identity or corrupted data",
+            ));
+        }
+    }
+
+    Ok(output)
+}
+
+/// Encrypt identity bytes with a passphrase using age scrypt, producing armored output.
+///
+/// Returns an ASCII-armored age encrypted blob (`-----BEGIN AGE ENCRYPTED FILE-----`).
+/// This format is interoperable with `age -d -i key.age` on the command line.
+///
+/// # Errors
+///
+/// Returns `IdentityNotEncrypted` if the passphrase is empty.
+/// Returns `DecryptFailed` if encryption fails for any other reason.
+pub fn encrypt_identity(passphrase: &str, identity: &[u8]) -> Result<Vec<u8>, Error> {
+    if passphrase.is_empty() {
+        return Err(Error::new(
+            ErrorCode::IdentityNotEncrypted,
+            "Passphrase must not be empty",
+        ));
+    }
+
+    let secret: SecretString = passphrase.to_string().into();
+    let encryptor = age::Encryptor::with_user_passphrase(secret);
+
+    let mut encrypted = Vec::new();
+    let armored =
+        age::armor::ArmoredWriter::wrap_output(&mut encrypted, age::armor::Format::AsciiArmor)
+            .map_err(|err| {
+                Error::new(
+                    ErrorCode::DecryptFailed,
+                    format!("Armor setup failed: {err}"),
+                )
+            })?;
+
+    let mut writer = encryptor.wrap_output(armored).map_err(|err| {
+        Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Encryption failed: {err}"),
+        )
+    })?;
+
+    writer.write_all(identity).map_err(|err| {
+        Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Encryption write failed: {err}"),
+        )
+    })?;
+
+    let armored = writer.finish().map_err(|err| {
+        Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Encryption finish failed: {err}"),
+        )
+    })?;
+
+    armored.finish().map_err(|err| {
+        Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Armor finish failed: {err}"),
+        )
+    })?;
+
+    Ok(encrypted)
+}
+
+/// Decrypt an age-encrypted identity using a passphrase.
+///
+/// Accepts both armored (`-----BEGIN AGE ENCRYPTED FILE-----`) and binary
+/// age encrypted data. Returns the raw plaintext identity bytes.
+///
+/// # Errors
+///
+/// Returns `IdentityNotEncrypted` if the passphrase is empty.
+/// Returns `WrongPassphrase` if the passphrase is incorrect.
+/// Returns `DecryptFailed` if the encrypted data is corrupted or cannot be parsed.
+pub fn decrypt_identity(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, Error> {
+    if passphrase.is_empty() {
+        return Err(Error::new(
+            ErrorCode::IdentityNotEncrypted,
+            "Passphrase must not be empty",
+        ));
+    }
+
+    // Detect armored format and dearmor if needed
+    let encrypted_data = if encrypted.starts_with(b"-----BEGIN AGE ENCRYPTED FILE-----") {
+        let reader = age::armor::ArmoredReader::new(encrypted);
+        let mut buf = Vec::new();
+        let mut dearmored = reader;
+        dearmored.read_to_end(&mut buf).map_err(|err| {
+            Error::new(
+                ErrorCode::DecryptFailed,
+                format!("Failed to dearmor: {err}"),
+            )
+        })?;
+        buf
+    } else {
+        encrypted.to_vec()
+    };
+
+    let secret: SecretString = passphrase.to_string().into();
+    let scrypt_identity = age::scrypt::Identity::new(secret);
+
+    let Ok(decryptor) = Decryptor::new(encrypted_data.as_slice()) else {
+        return Err(Error::new(
+            ErrorCode::DecryptFailed,
+            "Failed to parse encrypted identity data",
+        ));
+    };
+
+    let mut output = Vec::new();
+    let identities: Vec<Box<dyn age::Identity>> = vec![Box::new(scrypt_identity)];
+    match decryptor.decrypt(identities.iter().map(AsRef::as_ref)) {
+        Ok(mut reader) => {
+            if reader.read_to_end(&mut output).is_err() {
+                return Err(Error::new(
+                    ErrorCode::WrongPassphrase,
+                    "Wrong passphrase or corrupted identity data",
+                ));
+            }
+        }
+        Err(_) => {
+            return Err(Error::new(
+                ErrorCode::WrongPassphrase,
+                "Wrong passphrase or corrupted identity data",
             ));
         }
     }
@@ -269,6 +397,52 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
         // Use a different (wrong) SSH key to try to decrypt
         let (wrong_identity, _) = generate_keypair();
         let err = decrypt_bytes(&ciphertext, wrong_identity.as_bytes()).unwrap_err();
+        assert_eq!(err.code, "DECRYPT_FAILED");
+    }
+
+    // ── Identity encryption tests ─────────────────────────────────────────
+
+    #[test]
+    fn encrypt_decrypt_identity_roundtrip() {
+        let (identity, _recipient) = generate_keypair();
+        let passphrase = "correct-horse-battery-staple";
+
+        let encrypted = encrypt_identity(passphrase, identity.as_bytes()).unwrap();
+        assert!(
+            encrypted.starts_with(b"-----BEGIN AGE ENCRYPTED FILE-----"),
+            "encrypted output should be armored"
+        );
+
+        let decrypted = decrypt_identity(passphrase, &encrypted).unwrap();
+        assert_eq!(decrypted, identity.as_bytes());
+    }
+
+    #[test]
+    fn encrypt_identity_rejects_empty_passphrase() {
+        let (identity, _recipient) = generate_keypair();
+        let err = encrypt_identity("", identity.as_bytes()).unwrap_err();
+        assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
+    }
+
+    #[test]
+    fn decrypt_identity_rejects_empty_passphrase() {
+        let encrypted = b"some encrypted data";
+        let err = decrypt_identity("", encrypted).unwrap_err();
+        assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
+    }
+
+    #[test]
+    fn decrypt_identity_wrong_passphrase() {
+        let (identity, _recipient) = generate_keypair();
+        let encrypted = encrypt_identity("correct-passphrase", identity.as_bytes()).unwrap();
+
+        let err = decrypt_identity("wrong-passphrase", &encrypted).unwrap_err();
+        assert_eq!(err.code, "WRONG_PASSPHRASE");
+    }
+
+    #[test]
+    fn decrypt_identity_corrupted_data() {
+        let err = decrypt_identity("some-passphrase", b"not-valid-encrypted-data").unwrap_err();
         assert_eq!(err.code, "DECRYPT_FAILED");
     }
 }

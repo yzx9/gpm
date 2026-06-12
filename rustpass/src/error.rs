@@ -32,6 +32,12 @@ pub enum ErrorCode {
     StoreError,
     /// SSH key was invalid or could not be parsed.
     SshKeyInvalid,
+    /// Identity file is passphrase-encrypted and requires unlock.
+    IdentityEncrypted,
+    /// Provided passphrase does not match the encrypted identity.
+    WrongPassphrase,
+    /// Operation requires an encrypted identity, or empty passphrase was rejected.
+    IdentityNotEncrypted,
 }
 
 /// Safe error type that never contains secret content.
@@ -60,6 +66,9 @@ impl Error {
                 ErrorCode::ConfigError => "CONFIG_ERROR",
                 ErrorCode::StoreError => "STORE_ERROR",
                 ErrorCode::SshKeyInvalid => "SSH_KEY_INVALID",
+                ErrorCode::IdentityEncrypted => "IDENTITY_ENCRYPTED",
+                ErrorCode::WrongPassphrase => "WRONG_PASSPHRASE",
+                ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
             }
             .to_string(),
             message: message.into(),
@@ -137,6 +146,9 @@ mod tests {
             ErrorCode::ConfigError => "CONFIG_ERROR",
             ErrorCode::StoreError => "STORE_ERROR",
             ErrorCode::SshKeyInvalid => "SSH_KEY_INVALID",
+            ErrorCode::IdentityEncrypted => "IDENTITY_ENCRYPTED",
+            ErrorCode::WrongPassphrase => "WRONG_PASSPHRASE",
+            ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
         }
     }
 
@@ -155,6 +167,9 @@ mod tests {
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
             ErrorCode::SshKeyInvalid,
+            ErrorCode::IdentityEncrypted,
+            ErrorCode::WrongPassphrase,
+            ErrorCode::IdentityNotEncrypted,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -181,6 +196,9 @@ mod tests {
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
             ErrorCode::SshKeyInvalid,
+            ErrorCode::IdentityEncrypted,
+            ErrorCode::WrongPassphrase,
+            ErrorCode::IdentityNotEncrypted,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");

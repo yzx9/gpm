@@ -66,17 +66,28 @@ describe("SettingsPage", () => {
     vi.restoreAllMocks();
   });
 
+  const authState = {
+    configured: true,
+    encrypted: false,
+    unlocked: false,
+  };
+
   function mountPage() {
     return mount(SettingsPage);
   }
 
   describe("config loading", () => {
     it("calls get_config on mount", async () => {
-      vi.mocked(invoke).mockResolvedValue(sshConfig);
+      vi.mocked(invoke).mockResolvedValueOnce(sshConfig).mockResolvedValueOnce({
+        configured: true,
+        encrypted: false,
+        unlocked: false,
+      });
       mountPage();
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("get_config");
+      expect(invoke).toHaveBeenCalledWith("get_auth_state");
     });
 
     it("displays repo URL from config", async () => {
@@ -156,6 +167,7 @@ describe("SettingsPage", () => {
     it("shows public key when Show Public Key is clicked", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig) // get_config
+        .mockResolvedValueOnce(authState) // get_auth_state
         .mockResolvedValueOnce({
           public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItest",
         }); // get_ssh_public_key
@@ -178,10 +190,13 @@ describe("SettingsPage", () => {
     });
 
     it("shows error when get_ssh_public_key fails", async () => {
-      vi.mocked(invoke).mockResolvedValueOnce(sshConfig).mockRejectedValueOnce({
-        code: "SSH_KEY_INVALID",
-        message: "No SSH key configured",
-      });
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(sshConfig)
+        .mockResolvedValueOnce(authState)
+        .mockRejectedValueOnce({
+          code: "SSH_KEY_INVALID",
+          message: "No SSH key configured",
+        });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -219,6 +234,7 @@ describe("SettingsPage", () => {
     it("shows private key when export is confirmed", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig) // get_config
+        .mockResolvedValueOnce(authState) // get_auth_state
         .mockResolvedValueOnce({
           private_key:
             "-----BEGIN OPENSSH PRIVATE KEY-----\nexported\n-----END OPENSSH PRIVATE KEY-----",
@@ -239,10 +255,13 @@ describe("SettingsPage", () => {
     });
 
     it("shows error when export_ssh_private_key fails", async () => {
-      vi.mocked(invoke).mockResolvedValueOnce(sshConfig).mockRejectedValueOnce({
-        code: "SSH_KEY_INVALID",
-        message: "Invalid key",
-      });
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(sshConfig)
+        .mockResolvedValueOnce(authState)
+        .mockRejectedValueOnce({
+          code: "SSH_KEY_INVALID",
+          message: "Invalid key",
+        });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
@@ -257,9 +276,12 @@ describe("SettingsPage", () => {
     });
 
     it("hides private key when Hide button is clicked", async () => {
-      vi.mocked(invoke).mockResolvedValueOnce(sshConfig).mockResolvedValueOnce({
-        private_key: "secret-key-data",
-      });
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(sshConfig)
+        .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce({
+          private_key: "secret-key-data",
+        });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
@@ -285,9 +307,12 @@ describe("SettingsPage", () => {
     });
 
     it("copies public key to clipboard", async () => {
-      vi.mocked(invoke).mockResolvedValueOnce(sshConfig).mockResolvedValueOnce({
-        public_key: "ssh-ed25519 AAAAtest",
-      });
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(sshConfig)
+        .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce({
+          public_key: "ssh-ed25519 AAAAtest",
+        });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -310,9 +335,12 @@ describe("SettingsPage", () => {
     });
 
     it("auto-clears toast after 3 seconds", async () => {
-      vi.mocked(invoke).mockResolvedValueOnce(sshConfig).mockResolvedValueOnce({
-        public_key: "ssh-ed25519 AAAAtest",
-      });
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(sshConfig)
+        .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce({
+          public_key: "ssh-ed25519 AAAAtest",
+        });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -340,6 +368,7 @@ describe("SettingsPage", () => {
     it("calls reset_config and navigates when confirmed", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(httpsConfig) // get_config
+        .mockResolvedValueOnce(authState) // get_auth_state
         .mockResolvedValueOnce(undefined); // reset_config
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
@@ -378,6 +407,7 @@ describe("SettingsPage", () => {
     it("shows error when reset fails", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(httpsConfig)
+        .mockResolvedValueOnce(authState)
         .mockRejectedValueOnce({ code: "Err", message: "Reset failed" });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();

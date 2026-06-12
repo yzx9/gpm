@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional passphrase to encrypt identity at rest (setup wizard or settings)
+- Unlock screen when identity is passphrase-encrypted
+- Auto-lock after 5 minutes of inactivity
+- Passphrase management in settings: set, change, or remove
+- SSH key authentication for Git operations (`git@host:repo` and `ssh://` URLs)
+
+## [v0.2.0] - 2026-06-10
 
 ### Added
 
-- SSH key authentication for Git operations (`git@host:repo` and `ssh://` URLs)
 - On-device ed25519 SSH key generation with optional passphrase
 - Settings page with public key display and private key export
 - Two-step setup wizard: clone repo first, then select a recipient and provide matching age identity

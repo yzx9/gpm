@@ -56,3 +56,10 @@ export interface RecipientInfo {
   comment: string | null;
   key_type: "x25519" | "ssh_ed25519" | "ssh_rsa";
 }
+
+/** Auth state snapshot from get_auth_state command. */
+export interface AuthState {
+  configured: boolean;
+  encrypted: boolean;
+  unlocked: boolean;
+}
