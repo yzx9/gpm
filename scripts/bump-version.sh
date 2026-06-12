@@ -61,7 +61,7 @@ cd "$ROOT" && pnpm version --no-git-checks --no-git-tag-version "$NEW_VERSION"
 
 # 5. CHANGELOG.md — insert new version header after [Unreleased]
 "${_sed_i[@]}" "/^## \[Unreleased\]$/a\\
-
+\\
 ## [v$NEW_VERSION] - $DATE
 " "$ROOT/CHANGELOG.md"
 
