@@ -14,7 +14,7 @@
 //! use std::path::PathBuf;
 //!
 //! let store = Store::new(PathBuf::from("/path/to/config"));
-//! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...")?;
+//! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...", None)?;
 //!
 //! for entry in store.list()? {
 //!     println!("{}", entry.name);
@@ -65,6 +65,6 @@ pub mod store;
 pub use config::{Config, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
-pub use recipient::{KeyType, Recipient};
+pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use secret::Secret;
 pub use store::{Store, SyncResult};

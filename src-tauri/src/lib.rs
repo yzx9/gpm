@@ -19,7 +19,7 @@
     clippy::pedantic
 )]
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rustpass::error::ErrorCode;
@@ -82,10 +82,17 @@ struct RecipientInfo {
 struct AuthState {
     /// True if both identity and repo config exist.
     configured: bool,
-    /// True if the stored identity is passphrase-encrypted.
+    /// True if the stored identity requires a passphrase (age-encrypted or encrypted SSH).
     encrypted: bool,
     /// True if the identity cache is populated (passphrase provided).
     unlocked: bool,
+}
+
+/// Returned by `validate_identity` — identity type and encryption status.
+#[derive(Debug, Clone, Serialize)]
+struct IdentityInfoResult {
+    key_type: String,
+    encrypted: bool,
 }
 
 impl From<Recipient> for RecipientInfo {
@@ -108,7 +115,7 @@ impl From<Recipient> for RecipientInfo {
 
 /// Application state shared across all Tauri commands.
 struct AppState {
-    store: Store,
+    store: Arc<Store>,
     /// Auto-lock timer handle (cancel-and-respawn pattern).
     lock_timer: Mutex<Option<JoinHandle<()>>>,
 }
@@ -168,6 +175,21 @@ fn list_recipients(state: tauri::State<'_, AppState>) -> Result<Vec<RecipientInf
     Ok(recipients.into_iter().map(RecipientInfo::from).collect())
 }
 
+/// Validate an identity and return its type and encryption status.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn validate_identity(identity: String) -> Result<IdentityInfoResult, Error> {
+    let info = rustpass::recipient::validate_identity(&identity)?;
+    Ok(IdentityInfoResult {
+        key_type: match info.key_type {
+            KeyType::X25519 => "x25519".to_string(),
+            KeyType::SshEd25519 => "ssh_ed25519".to_string(),
+            KeyType::SshRsa => "ssh_rsa".to_string(),
+        },
+        encrypted: info.encrypted,
+    })
+}
+
 /// Step 2 of setup: save the age identity and complete configuration.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -175,8 +197,11 @@ fn complete_setup(
     state: tauri::State<'_, AppState>,
     identity: String,
     passphrase: Option<String>,
+    ssh_passphrase: Option<String>, // TODO: why there are passphrase and passphrase for ssh? can we unify them?
 ) -> Result<(), Error> {
-    state.store.save_identity(&identity, passphrase.as_deref())
+    state
+        .store
+        .save_identity(&identity, passphrase.as_deref(), ssh_passphrase.as_deref())
 }
 
 /// Full setup: validate identity, clone repo, save config.
@@ -189,6 +214,7 @@ fn setup(
     ssh_key: Option<String>,
     ssh_passphrase: Option<String>,
     identity: String,
+    identity_passphrase: Option<String>,
 ) -> Result<(), Error> {
     state.store.configure(
         &repo_url,
@@ -196,6 +222,7 @@ fn setup(
         ssh_key.as_deref(),
         ssh_passphrase.as_deref(),
         &identity,
+        identity_passphrase.as_deref(),
     )
 }
 
@@ -207,15 +234,12 @@ async fn unlock(
     app: tauri::AppHandle,
     passphrase: String,
 ) -> Result<(), Error> {
-    // Run scrypt decryption on blocking thread
-    let store_dir = state.store.config_dir();
+    // Run scrypt decryption on blocking thread using the real store
+    let store = state.store.clone();
     let pw = passphrase;
-    let result = tokio::task::spawn_blocking(move || {
-        let s = Store::new(store_dir);
-        s.unlock(&pw)
-    })
-    .await
-    .map_err(|e| Error::new(ErrorCode::StoreError, format!("Unlock task failed: {e}")))?;
+    let result = tokio::task::spawn_blocking(move || store.unlock(&pw))
+        .await
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Unlock task failed: {e}")))?;
 
     result?;
 
@@ -399,7 +423,7 @@ fn reset_lock_timer(state: &tauri::State<'_, AppState>, app: &tauri::AppHandle) 
 
     // Spawn new timer
     let app_handle = app.clone();
-    let config_dir = state.store.config_dir();
+    let store = state.store.clone();
 
     let handle = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(
@@ -407,8 +431,7 @@ fn reset_lock_timer(state: &tauri::State<'_, AppState>, app: &tauri::AppHandle) 
         ))
         .await;
 
-        // Lock the store
-        let store = Store::new(config_dir);
+        // Lock the real store (clears cached identity + passphrase)
         store.lock();
 
         // Emit lock event so frontend can redirect
@@ -439,7 +462,7 @@ pub fn run() {
                 .app_config_dir()
                 .expect("Cannot determine app config directory");
             app.manage(AppState {
-                store: Store::new(config_dir),
+                store: Arc::new(Store::new(config_dir)),
                 lock_timer: Mutex::new(None),
             });
             Ok(())
@@ -450,6 +473,7 @@ pub fn run() {
             is_repo_ready,
             clone_repo,
             list_recipients,
+            validate_identity,
             complete_setup,
             setup,
             unlock,

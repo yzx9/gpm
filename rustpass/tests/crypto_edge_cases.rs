@@ -14,7 +14,7 @@ mod tests {
         let (identity, recipient) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"", &recipient);
 
-        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes()).unwrap();
+        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes(), None).unwrap();
         assert!(
             result.is_empty(),
             "decrypted empty plaintext should be empty"
@@ -28,7 +28,7 @@ mod tests {
         let binary: Vec<u8> = (0..=255).collect();
         let encrypted = encrypt_to_recipient(&binary, &recipient);
 
-        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes()).unwrap();
+        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes(), None).unwrap();
         assert_eq!(result, binary, "binary content should round-trip exactly");
     }
 
@@ -38,7 +38,7 @@ mod tests {
         let (identity, recipient) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"\n\n\n", &recipient);
 
-        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes()).unwrap();
+        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes(), None).unwrap();
         assert_eq!(result, b"\n\n\n", "newline-only content should round-trip");
     }
 
@@ -49,7 +49,7 @@ mod tests {
         let (identity_b, _recipient_b) = generate_test_keypair();
 
         let encrypted = encrypt_to_recipient(b"secret for A", &recipient_a);
-        let result = crypto::decrypt_bytes(&encrypted, identity_b.as_bytes());
+        let result = crypto::decrypt_bytes(&encrypted, identity_b.as_bytes(), None);
         assert!(
             result.is_err(),
             "decrypting with wrong identity should fail"
@@ -64,7 +64,7 @@ mod tests {
 
         // Leading/trailing whitespace should cause parse failure
         let padded = format!("  {identity}  ");
-        let result = crypto::decrypt_bytes(&encrypted, padded.as_bytes());
+        let result = crypto::decrypt_bytes(&encrypted, padded.as_bytes(), None);
         // This may fail or succeed depending on age parser tolerance — verify behavior
         // The age library's from_buffer may trim or may not; either way it should be deterministic
         if let Ok(decrypted) = result {
@@ -80,7 +80,7 @@ mod tests {
         let large: Vec<u8> = (0..=255).cycle().take(20_000).collect();
         let encrypted = encrypt_to_recipient(&large, &recipient);
 
-        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes()).unwrap();
+        let result = crypto::decrypt_bytes(&encrypted, identity.as_bytes(), None).unwrap();
         assert_eq!(result, large, "large plaintext should round-trip exactly");
     }
 }

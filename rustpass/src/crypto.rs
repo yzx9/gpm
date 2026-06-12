@@ -19,7 +19,11 @@ use crate::error::{Error, ErrorCode};
 ///
 /// Returns an error if the file cannot be read, the identity format is invalid,
 /// or decryption fails.
-pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn decrypt_file(
+    file_path: &Path,
+    identity_bytes: &[u8],
+    passphrase: Option<&str>,
+) -> Result<Vec<u8>, Error> {
     let encrypted = std::fs::read(file_path).map_err(|e| {
         Error::new(
             ErrorCode::IoError,
@@ -27,20 +31,25 @@ pub fn decrypt_file(file_path: &Path, identity_bytes: &[u8]) -> Result<Vec<u8>, 
         )
     })?;
 
-    decrypt_bytes(&encrypted, identity_bytes)
+    decrypt_bytes(&encrypted, identity_bytes, passphrase)
 }
 
 /// Decrypt age-encrypted bytes using the given identity.
 ///
 /// Supports both native x25519 identities (`AGE-SECRET-KEY-...`) and SSH
-/// private keys (OpenSSH or PEM format). Encrypted SSH keys are rejected
-/// with an error.
+/// private keys (OpenSSH or PEM format). Encrypted SSH keys require a
+/// passphrase to be provided via the `passphrase` parameter.
 ///
 /// # Errors
 ///
 /// Returns an error if the identity format is invalid, contains no valid
-/// identities, the encrypted data cannot be parsed, or decryption fails.
-pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>, Error> {
+/// identities, the encrypted data cannot be parsed, decryption fails, or
+/// an encrypted SSH key is provided without a passphrase.
+pub fn decrypt_bytes(
+    encrypted: &[u8],
+    identity_bytes: &[u8],
+    passphrase: Option<&str>,
+) -> Result<Vec<u8>, Error> {
     let identity_str = std::str::from_utf8(identity_bytes)
         .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
     let trimmed = identity_str.trim();
@@ -64,20 +73,34 @@ pub fn decrypt_bytes(encrypted: &[u8], identity_bytes: &[u8]) -> Result<Vec<u8>,
     {
         // SSH path
         let buf = std::io::BufReader::new(trimmed.as_bytes());
-        let ssh_identity = age::ssh::Identity::from_buffer(buf, None).map_err(|e| {
-            Error::new(
-                ErrorCode::InvalidIdentity,
-                format!("Cannot parse SSH private key: {e}"),
-            )
-        })?;
+        let ssh_identity = age::ssh::Identity::from_buffer(buf, passphrase.map(String::from))
+            .map_err(|e| {
+                Error::new(
+                    ErrorCode::InvalidIdentity,
+                    format!("Cannot parse SSH private key: {e}"),
+                )
+            })?;
 
         match ssh_identity {
             age::ssh::Identity::Unencrypted(_) => vec![Box::new(ssh_identity)],
-            age::ssh::Identity::Encrypted(_) => {
-                return Err(Error::new(
-                    ErrorCode::InvalidIdentity,
-                    "Encrypted SSH keys are not yet supported as age identities",
-                ));
+            age::ssh::Identity::Encrypted(enc) => {
+                // age's Identity trait returns None for Encrypted variants.
+                // We must decrypt the SSH key ourselves, then use the UnencryptedKey.
+                let Some(pw) = passphrase else {
+                    return Err(Error::new(
+                        ErrorCode::IdentityEncrypted,
+                        "Encrypted SSH key requires a passphrase",
+                    ));
+                };
+                let passphrase_str: SecretString = pw.to_string().into();
+                let decrypted_key = enc.decrypt(passphrase_str).map_err(|e| {
+                    Error::new(
+                        ErrorCode::DecryptFailed,
+                        format!("Failed to decrypt SSH key: {e}"),
+                    )
+                })?;
+                let unencrypted = age::ssh::Identity::Unencrypted(decrypted_key);
+                vec![Box::new(unencrypted)]
             }
             age::ssh::Identity::Unsupported(u) => {
                 return Err(Error::new(
@@ -311,10 +334,10 @@ mod tests {
         let ciphertext = encrypt(plaintext, &recipient);
         std::fs::write(&file_path, &ciphertext).unwrap();
 
-        let result = decrypt_file(&file_path, identity.as_bytes()).unwrap();
+        let result = decrypt_file(&file_path, identity.as_bytes(), None).unwrap();
         assert_eq!(result, plaintext);
 
-        let bytes_result = decrypt_bytes(&ciphertext, identity.as_bytes()).unwrap();
+        let bytes_result = decrypt_bytes(&ciphertext, identity.as_bytes(), None).unwrap();
         assert_eq!(result, bytes_result);
     }
 
@@ -323,7 +346,7 @@ mod tests {
         let (identity, _recipient) = generate_keypair();
         let missing = std::path::PathBuf::from("/nonexistent/path/no-such-file.age");
 
-        let err = decrypt_file(&missing, identity.as_bytes()).unwrap_err();
+        let err = decrypt_file(&missing, identity.as_bytes(), None).unwrap_err();
         assert_eq!(
             err.code, "IO_ERROR",
             "expected IO_ERROR for missing file, got: {err}"
@@ -344,7 +367,7 @@ AAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz
         let plaintext = b"secret-password\nnotes: ssh encrypted";
         let ciphertext = encrypt_to_ssh(plaintext, pk);
 
-        let result = decrypt_bytes(&ciphertext, sk.as_bytes()).unwrap();
+        let result = decrypt_bytes(&ciphertext, sk.as_bytes(), None).unwrap();
         assert_eq!(result, plaintext);
     }
 
@@ -382,7 +405,7 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
         let plaintext = b"secret-password\nnotes: rsa encrypted";
         let ciphertext = encrypt_to_ssh(plaintext, pk);
 
-        let result = decrypt_bytes(&ciphertext, sk.as_bytes()).unwrap();
+        let result = decrypt_bytes(&ciphertext, sk.as_bytes(), None).unwrap();
         assert_eq!(result, plaintext);
     }
 
@@ -396,7 +419,7 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
 
         // Use a different (wrong) SSH key to try to decrypt
         let (wrong_identity, _) = generate_keypair();
-        let err = decrypt_bytes(&ciphertext, wrong_identity.as_bytes()).unwrap_err();
+        let err = decrypt_bytes(&ciphertext, wrong_identity.as_bytes(), None).unwrap_err();
         assert_eq!(err.code, "DECRYPT_FAILED");
     }
 
@@ -444,5 +467,49 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
     fn decrypt_identity_corrupted_data() {
         let err = decrypt_identity("some-passphrase", b"not-valid-encrypted-data").unwrap_err();
         assert_eq!(err.code, "DECRYPT_FAILED");
+    }
+
+    // ── Encrypted SSH key tests ──────────────────────────────────────────
+
+    #[test]
+    fn decrypt_bytes_with_encrypted_ssh_key_and_passphrase() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let pk = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08lcpk06Ast8Z7z7CjjvwJHMnKMjH7";
+
+        let plaintext = b"secret-password\nnotes: encrypted SSH key";
+        let ciphertext = encrypt_to_ssh(plaintext, pk);
+
+        let result = decrypt_bytes(&ciphertext, sk.as_bytes(), Some("test-passphrase")).unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn decrypt_bytes_encrypted_ssh_key_wrong_passphrase() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let pk = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08lcpk06Ast8Z7z7CjjvwJHMnKMjH7";
+
+        let plaintext = b"secret";
+        let ciphertext = encrypt_to_ssh(plaintext, pk);
+
+        let err = decrypt_bytes(&ciphertext, sk.as_bytes(), Some("wrong-passphrase")).unwrap_err();
+        assert_eq!(
+            err.code, "DECRYPT_FAILED",
+            "expected DECRYPT_FAILED for wrong passphrase, got: {err}"
+        );
+    }
+
+    #[test]
+    fn decrypt_bytes_encrypted_ssh_key_no_passphrase() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let pk = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08lcpk06Ast8Z7z7CjjvwJHMnKMjH7";
+
+        let plaintext = b"secret";
+        let ciphertext = encrypt_to_ssh(plaintext, pk);
+
+        let err = decrypt_bytes(&ciphertext, sk.as_bytes(), None).unwrap_err();
+        assert_eq!(
+            err.code, "IDENTITY_ENCRYPTED",
+            "expected IDENTITY_ENCRYPTED for missing passphrase, got: {err}"
+        );
     }
 }

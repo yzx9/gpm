@@ -39,6 +39,8 @@ pub struct Store {
     config: Config,
     /// Cached decrypted identity (populated after unlock).
     cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
+    /// Cached passphrase for encrypted SSH key decryption.
+    cached_passphrase: RwLock<Option<Zeroizing<String>>>,
 }
 
 impl std::fmt::Debug for Store {
@@ -60,6 +62,7 @@ impl Store {
         Self {
             config: Config::new(config_dir),
             cached_identity: RwLock::new(None),
+            cached_passphrase: RwLock::new(None),
         }
     }
 
@@ -75,10 +78,33 @@ impl Store {
         self.config.repo_config_exists()
     }
 
-    /// Check if the stored identity is passphrase-encrypted.
+    /// Check if the stored identity requires a passphrase.
+    ///
+    /// Returns true for age-encrypted identities and encrypted SSH keys.
+    /// Returns false for plaintext x25519 keys and unencrypted SSH keys.
     #[must_use]
     pub fn is_identity_encrypted(&self) -> bool {
-        self.config.is_identity_encrypted()
+        let Ok(bytes) = self.config.load_identity() else {
+            return false;
+        };
+        let itype = classify_identity(&bytes);
+
+        if itype == IdentityType::AgeEncrypted {
+            return true;
+        }
+
+        if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                return false;
+            };
+            let buf = std::io::BufReader::new(text.trim().as_bytes());
+            return matches!(
+                age::ssh::Identity::from_buffer(buf, None),
+                Ok(age::ssh::Identity::Encrypted(_))
+            );
+        }
+
+        false
     }
 
     /// Check if the identity cache is populated (identity is unlocked).
@@ -102,32 +128,43 @@ impl Store {
     pub fn unlock(&self, passphrase: &str) -> Result<(), Error> {
         let encrypted_bytes = self.config.load_identity()?;
 
-        if classify_identity(&encrypted_bytes) != IdentityType::AgeEncrypted {
-            return Err(Error::new(
-                ErrorCode::IdentityNotEncrypted,
-                "Identity is not passphrase-encrypted",
-            ));
+        let itype = classify_identity(&encrypted_bytes);
+
+        if itype == IdentityType::AgeEncrypted {
+            // Age-encrypted identity: decrypt with passphrase
+            let decrypted = crypto::decrypt_identity(passphrase, &encrypted_bytes)?;
+            let zeroizing = Zeroizing::new(decrypted);
+
+            {
+                let mut cache = self
+                    .cached_identity
+                    .write()
+                    .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
+                *cache = Some(zeroizing);
+            }
         }
 
-        let decrypted = crypto::decrypt_identity(passphrase, &encrypted_bytes)?;
-        let zeroizing = Zeroizing::new(decrypted);
-
+        // Cache passphrase for encrypted SSH key decryption (works for both
+        // age-encrypted and plaintext encrypted SSH keys)
         {
             let mut cache = self
-                .cached_identity
+                .cached_passphrase
                 .write()
                 .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
-            *cache = Some(zeroizing);
+            *cache = Some(Zeroizing::new(passphrase.to_string()));
         }
 
         Ok(())
     }
 
-    /// Lock the store: zeroize the cached identity.
+    /// Lock the store: zeroize the cached identity and passphrase.
     ///
     /// Idempotent — safe to call when already locked.
     pub fn lock(&self) {
         if let Ok(mut cache) = self.cached_identity.write() {
+            *cache = None;
+        }
+        if let Ok(mut cache) = self.cached_passphrase.write() {
             *cache = None;
         }
     }
@@ -194,7 +231,12 @@ impl Store {
     ///
     /// Returns an error if the identity format is invalid, the identity does
     /// not match any recipient, or the config cannot be persisted.
-    pub fn save_identity(&self, identity: &str, passphrase: Option<&str>) -> Result<(), Error> {
+    pub fn save_identity(
+        &self,
+        identity: &str,
+        passphrase: Option<&str>,
+        ssh_passphrase: Option<&str>,
+    ) -> Result<(), Error> {
         let identity_bytes = identity.trim().as_bytes();
         let trimmed = identity.trim();
         if !trimmed.starts_with("AGE-SECRET-KEY-")
@@ -207,7 +249,7 @@ impl Store {
             ));
         }
 
-        let derived_recipient = recipient::identity_to_recipient(identity)?;
+        let derived_recipient = recipient::identity_to_recipient(identity, ssh_passphrase)?;
 
         let known_recipients = self.list_recipients().unwrap_or_default();
         if !known_recipients.is_empty() {
@@ -239,6 +281,7 @@ impl Store {
         ssh_key: Option<&str>,
         ssh_passphrase: Option<&str>,
         identity: &str,
+        identity_passphrase: Option<&str>,
     ) -> Result<(), Error> {
         let identity_bytes = identity.trim().as_bytes();
         let trimmed = identity.trim();
@@ -251,6 +294,9 @@ impl Store {
                 "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
             ));
         }
+
+        // Validate identity can derive a recipient (verifies key is usable)
+        let _ = recipient::identity_to_recipient(identity, identity_passphrase)?;
 
         let auth = match (ssh_key, pat) {
             (Some(key), _) => git::GitAuth::Ssh {
@@ -316,7 +362,8 @@ impl Store {
 
         let file_path = resolve_entry_path(repo_path, &entry_path)?;
         let identity_bytes = self.get_identity_bytes()?;
-        let decrypted = crypto::decrypt_file(&file_path, &identity_bytes)?;
+        let passphrase = self.get_cached_passphrase();
+        let decrypted = crypto::decrypt_file(&file_path, &identity_bytes, passphrase.as_deref())?;
         Secret::parse(&decrypted)
     }
 
@@ -343,6 +390,16 @@ impl Store {
         }
 
         Ok(raw_bytes)
+    }
+
+    /// Get the cached passphrase, if any.
+    ///
+    /// Returns `None` if the store has not been unlocked or has been locked.
+    fn get_cached_passphrase(&self) -> Option<String> {
+        self.cached_passphrase
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|p| (**p).clone()))
     }
 
     /// Set a passphrase on an existing plaintext identity.
@@ -613,14 +670,17 @@ mod tests {
     }
 
     #[test]
-    fn unlock_requires_encrypted_identity() {
+    fn unlock_caches_passphrase_for_plaintext_identity() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
         config.save_identity(b"AGE-SECRET-KEY-1TEST", None).unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        let err = store.unlock("passphrase").unwrap_err();
-        assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
+        // unlock() now succeeds for plaintext identities — caches passphrase
+        // for encrypted SSH key decryption (no-op for x25519, harmless)
+        store.unlock("passphrase").unwrap();
+        // cached_identity should NOT be populated (identity is not age-encrypted)
+        assert!(!store.is_unlocked());
     }
 
     #[test]
@@ -643,6 +703,28 @@ mod tests {
 
         let store = Store::new(dir.path().to_path_buf());
         assert!(store.is_identity_encrypted());
+    }
+
+    #[test]
+    fn is_identity_encrypted_true_for_encrypted_ssh_key() {
+        let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(encrypted_ssh_key, None).unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        assert!(store.is_identity_encrypted());
+    }
+
+    #[test]
+    fn is_identity_encrypted_false_for_unencrypted_ssh_key() {
+        let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(unencrypted_ssh_key, None).unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        assert!(!store.is_identity_encrypted());
     }
 
     #[test]

@@ -6,7 +6,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, RecipientInfo, SshKeyPairResult } from "../types";
+import type {
+  AppError,
+  IdentityInfoResult,
+  RecipientInfo,
+  SshKeyPairResult,
+} from "../types";
 
 const router = useRouter();
 
@@ -46,6 +51,8 @@ const recipients = ref<RecipientInfo[]>([]);
 const selectedRecipient = ref("");
 const identity = ref("");
 const passphrase = ref("");
+const sshIdentityPassphrase = ref("");
+const isIdentityEncrypted = ref(false);
 const loadingRecipients = ref(false);
 const loadingIdentity = ref(false);
 
@@ -203,6 +210,9 @@ async function onCompleteSetup() {
     await invoke("complete_setup", {
       identity: identity.value,
       passphrase: passphrase.value || null,
+      sshPassphrase: isIdentityEncrypted.value
+        ? sshIdentityPassphrase.value || null
+        : null,
     });
     router.push({ name: "entries" });
   } catch (e) {
@@ -227,6 +237,26 @@ function truncateKey(key: string): string {
 watch(step, (s) => {
   if (s === 2) {
     fetchRecipients();
+  }
+});
+
+// Detect encrypted SSH keys when identity changes
+watch(identity, async (val) => {
+  const trimmed = val.trim();
+  if (
+    !trimmed.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----") &&
+    !trimmed.startsWith("-----BEGIN RSA PRIVATE KEY-----")
+  ) {
+    isIdentityEncrypted.value = false;
+    return;
+  }
+  try {
+    const info = await invoke<IdentityInfoResult>("validate_identity", {
+      identity: trimmed,
+    });
+    isIdentityEncrypted.value = info.encrypted;
+  } catch {
+    isIdentityEncrypted.value = false;
   }
 });
 </script>
@@ -539,6 +569,26 @@ watch(step, (s) => {
           <small class="text-xs text-muted"
             >Paste your age secret key (AGE-SECRET-KEY-...) or SSH private
             key</small
+          >
+        </div>
+
+        <!-- SSH key passphrase (shown when identity is an encrypted SSH key) -->
+        <div v-if="isIdentityEncrypted" class="flex flex-col gap-1">
+          <label for="ssh-identity-passphrase" class="text-sm font-medium"
+            >SSH Key Passphrase</label
+          >
+          <input
+            id="ssh-identity-passphrase"
+            v-model="sshIdentityPassphrase"
+            type="password"
+            placeholder="Passphrase to decrypt the SSH key"
+            autocomplete="off"
+            :disabled="loadingIdentity"
+            class="input-base"
+          />
+          <small class="text-xs text-muted"
+            >This SSH key is passphrase-encrypted. Enter its passphrase to use
+            it as an age identity.</small
           >
         </div>
 

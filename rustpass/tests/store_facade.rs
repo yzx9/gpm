@@ -35,6 +35,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
         assert!(store.is_configured(), "should be configured after setup");
@@ -83,6 +84,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 
@@ -115,6 +117,7 @@ mod tests {
                 None,
                 None,
                 &identity1,
+                None,
             )
             .expect("first configure should succeed");
         let entries1 = store.list().expect("list should succeed");
@@ -128,6 +131,7 @@ mod tests {
                 None,
                 None,
                 &identity2,
+                None,
             )
             .expect("reconfigure should succeed");
         let entries2 = store.list().expect("list after reconfigure should succeed");
@@ -159,6 +163,7 @@ mod tests {
             None,
             None,
             "not-a-valid-identity",
+            None,
         );
         assert!(
             result.is_err(),
@@ -184,6 +189,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 
@@ -208,6 +214,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 
@@ -232,6 +239,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 
@@ -254,6 +262,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 
@@ -280,6 +289,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 

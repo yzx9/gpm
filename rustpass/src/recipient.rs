@@ -155,14 +155,15 @@ fn parse_ssh_recipient_line(key_part: &str, hash_comment: Option<String>) -> Opt
 /// Derive the recipient (public key) from an age identity (private key).
 ///
 /// Supports both native x25519 identities (`AGE-SECRET-KEY-...`) and SSH
-/// private keys (OpenSSH or PEM format). For SSH keys, the corresponding
-/// SSH public key string is derived.
+/// private keys (OpenSSH or PEM format). For encrypted SSH keys, provide
+/// the passphrase via the `passphrase` parameter.
 ///
 /// # Errors
 ///
 /// Returns an error if the identity format is invalid, cannot be parsed,
-/// is encrypted, or uses an unsupported key type.
-pub fn identity_to_recipient(identity: &str) -> Result<String, Error> {
+/// uses an unsupported key type, or an encrypted SSH key is provided
+/// without a passphrase.
+pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result<String, Error> {
     let trimmed = identity.trim();
 
     if trimmed.starts_with("AGE-SECRET-KEY-") {
@@ -175,23 +176,20 @@ pub fn identity_to_recipient(identity: &str) -> Result<String, Error> {
     {
         // SSH path
         let buf = std::io::BufReader::new(trimmed.as_bytes());
-        let ssh_identity = age::ssh::Identity::from_buffer(buf, None).map_err(|e| {
-            Error::new(
-                ErrorCode::InvalidIdentity,
-                format!("Cannot parse SSH private key: {e}"),
-            )
-        })?;
+        let ssh_identity = age::ssh::Identity::from_buffer(buf, passphrase.map(String::from))
+            .map_err(|e| {
+                Error::new(
+                    ErrorCode::InvalidIdentity,
+                    format!("Cannot parse SSH private key: {e}"),
+                )
+            })?;
 
         match &ssh_identity {
-            age::ssh::Identity::Encrypted(_) => Err(Error::new(
-                ErrorCode::InvalidIdentity,
-                "Encrypted SSH keys are not yet supported as age identities",
+            age::ssh::Identity::Encrypted(_) if passphrase.is_none() => Err(Error::new(
+                ErrorCode::IdentityEncrypted,
+                "Encrypted SSH key requires a passphrase",
             )),
-            age::ssh::Identity::Unsupported(u) => Err(Error::new(
-                ErrorCode::InvalidIdentity,
-                format!("Unsupported SSH key type: {u:?}"),
-            )),
-            age::ssh::Identity::Unencrypted(_) => {
+            age::ssh::Identity::Encrypted(_) | age::ssh::Identity::Unencrypted(_) => {
                 let recipient = age::ssh::Recipient::try_from(ssh_identity).map_err(|e| {
                     Error::new(
                         ErrorCode::InvalidIdentity,
@@ -200,6 +198,10 @@ pub fn identity_to_recipient(identity: &str) -> Result<String, Error> {
                 })?;
                 Ok(recipient.to_string())
             }
+            age::ssh::Identity::Unsupported(u) => Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                format!("Unsupported SSH key type: {u:?}"),
+            )),
         }
     } else {
         Err(Error::new(
@@ -222,6 +224,70 @@ pub fn detect_identity_type(identity: &str) -> KeyType {
         KeyType::SshEd25519
     } else {
         KeyType::SshRsa
+    }
+}
+
+/// Information about an age identity, returned by [`validate_identity`].
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct IdentityInfo {
+    /// The type of the identity key.
+    pub key_type: KeyType,
+    /// True if the identity requires a passphrase (encrypted SSH key).
+    pub encrypted: bool,
+}
+
+/// Validate an age identity and return its type and encryption status.
+///
+/// Parses the identity to determine its key type and whether it requires
+/// a passphrase. This is used during setup to detect encrypted SSH keys
+/// and prompt the user for a passphrase.
+///
+/// # Errors
+///
+/// Returns an error if the identity format is invalid or cannot be parsed.
+pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
+    let trimmed = identity.trim();
+
+    if trimmed.starts_with("AGE-SECRET-KEY-") {
+        // Validate x25519 key can be parsed
+        age::x25519::Identity::from_str(trimmed)
+            .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key"))?;
+        Ok(IdentityInfo {
+            key_type: KeyType::X25519,
+            encrypted: false,
+        })
+    } else if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+        || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
+    {
+        // Parse SSH key without passphrase to detect encryption
+        let buf = std::io::BufReader::new(trimmed.as_bytes());
+        let ssh_identity = age::ssh::Identity::from_buffer(buf, None).map_err(|e| {
+            Error::new(
+                ErrorCode::InvalidIdentity,
+                format!("Cannot parse SSH private key: {e}"),
+            )
+        })?;
+
+        let encrypted = matches!(ssh_identity, age::ssh::Identity::Encrypted(_));
+
+        // Use classify_identity for key type detection — detect_identity_type
+        // checks for literal "ssh-ed25519" which is only present in SSH public
+        // keys, not in private key payloads.
+        let key_type = if trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----") {
+            KeyType::SshRsa
+        } else {
+            KeyType::SshEd25519
+        };
+
+        Ok(IdentityInfo {
+            key_type,
+            encrypted,
+        })
+    } else {
+        Err(Error::new(
+            ErrorCode::InvalidIdentity,
+            "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
+        ))
     }
 }
 
@@ -367,7 +433,7 @@ ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE7nIXTGNuaRBN9toI/wNALuQec8mvlt0iJ7o3OaD2
         let identity_str = sk.to_string().expose_secret().to_string();
         let expected_recipient = pk.to_string();
 
-        let derived = identity_to_recipient(&identity_str).unwrap();
+        let derived = identity_to_recipient(&identity_str, None).unwrap();
         assert_eq!(derived, expected_recipient);
     }
 
@@ -380,7 +446,7 @@ agAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ
 AAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz
 1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=
 -----END OPENSSH PRIVATE KEY-----";
-        let derived = identity_to_recipient(sk).unwrap();
+        let derived = identity_to_recipient(sk, None).unwrap();
         assert!(derived.starts_with("ssh-ed25519 "));
     }
 
@@ -413,7 +479,7 @@ tai/AoGAC0CiIJAzmmXscXNS/stLrL9bb3Yb+VZi9zN7Cb/w7B0IJ35N5UOFmKWA
 QIGpMU4gh6p52S1eLttpIf2+39rEDzo8pY6BVmEp3fKN3jWmGS4mJQ31tWefupC+
 fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
 -----END RSA PRIVATE KEY-----";
-        let derived = identity_to_recipient(sk).unwrap();
+        let derived = identity_to_recipient(sk, None).unwrap();
         assert!(derived.starts_with("ssh-rsa "));
     }
 
@@ -427,14 +493,14 @@ oTrS/orMBJ4b/phQcv/ejWYJ4RYYVhSLiI6hf0KwNGefxI90E8iG/yDOKcrxb34tqDEYrY
 FARDaJVRd9QtWLEqoP7pgdBR2BTP7aK1y6Mx3eFDgiQI9f/0Sjxd8V0apOPXv4i4kuQ1Nt
 LF7kNlDznn/nyZlg==
 -----END OPENSSH PRIVATE KEY-----";
-        let result = identity_to_recipient(sk);
+        let result = identity_to_recipient(sk, None);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code, "INVALID_IDENTITY");
+        assert_eq!(result.unwrap_err().code, "IDENTITY_ENCRYPTED");
     }
 
     #[test]
     fn identity_to_recipient_invalid_format() {
-        let result = identity_to_recipient("not-a-valid-key");
+        let result = identity_to_recipient("not-a-valid-key", None);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, "INVALID_IDENTITY");
     }
@@ -448,5 +514,45 @@ LF7kNlDznn/nyZlg==
         };
         let debug = format!("{r:?}");
         assert!(debug.contains("age1test"));
+    }
+
+    // ── Encrypted SSH key tests ──────────────────────────────────────────
+
+    #[test]
+    fn identity_to_recipient_encrypted_ssh_key_with_passphrase() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let derived = identity_to_recipient(sk, Some("test-passphrase")).unwrap();
+        assert!(
+            derived.starts_with("ssh-ed25519 "),
+            "expected ssh-ed25519 recipient, got: {derived}"
+        );
+    }
+
+    #[test]
+    fn validate_identity_x25519_not_encrypted() {
+        use age::secrecy::ExposeSecret;
+        use age::x25519::Identity;
+        let sk = Identity::generate();
+        let identity_str = sk.to_string().expose_secret().to_string();
+
+        let info = validate_identity(&identity_str).unwrap();
+        assert_eq!(info.key_type, KeyType::X25519);
+        assert!(!info.encrypted);
+    }
+
+    #[test]
+    fn validate_identity_unencrypted_ssh_key() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
+        let info = validate_identity(sk).unwrap();
+        assert_eq!(info.key_type, KeyType::SshEd25519);
+        assert!(!info.encrypted);
+    }
+
+    #[test]
+    fn validate_identity_encrypted_ssh_key() {
+        let sk = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let info = validate_identity(sk).unwrap();
+        assert_eq!(info.key_type, KeyType::SshEd25519);
+        assert!(info.encrypted);
     }
 }

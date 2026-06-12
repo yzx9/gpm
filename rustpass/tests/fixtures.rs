@@ -132,7 +132,7 @@ mod tests {
         let plaintext = b"super-secret-password\nusername: alice";
         let encrypted = encrypt_to_recipient(plaintext, &recipient);
 
-        let decrypted = crypto::decrypt_bytes(&encrypted, identity.as_bytes()).unwrap();
+        let decrypted = crypto::decrypt_bytes(&encrypted, identity.as_bytes(), None).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
@@ -142,7 +142,7 @@ mod tests {
         let (wrong_identity, _wrong_recipient) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"secret", &recipient);
 
-        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
+        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes(), None);
         assert!(result.is_err());
         // Verify error message contains no secret content
         let err_msg = format!("{}", result.unwrap_err());
@@ -151,14 +151,14 @@ mod tests {
 
     #[test]
     fn test_decrypt_invalid_identity_format() {
-        let result = crypto::decrypt_bytes(b"some data", b"not-a-valid-identity");
+        let result = crypto::decrypt_bytes(b"some data", b"not-a-valid-identity", None);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_decrypt_corrupted_data() {
         let (identity, _recipient) = generate_test_keypair();
-        let result = crypto::decrypt_bytes(b"not-valid-age-data", identity.as_bytes());
+        let result = crypto::decrypt_bytes(b"not-valid-age-data", identity.as_bytes(), None);
         assert!(result.is_err());
     }
 
@@ -172,7 +172,7 @@ mod tests {
         let (wrong_identity, _) = generate_test_keypair();
         let encrypted = encrypt_to_recipient(b"my-real-password", &recipient);
 
-        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
+        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes(), None);
         let err = result.unwrap_err();
         let msg = format!("{}", err);
 

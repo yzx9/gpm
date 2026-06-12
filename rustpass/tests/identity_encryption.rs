@@ -30,6 +30,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 
@@ -101,7 +102,7 @@ mod tests {
 
         // Step 2: save identity with passphrase
         store
-            .save_identity(&identity, Some("mypass"))
+            .save_identity(&identity, Some("mypass"), None)
             .expect("save_identity should succeed");
 
         assert!(store.is_configured());
@@ -132,6 +133,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .expect("configure should succeed");
 
@@ -177,6 +179,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .unwrap();
 
@@ -207,6 +210,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .unwrap();
 
@@ -240,6 +244,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .unwrap();
 
@@ -268,6 +273,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .unwrap();
 
@@ -293,6 +299,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .unwrap();
 
@@ -319,6 +326,7 @@ mod tests {
                 None,
                 None,
                 &identity,
+                None,
             )
             .unwrap();
 

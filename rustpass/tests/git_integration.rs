@@ -197,7 +197,7 @@ mod tests {
 
         let file_path = store::resolve_entry_path(dest.path(), "cloud/aws/root.age")
             .expect("resolve entry path");
-        let decrypted = crypto::decrypt_file(&file_path, identity.as_bytes())
+        let decrypted = crypto::decrypt_file(&file_path, identity.as_bytes(), None)
             .expect("decrypt should succeed with correct identity");
 
         let parsed = Secret::parse(&decrypted).expect("parse should succeed");

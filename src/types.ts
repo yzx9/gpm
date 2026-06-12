@@ -63,3 +63,9 @@ export interface AuthState {
   encrypted: boolean;
   unlocked: boolean;
 }
+
+/** Identity validation result from validate_identity command. */
+export interface IdentityInfoResult {
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa";
+  encrypted: boolean;
+}

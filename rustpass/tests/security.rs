@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn no_identity_in_decrypt_error() {
         let invalid_identity = "not-a-key";
-        let result = crypto::decrypt_bytes(b"some data", invalid_identity.as_bytes());
+        let result = crypto::decrypt_bytes(b"some data", invalid_identity.as_bytes(), None);
         assert!(result.is_err(), "expected Err for invalid identity, got Ok");
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -125,7 +125,7 @@ mod tests {
         let plaintext = "my-real-secret-password";
         let encrypted = encrypt_to_recipient(plaintext.as_bytes(), &recipient);
 
-        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes());
+        let result = crypto::decrypt_bytes(&encrypted, wrong_identity.as_bytes(), None);
         assert!(result.is_err(), "expected Err with wrong identity, got Ok");
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn identity_missing_prefix_rejected() {
-        let result = crypto::decrypt_bytes(b"some data", b"not-a-key");
+        let result = crypto::decrypt_bytes(b"some data", b"not-a-key", None);
         assert!(
             result.is_err(),
             "expected Err for identity missing prefix, got Ok"
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn identity_only_prefix_rejected() {
-        let result = crypto::decrypt_bytes(b"some data", b"AGE-SECRET-KEY-");
+        let result = crypto::decrypt_bytes(b"some data", b"AGE-SECRET-KEY-", None);
         assert!(
             result.is_err(),
             "expected Err for prefix-only identity, got Ok"

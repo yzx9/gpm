@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-lock after 5 minutes of inactivity
 - Passphrase management in settings: set, change, or remove
 - SSH key authentication for Git operations (`git@host:repo` and `ssh://` URLs)
+- Passphrase-encrypted SSH private keys as age identities (passphrase prompted during setup, cached at runtime)
 
 ## [v0.2.0] - 2026-06-10
 
