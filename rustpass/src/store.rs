@@ -14,7 +14,7 @@ use crate::crypto;
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::git;
-use crate::identity::{classify_identity, IdentityType};
+use crate::identity::{classify_identity, validate_identity_format, IdentityType};
 use crate::recipient::{self, Recipient};
 use crate::secret::Secret;
 
@@ -238,16 +238,7 @@ impl Store {
         ssh_passphrase: Option<&str>,
     ) -> Result<(), Error> {
         let identity_bytes = identity.trim().as_bytes();
-        let trimmed = identity.trim();
-        if !trimmed.starts_with("AGE-SECRET-KEY-")
-            && !trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
-            && !trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
-        {
-            return Err(Error::new(
-                ErrorCode::InvalidIdentity,
-                "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
-            ));
-        }
+        validate_identity_format(identity_bytes)?;
 
         let derived_recipient = recipient::identity_to_recipient(identity, ssh_passphrase)?;
 
@@ -284,16 +275,7 @@ impl Store {
         identity_passphrase: Option<&str>,
     ) -> Result<(), Error> {
         let identity_bytes = identity.trim().as_bytes();
-        let trimmed = identity.trim();
-        if !trimmed.starts_with("AGE-SECRET-KEY-")
-            && !trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
-            && !trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
-        {
-            return Err(Error::new(
-                ErrorCode::InvalidIdentity,
-                "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
-            ));
-        }
+        validate_identity_format(identity_bytes)?;
 
         // Validate identity can derive a recipient (verifies key is usable)
         let _ = recipient::identity_to_recipient(identity, identity_passphrase)?;

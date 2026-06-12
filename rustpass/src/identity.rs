@@ -10,6 +10,8 @@
 
 use serde::Serialize;
 
+use crate::error::{Error, ErrorCode};
+
 /// The type of an age identity, detected from its byte content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,6 +59,26 @@ pub fn classify_identity(bytes: &[u8]) -> IdentityType {
         IdentityType::SshEd25519
     } else {
         IdentityType::Unknown
+    }
+}
+
+/// Validate that `identity_bytes` contains a recognized private key format.
+///
+/// Delegates to [`classify_identity`] for the actual prefix detection, keeping
+/// it as the single source of truth. Accepts native x25519, OpenSSH, RSA, and
+/// PKCS#8 private keys. Rejects age-encrypted blobs (not a private key) and
+/// unrecognized formats.
+///
+/// # Errors
+///
+/// Returns `InvalidIdentity` if the format is not recognized.
+pub fn validate_identity_format(identity_bytes: &[u8]) -> Result<(), Error> {
+    match classify_identity(identity_bytes) {
+        IdentityType::Unknown | IdentityType::AgeEncrypted => Err(Error::new(
+            ErrorCode::InvalidIdentity,
+            "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -114,5 +136,45 @@ mod tests {
     #[test]
     fn classify_empty() {
         assert_eq!(classify_identity(b""), IdentityType::Unknown);
+    }
+
+    // --- validate_identity_format tests ---
+
+    #[test]
+    fn validate_accepts_x25519() {
+        assert!(validate_identity_format(b"AGE-SECRET-KEY-1TEST1234567890ABCDEF").is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_ssh_ed25519() {
+        let key = b"-----BEGIN OPENSSH PRIVATE KEY-----\ndata\n-----END OPENSSH PRIVATE KEY-----";
+        assert!(validate_identity_format(key).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_ssh_rsa() {
+        let key = b"-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----";
+        assert!(validate_identity_format(key).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unknown() {
+        let result = validate_identity_format(b"not-a-key");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "INVALID_IDENTITY");
+    }
+
+    #[test]
+    fn validate_rejects_age_encrypted() {
+        let encrypted =
+            b"-----BEGIN AGE ENCRYPTED FILE-----\ndata\n-----END AGE ENCRYPTED FILE-----";
+        let result = validate_identity_format(encrypted);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "INVALID_IDENTITY");
+    }
+
+    #[test]
+    fn validate_rejects_empty() {
+        assert!(validate_identity_format(b"").is_err());
     }
 }
