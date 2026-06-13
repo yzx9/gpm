@@ -62,6 +62,8 @@ export interface AuthState {
   configured: boolean;
   encrypted: boolean;
   unlocked: boolean;
+  /** Identity type: "x25519", "ssh_ed25519", "ssh_rsa", "age_encrypted", "unknown". */
+  identity_type: string;
 }
 
 /** Identity validation result from validate_identity command. */

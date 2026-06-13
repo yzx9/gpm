@@ -51,7 +51,7 @@ const recipients = ref<RecipientInfo[]>([]);
 const selectedRecipient = ref("");
 const identity = ref("");
 const passphrase = ref("");
-const sshIdentityPassphrase = ref("");
+const identityType = ref<string>("");
 const isIdentityEncrypted = ref(false);
 const loadingRecipients = ref(false);
 const loadingIdentity = ref(false);
@@ -72,6 +72,14 @@ const hasSshRecipients = computed(() =>
 
 const canReuseSshKey = computed(
   () => isSshUrl.value && hasSshRecipients.value && sshKey.value.trim(),
+);
+
+// Whether the pasted/generated identity is an SSH key (vs. native x25519).
+// Controls passphrase field semantics: SSH keys use their own passphrase to
+// decrypt the key; x25519 keys use it for optional at-rest encryption.
+const isSshIdentity = computed(
+  () =>
+    identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
 );
 
 function useSshKeyForIdentity() {
@@ -194,6 +202,9 @@ function validateStep2(): string | null {
     return "Identity must be an age key (AGE-SECRET-KEY-...) or SSH private key";
   if (recipients.value.length > 0 && !selectedRecipient.value)
     return "Please select a recipient";
+  // Encrypted SSH keys require their passphrase to derive a recipient.
+  if (isSshIdentity.value && isIdentityEncrypted.value && !passphrase.value)
+    return "SSH key passphrase is required";
   return null;
 }
 
@@ -210,9 +221,6 @@ async function onCompleteSetup() {
     await invoke("complete_setup", {
       identity: identity.value,
       passphrase: passphrase.value || null,
-      sshPassphrase: isIdentityEncrypted.value
-        ? sshIdentityPassphrase.value || null
-        : null,
     });
     router.push({ name: "entries" });
   } catch (e) {
@@ -240,13 +248,19 @@ watch(step, (s) => {
   }
 });
 
-// Detect encrypted SSH keys when identity changes
+// Detect identity type and SSH-key encryption status when identity changes
 watch(identity, async (val) => {
   const trimmed = val.trim();
+  if (trimmed.startsWith("AGE-SECRET-KEY-")) {
+    identityType.value = "x25519";
+    isIdentityEncrypted.value = false;
+    return;
+  }
   if (
     !trimmed.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----") &&
     !trimmed.startsWith("-----BEGIN RSA PRIVATE KEY-----")
   ) {
+    identityType.value = "";
     isIdentityEncrypted.value = false;
     return;
   }
@@ -254,8 +268,10 @@ watch(identity, async (val) => {
     const info = await invoke<IdentityInfoResult>("validate_identity", {
       identity: trimmed,
     });
+    identityType.value = info.key_type;
     isIdentityEncrypted.value = info.encrypted;
   } catch {
+    identityType.value = "";
     isIdentityEncrypted.value = false;
   }
 });
@@ -572,14 +588,17 @@ watch(identity, async (val) => {
           >
         </div>
 
-        <!-- SSH key passphrase (shown when identity is an encrypted SSH key) -->
-        <div v-if="isIdentityEncrypted" class="flex flex-col gap-1">
-          <label for="ssh-identity-passphrase" class="text-sm font-medium"
+        <!-- SSH key passphrase (required when identity is an encrypted SSH key) -->
+        <div
+          v-if="isSshIdentity && isIdentityEncrypted"
+          class="flex flex-col gap-1"
+        >
+          <label for="passphrase" class="text-sm font-medium"
             >SSH Key Passphrase</label
           >
           <input
-            id="ssh-identity-passphrase"
-            v-model="sshIdentityPassphrase"
+            id="passphrase"
+            v-model="passphrase"
             type="password"
             placeholder="Passphrase to decrypt the SSH key"
             autocomplete="off"
@@ -592,8 +611,9 @@ watch(identity, async (val) => {
           >
         </div>
 
-        <!-- Optional passphrase encryption -->
-        <div class="flex flex-col gap-1">
+        <!-- Optional at-rest encryption (x25519 keys only; SSH keys rely on
+             their own native passphrase protection) -->
+        <div v-else-if="identityType === 'x25519'" class="flex flex-col gap-1">
           <label for="passphrase" class="text-sm font-medium"
             >Passphrase (optional)</label
           >

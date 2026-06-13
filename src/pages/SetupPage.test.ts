@@ -267,7 +267,6 @@ describe("SetupPage", () => {
       expect(invoke).toHaveBeenCalledWith("complete_setup", {
         identity: "AGE-SECRET-KEY-1abc",
         passphrase: null,
-        sshPassphrase: null,
       });
     });
 

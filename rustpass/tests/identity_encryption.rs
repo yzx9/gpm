@@ -114,7 +114,7 @@ mod tests {
 
         // Step 2: save identity with passphrase
         store
-            .save_identity(&identity, Some("mypass"), None)
+            .save_identity(&identity, Some("mypass"))
             .await
             .expect("save_identity should succeed");
 

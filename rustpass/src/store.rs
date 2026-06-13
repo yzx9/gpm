@@ -110,6 +110,16 @@ impl Store {
         false
     }
 
+    /// Get the type of the stored identity.
+    ///
+    /// Returns [`IdentityType::Unknown`] if no identity is configured.
+    pub async fn identity_type(&self) -> IdentityType {
+        match self.config.load_identity().await {
+            Ok(bytes) => classify_identity(&bytes),
+            Err(_) => IdentityType::Unknown,
+        }
+    }
+
     /// Check if the identity cache is populated (identity is unlocked).
     #[must_use]
     pub fn is_unlocked(&self) -> bool {
@@ -175,7 +185,7 @@ impl Store {
         }
     }
 
-    /// Step 1 of two-step setup: clone the repository and save repo config.
+    /// Clone the repository and save repo config.
     ///
     /// Does **not** save the age identity — that is done via
     /// [`save_identity`](Store::save_identity). Clears any existing
@@ -232,9 +242,15 @@ impl Store {
         recipient::list_recipients(repo_path).await
     }
 
-    /// Step 2 of two-step setup: save the age identity.
+    /// Save the age identity.
     ///
-    /// If `passphrase` is provided, the identity is encrypted before storage.
+    /// The single `passphrase` is used differently based on identity type:
+    /// - **x25519**: optionally encrypts the identity at rest (like `age -p`).
+    ///   `None` stores it in plaintext.
+    /// - **SSH key**: decrypts the SSH private key for recipient derivation
+    ///   (required if the key is passphrase-protected). SSH keys are stored
+    ///   as-is and never re-encrypted by gpm — they rely on the SSH key's
+    ///   native passphrase protection, matching age's design.
     ///
     /// # Errors
     ///
@@ -244,12 +260,19 @@ impl Store {
         &self,
         identity: &str,
         passphrase: Option<&str>,
-        ssh_passphrase: Option<&str>,
     ) -> Result<(), Error> {
         let identity_bytes = identity.trim().as_bytes();
         validate_identity_format(identity_bytes)?;
 
-        let derived_recipient = recipient::identity_to_recipient(identity, ssh_passphrase)?;
+        let itype = classify_identity(identity_bytes);
+
+        // SSH keys need the passphrase to decrypt the private key for recipient
+        // derivation; native x25519 keys are never passphrase-protected.
+        let recipient_passphrase = match itype {
+            IdentityType::SshEd25519 | IdentityType::SshRsa => passphrase,
+            _ => None,
+        };
+        let derived_recipient = recipient::identity_to_recipient(identity, recipient_passphrase)?;
 
         let known_recipients = self.list_recipients().await.unwrap_or_default();
         if !known_recipients.is_empty() {
@@ -264,8 +287,14 @@ impl Store {
             }
         }
 
+        // Only native x25519 keys support optional at-rest encryption; SSH keys
+        // are stored as-is.
+        let storage_passphrase = match itype {
+            IdentityType::SshEd25519 | IdentityType::SshRsa => None,
+            _ => passphrase,
+        };
         self.config
-            .save_identity(identity_bytes, passphrase)
+            .save_identity(identity_bytes, storage_passphrase)
             .await?;
         Ok(())
     }
@@ -403,9 +432,13 @@ impl Store {
     ///
     /// Encrypts the current identity file in place. Rejects empty passphrase.
     ///
+    /// Only native x25519 keys support at-rest encryption; SSH keys are
+    /// rejected (they rely on their own native passphrase protection).
+    ///
     /// # Errors
     ///
-    /// Returns `IdentityNotEncrypted` if passphrase is empty.
+    /// Returns `IdentityNotEncrypted` if passphrase is empty or the identity
+    /// is an SSH key (not encrypted by gpm).
     /// Returns `IdentityEncrypted` if identity is already encrypted.
     pub async fn set_passphrase(&self, passphrase: &str) -> Result<(), Error> {
         if passphrase.is_empty() {
@@ -417,11 +450,20 @@ impl Store {
 
         let raw_bytes = self.config.load_identity().await?;
 
-        if classify_identity(&raw_bytes) == IdentityType::AgeEncrypted {
-            return Err(Error::new(
-                ErrorCode::IdentityEncrypted,
-                "Identity is already encrypted — use change_passphrase instead",
-            ));
+        match classify_identity(&raw_bytes) {
+            IdentityType::AgeEncrypted => {
+                return Err(Error::new(
+                    ErrorCode::IdentityEncrypted,
+                    "Identity is already encrypted — use change_passphrase instead",
+                ));
+            }
+            IdentityType::SshEd25519 | IdentityType::SshRsa => {
+                return Err(Error::new(
+                    ErrorCode::IdentityNotEncrypted,
+                    "SSH keys are not encrypted by gpm; use the SSH key's native passphrase",
+                ));
+            }
+            _ => {}
         }
 
         self.config
@@ -735,6 +777,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_identity_stores_ssh_key_as_plaintext_even_with_passphrase() {
+        let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf());
+
+        // Even when a passphrase is supplied, SSH keys are stored as-is — gpm
+        // never re-encrypts them (they rely on their own native protection),
+        // matching age's design.
+        store
+            .save_identity(
+                str::from_utf8(unencrypted_ssh_key).unwrap(),
+                Some("would-be-storage-pass"),
+            )
+            .await
+            .expect("save_identity should succeed for SSH key");
+
+        assert!(
+            !store.is_identity_encrypted().await,
+            "SSH key must be stored as plaintext, not age-encrypted"
+        );
+        assert_eq!(
+            store.identity_type().await,
+            IdentityType::SshEd25519,
+            "stored identity should still be an SSH key, not an age-encrypted blob"
+        );
+    }
+
+    #[tokio::test]
     async fn set_passphrase_rejects_empty() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
@@ -760,6 +830,21 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf());
         let err = store.set_passphrase("new").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_ENCRYPTED");
+    }
+
+    #[tokio::test]
+    async fn set_passphrase_rejects_ssh_key() {
+        let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config
+            .save_identity(unencrypted_ssh_key, None)
+            .await
+            .unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        let err = store.set_passphrase("new").await.unwrap_err();
+        assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -30,11 +30,20 @@ const isSsh = ref(false);
 
 // ── Passphrase management state ──────────────────────────────────────────
 const isIdentityEncrypted = ref(false);
+const identityType = ref("");
 const showSetPassphrase = ref(false);
 const showChangePassphrase = ref(false);
 const newPassphrase = ref("");
 const oldPassphrase = ref("");
 const passphraseLoading = ref(false);
+
+// Whether the stored identity is an SSH key. SSH keys are never
+// passphrase-encrypted by gpm (they rely on their own native protection),
+// so the at-rest encryption UI is hidden for them.
+const isSshIdentity = computed(
+  () =>
+    identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
+);
 
 function showToast(message: string) {
   toast.value = message;
@@ -53,6 +62,7 @@ async function loadConfig() {
     isSsh.value = config.value.ssh_key !== null;
     const auth = await invoke<AuthState>("get_auth_state");
     isIdentityEncrypted.value = auth.encrypted;
+    identityType.value = auth.identity_type;
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load config";
@@ -254,8 +264,9 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- Passphrase management -->
-      <section class="settings-card">
+      <!-- Passphrase management (x25519 identities only — SSH keys rely on
+           their own native passphrase protection) -->
+      <section v-if="!isSshIdentity" class="settings-card">
         <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
 
         <!-- Not encrypted: set passphrase -->
@@ -341,6 +352,15 @@ onMounted(() => {
             </button>
           </div>
         </template>
+      </section>
+
+      <!-- SSH key identities are not encrypted by gpm -->
+      <section v-else class="settings-card">
+        <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
+        <p class="text-xs text-muted">
+          SSH key identities rely on their own native passphrase protection and
+          are not re-encrypted by gpm.
+        </p>
       </section>
 
       <!-- Danger zone -->

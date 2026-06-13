@@ -86,6 +86,9 @@ struct AuthState {
     encrypted: bool,
     /// True if the identity cache is populated (passphrase provided).
     unlocked: bool,
+    /// Identity type string (`x25519`, `ssh_ed25519`, `ssh_rsa`, `age_encrypted`,
+    /// `unknown`) — lets the UI branch on whether the identity is an SSH key.
+    identity_type: String,
 }
 
 /// Returned by `validate_identity` — identity type and encryption status.
@@ -128,11 +131,27 @@ struct AppState {
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 async fn get_auth_state(state: State<'_, AppState>) -> Result<AuthState, Error> {
+    let itype = state.store.identity_type().await;
     Ok(AuthState {
         configured: state.store.is_configured(),
         encrypted: state.store.is_identity_encrypted().await,
         unlocked: state.store.is_unlocked(),
+        identity_type: identity_type_string(itype),
     })
+}
+
+/// Map an [`IdentityType`](rustpass::identity::IdentityType) to a stable string
+/// for IPC, matching the `key_type` values returned by [`validate_identity`].
+fn identity_type_string(itype: rustpass::identity::IdentityType) -> String {
+    use rustpass::identity::IdentityType;
+    match itype {
+        IdentityType::X25519 => "x25519",
+        IdentityType::SshEd25519 => "ssh_ed25519",
+        IdentityType::SshRsa => "ssh_rsa",
+        IdentityType::AgeEncrypted => "age_encrypted",
+        IdentityType::Unknown => "unknown",
+    }
+    .to_string()
 }
 
 /// Check if the app has been configured (identity + repo exist).
@@ -194,17 +213,21 @@ fn validate_identity(identity: String) -> Result<IdentityInfoResult, Error> {
 }
 
 /// Step 2 of setup: save the age identity and complete configuration.
+///
+/// The `passphrase` is used based on identity type: for x25519 keys it
+/// optionally encrypts the identity at rest; for SSH keys it decrypts the
+/// private key for recipient derivation (SSH keys are never re-encrypted by
+/// gpm — they rely on their own passphrase protection, matching age's design).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 async fn complete_setup(
     state: State<'_, AppState>,
     identity: String,
     passphrase: Option<String>,
-    ssh_passphrase: Option<String>, // TODO: why there are passphrase and passphrase for ssh? can we unify them?
 ) -> Result<(), Error> {
     state
         .store
-        .save_identity(&identity, passphrase.as_deref(), ssh_passphrase.as_deref())
+        .save_identity(&identity, passphrase.as_deref())
         .await
 }
 
