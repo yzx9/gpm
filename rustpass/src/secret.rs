@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fmt;
+
 use zeroize::Zeroizing;
 
 use crate::error::{Error, ErrorCode};
@@ -16,8 +18,8 @@ pub struct Secret {
 }
 
 /// Custom `Debug` that redacts all fields — prevents accidental log leakage.
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Secret")
             .field("password", &"[REDACTED]")
             .field("body", &"[REDACTED]")

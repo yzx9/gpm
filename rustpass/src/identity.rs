@@ -8,6 +8,8 @@
 //! an age identity (x25519, SSH ed25519, SSH RSA, or age-encrypted) from its
 //! byte content. This eliminates prefix-check duplication across call sites.
 
+use std::str;
+
 use serde::Serialize;
 
 use crate::error::{Error, ErrorCode};
@@ -34,7 +36,7 @@ pub enum IdentityType {
 /// This is a cheap, non-validating check — it does not parse the full content.
 #[must_use]
 pub fn classify_identity(bytes: &[u8]) -> IdentityType {
-    let Ok(text) = std::str::from_utf8(bytes) else {
+    let Ok(text) = str::from_utf8(bytes) else {
         return IdentityType::Unknown;
     };
     let trimmed = text.trim();

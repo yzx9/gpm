@@ -4,18 +4,21 @@
 
 use std::path::{Path, PathBuf};
 
+use serde_json;
+use tokio::fs;
+
 use crate::crypto;
 use crate::error::{Error, ErrorCode};
-use crate::identity::classify_identity;
-use crate::identity::IdentityType;
+use crate::git::GitAuth;
+use crate::identity::{classify_identity, IdentityType};
 
 /// Atomic write: write data to a temp file then rename over the target.
 ///
 /// Prevents identity file corruption if the write fails mid-operation.
 async fn save_identity_raw(path: &Path, data: &[u8]) -> Result<(), Error> {
     let temp_path = path.with_extension("tmp");
-    tokio::fs::write(&temp_path, data).await?;
-    tokio::fs::rename(&temp_path, path).await?;
+    fs::write(&temp_path, data).await?;
+    fs::rename(&temp_path, path).await?;
     Ok(())
 }
 
@@ -67,7 +70,7 @@ impl Config {
         identity: &[u8],
         passphrase: Option<&str>,
     ) -> Result<(), Error> {
-        tokio::fs::create_dir_all(&self.config_dir).await?;
+        fs::create_dir_all(&self.config_dir).await?;
 
         let data = match passphrase {
             Some(pw) if !pw.is_empty() => crypto::encrypt_identity(pw, identity)?,
@@ -103,7 +106,7 @@ impl Config {
                 "No identity configured. Run setup first.",
             ));
         }
-        Ok(tokio::fs::read(&path).await?)
+        Ok(fs::read(&path).await?)
     }
 
     /// Delete the stored identity.
@@ -114,7 +117,7 @@ impl Config {
     pub async fn delete_identity(&self) -> Result<(), Error> {
         let path = self.identity_path();
         if path.exists() {
-            tokio::fs::remove_file(path).await?;
+            fs::remove_file(path).await?;
         }
         Ok(())
     }
@@ -133,7 +136,7 @@ impl Config {
         ssh_passphrase: Option<&str>,
         local_path: &str,
     ) -> Result<(), Error> {
-        tokio::fs::create_dir_all(&self.config_dir).await?;
+        fs::create_dir_all(&self.config_dir).await?;
         let config = RepoConfig {
             url: url.to_string(),
             pat: pat.map(String::from),
@@ -142,7 +145,7 @@ impl Config {
             local_path: local_path.to_string(),
         };
         let json = serde_json::to_string_pretty(&config)?;
-        tokio::fs::write(self.repo_config_path(), json).await?;
+        fs::write(self.repo_config_path(), json).await?;
         Ok(())
     }
 
@@ -160,7 +163,7 @@ impl Config {
                 "No repository configured. Run setup first.",
             ));
         }
-        let json = tokio::fs::read_to_string(&path).await?;
+        let json = fs::read_to_string(&path).await?;
         let config: RepoConfig = serde_json::from_str(&json)?;
         Ok(config)
     }
@@ -184,10 +187,10 @@ impl Config {
     /// Returns an error if the files cannot be removed.
     pub async fn clear_all(&self) -> Result<(), Error> {
         if self.identity_path().exists() {
-            tokio::fs::remove_file(self.identity_path()).await?;
+            fs::remove_file(self.identity_path()).await?;
         }
         if self.repo_config_path().exists() {
-            tokio::fs::remove_file(self.repo_config_path()).await?;
+            fs::remove_file(self.repo_config_path()).await?;
         }
         Ok(())
     }
@@ -215,17 +218,17 @@ impl RepoConfig {
     ///
     /// SSH key takes priority if both PAT and SSH key are present.
     #[must_use]
-    pub fn to_git_auth(&self) -> crate::git::GitAuth {
+    pub fn to_git_auth(&self) -> GitAuth {
         if let Some(key) = &self.ssh_key {
-            crate::git::GitAuth::Ssh {
+            GitAuth::Ssh {
                 username: "git".to_string(),
                 private_key: key.clone(),
                 passphrase: self.ssh_passphrase.clone(),
             }
         } else if let Some(token) = &self.pat {
-            crate::git::GitAuth::Pat(token.clone())
+            GitAuth::Pat(token.clone())
         } else {
-            crate::git::GitAuth::None
+            GitAuth::None
         }
     }
 }
@@ -533,7 +536,7 @@ mod tests {
 
         let auth = cfg.to_git_auth();
         match auth {
-            crate::git::GitAuth::Ssh {
+            GitAuth::Ssh {
                 username,
                 private_key,
                 passphrase,
@@ -558,7 +561,7 @@ mod tests {
 
         let auth = cfg.to_git_auth();
         match auth {
-            crate::git::GitAuth::Pat(token) => assert_eq!(token, "my-token"),
+            GitAuth::Pat(token) => assert_eq!(token, "my-token"),
             _ => panic!("expected GitAuth::Pat, got {auth:?}"),
         }
     }
@@ -575,7 +578,7 @@ mod tests {
 
         let auth = cfg.to_git_auth();
         assert!(
-            matches!(auth, crate::git::GitAuth::None),
+            matches!(auth, GitAuth::None),
             "expected GitAuth::None, got {auth:?}"
         );
     }
@@ -593,7 +596,7 @@ mod tests {
 
         let auth = cfg.to_git_auth();
         assert!(
-            matches!(auth, crate::git::GitAuth::Ssh { .. }),
+            matches!(auth, GitAuth::Ssh { .. }),
             "SSH should take priority over PAT"
         );
     }

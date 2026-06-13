@@ -12,10 +12,13 @@
 //! and SSH keys (`ssh-ed25519` / `ssh-rsa` as recipients, OpenSSH private
 //! keys as identities).
 
+use std::io::BufReader;
 use std::path::Path;
 use std::str::FromStr;
 
+use age::{ssh, x25519};
 use serde::Serialize;
+use tokio::fs;
 
 use crate::error::{Error, ErrorCode};
 
@@ -72,7 +75,7 @@ pub async fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> 
         return Ok(Vec::new());
     };
 
-    let content = tokio::fs::read_to_string(file_path).await?;
+    let content = fs::read_to_string(file_path).await?;
     Ok(parse_recipients(&content))
 }
 
@@ -138,7 +141,7 @@ fn parse_ssh_recipient_line(key_part: &str, hash_comment: Option<String>) -> Opt
     let full_key = format!("{key_type_str} {base64_data}");
 
     // Validate that the age crate can parse this recipient
-    if age::ssh::Recipient::from_str(&full_key).is_err() {
+    if ssh::Recipient::from_str(&full_key).is_err() {
         return None;
     }
 
@@ -168,16 +171,16 @@ pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result
 
     if trimmed.starts_with("AGE-SECRET-KEY-") {
         // x25519 path
-        let sk = age::x25519::Identity::from_str(trimmed)
+        let sk = x25519::Identity::from_str(trimmed)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key"))?;
         Ok(sk.to_public().to_string())
     } else if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
         || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
     {
         // SSH path
-        let buf = std::io::BufReader::new(trimmed.as_bytes());
-        let ssh_identity = age::ssh::Identity::from_buffer(buf, passphrase.map(String::from))
-            .map_err(|e| {
+        let buf = BufReader::new(trimmed.as_bytes());
+        let ssh_identity =
+            ssh::Identity::from_buffer(buf, passphrase.map(String::from)).map_err(|e| {
                 Error::new(
                     ErrorCode::InvalidIdentity,
                     format!("Cannot parse SSH private key: {e}"),
@@ -185,12 +188,12 @@ pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result
             })?;
 
         match &ssh_identity {
-            age::ssh::Identity::Encrypted(_) if passphrase.is_none() => Err(Error::new(
+            ssh::Identity::Encrypted(_) if passphrase.is_none() => Err(Error::new(
                 ErrorCode::IdentityEncrypted,
                 "Encrypted SSH key requires a passphrase",
             )),
-            age::ssh::Identity::Encrypted(_) | age::ssh::Identity::Unencrypted(_) => {
-                let recipient = age::ssh::Recipient::try_from(ssh_identity).map_err(|e| {
+            ssh::Identity::Encrypted(_) | ssh::Identity::Unencrypted(_) => {
+                let recipient = ssh::Recipient::try_from(ssh_identity).map_err(|e| {
                     Error::new(
                         ErrorCode::InvalidIdentity,
                         format!("Cannot derive recipient from SSH key: {e:?}"),
@@ -198,7 +201,7 @@ pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result
                 })?;
                 Ok(recipient.to_string())
             }
-            age::ssh::Identity::Unsupported(u) => Err(Error::new(
+            ssh::Identity::Unsupported(u) => Err(Error::new(
                 ErrorCode::InvalidIdentity,
                 format!("Unsupported SSH key type: {u:?}"),
             )),
@@ -250,7 +253,7 @@ pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
 
     if trimmed.starts_with("AGE-SECRET-KEY-") {
         // Validate x25519 key can be parsed
-        age::x25519::Identity::from_str(trimmed)
+        x25519::Identity::from_str(trimmed)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key"))?;
         Ok(IdentityInfo {
             key_type: KeyType::X25519,
@@ -260,15 +263,15 @@ pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
         || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
     {
         // Parse SSH key without passphrase to detect encryption
-        let buf = std::io::BufReader::new(trimmed.as_bytes());
-        let ssh_identity = age::ssh::Identity::from_buffer(buf, None).map_err(|e| {
+        let buf = BufReader::new(trimmed.as_bytes());
+        let ssh_identity = ssh::Identity::from_buffer(buf, None).map_err(|e| {
             Error::new(
                 ErrorCode::InvalidIdentity,
                 format!("Cannot parse SSH private key: {e}"),
             )
         })?;
 
-        let encrypted = matches!(ssh_identity, age::ssh::Identity::Encrypted(_));
+        let encrypted = matches!(ssh_identity, ssh::Identity::Encrypted(_));
 
         // Use classify_identity for key type detection — detect_identity_type
         // checks for literal "ssh-ed25519" which is only present in SSH public

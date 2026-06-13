@@ -2,21 +2,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use std::{fmt, str};
 
+use age::ssh;
 use serde::Serialize;
+use tokio::fs;
+use tokio::task::spawn_blocking;
 use walkdir::WalkDir;
 use zeroize::Zeroizing;
 
-use crate::config::Config;
-use crate::crypto;
+use crate::config::{Config, RepoConfig};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
-use crate::git;
 use crate::identity::{classify_identity, validate_identity_format, IdentityType};
 use crate::recipient::{self, Recipient};
 use crate::secret::Secret;
+use crate::{crypto, git};
 
 /// Default auto-lock timeout in seconds (5 minutes).
 pub const DEFAULT_LOCK_TIMEOUT_SECS: u64 = 300;
@@ -43,8 +47,8 @@ pub struct Store {
     cached_passphrase: RwLock<Option<Zeroizing<String>>>,
 }
 
-impl std::fmt::Debug for Store {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Store {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Store")
             .field("config", &self.config)
             .field(
@@ -93,13 +97,13 @@ impl Store {
         }
 
         if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
-            let Ok(text) = std::str::from_utf8(&bytes) else {
+            let Ok(text) = str::from_utf8(&bytes) else {
                 return false;
             };
-            let buf = std::io::BufReader::new(text.trim().as_bytes());
+            let buf = BufReader::new(text.trim().as_bytes());
             return matches!(
-                age::ssh::Identity::from_buffer(buf, None),
-                Ok(age::ssh::Identity::Encrypted(_))
+                ssh::Identity::from_buffer(buf, None),
+                Ok(ssh::Identity::Encrypted(_))
             );
         }
 
@@ -133,10 +137,8 @@ impl Store {
             // Age-encrypted identity: decrypt with passphrase on blocking thread
             // (scrypt is intentionally slow ~100ms+)
             let pw = passphrase.to_string();
-            let decrypted = tokio::task::spawn_blocking(move || {
-                crypto::decrypt_identity(&pw, &encrypted_bytes)
-            })
-            .await??;
+            let decrypted =
+                spawn_blocking(move || crypto::decrypt_identity(&pw, &encrypted_bytes)).await??;
             let zeroizing = Zeroizing::new(decrypted);
 
             {
@@ -203,15 +205,12 @@ impl Store {
         self.config.clear_all().await?;
 
         if repo_dir.exists() {
-            tokio::fs::remove_dir_all(&repo_dir).await?;
+            fs::remove_dir_all(&repo_dir).await?;
         }
 
         let repo_url_owned = repo_url.to_string();
         let repo_dir_clone = repo_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)
-        })
-        .await??;
+        spawn_blocking(move || git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)).await??;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
@@ -306,17 +305,14 @@ impl Store {
         self.config.clear_all().await?;
 
         if repo_dir.exists() {
-            tokio::fs::remove_dir_all(&repo_dir).await?;
+            fs::remove_dir_all(&repo_dir).await?;
         }
 
         self.config.save_identity(identity_bytes, None).await?;
 
         let repo_url_owned = repo_url.to_string();
         let repo_dir_clone = repo_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)
-        })
-        .await??;
+        spawn_blocking(move || git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)).await??;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
@@ -467,8 +463,7 @@ impl Store {
         // scrypt is intentionally slow (~100ms+), run on blocking thread
         let pw = old_passphrase.to_string();
         let plaintext =
-            tokio::task::spawn_blocking(move || crypto::decrypt_identity(&pw, &encrypted_bytes))
-                .await??;
+            spawn_blocking(move || crypto::decrypt_identity(&pw, &encrypted_bytes)).await??;
         self.config
             .save_identity(&plaintext, Some(new_passphrase))
             .await?;
@@ -486,7 +481,7 @@ impl Store {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
-        tokio::task::spawn_blocking(move || git::pull_repo(&repo_path, &auth)).await?
+        spawn_blocking(move || git::pull_repo(&repo_path, &auth)).await?
     }
 
     /// Reset all configuration and local data. Clears the identity cache.
@@ -500,7 +495,7 @@ impl Store {
         if let Ok(repo_config) = self.config.load_repo_config().await {
             let repo_path = Path::new(&repo_config.local_path);
             if repo_path.exists() {
-                tokio::fs::remove_dir_all(repo_path).await?;
+                fs::remove_dir_all(repo_path).await?;
             }
         }
         self.config.clear_all().await
@@ -511,7 +506,7 @@ impl Store {
     /// # Errors
     ///
     /// Returns an error if the store is not configured.
-    pub async fn config(&self) -> Result<crate::config::RepoConfig, Error> {
+    pub async fn config(&self) -> Result<RepoConfig, Error> {
         self.config.load_repo_config().await
     }
 }

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::{fmt, io};
+
 use serde::Serialize;
 
 /// Machine-readable error codes — all messages are safe (no secrets).
@@ -79,16 +81,16 @@ impl Error {
     }
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
     }
 }
 
 impl std::error::Error for Error {}
 
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
         Error::new(ErrorCode::IoError, format!("Filesystem error: {e}"))
     }
 }
@@ -232,7 +234,7 @@ mod tests {
 
     #[test]
     fn from_io_error() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let io_err = io::Error::new(io::ErrorKind::NotFound, "file missing");
         let app_err: Error = io_err.into();
         assert_eq!(app_err.code, "IO_ERROR");
         assert!(

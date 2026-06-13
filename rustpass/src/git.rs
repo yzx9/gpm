@@ -214,20 +214,6 @@ fn short_hash(oid: &git2::Oid) -> String {
     }
 }
 
-/// Helper: create an empty initial commit in a test repository.
-///
-/// Builds a commit from an empty tree so the repo has a valid HEAD
-/// without requiring any working-tree files.
-#[cfg(test)]
-fn create_empty_commit(repo: &Repository, sig: &git2::Signature<'_>) -> git2::Oid {
-    let mut index = repo.index().expect("failed to get index");
-    let tree_id = index.write_tree().expect("failed to write tree");
-    let tree = repo.find_tree(tree_id).expect("failed to find tree");
-    let parents: &[&git2::Commit<'_>] = &[];
-    repo.commit(Some("HEAD"), sig, sig, "initial commit", &tree, parents)
-        .expect("failed to create commit")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,6 +229,19 @@ mod tests {
         repo.config()
             .and_then(|c| c.get_string("init.defaultBranch"))
             .unwrap_or_else(|_| "master".to_string())
+    }
+
+    /// Create an empty initial commit in a test repository.
+    ///
+    /// Builds a commit from an empty tree so the repo has a valid HEAD
+    /// without requiring any working-tree files.
+    fn create_empty_commit(repo: &Repository, sig: &git2::Signature<'_>) -> git2::Oid {
+        let mut index = repo.index().expect("failed to get index");
+        let tree_id = index.write_tree().expect("failed to write tree");
+        let tree = repo.find_tree(tree_id).expect("failed to find tree");
+        let parents: &[&git2::Commit<'_>] = &[];
+        repo.commit(Some("HEAD"), sig, sig, "initial commit", &tree, parents)
+            .expect("failed to create commit")
     }
 
     #[test]

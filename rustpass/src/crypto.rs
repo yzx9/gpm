@@ -2,11 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::path::Path;
+use std::str;
 
+use age::armor::{ArmoredReader, ArmoredWriter, Format};
 use age::secrecy::SecretString;
-use age::Decryptor;
+use age::{scrypt, ssh, Decryptor, Encryptor, IdentityFile};
+use tokio::fs;
 
 use crate::error::{Error, ErrorCode};
 
@@ -24,7 +27,7 @@ pub async fn decrypt_file(
     identity_bytes: &[u8],
     passphrase: Option<&str>,
 ) -> Result<Vec<u8>, Error> {
-    let encrypted = tokio::fs::read(file_path).await.map_err(|e| {
+    let encrypted = fs::read(file_path).await.map_err(|e| {
         Error::new(
             ErrorCode::IoError,
             format!("Failed to read entry file: {e}"),
@@ -50,13 +53,13 @@ pub fn decrypt_bytes(
     identity_bytes: &[u8],
     passphrase: Option<&str>,
 ) -> Result<Vec<u8>, Error> {
-    let identity_str = std::str::from_utf8(identity_bytes)
+    let identity_str = str::from_utf8(identity_bytes)
         .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
     let trimmed = identity_str.trim();
 
     let identities: Vec<Box<dyn age::Identity>> = if trimmed.starts_with("AGE-SECRET-KEY-") {
         // x25519 path
-        let identity_file = age::IdentityFile::from_buffer(identity_bytes).map_err(|_| {
+        let identity_file = IdentityFile::from_buffer(identity_bytes).map_err(|_| {
             Error::new(
                 ErrorCode::InvalidIdentity,
                 "Identity is not valid AGE-SECRET-KEY-... format",
@@ -72,9 +75,9 @@ pub fn decrypt_bytes(
         || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
     {
         // SSH path
-        let buf = std::io::BufReader::new(trimmed.as_bytes());
-        let ssh_identity = age::ssh::Identity::from_buffer(buf, passphrase.map(String::from))
-            .map_err(|e| {
+        let buf = BufReader::new(trimmed.as_bytes());
+        let ssh_identity =
+            ssh::Identity::from_buffer(buf, passphrase.map(String::from)).map_err(|e| {
                 Error::new(
                     ErrorCode::InvalidIdentity,
                     format!("Cannot parse SSH private key: {e}"),
@@ -82,8 +85,8 @@ pub fn decrypt_bytes(
             })?;
 
         match ssh_identity {
-            age::ssh::Identity::Unencrypted(_) => vec![Box::new(ssh_identity)],
-            age::ssh::Identity::Encrypted(enc) => {
+            ssh::Identity::Unencrypted(_) => vec![Box::new(ssh_identity)],
+            ssh::Identity::Encrypted(enc) => {
                 // age's Identity trait returns None for Encrypted variants.
                 // We must decrypt the SSH key ourselves, then use the UnencryptedKey.
                 let Some(pw) = passphrase else {
@@ -99,10 +102,10 @@ pub fn decrypt_bytes(
                         format!("Failed to decrypt SSH key: {e}"),
                     )
                 })?;
-                let unencrypted = age::ssh::Identity::Unencrypted(decrypted_key);
+                let unencrypted = ssh::Identity::Unencrypted(decrypted_key);
                 vec![Box::new(unencrypted)]
             }
-            age::ssh::Identity::Unsupported(u) => {
+            ssh::Identity::Unsupported(u) => {
                 return Err(Error::new(
                     ErrorCode::InvalidIdentity,
                     format!("Unsupported SSH key type: {u:?}"),
@@ -171,17 +174,16 @@ pub fn encrypt_identity(passphrase: &str, identity: &[u8]) -> Result<Vec<u8>, Er
     }
 
     let secret: SecretString = passphrase.to_string().into();
-    let encryptor = age::Encryptor::with_user_passphrase(secret);
+    let encryptor = Encryptor::with_user_passphrase(secret);
 
     let mut encrypted = Vec::new();
     let armored =
-        age::armor::ArmoredWriter::wrap_output(&mut encrypted, age::armor::Format::AsciiArmor)
-            .map_err(|err| {
-                Error::new(
-                    ErrorCode::DecryptFailed,
-                    format!("Armor setup failed: {err}"),
-                )
-            })?;
+        ArmoredWriter::wrap_output(&mut encrypted, Format::AsciiArmor).map_err(|err| {
+            Error::new(
+                ErrorCode::DecryptFailed,
+                format!("Armor setup failed: {err}"),
+            )
+        })?;
 
     let mut writer = encryptor.wrap_output(armored).map_err(|err| {
         Error::new(
@@ -234,7 +236,7 @@ pub fn decrypt_identity(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, E
 
     // Detect armored format and dearmor if needed
     let encrypted_data = if encrypted.starts_with(b"-----BEGIN AGE ENCRYPTED FILE-----") {
-        let reader = age::armor::ArmoredReader::new(encrypted);
+        let reader = ArmoredReader::new(encrypted);
         let mut buf = Vec::new();
         let mut dearmored = reader;
         dearmored.read_to_end(&mut buf).map_err(|err| {
@@ -249,7 +251,7 @@ pub fn decrypt_identity(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, E
     };
 
     let secret: SecretString = passphrase.to_string().into();
-    let scrypt_identity = age::scrypt::Identity::new(secret);
+    let scrypt_identity = scrypt::Identity::new(secret);
 
     let Ok(decryptor) = Decryptor::new(encrypted_data.as_slice()) else {
         return Err(Error::new(
@@ -302,8 +304,7 @@ mod tests {
 
         let recipient = age::x25519::Recipient::from_str(recipient_str).unwrap();
         let recipients: Vec<Box<dyn age::Recipient>> = vec![Box::new(recipient)];
-        let encryptor =
-            age::Encryptor::with_recipients(recipients.iter().map(AsRef::as_ref)).unwrap();
+        let encryptor = Encryptor::with_recipients(recipients.iter().map(AsRef::as_ref)).unwrap();
         let mut encrypted = Vec::new();
         let mut writer = encryptor.wrap_output(&mut encrypted).unwrap();
         writer.write_all(plaintext).unwrap();
@@ -313,10 +314,9 @@ mod tests {
 
     /// Encrypt `plaintext` to the given SSH recipient string, returning ciphertext.
     fn encrypt_to_ssh(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
-        let recipient: age::ssh::Recipient = recipient_str.parse().unwrap();
+        let recipient: ssh::Recipient = recipient_str.parse().unwrap();
         let recipients: Vec<Box<dyn age::Recipient>> = vec![Box::new(recipient)];
-        let encryptor =
-            age::Encryptor::with_recipients(recipients.iter().map(AsRef::as_ref)).unwrap();
+        let encryptor = Encryptor::with_recipients(recipients.iter().map(AsRef::as_ref)).unwrap();
         let mut encrypted = Vec::new();
         let mut writer = encryptor.wrap_output(&mut encrypted).unwrap();
         writer.write_all(plaintext).unwrap();
