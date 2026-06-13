@@ -8,7 +8,7 @@ use std::str;
 
 use age::armor::{ArmoredReader, ArmoredWriter, Format};
 use age::secrecy::SecretString;
-use age::{scrypt, ssh, Decryptor, Encryptor, IdentityFile};
+use age::{Decryptor, Encryptor, IdentityFile, scrypt, ssh};
 use tokio::fs;
 
 use crate::error::{Error, ErrorCode};

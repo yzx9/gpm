@@ -5,7 +5,7 @@ members = ["rustpass", "src-tauri", "gpm-plugin-safe-area"]
 [workspace.package]
 version = "0.3.0"
 authors = ["Zexin Yuan"]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 
 [workspace.dependencies]
@@ -17,4 +17,9 @@ git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
 walkdir = "2"
 tokio = { version = "1", features = ["time"] }
 tempfile = "3"
-ssh-key = { version = "0.6", features = ["ed25519", "encryption", "rand_core", "std"] }
+ssh-key = { version = "0.6", features = [
+  "ed25519",
+  "encryption",
+  "rand_core",
+  "std",
+] }

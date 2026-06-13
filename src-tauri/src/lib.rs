@@ -255,10 +255,10 @@ async fn unlock(
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
 fn lock(state: State<'_, AppState>) -> Result<(), Error> {
     // Cancel timer
-    if let Ok(mut timer) = state.lock_timer.lock() {
-        if let Some(handle) = timer.take() {
-            handle.abort();
-        }
+    if let Ok(mut timer) = state.lock_timer.lock()
+        && let Some(handle) = timer.take()
+    {
+        handle.abort();
     }
     state.store.lock();
     Ok(())
@@ -363,10 +363,10 @@ async fn get_config(state: State<'_, AppState>) -> Result<RepoConfig, Error> {
 #[allow(clippy::needless_pass_by_value)]
 async fn reset_config(state: State<'_, AppState>) -> Result<(), Error> {
     // Cancel timer
-    if let Ok(mut timer) = state.lock_timer.lock() {
-        if let Some(handle) = timer.take() {
-            handle.abort();
-        }
+    if let Ok(mut timer) = state.lock_timer.lock()
+        && let Some(handle) = timer.take()
+    {
+        handle.abort();
     }
     state.store.reset().await
 }

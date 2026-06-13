@@ -29,7 +29,7 @@ pub struct SshKeyPair {
 ///
 /// Returns `SSH_KEY_INVALID` if key generation or encryption fails.
 pub fn generate_keypair(passphrase: Option<&str>) -> Result<SshKeyPair, Error> {
-    use ssh_key::{rand_core::OsRng, Algorithm, LineEnding, PrivateKey};
+    use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
 
     let key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).map_err(|e| {
         Error::new(

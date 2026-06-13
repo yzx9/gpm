@@ -4,8 +4,8 @@
 
 //! Tauri plugin exposing Android safe-area insets to the frontend.
 
-use tauri::plugin::{Builder, TauriPlugin};
 use tauri::Runtime;
+use tauri::plugin::{Builder, TauriPlugin};
 
 /// Initializes the safe-area plugin.
 ///

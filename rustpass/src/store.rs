@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 use crate::config::{Config, RepoConfig};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
-use crate::identity::{classify_identity, validate_identity_format, IdentityType};
+use crate::identity::{IdentityType, classify_identity, validate_identity_format};
 use crate::recipient::{self, Recipient};
 use crate::secret::Secret;
 use crate::{crypto, git};
@@ -370,10 +370,10 @@ impl Store {
     /// then falls back to loading from disk (for plaintext identities).
     async fn get_identity_bytes(&self) -> Result<Vec<u8>, Error> {
         // Check cache first
-        if let Ok(cache) = self.cached_identity.read() {
-            if let Some(ref cached) = *cache {
-                return Ok((**cached).clone());
-            }
+        if let Ok(cache) = self.cached_identity.read()
+            && let Some(ref cached) = *cache
+        {
+            return Ok((**cached).clone());
         }
 
         // Load from disk

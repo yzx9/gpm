@@ -334,8 +334,7 @@ mod tests {
     #[test]
     #[allow(clippy::indexing_slicing)]
     fn parse_recipients_ssh_ed25519() {
-        let content =
-            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsKLqeplhpW+uObz5dvMgjz1OxfM/XXUB+VHtZ6isGN alice@rust\n";
+        let content = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsKLqeplhpW+uObz5dvMgjz1OxfM/XXUB+VHtZ6isGN alice@rust\n";
         let recipients = parse_recipients(content);
         assert_eq!(recipients.len(), 1);
         let r = &recipients[0];

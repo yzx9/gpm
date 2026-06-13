@@ -10,7 +10,7 @@ use tokio::fs;
 use crate::crypto;
 use crate::error::{Error, ErrorCode};
 use crate::git::GitAuth;
-use crate::identity::{classify_identity, IdentityType};
+use crate::identity::{IdentityType, classify_identity};
 
 /// Atomic write: write data to a temp file then rename over the target.
 ///

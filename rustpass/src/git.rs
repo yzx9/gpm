@@ -192,10 +192,10 @@ fn find_default_branch(repo: &Repository) -> Result<String, Error> {
     }
 
     // Fallback: check what HEAD points to
-    if let Ok(head) = repo.head() {
-        if let Some(name) = head.shorthand() {
-            return Ok(name.to_string());
-        }
+    if let Ok(head) = repo.head()
+        && let Some(name) = head.shorthand()
+    {
+        return Ok(name.to_string());
     }
 
     Err(Error::new(
