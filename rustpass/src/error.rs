@@ -42,6 +42,8 @@ pub enum ErrorCode {
     IdentityNotEncrypted,
     /// Operation was cancelled (e.g. Android lifecycle event).
     Cancelled,
+    /// Post-quantum (X-Wing) age key recognized but decryption not yet supported.
+    PostQuantumNotSupported,
 }
 
 /// Safe error type that never contains secret content.
@@ -74,6 +76,7 @@ impl Error {
                 ErrorCode::WrongPassphrase => "WRONG_PASSPHRASE",
                 ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
                 ErrorCode::Cancelled => "CANCELLED",
+                ErrorCode::PostQuantumNotSupported => "POST_QUANTUM_NOT_SUPPORTED",
             }
             .to_string(),
             message: message.into(),
@@ -161,6 +164,7 @@ mod tests {
             ErrorCode::WrongPassphrase => "WRONG_PASSPHRASE",
             ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
             ErrorCode::Cancelled => "CANCELLED",
+            ErrorCode::PostQuantumNotSupported => "POST_QUANTUM_NOT_SUPPORTED",
         }
     }
 
@@ -183,6 +187,7 @@ mod tests {
             ErrorCode::WrongPassphrase,
             ErrorCode::IdentityNotEncrypted,
             ErrorCode::Cancelled,
+            ErrorCode::PostQuantumNotSupported,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -213,6 +218,7 @@ mod tests {
             ErrorCode::WrongPassphrase,
             ErrorCode::IdentityNotEncrypted,
             ErrorCode::Cancelled,
+            ErrorCode::PostQuantumNotSupported,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");

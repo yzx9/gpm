@@ -54,7 +54,7 @@ export interface SshPrivateKeyResult {
 export interface RecipientInfo {
   public_key: string;
   comment: string | null;
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa";
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
 }
 
 /** Auth state snapshot from get_auth_state command. */
@@ -62,12 +62,12 @@ export interface AuthState {
   configured: boolean;
   encrypted: boolean;
   unlocked: boolean;
-  /** Identity type: "x25519", "ssh_ed25519", "ssh_rsa", "age_encrypted", "unknown". */
+  /** Identity type: "x25519", "ssh_ed25519", "ssh_rsa", "age_encrypted", "post_quantum", "unknown". */
   identity_type: string;
 }
 
 /** Identity validation result from validate_identity command. */
 export interface IdentityInfoResult {
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa";
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
   encrypted: boolean;
 }

@@ -57,6 +57,15 @@ pub fn decrypt_bytes(
         .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
     let trimmed = identity_str.trim();
 
+    // Intercept post-quantum identities before the underlying age parser
+    // produces an opaque error — the Rust age crate (0.11.x) has no PQ support.
+    if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
+        return Err(Error::new(
+            ErrorCode::PostQuantumNotSupported,
+            "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
+        ));
+    }
+
     let identities: Vec<Box<dyn age::Identity>> = if trimmed.starts_with("AGE-SECRET-KEY-") {
         // x25519 path
         let identity_file = IdentityFile::from_buffer(identity_bytes).map_err(|_| {
@@ -425,6 +434,16 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
         let (wrong_identity, _) = generate_keypair();
         let err = decrypt_bytes(&ciphertext, wrong_identity.as_bytes(), None).unwrap_err();
         assert_eq!(err.code, "DECRYPT_FAILED");
+    }
+
+    #[test]
+    fn decrypt_bytes_rejects_post_quantum_identity() {
+        let identity = b"AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ";
+        let err = decrypt_bytes(b"some data", identity, None).unwrap_err();
+        assert_eq!(
+            err.code, "POST_QUANTUM_NOT_SUPPORTED",
+            "PQ identity must be rejected as unsupported before age parsing"
+        );
     }
 
     // ── Identity encryption tests ─────────────────────────────────────────

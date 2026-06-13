@@ -32,6 +32,8 @@ pub enum KeyType {
     SshEd25519,
     /// SSH RSA key (ssh-rsa ...).
     SshRsa,
+    /// Post-quantum MLKEM768-X25519 key (age1pq1...), recognized but unsupported.
+    PostQuantum,
 }
 
 impl KeyType {
@@ -104,7 +106,13 @@ fn parse_recipients(content: &str) -> Vec<Recipient> {
                 (trimmed, None)
             };
 
-            if key_part.starts_with("age1") {
+            if key_part.starts_with("age1pq1") {
+                Some(Recipient {
+                    public_key: key_part.to_string(),
+                    comment: hash_comment,
+                    key_type: KeyType::PostQuantum,
+                })
+            } else if key_part.starts_with("age1") {
                 Some(Recipient {
                     public_key: key_part.to_string(),
                     comment: hash_comment,
@@ -169,7 +177,12 @@ fn parse_ssh_recipient_line(key_part: &str, hash_comment: Option<String>) -> Opt
 pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result<String, Error> {
     let trimmed = identity.trim();
 
-    if trimmed.starts_with("AGE-SECRET-KEY-") {
+    if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
+        Err(Error::new(
+            ErrorCode::PostQuantumNotSupported,
+            "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
+        ))
+    } else if trimmed.starts_with("AGE-SECRET-KEY-") {
         // x25519 path
         let sk = x25519::Identity::from_str(trimmed)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Cannot parse age identity key"))?;
@@ -221,7 +234,9 @@ pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result
 #[must_use]
 pub fn detect_identity_type(identity: &str) -> KeyType {
     let trimmed = identity.trim();
-    if trimmed.starts_with("AGE-SECRET-KEY-") {
+    if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
+        KeyType::PostQuantum
+    } else if trimmed.starts_with("AGE-SECRET-KEY-") {
         KeyType::X25519
     } else if trimmed.contains("ssh-ed25519") {
         KeyType::SshEd25519
@@ -250,6 +265,13 @@ pub struct IdentityInfo {
 /// Returns an error if the identity format is invalid or cannot be parsed.
 pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
     let trimmed = identity.trim();
+
+    if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
+        return Err(Error::new(
+            ErrorCode::PostQuantumNotSupported,
+            "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
+        ));
+    }
 
     if trimmed.starts_with("AGE-SECRET-KEY-") {
         // Validate x25519 key can be parsed
@@ -370,6 +392,31 @@ ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE7nIXTGNuaRBN9toI/wNALuQec8mvlt0iJ7o3OaD2
         assert_eq!(recipients[0].key_type, KeyType::X25519);
         assert_eq!(recipients[1].key_type, KeyType::SshEd25519);
         assert_eq!(recipients[2].key_type, KeyType::SshRsa);
+    }
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn parse_recipients_post_quantum() {
+        let content = "age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\n";
+        let recipients = parse_recipients(content);
+        assert_eq!(recipients.len(), 1);
+        assert_eq!(recipients[0].key_type, KeyType::PostQuantum);
+        assert!(recipients[0].public_key.starts_with("age1pq1"));
+    }
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn parse_recipients_pq_not_swallowed_as_x25519() {
+        // Regression: a PQ recipient must not be tagged X25519 despite the
+        // shared age1 prefix.
+        let content = "\
+age1abc123...
+age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
+";
+        let recipients = parse_recipients(content);
+        assert_eq!(recipients.len(), 2);
+        assert_eq!(recipients[0].key_type, KeyType::X25519);
+        assert_eq!(recipients[1].key_type, KeyType::PostQuantum);
     }
 
     #[test]
@@ -508,6 +555,30 @@ LF7kNlDznn/nyZlg==
     }
 
     #[test]
+    fn identity_to_recipient_rejects_post_quantum() {
+        let identity = "AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ";
+        let result = identity_to_recipient(identity, None);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            "POST_QUANTUM_NOT_SUPPORTED",
+            "PQ identity must be rejected as unsupported, not routed to the x25519 parser"
+        );
+    }
+
+    #[test]
+    fn detect_identity_type_post_quantum() {
+        let identity = "AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ";
+        assert_eq!(detect_identity_type(identity), KeyType::PostQuantum);
+    }
+
+    #[test]
+    fn detect_identity_type_x25519_not_swallowed_by_pq_prefix() {
+        let identity = "AGE-SECRET-KEY-1TEST1234567890ABCDEF";
+        assert_eq!(detect_identity_type(identity), KeyType::X25519);
+    }
+
+    #[test]
     fn recipient_struct_debug_format() {
         let r = Recipient {
             public_key: "age1test".to_string(),
@@ -556,5 +627,17 @@ LF7kNlDznn/nyZlg==
         let info = validate_identity(sk).unwrap();
         assert_eq!(info.key_type, KeyType::SshEd25519);
         assert!(info.encrypted);
+    }
+
+    #[test]
+    fn validate_identity_rejects_post_quantum() {
+        let identity = "AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ";
+        let result = validate_identity(identity);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            "POST_QUANTUM_NOT_SUPPORTED",
+            "PQ identity must be rejected as unsupported, not routed to the x25519 parser"
+        );
     }
 }

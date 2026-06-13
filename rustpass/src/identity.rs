@@ -26,6 +26,9 @@ pub enum IdentityType {
     SshRsa,
     /// Age passphrase-encrypted identity file (armored age encrypted blob).
     AgeEncrypted,
+    /// Post-quantum MLKEM768-X25519 key (`AGE-SECRET-KEY-PQ-1...`), recognized
+    /// but unsupported.
+    PostQuantum,
     /// Unknown / unrecognized identity format.
     Unknown,
 }
@@ -41,7 +44,9 @@ pub fn classify_identity(bytes: &[u8]) -> IdentityType {
     };
     let trimmed = text.trim();
 
-    if trimmed.starts_with("AGE-SECRET-KEY-") {
+    if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
+        IdentityType::PostQuantum
+    } else if trimmed.starts_with("AGE-SECRET-KEY-") {
         IdentityType::X25519
     } else if trimmed.starts_with("-----BEGIN AGE ENCRYPTED FILE-----") {
         IdentityType::AgeEncrypted
@@ -68,17 +73,23 @@ pub fn classify_identity(bytes: &[u8]) -> IdentityType {
 ///
 /// Delegates to [`classify_identity`] for the actual prefix detection, keeping
 /// it as the single source of truth. Accepts native x25519, OpenSSH, RSA, and
-/// PKCS#8 private keys. Rejects age-encrypted blobs (not a private key) and
-/// unrecognized formats.
+/// PKCS#8 private keys. Rejects age-encrypted blobs (not a private key),
+/// unrecognized formats, and post-quantum keys (recognized but unsupported).
 ///
 /// # Errors
 ///
 /// Returns `InvalidIdentity` if the format is not recognized.
+/// Returns `PostQuantumNotSupported` for post-quantum (`AGE-SECRET-KEY-PQ-1`)
+/// keys.
 pub fn validate_identity_format(identity_bytes: &[u8]) -> Result<(), Error> {
     match classify_identity(identity_bytes) {
         IdentityType::Unknown | IdentityType::AgeEncrypted => Err(Error::new(
             ErrorCode::InvalidIdentity,
             "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
+        )),
+        IdentityType::PostQuantum => Err(Error::new(
+            ErrorCode::PostQuantumNotSupported,
+            "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
         )),
         _ => Ok(()),
     }
@@ -107,6 +118,23 @@ mod tests {
             classify_identity(encrypted.as_bytes()),
             IdentityType::AgeEncrypted,
         );
+    }
+
+    #[test]
+    fn classify_post_quantum() {
+        // PQ identity prefix must be matched before the generic AGE-SECRET-KEY-.
+        let identity = "AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ";
+        assert_eq!(
+            classify_identity(identity.as_bytes()),
+            IdentityType::PostQuantum,
+        );
+    }
+
+    #[test]
+    fn classify_x25519_is_not_swallowed_by_pq_prefix() {
+        // Regression: a plain x25519 key (no PQ- segment) must stay X25519.
+        let identity = "AGE-SECRET-KEY-1TEST1234567890ABCDEF";
+        assert_eq!(classify_identity(identity.as_bytes()), IdentityType::X25519);
     }
 
     #[test]
@@ -173,6 +201,18 @@ mod tests {
         let result = validate_identity_format(encrypted);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, "INVALID_IDENTITY");
+    }
+
+    #[test]
+    fn validate_rejects_post_quantum() {
+        let identity = b"AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ";
+        let result = validate_identity_format(identity);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            "POST_QUANTUM_NOT_SUPPORTED",
+            "PQ identity must be rejected as unsupported, not as invalid format"
+        );
     }
 
     #[test]

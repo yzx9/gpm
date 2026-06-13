@@ -87,7 +87,8 @@ struct AuthState {
     /// True if the identity cache is populated (passphrase provided).
     unlocked: bool,
     /// Identity type string (`x25519`, `ssh_ed25519`, `ssh_rsa`, `age_encrypted`,
-    /// `unknown`) — lets the UI branch on whether the identity is an SSH key.
+    /// `post_quantum`, `unknown`) — lets the UI branch on whether the identity
+    /// is an SSH key.
     identity_type: String,
 }
 
@@ -107,6 +108,7 @@ impl From<Recipient> for RecipientInfo {
                 KeyType::X25519 => "x25519".to_string(),
                 KeyType::SshEd25519 => "ssh_ed25519".to_string(),
                 KeyType::SshRsa => "ssh_rsa".to_string(),
+                KeyType::PostQuantum => "post_quantum".to_string(),
             },
         }
     }
@@ -149,6 +151,7 @@ fn identity_type_string(itype: rustpass::identity::IdentityType) -> String {
         IdentityType::SshEd25519 => "ssh_ed25519",
         IdentityType::SshRsa => "ssh_rsa",
         IdentityType::AgeEncrypted => "age_encrypted",
+        IdentityType::PostQuantum => "post_quantum",
         IdentityType::Unknown => "unknown",
     }
     .to_string()
@@ -207,6 +210,7 @@ fn validate_identity(identity: String) -> Result<IdentityInfoResult, Error> {
             KeyType::X25519 => "x25519".to_string(),
             KeyType::SshEd25519 => "ssh_ed25519".to_string(),
             KeyType::SshRsa => "ssh_rsa".to_string(),
+            KeyType::PostQuantum => "post_quantum".to_string(),
         },
         encrypted: info.encrypted,
     })

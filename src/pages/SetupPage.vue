@@ -251,6 +251,11 @@ watch(step, (s) => {
 // Detect identity type and SSH-key encryption status when identity changes
 watch(identity, async (val) => {
   const trimmed = val.trim();
+  if (trimmed.startsWith("AGE-SECRET-KEY-PQ-1")) {
+    identityType.value = "post_quantum";
+    isIdentityEncrypted.value = false;
+    return;
+  }
   if (trimmed.startsWith("AGE-SECRET-KEY-")) {
     identityType.value = "x25519";
     isIdentityEncrypted.value = false;
@@ -542,7 +547,7 @@ watch(identity, async (val) => {
                 <span
                   v-if="r.key_type !== 'x25519'"
                   class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--color-edge)] text-muted"
-                  >SSH</span
+                  >{{ r.key_type === "post_quantum" ? "PQ" : "SSH" }}</span
                 >
               </div>
               <span v-if="r.comment" class="text-xs text-muted">{{

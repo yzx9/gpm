@@ -57,4 +57,4 @@ Full, native support for decrypting age files encrypted to post-quantum recipien
 - rage tracking: https://github.com/str4d/rage/issues/621 , https://github.com/str4d/rage/issues/598
 - RustCrypto `x-wing`: https://crates.io/crates/x-wing ; `hpke`: https://lib.rs/crates/hpke
 - CCTV test vectors: https://github.com/C2SP/CCTV/tree/main/age
-- Prerequisite (recognition): [0009-post-quantum-detection.md](0009-post-quantum-detection.md)
+- Prerequisite (recognition): done — PQ keys are now recognized and surface a clear "not yet supported" error instead of a confusing failure (shipped)
