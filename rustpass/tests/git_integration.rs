@@ -159,8 +159,8 @@ mod tests {
     // Full workflow (clone + list + decrypt)
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn full_workflow_clone_list_decrypt() {
+    #[tokio::test]
+    async fn full_workflow_clone_list_decrypt() {
         let (identity, recipient) = generate_test_keypair();
 
         let entries: Vec<(&str, &[u8])> = vec![
@@ -198,6 +198,7 @@ mod tests {
         let file_path = store::resolve_entry_path(dest.path(), "cloud/aws/root.age")
             .expect("resolve entry path");
         let decrypted = crypto::decrypt_file(&file_path, identity.as_bytes(), None)
+            .await
             .expect("decrypt should succeed with correct identity");
 
         let parsed = Secret::parse(&decrypted).expect("parse should succeed");

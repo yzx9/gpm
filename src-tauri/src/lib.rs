@@ -126,11 +126,11 @@ struct AppState {
 
 /// Get the authentication state as a single atomic snapshot.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
-fn get_auth_state(state: tauri::State<'_, AppState>) -> Result<AuthState, Error> {
+#[allow(clippy::needless_pass_by_value)]
+async fn get_auth_state(state: tauri::State<'_, AppState>) -> Result<AuthState, Error> {
     Ok(AuthState {
         configured: state.store.is_configured(),
-        encrypted: state.store.is_identity_encrypted(),
+        encrypted: state.store.is_identity_encrypted().await,
         unlocked: state.store.is_unlocked(),
     })
 }
@@ -152,26 +152,29 @@ fn is_repo_ready(state: tauri::State<'_, AppState>) -> Result<bool, Error> {
 /// Step 1 of setup: clone the repo and save repo config (no identity).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn clone_repo(
+async fn clone_repo(
     state: tauri::State<'_, AppState>,
     repo_url: String,
     pat: Option<String>,
     ssh_key: Option<String>,
     ssh_passphrase: Option<String>,
 ) -> Result<(), Error> {
-    state.store.clone_only(
-        &repo_url,
-        pat.as_deref(),
-        ssh_key.as_deref(),
-        ssh_passphrase.as_deref(),
-    )
+    state
+        .store
+        .clone_only(
+            &repo_url,
+            pat.as_deref(),
+            ssh_key.as_deref(),
+            ssh_passphrase.as_deref(),
+        )
+        .await
 }
 
 /// Read recipients from the cloned repository for setup step 2.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn list_recipients(state: tauri::State<'_, AppState>) -> Result<Vec<RecipientInfo>, Error> {
-    let recipients = state.store.list_recipients()?;
+async fn list_recipients(state: tauri::State<'_, AppState>) -> Result<Vec<RecipientInfo>, Error> {
+    let recipients = state.store.list_recipients().await?;
     Ok(recipients.into_iter().map(RecipientInfo::from).collect())
 }
 
@@ -193,7 +196,7 @@ fn validate_identity(identity: String) -> Result<IdentityInfoResult, Error> {
 /// Step 2 of setup: save the age identity and complete configuration.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn complete_setup(
+async fn complete_setup(
     state: tauri::State<'_, AppState>,
     identity: String,
     passphrase: Option<String>,
@@ -202,12 +205,13 @@ fn complete_setup(
     state
         .store
         .save_identity(&identity, passphrase.as_deref(), ssh_passphrase.as_deref())
+        .await
 }
 
 /// Full setup: validate identity, clone repo, save config.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn setup(
+async fn setup(
     state: tauri::State<'_, AppState>,
     repo_url: String,
     pat: Option<String>,
@@ -216,14 +220,17 @@ fn setup(
     identity: String,
     identity_passphrase: Option<String>,
 ) -> Result<(), Error> {
-    state.store.configure(
-        &repo_url,
-        pat.as_deref(),
-        ssh_key.as_deref(),
-        ssh_passphrase.as_deref(),
-        &identity,
-        identity_passphrase.as_deref(),
-    )
+    state
+        .store
+        .configure(
+            &repo_url,
+            pat.as_deref(),
+            ssh_key.as_deref(),
+            ssh_passphrase.as_deref(),
+            &identity,
+            identity_passphrase.as_deref(),
+        )
+        .await
 }
 
 /// Unlock a passphrase-encrypted identity (async — scrypt is slow).
@@ -234,14 +241,8 @@ async fn unlock(
     app: tauri::AppHandle,
     passphrase: String,
 ) -> Result<(), Error> {
-    // Run scrypt decryption on blocking thread using the real store
-    let store = state.store.clone();
-    let pw = passphrase;
-    let result = tokio::task::spawn_blocking(move || store.unlock(&pw))
-        .await
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Unlock task failed: {e}")))?;
-
-    result?;
+    // Store::unlock is now async and handles spawn_blocking internally
+    state.store.unlock(&passphrase).await?;
 
     // Start auto-lock timer
     reset_lock_timer(&state, &app);
@@ -266,14 +267,17 @@ fn lock(state: tauri::State<'_, AppState>) -> Result<(), Error> {
 /// Set a passphrase on an existing plaintext identity.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn set_passphrase(state: tauri::State<'_, AppState>, passphrase: String) -> Result<(), Error> {
-    state.store.set_passphrase(&passphrase)
+async fn set_passphrase(
+    state: tauri::State<'_, AppState>,
+    passphrase: String,
+) -> Result<(), Error> {
+    state.store.set_passphrase(&passphrase).await
 }
 
 /// Change the passphrase on an encrypted identity.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn change_passphrase(
+async fn change_passphrase(
     state: tauri::State<'_, AppState>,
     old_passphrase: String,
     new_passphrase: String,
@@ -281,20 +285,21 @@ fn change_passphrase(
     state
         .store
         .change_passphrase(&old_passphrase, &new_passphrase)
+        .await
 }
 
 /// List all .age entries in the configured repository.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn list_entries(state: tauri::State<'_, AppState>) -> Result<Vec<Entry>, Error> {
-    state.store.list()
+async fn list_entries(state: tauri::State<'_, AppState>) -> Result<Vec<Entry>, Error> {
+    state.store.list().await
 }
 
 /// Pull latest changes (fast-forward only).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn pull_repo(state: tauri::State<'_, AppState>) -> Result<SyncResult, Error> {
-    state.store.sync()
+async fn pull_repo(state: tauri::State<'_, AppState>) -> Result<SyncResult, Error> {
+    state.store.sync().await
 }
 
 /// Primary operation: decrypt and copy password to clipboard.
@@ -306,7 +311,7 @@ async fn copy_password(
     app: tauri::AppHandle,
     entry_path: String,
 ) -> Result<CopyResult, Error> {
-    let secret = state.store.get(&entry_path)?;
+    let secret = state.store.get(&entry_path).await?;
 
     let entry_name = entry_path.trim_end_matches(".age").to_string();
 
@@ -337,11 +342,11 @@ async fn copy_password(
 /// Password crosses IPC — Vue component must follow strict lifecycle.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn show_password(
+async fn show_password(
     state: tauri::State<'_, AppState>,
     entry_path: String,
 ) -> Result<SensitiveContent, Error> {
-    let secret = state.store.get(&entry_path)?;
+    let secret = state.store.get(&entry_path).await?;
 
     Ok(SensitiveContent {
         password: secret.password().to_string(),
@@ -352,21 +357,21 @@ fn show_password(
 /// Get the current repo config (for display in settings).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn get_config(state: tauri::State<'_, AppState>) -> Result<RepoConfig, Error> {
-    state.store.config()
+async fn get_config(state: tauri::State<'_, AppState>) -> Result<RepoConfig, Error> {
+    state.store.config().await
 }
 
 /// Reset all configuration and local data.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), Error> {
+async fn reset_config(state: tauri::State<'_, AppState>) -> Result<(), Error> {
     // Cancel timer
     if let Ok(mut timer) = state.lock_timer.lock() {
         if let Some(handle) = timer.take() {
             handle.abort();
         }
     }
-    state.store.reset()
+    state.store.reset().await
 }
 
 /// Generate a new ed25519 SSH keypair for setup.
@@ -383,8 +388,10 @@ fn generate_ssh_key(passphrase: Option<String>) -> Result<SshKeyPairResult, Erro
 /// Get the public key derived from the stored SSH private key.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn get_ssh_public_key(state: tauri::State<'_, AppState>) -> Result<SshPublicKeyResult, Error> {
-    let config = state.store.config()?;
+async fn get_ssh_public_key(
+    state: tauri::State<'_, AppState>,
+) -> Result<SshPublicKeyResult, Error> {
+    let config = state.store.config().await?;
     let private_key = config
         .ssh_key
         .ok_or_else(|| Error::new(ErrorCode::SshKeyInvalid, "No SSH key configured"))?;
@@ -395,8 +402,10 @@ fn get_ssh_public_key(state: tauri::State<'_, AppState>) -> Result<SshPublicKeyR
 /// Export the stored SSH private key (secret — requires confirmation in UI).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn export_ssh_private_key(state: tauri::State<'_, AppState>) -> Result<SshPrivateKeyResult, Error> {
-    let config = state.store.config()?;
+async fn export_ssh_private_key(
+    state: tauri::State<'_, AppState>,
+) -> Result<SshPrivateKeyResult, Error> {
+    let config = state.store.config().await?;
     let private_key_pem = config
         .ssh_key
         .ok_or_else(|| Error::new(ErrorCode::SshKeyInvalid, "No SSH key configured"))?;

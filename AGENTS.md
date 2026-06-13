@@ -33,20 +33,22 @@ All Tauri IPC types live in `src/types.ts`.
 
 ### Backend (Rust library) — `rustpass/src/`
 
+Async crate using `tokio::fs` for all file I/O. Git and scrypt operations wrapped in `spawn_blocking`.
+
 - `lib.rs` — Crate root, re-exports core types
-- `crypto.rs` — Age decryption with zeroize-per-decrypt (x25519 and SSH identities)
+- `crypto.rs` — Age decryption with zeroize-per-decrypt (x25519 and SSH identities); `decrypt_file` is async, `decrypt_bytes`/`decrypt_identity` are sync
 - `ssh.rs` — SSH key generation (ed25519), public key derivation, private key export
-- `recipient.rs` — Recipient discovery, `KeyType` enum (X25519, SshEd25519, SshRsa), identity-to-recipient conversion
-- `store.rs` — Two-step setup, directory walking, .age file discovery, content parsing
-- `git.rs` — Clone + pull (ff-only) via git2
-- `config.rs` — Identity + config persistence
-- `error.rs` — Safe error types (no secrets in messages)
+- `recipient.rs` — Recipient discovery (async), `KeyType` enum (X25519, SshEd25519, SshRsa), identity-to-recipient conversion
+- `store.rs` — Async facade: two-step setup, directory walking, .age file discovery, content parsing; git/scrypt via `spawn_blocking`
+- `git.rs` — Clone + pull (ff-only) via git2 (sync — wrapped in `spawn_blocking` by store.rs)
+- `config.rs` — Async identity + config persistence via `tokio::fs`
+- `error.rs` — Safe error types (no secrets in messages); includes `Cancelled` variant for Phase 2
 - `entry.rs` — Entry type (path, name)
 - `secret.rs` — Decrypted secret type (password, body)
 
 ### Tauri app — `src-tauri/src/`
 
-- `lib.rs` — Tauri commands, state management, app entry, IPC types
+- `lib.rs` — Async Tauri commands (14 async, 5 sync), state management, app entry, IPC types
 - `main.rs` — Desktop entry point
 
 ### Tauri Plugins — `gpm-plugin-safe-area/`

@@ -19,12 +19,12 @@ use crate::error::{Error, ErrorCode};
 ///
 /// Returns an error if the file cannot be read, the identity format is invalid,
 /// or decryption fails.
-pub fn decrypt_file(
+pub async fn decrypt_file(
     file_path: &Path,
     identity_bytes: &[u8],
     passphrase: Option<&str>,
 ) -> Result<Vec<u8>, Error> {
-    let encrypted = std::fs::read(file_path).map_err(|e| {
+    let encrypted = tokio::fs::read(file_path).await.map_err(|e| {
         Error::new(
             ErrorCode::IoError,
             format!("Failed to read entry file: {e}"),
@@ -324,8 +324,8 @@ mod tests {
         encrypted
     }
 
-    #[test]
-    fn decrypt_file_reads_and_decrypts() {
+    #[tokio::test]
+    async fn decrypt_file_reads_and_decrypts() {
         let (identity, recipient) = generate_keypair();
         let plaintext = b"hunter2\nusername: bob";
 
@@ -334,19 +334,23 @@ mod tests {
         let ciphertext = encrypt(plaintext, &recipient);
         std::fs::write(&file_path, &ciphertext).unwrap();
 
-        let result = decrypt_file(&file_path, identity.as_bytes(), None).unwrap();
+        let result = decrypt_file(&file_path, identity.as_bytes(), None)
+            .await
+            .unwrap();
         assert_eq!(result, plaintext);
 
         let bytes_result = decrypt_bytes(&ciphertext, identity.as_bytes(), None).unwrap();
         assert_eq!(result, bytes_result);
     }
 
-    #[test]
-    fn decrypt_file_missing_file() {
+    #[tokio::test]
+    async fn decrypt_file_missing_file() {
         let (identity, _recipient) = generate_keypair();
         let missing = std::path::PathBuf::from("/nonexistent/path/no-such-file.age");
 
-        let err = decrypt_file(&missing, identity.as_bytes(), None).unwrap_err();
+        let err = decrypt_file(&missing, identity.as_bytes(), None)
+            .await
+            .unwrap_err();
         assert_eq!(
             err.code, "IO_ERROR",
             "expected IO_ERROR for missing file, got: {err}"

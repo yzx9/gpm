@@ -13,16 +13,19 @@
 //! use rustpass::Store;
 //! use std::path::PathBuf;
 //!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), rustpass::Error> {
 //! let store = Store::new(PathBuf::from("/path/to/config"));
-//! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...", None)?;
+//! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...", None).await?;
 //!
-//! for entry in store.list()? {
+//! for entry in store.list().await? {
 //!     println!("{}", entry.name);
 //! }
 //!
-//! let secret = store.get("cloud/aws/root")?;
+//! let secret = store.get("cloud/aws/root").await?;
 //! println!("password: {}", secret.password());
-//! # Ok::<(), rustpass::Error>(())
+//! # Ok(())
+//! # }
 //! ```
 
 #![warn(

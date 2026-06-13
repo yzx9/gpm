@@ -14,6 +14,8 @@ zeroize = { workspace = true }
 git2 = { workspace = true }
 walkdir = { workspace = true }
 ssh-key = { workspace = true }
+tokio = { workspace = true, features = ["fs", "rt"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }

@@ -38,6 +38,8 @@ pub enum ErrorCode {
     WrongPassphrase,
     /// Operation requires an encrypted identity, or empty passphrase was rejected.
     IdentityNotEncrypted,
+    /// Operation was cancelled (e.g. Android lifecycle event).
+    Cancelled,
 }
 
 /// Safe error type that never contains secret content.
@@ -69,6 +71,7 @@ impl Error {
                 ErrorCode::IdentityEncrypted => "IDENTITY_ENCRYPTED",
                 ErrorCode::WrongPassphrase => "WRONG_PASSPHRASE",
                 ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
+                ErrorCode::Cancelled => "CANCELLED",
             }
             .to_string(),
             message: message.into(),
@@ -128,6 +131,12 @@ impl From<ssh_key::Error> for Error {
     }
 }
 
+impl From<tokio::task::JoinError> for Error {
+    fn from(e: tokio::task::JoinError) -> Self {
+        Error::new(ErrorCode::StoreError, format!("Blocking task failed: {e}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +158,7 @@ mod tests {
             ErrorCode::IdentityEncrypted => "IDENTITY_ENCRYPTED",
             ErrorCode::WrongPassphrase => "WRONG_PASSPHRASE",
             ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
+            ErrorCode::Cancelled => "CANCELLED",
         }
     }
 
@@ -170,6 +180,7 @@ mod tests {
             ErrorCode::IdentityEncrypted,
             ErrorCode::WrongPassphrase,
             ErrorCode::IdentityNotEncrypted,
+            ErrorCode::Cancelled,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -199,6 +210,7 @@ mod tests {
             ErrorCode::IdentityEncrypted,
             ErrorCode::WrongPassphrase,
             ErrorCode::IdentityNotEncrypted,
+            ErrorCode::Cancelled,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");
@@ -251,6 +263,19 @@ mod tests {
         assert!(
             app_err.message.contains("Config error:"),
             "message should have Config error prefix: {}",
+            app_err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn from_join_error() {
+        let handle = tokio::spawn(async { panic!("test") });
+        let join_err = handle.await.unwrap_err();
+        let app_err: Error = join_err.into();
+        assert_eq!(app_err.code, "STORE_ERROR");
+        assert!(
+            app_err.message.contains("Blocking task failed"),
+            "message should contain prefix: {}",
             app_err.message
         );
     }

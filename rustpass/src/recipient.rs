@@ -60,7 +60,7 @@ pub struct Recipient {
 /// # Errors
 ///
 /// Returns an error if the file exists but cannot be read.
-pub fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> {
+pub async fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> {
     let gopass_path = repo_path.join(".gopass-recipients");
     let age_path = repo_path.join(".age-recipients");
 
@@ -72,7 +72,7 @@ pub fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> {
         return Ok(Vec::new());
     };
 
-    let content = std::fs::read_to_string(file_path)?;
+    let content = tokio::fs::read_to_string(file_path).await?;
     Ok(parse_recipients(&content))
 }
 
@@ -383,8 +383,8 @@ ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE7nIXTGNuaRBN9toI/wNALuQec8mvlt0iJ7o3OaD2
         assert!(recipients.is_empty());
     }
 
-    #[test]
-    fn list_recipients_from_gopass_file() {
+    #[tokio::test]
+    async fn list_recipients_from_gopass_file() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(".gopass-recipients"),
@@ -392,35 +392,35 @@ ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE7nIXTGNuaRBN9toI/wNALuQec8mvlt0iJ7o3OaD2
         )
         .unwrap();
 
-        let recipients = list_recipients(dir.path()).unwrap();
+        let recipients = list_recipients(dir.path()).await.unwrap();
         assert_eq!(recipients.len(), 2);
     }
 
-    #[test]
-    fn list_recipients_fallback_to_age_file() {
+    #[tokio::test]
+    async fn list_recipients_fallback_to_age_file() {
         let dir = tempfile::tempdir().unwrap();
         // Only .age-recipients exists
         std::fs::write(dir.path().join(".age-recipients"), "age1key1\n").unwrap();
 
-        let recipients = list_recipients(dir.path()).unwrap();
+        let recipients = list_recipients(dir.path()).await.unwrap();
         assert_eq!(recipients.len(), 1);
     }
 
-    #[test]
-    fn list_recipients_prefers_gopass_over_age() {
+    #[tokio::test]
+    async fn list_recipients_prefers_gopass_over_age() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".gopass-recipients"), "age1gopass\n").unwrap();
         std::fs::write(dir.path().join(".age-recipients"), "age1age\n").unwrap();
 
-        let recipients = list_recipients(dir.path()).unwrap();
+        let recipients = list_recipients(dir.path()).await.unwrap();
         assert_eq!(recipients.len(), 1);
         assert_eq!(recipients.first().unwrap().public_key, "age1gopass");
     }
 
-    #[test]
-    fn list_recipients_no_file_returns_empty() {
+    #[tokio::test]
+    async fn list_recipients_no_file_returns_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let recipients = list_recipients(dir.path()).unwrap();
+        let recipients = list_recipients(dir.path()).await.unwrap();
         assert!(recipients.is_empty());
     }
 

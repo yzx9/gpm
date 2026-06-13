@@ -82,9 +82,8 @@ impl Store {
     ///
     /// Returns true for age-encrypted identities and encrypted SSH keys.
     /// Returns false for plaintext x25519 keys and unencrypted SSH keys.
-    #[must_use]
-    pub fn is_identity_encrypted(&self) -> bool {
-        let Ok(bytes) = self.config.load_identity() else {
+    pub async fn is_identity_encrypted(&self) -> bool {
+        let Ok(bytes) = self.config.load_identity().await else {
             return false;
         };
         let itype = classify_identity(&bytes);
@@ -125,14 +124,19 @@ impl Store {
     /// Returns `IdentityNotEncrypted` if the identity is not encrypted.
     /// Returns `WrongPassphrase` if the passphrase is incorrect.
     /// Returns `NoIdentity` if no identity is configured.
-    pub fn unlock(&self, passphrase: &str) -> Result<(), Error> {
-        let encrypted_bytes = self.config.load_identity()?;
+    pub async fn unlock(&self, passphrase: &str) -> Result<(), Error> {
+        let encrypted_bytes = self.config.load_identity().await?;
 
         let itype = classify_identity(&encrypted_bytes);
 
         if itype == IdentityType::AgeEncrypted {
-            // Age-encrypted identity: decrypt with passphrase
-            let decrypted = crypto::decrypt_identity(passphrase, &encrypted_bytes)?;
+            // Age-encrypted identity: decrypt with passphrase on blocking thread
+            // (scrypt is intentionally slow ~100ms+)
+            let pw = passphrase.to_string();
+            let decrypted = tokio::task::spawn_blocking(move || {
+                crypto::decrypt_identity(&pw, &encrypted_bytes)
+            })
+            .await??;
             let zeroizing = Zeroizing::new(decrypted);
 
             {
@@ -178,7 +182,7 @@ impl Store {
     /// # Errors
     ///
     /// Returns an error if the clone fails or the config cannot be persisted.
-    pub fn clone_only(
+    pub async fn clone_only(
         &self,
         repo_url: &str,
         pat: Option<&str>,
@@ -196,17 +200,23 @@ impl Store {
         };
 
         let repo_dir = self.config.config_dir().join("repo");
-        self.config.clear_all()?;
+        self.config.clear_all().await?;
 
         if repo_dir.exists() {
-            std::fs::remove_dir_all(&repo_dir)?;
+            tokio::fs::remove_dir_all(&repo_dir).await?;
         }
 
-        git::clone_repo(repo_url, &repo_dir, &auth)?;
+        let repo_url_owned = repo_url.to_string();
+        let repo_dir_clone = repo_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)
+        })
+        .await??;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
-            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)?;
+            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)
+            .await?;
 
         Ok(())
     }
@@ -217,10 +227,10 @@ impl Store {
     ///
     /// Returns an error if the repo is not configured or the recipients file
     /// cannot be read.
-    pub fn list_recipients(&self) -> Result<Vec<Recipient>, Error> {
-        let repo_config = self.config.load_repo_config()?;
+    pub async fn list_recipients(&self) -> Result<Vec<Recipient>, Error> {
+        let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        recipient::list_recipients(repo_path)
+        recipient::list_recipients(repo_path).await
     }
 
     /// Step 2 of two-step setup: save the age identity.
@@ -231,7 +241,7 @@ impl Store {
     ///
     /// Returns an error if the identity format is invalid, the identity does
     /// not match any recipient, or the config cannot be persisted.
-    pub fn save_identity(
+    pub async fn save_identity(
         &self,
         identity: &str,
         passphrase: Option<&str>,
@@ -242,7 +252,7 @@ impl Store {
 
         let derived_recipient = recipient::identity_to_recipient(identity, ssh_passphrase)?;
 
-        let known_recipients = self.list_recipients().unwrap_or_default();
+        let known_recipients = self.list_recipients().await.unwrap_or_default();
         if !known_recipients.is_empty() {
             let matches = known_recipients
                 .iter()
@@ -255,7 +265,9 @@ impl Store {
             }
         }
 
-        self.config.save_identity(identity_bytes, passphrase)?;
+        self.config
+            .save_identity(identity_bytes, passphrase)
+            .await?;
         Ok(())
     }
 
@@ -265,7 +277,7 @@ impl Store {
     ///
     /// Returns an error if the identity format is invalid, the clone fails,
     /// or the config cannot be persisted.
-    pub fn configure(
+    pub async fn configure(
         &self,
         repo_url: &str,
         pat: Option<&str>,
@@ -291,19 +303,25 @@ impl Store {
         };
 
         let repo_dir = self.config.config_dir().join("repo");
-        self.config.clear_all()?;
+        self.config.clear_all().await?;
 
         if repo_dir.exists() {
-            std::fs::remove_dir_all(&repo_dir)?;
+            tokio::fs::remove_dir_all(&repo_dir).await?;
         }
 
-        self.config.save_identity(identity_bytes, None)?;
+        self.config.save_identity(identity_bytes, None).await?;
 
-        git::clone_repo(repo_url, &repo_dir, &auth)?;
+        let repo_url_owned = repo_url.to_string();
+        let repo_dir_clone = repo_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)
+        })
+        .await??;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
-            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)?;
+            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)
+            .await?;
 
         Ok(())
     }
@@ -314,8 +332,8 @@ impl Store {
     ///
     /// Returns an error if the store is not configured or the repo path
     /// does not exist.
-    pub fn list(&self) -> Result<Vec<Entry>, Error> {
-        let repo_config = self.config.load_repo_config()?;
+    pub async fn list(&self) -> Result<Vec<Entry>, Error> {
+        let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
         list_entries(repo_path)
     }
@@ -329,8 +347,8 @@ impl Store {
     ///
     /// Returns an error if the entry does not exist, the identity is missing,
     /// the identity is encrypted but not unlocked, or decryption fails.
-    pub fn get(&self, name: &str) -> Result<Secret, Error> {
-        let repo_config = self.config.load_repo_config()?;
+    pub async fn get(&self, name: &str) -> Result<Secret, Error> {
+        let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
 
         let entry_path = if Path::new(name)
@@ -343,9 +361,10 @@ impl Store {
         };
 
         let file_path = resolve_entry_path(repo_path, &entry_path)?;
-        let identity_bytes = self.get_identity_bytes()?;
+        let identity_bytes = self.get_identity_bytes().await?;
         let passphrase = self.get_cached_passphrase();
-        let decrypted = crypto::decrypt_file(&file_path, &identity_bytes, passphrase.as_deref())?;
+        let decrypted =
+            crypto::decrypt_file(&file_path, &identity_bytes, passphrase.as_deref()).await?;
         Secret::parse(&decrypted)
     }
 
@@ -353,7 +372,7 @@ impl Store {
     ///
     /// Checks cache first (for encrypted identities that have been unlocked),
     /// then falls back to loading from disk (for plaintext identities).
-    fn get_identity_bytes(&self) -> Result<Vec<u8>, Error> {
+    async fn get_identity_bytes(&self) -> Result<Vec<u8>, Error> {
         // Check cache first
         if let Ok(cache) = self.cached_identity.read() {
             if let Some(ref cached) = *cache {
@@ -362,7 +381,7 @@ impl Store {
         }
 
         // Load from disk
-        let raw_bytes = self.config.load_identity()?;
+        let raw_bytes = self.config.load_identity().await?;
 
         if classify_identity(&raw_bytes) == IdentityType::AgeEncrypted {
             return Err(Error::new(
@@ -392,7 +411,7 @@ impl Store {
     ///
     /// Returns `IdentityNotEncrypted` if passphrase is empty.
     /// Returns `IdentityEncrypted` if identity is already encrypted.
-    pub fn set_passphrase(&self, passphrase: &str) -> Result<(), Error> {
+    pub async fn set_passphrase(&self, passphrase: &str) -> Result<(), Error> {
         if passphrase.is_empty() {
             return Err(Error::new(
                 ErrorCode::IdentityNotEncrypted,
@@ -400,7 +419,7 @@ impl Store {
             ));
         }
 
-        let raw_bytes = self.config.load_identity()?;
+        let raw_bytes = self.config.load_identity().await?;
 
         if classify_identity(&raw_bytes) == IdentityType::AgeEncrypted {
             return Err(Error::new(
@@ -409,7 +428,9 @@ impl Store {
             ));
         }
 
-        self.config.save_identity(&raw_bytes, Some(passphrase))?;
+        self.config
+            .save_identity(&raw_bytes, Some(passphrase))
+            .await?;
         Ok(())
     }
 
@@ -422,7 +443,7 @@ impl Store {
     ///
     /// Returns `IdentityNotEncrypted` if either passphrase is empty or identity is not encrypted.
     /// Returns `WrongPassphrase` if old passphrase is incorrect.
-    pub fn change_passphrase(
+    pub async fn change_passphrase(
         &self,
         old_passphrase: &str,
         new_passphrase: &str,
@@ -434,7 +455,7 @@ impl Store {
             ));
         }
 
-        let encrypted_bytes = self.config.load_identity()?;
+        let encrypted_bytes = self.config.load_identity().await?;
 
         if classify_identity(&encrypted_bytes) != IdentityType::AgeEncrypted {
             return Err(Error::new(
@@ -443,9 +464,14 @@ impl Store {
             ));
         }
 
-        let plaintext = crypto::decrypt_identity(old_passphrase, &encrypted_bytes)?;
+        // scrypt is intentionally slow (~100ms+), run on blocking thread
+        let pw = old_passphrase.to_string();
+        let plaintext =
+            tokio::task::spawn_blocking(move || crypto::decrypt_identity(&pw, &encrypted_bytes))
+                .await??;
         self.config
-            .save_identity(&plaintext, Some(new_passphrase))?;
+            .save_identity(&plaintext, Some(new_passphrase))
+            .await?;
         self.lock();
         Ok(())
     }
@@ -456,11 +482,11 @@ impl Store {
     ///
     /// Returns an error if the store is not configured, the remote is
     /// unreachable, or the branches have diverged.
-    pub fn sync(&self) -> Result<SyncResult, Error> {
-        let repo_config = self.config.load_repo_config()?;
-        let repo_path = Path::new(&repo_config.local_path);
+    pub async fn sync(&self) -> Result<SyncResult, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
-        git::pull_repo(repo_path, &auth)
+        tokio::task::spawn_blocking(move || git::pull_repo(&repo_path, &auth)).await?
     }
 
     /// Reset all configuration and local data. Clears the identity cache.
@@ -468,16 +494,16 @@ impl Store {
     /// # Errors
     ///
     /// Returns an error if the files cannot be removed.
-    pub fn reset(&self) -> Result<(), Error> {
+    pub async fn reset(&self) -> Result<(), Error> {
         self.lock();
 
-        if let Ok(repo_config) = self.config.load_repo_config() {
+        if let Ok(repo_config) = self.config.load_repo_config().await {
             let repo_path = Path::new(&repo_config.local_path);
             if repo_path.exists() {
-                std::fs::remove_dir_all(repo_path)?;
+                tokio::fs::remove_dir_all(repo_path).await?;
             }
         }
-        self.config.clear_all()
+        self.config.clear_all().await
     }
 
     /// Get the current repository configuration.
@@ -485,8 +511,8 @@ impl Store {
     /// # Errors
     ///
     /// Returns an error if the store is not configured.
-    pub fn config(&self) -> Result<crate::config::RepoConfig, Error> {
-        self.config.load_repo_config()
+    pub async fn config(&self) -> Result<crate::config::RepoConfig, Error> {
+        self.config.load_repo_config().await
     }
 }
 
@@ -645,103 +671,118 @@ mod tests {
         assert!(!store.is_unlocked());
     }
 
-    #[test]
-    fn unlock_caches_passphrase_for_plaintext_identity() {
+    #[tokio::test]
+    async fn unlock_caches_passphrase_for_plaintext_identity() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
-        config.save_identity(b"AGE-SECRET-KEY-1TEST", None).unwrap();
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", None)
+            .await
+            .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
         // unlock() now succeeds for plaintext identities — caches passphrase
         // for encrypted SSH key decryption (no-op for x25519, harmless)
-        store.unlock("passphrase").unwrap();
+        store.unlock("passphrase").await.unwrap();
         // cached_identity should NOT be populated (identity is not age-encrypted)
         assert!(!store.is_unlocked());
     }
 
-    #[test]
-    fn is_identity_encrypted_false_for_plaintext() {
+    #[tokio::test]
+    async fn is_identity_encrypted_false_for_plaintext() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
-        config.save_identity(b"AGE-SECRET-KEY-1TEST", None).unwrap();
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", None)
+            .await
+            .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        assert!(!store.is_identity_encrypted());
+        assert!(!store.is_identity_encrypted().await);
     }
 
-    #[test]
-    fn is_identity_encrypted_true_after_encrypted_save() {
+    #[tokio::test]
+    async fn is_identity_encrypted_true_after_encrypted_save() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", Some("pass123"))
+            .await
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        assert!(store.is_identity_encrypted());
+        assert!(store.is_identity_encrypted().await);
     }
 
-    #[test]
-    fn is_identity_encrypted_true_for_encrypted_ssh_key() {
+    #[tokio::test]
+    async fn is_identity_encrypted_true_for_encrypted_ssh_key() {
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
-        config.save_identity(encrypted_ssh_key, None).unwrap();
+        config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        assert!(store.is_identity_encrypted());
+        assert!(store.is_identity_encrypted().await);
     }
 
-    #[test]
-    fn is_identity_encrypted_false_for_unencrypted_ssh_key() {
+    #[tokio::test]
+    async fn is_identity_encrypted_false_for_unencrypted_ssh_key() {
         let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
-        config.save_identity(unencrypted_ssh_key, None).unwrap();
+        config
+            .save_identity(unencrypted_ssh_key, None)
+            .await
+            .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        assert!(!store.is_identity_encrypted());
+        assert!(!store.is_identity_encrypted().await);
     }
 
-    #[test]
-    fn set_passphrase_rejects_empty() {
+    #[tokio::test]
+    async fn set_passphrase_rejects_empty() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
-        config.save_identity(b"AGE-SECRET-KEY-1TEST", None).unwrap();
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", None)
+            .await
+            .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        let err = store.set_passphrase("").unwrap_err();
+        let err = store.set_passphrase("").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
     }
 
-    #[test]
-    fn set_passphrase_rejects_already_encrypted() {
+    #[tokio::test]
+    async fn set_passphrase_rejects_already_encrypted() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", Some("old"))
+            .await
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        let err = store.set_passphrase("new").unwrap_err();
+        let err = store.set_passphrase("new").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_ENCRYPTED");
     }
 
-    #[test]
-    fn change_passphrase_rejects_empty() {
+    #[tokio::test]
+    async fn change_passphrase_rejects_empty() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", Some("old"))
+            .await
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
         assert_eq!(
-            store.change_passphrase("", "new").unwrap_err().code,
+            store.change_passphrase("", "new").await.unwrap_err().code,
             "IDENTITY_NOT_ENCRYPTED"
         );
         assert_eq!(
-            store.change_passphrase("old", "").unwrap_err().code,
+            store.change_passphrase("old", "").await.unwrap_err().code,
             "IDENTITY_NOT_ENCRYPTED"
         );
     }

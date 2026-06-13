@@ -12,10 +12,10 @@ use crate::identity::IdentityType;
 /// Atomic write: write data to a temp file then rename over the target.
 ///
 /// Prevents identity file corruption if the write fails mid-operation.
-fn save_identity_raw(path: &Path, data: &[u8]) -> Result<(), Error> {
+async fn save_identity_raw(path: &Path, data: &[u8]) -> Result<(), Error> {
     let temp_path = path.with_extension("tmp");
-    std::fs::write(&temp_path, data)?;
-    std::fs::rename(&temp_path, path)?;
+    tokio::fs::write(&temp_path, data).await?;
+    tokio::fs::rename(&temp_path, path).await?;
     Ok(())
 }
 
@@ -62,23 +62,26 @@ impl Config {
     ///
     /// Returns an error if the config directory cannot be created, encryption
     /// fails, or the file cannot be written.
-    pub fn save_identity(&self, identity: &[u8], passphrase: Option<&str>) -> Result<(), Error> {
-        std::fs::create_dir_all(&self.config_dir)?;
+    pub async fn save_identity(
+        &self,
+        identity: &[u8],
+        passphrase: Option<&str>,
+    ) -> Result<(), Error> {
+        tokio::fs::create_dir_all(&self.config_dir).await?;
 
         let data = match passphrase {
             Some(pw) if !pw.is_empty() => crypto::encrypt_identity(pw, identity)?,
             _ => identity.to_vec(),
         };
 
-        save_identity_raw(&self.identity_path(), &data)
+        save_identity_raw(&self.identity_path(), &data).await
     }
 
     /// Check if the stored identity file is passphrase-encrypted.
     ///
     /// Returns `false` if no identity file exists.
-    #[must_use]
-    pub fn is_identity_encrypted(&self) -> bool {
-        match self.load_identity() {
+    pub async fn is_identity_encrypted(&self) -> bool {
+        match self.load_identity().await {
             Ok(bytes) => classify_identity(&bytes) == IdentityType::AgeEncrypted,
             Err(_) => false,
         }
@@ -92,7 +95,7 @@ impl Config {
     ///
     /// Returns an error if no identity has been configured or the file cannot
     /// be read.
-    pub fn load_identity(&self) -> Result<Vec<u8>, Error> {
+    pub async fn load_identity(&self) -> Result<Vec<u8>, Error> {
         let path = self.identity_path();
         if !path.exists() {
             return Err(Error::new(
@@ -100,7 +103,7 @@ impl Config {
                 "No identity configured. Run setup first.",
             ));
         }
-        Ok(std::fs::read(&path)?)
+        Ok(tokio::fs::read(&path).await?)
     }
 
     /// Delete the stored identity.
@@ -108,10 +111,10 @@ impl Config {
     /// # Errors
     ///
     /// Returns an error if the file cannot be removed.
-    pub fn delete_identity(&self) -> Result<(), Error> {
+    pub async fn delete_identity(&self) -> Result<(), Error> {
         let path = self.identity_path();
         if path.exists() {
-            std::fs::remove_file(path)?;
+            tokio::fs::remove_file(path).await?;
         }
         Ok(())
     }
@@ -122,7 +125,7 @@ impl Config {
     ///
     /// Returns an error if the config directory cannot be created or the file
     /// cannot be written.
-    pub fn save_repo_config(
+    pub async fn save_repo_config(
         &self,
         url: &str,
         pat: Option<&str>,
@@ -130,7 +133,7 @@ impl Config {
         ssh_passphrase: Option<&str>,
         local_path: &str,
     ) -> Result<(), Error> {
-        std::fs::create_dir_all(&self.config_dir)?;
+        tokio::fs::create_dir_all(&self.config_dir).await?;
         let config = RepoConfig {
             url: url.to_string(),
             pat: pat.map(String::from),
@@ -139,7 +142,7 @@ impl Config {
             local_path: local_path.to_string(),
         };
         let json = serde_json::to_string_pretty(&config)?;
-        std::fs::write(self.repo_config_path(), json)?;
+        tokio::fs::write(self.repo_config_path(), json).await?;
         Ok(())
     }
 
@@ -149,7 +152,7 @@ impl Config {
     ///
     /// Returns an error if no config exists, the file cannot be read, or the
     /// JSON is malformed.
-    pub fn load_repo_config(&self) -> Result<RepoConfig, Error> {
+    pub async fn load_repo_config(&self) -> Result<RepoConfig, Error> {
         let path = self.repo_config_path();
         if !path.exists() {
             return Err(Error::new(
@@ -157,7 +160,7 @@ impl Config {
                 "No repository configured. Run setup first.",
             ));
         }
-        let json = std::fs::read_to_string(&path)?;
+        let json = tokio::fs::read_to_string(&path).await?;
         let config: RepoConfig = serde_json::from_str(&json)?;
         Ok(config)
     }
@@ -179,12 +182,12 @@ impl Config {
     /// # Errors
     ///
     /// Returns an error if the files cannot be removed.
-    pub fn clear_all(&self) -> Result<(), Error> {
+    pub async fn clear_all(&self) -> Result<(), Error> {
         if self.identity_path().exists() {
-            std::fs::remove_file(self.identity_path())?;
+            tokio::fs::remove_file(self.identity_path()).await?;
         }
         if self.repo_config_path().exists() {
-            std::fs::remove_file(self.repo_config_path())?;
+            tokio::fs::remove_file(self.repo_config_path()).await?;
         }
         Ok(())
     }
@@ -237,83 +240,84 @@ mod tests {
         (config, dir)
     }
 
-    #[test]
-    fn save_load_identity_roundtrip() {
+    #[tokio::test]
+    async fn save_load_identity_roundtrip() {
         let (config, _dir) = create_config();
         let identity = b"AGE-SECRET-KEY-1TEST1234567890";
 
-        config.save_identity(identity, None).unwrap();
-        let loaded = config.load_identity().unwrap();
+        config.save_identity(identity, None).await.unwrap();
+        let loaded = config.load_identity().await.unwrap();
 
         assert_eq!(loaded, identity);
     }
 
-    #[test]
-    fn save_load_encrypted_identity_roundtrip() {
+    #[tokio::test]
+    async fn save_load_encrypted_identity_roundtrip() {
         let (config, _dir) = create_config();
         let identity = b"AGE-SECRET-KEY-1TEST1234567890";
 
         config
             .save_identity(identity, Some("test-passphrase"))
+            .await
             .unwrap();
 
         assert!(
-            config.is_identity_encrypted(),
+            config.is_identity_encrypted().await,
             "identity should be encrypted"
         );
 
-        let loaded = config.load_identity().unwrap();
+        let loaded = config.load_identity().await.unwrap();
         assert!(loaded.starts_with(b"-----BEGIN AGE ENCRYPTED FILE-----"));
 
         let decrypted = crypto::decrypt_identity("test-passphrase", &loaded).unwrap();
         assert_eq!(decrypted, identity);
     }
 
-    #[test]
-    fn save_identity_empty_passphrase_stores_plaintext() {
+    #[tokio::test]
+    async fn save_identity_empty_passphrase_stores_plaintext() {
         let (config, _dir) = create_config();
         let identity = b"AGE-SECRET-KEY-1TEST1234567890";
 
-        config.save_identity(identity, Some("")).unwrap();
+        config.save_identity(identity, Some("")).await.unwrap();
         assert!(
-            !config.is_identity_encrypted(),
+            !config.is_identity_encrypted().await,
             "empty passphrase should store plaintext"
         );
 
-        let loaded = config.load_identity().unwrap();
+        let loaded = config.load_identity().await.unwrap();
         assert_eq!(loaded, identity);
     }
 
-    #[test]
-    fn is_identity_encrypted_false_when_no_identity() {
+    #[tokio::test]
+    async fn is_identity_encrypted_false_when_no_identity() {
         let (config, _dir) = create_config();
-        assert!(!config.is_identity_encrypted());
+        assert!(!config.is_identity_encrypted().await);
     }
 
-    #[test]
-    fn load_identity_missing() {
+    #[tokio::test]
+    async fn load_identity_missing() {
         let (config, _dir) = create_config();
 
-        let err = config.load_identity().unwrap_err();
+        let err = config.load_identity().await.unwrap_err();
         assert_eq!(err.code, "NO_IDENTITY");
     }
 
-    #[test]
-    fn delete_identity_removes_file() {
+    #[tokio::test]
+    async fn delete_identity_removes_file() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity", None).unwrap();
+        config.save_identity(b"test-identity", None).await.unwrap();
         assert!(config.identity_path().exists());
 
-        config.delete_identity().unwrap();
+        config.delete_identity().await.unwrap();
         assert!(!config.identity_path().exists());
 
-        let err = config.load_identity().unwrap_err();
+        let err = config.load_identity().await.unwrap_err();
         assert_eq!(err.code, "NO_IDENTITY");
     }
 
-    #[test]
-    fn save_load_repo_config_roundtrip() {
+    #[tokio::test]
+    async fn save_load_repo_config_roundtrip() {
         let (config, _dir) = create_config();
 
         config
@@ -324,16 +328,17 @@ mod tests {
                 None,
                 "/local/repo",
             )
+            .await
             .unwrap();
 
-        let cfg = config.load_repo_config().unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.url, "https://example.com/repo.git");
         assert_eq!(cfg.pat, Some(String::from("pat-token")));
         assert_eq!(cfg.local_path, "/local/repo");
     }
 
-    #[test]
-    fn repo_config_with_pat() {
+    #[tokio::test]
+    async fn repo_config_with_pat() {
         let (config, _dir) = create_config();
 
         config
@@ -344,14 +349,15 @@ mod tests {
                 None,
                 "/local/path",
             )
+            .await
             .unwrap();
 
-        let cfg = config.load_repo_config().unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.pat, Some(String::from("my-secret-pat")));
     }
 
-    #[test]
-    fn repo_config_without_pat() {
+    #[tokio::test]
+    async fn repo_config_without_pat() {
         let (config, _dir) = create_config();
 
         config
@@ -362,9 +368,10 @@ mod tests {
                 None,
                 "/local/path",
             )
+            .await
             .unwrap();
 
-        let cfg = config.load_repo_config().unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.pat, None);
     }
 
@@ -375,11 +382,11 @@ mod tests {
         assert!(!config.is_configured());
     }
 
-    #[test]
-    fn is_configured_true_after_setup() {
+    #[tokio::test]
+    async fn is_configured_true_after_setup() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity", None).unwrap();
+        config.save_identity(b"test-identity", None).await.unwrap();
         config
             .save_repo_config(
                 "https://example.com/repo.git",
@@ -388,16 +395,17 @@ mod tests {
                 None,
                 "/local/path",
             )
+            .await
             .unwrap();
 
         assert!(config.is_configured());
     }
 
-    #[test]
-    fn clear_all_removes_everything() {
+    #[tokio::test]
+    async fn clear_all_removes_everything() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity", None).unwrap();
+        config.save_identity(b"test-identity", None).await.unwrap();
         config
             .save_repo_config(
                 "https://example.com/repo.git",
@@ -406,42 +414,46 @@ mod tests {
                 None,
                 "/local/path",
             )
+            .await
             .unwrap();
         assert!(config.is_configured());
 
-        config.clear_all().unwrap();
+        config.clear_all().await.unwrap();
 
         assert!(!config.is_configured());
-        let identity_err = config.load_identity().unwrap_err();
+        let identity_err = config.load_identity().await.unwrap_err();
         assert_eq!(identity_err.code, "NO_IDENTITY");
-        let repo_err = config.load_repo_config().unwrap_err();
+        let repo_err = config.load_repo_config().await.unwrap_err();
         assert_eq!(repo_err.code, "NO_REPO");
     }
 
-    #[test]
-    fn overwrite_identity() {
+    #[tokio::test]
+    async fn overwrite_identity() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"first-identity", None).unwrap();
-        config.save_identity(b"second-identity", None).unwrap();
+        config.save_identity(b"first-identity", None).await.unwrap();
+        config
+            .save_identity(b"second-identity", None)
+            .await
+            .unwrap();
 
-        let loaded = config.load_identity().unwrap();
+        let loaded = config.load_identity().await.unwrap();
         assert_eq!(loaded, b"second-identity");
     }
 
-    #[test]
-    fn partial_setup_identity_only() {
+    #[tokio::test]
+    async fn partial_setup_identity_only() {
         let (config, _dir) = create_config();
 
-        config.save_identity(b"test-identity", None).unwrap();
+        config.save_identity(b"test-identity", None).await.unwrap();
         assert!(
             !config.is_configured(),
             "should not be configured without repo config"
         );
     }
 
-    #[test]
-    fn partial_setup_repo_only() {
+    #[tokio::test]
+    async fn partial_setup_repo_only() {
         let (config, _dir) = create_config();
 
         config
@@ -452,6 +464,7 @@ mod tests {
                 None,
                 "/local/path",
             )
+            .await
             .unwrap();
         assert!(
             !config.is_configured(),
@@ -459,8 +472,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn repo_config_with_ssh_key() {
+    #[tokio::test]
+    async fn repo_config_with_ssh_key() {
         let (config, _dir) = create_config();
 
         config
@@ -471,9 +484,10 @@ mod tests {
                 Some("passphrase123"),
                 "/local/path",
             )
+            .await
             .unwrap();
 
-        let cfg = config.load_repo_config().unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.url, "git@github.com:user/repo.git");
         assert_eq!(cfg.pat, None);
         assert!(cfg.ssh_key.is_some(), "ssh_key should be set");
@@ -484,8 +498,8 @@ mod tests {
         assert_eq!(cfg.ssh_passphrase, Some(String::from("passphrase123")));
     }
 
-    #[test]
-    fn repo_config_backward_compat_no_ssh_fields() {
+    #[tokio::test]
+    async fn repo_config_backward_compat_no_ssh_fields() {
         let (config, _dir) = create_config();
 
         // Simulate old config JSON without ssh_key/ssh_passphrase fields
@@ -494,7 +508,7 @@ mod tests {
             r#"{"url":"https://example.com/repo.git","pat":"my-token","local_path":"/local/path"}"#;
         std::fs::write(config.repo_config_path(), old_json).unwrap();
 
-        let cfg = config.load_repo_config().unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.url, "https://example.com/repo.git");
         assert_eq!(cfg.pat, Some(String::from("my-token")));
         assert_eq!(
@@ -584,8 +598,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn repo_config_ssh_key_without_passphrase() {
+    #[tokio::test]
+    async fn repo_config_ssh_key_without_passphrase() {
         let (config, _dir) = create_config();
 
         config
@@ -596,15 +610,16 @@ mod tests {
                 None,
                 "/local/path",
             )
+            .await
             .unwrap();
 
-        let cfg = config.load_repo_config().unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.ssh_key, Some(String::from("test-key")));
         assert_eq!(cfg.ssh_passphrase, None);
     }
 
-    #[test]
-    fn repo_config_ssh_fields_not_serialized_when_none() {
+    #[tokio::test]
+    async fn repo_config_ssh_fields_not_serialized_when_none() {
         let (config, _dir) = create_config();
 
         config
@@ -615,6 +630,7 @@ mod tests {
                 None,
                 "/local/path",
             )
+            .await
             .unwrap();
 
         // Read raw JSON to verify ssh fields are omitted
@@ -629,14 +645,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn creates_config_dir_when_missing() {
+    #[tokio::test]
+    async fn creates_config_dir_when_missing() {
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("a/b/c");
         let config = Config::new(nested.clone());
 
         assert!(!nested.exists(), "precondition: dir does not exist");
-        config.save_identity(b"test", None).unwrap();
+        config.save_identity(b"test", None).await.unwrap();
         assert!(
             nested.exists(),
             "save_identity should create the config dir"

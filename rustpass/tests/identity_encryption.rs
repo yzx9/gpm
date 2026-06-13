@@ -9,8 +9,8 @@ mod tests {
     use rustpass::store::Store;
 
     /// Configure with encrypted identity → unlock → get → lock.
-    #[test]
-    fn encrypted_identity_full_lifecycle() {
+    #[tokio::test]
+    async fn encrypted_identity_full_lifecycle() {
         let (identity, recipient) = generate_test_keypair();
         let passphrase = "correct-horse-battery-staple";
 
@@ -32,14 +32,16 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .expect("configure should succeed");
 
         // Set passphrase (encrypt the identity)
         store
             .set_passphrase(passphrase)
+            .await
             .expect("set_passphrase should succeed");
         assert!(
-            store.is_identity_encrypted(),
+            store.is_identity_encrypted().await,
             "identity should be encrypted"
         );
 
@@ -49,22 +51,28 @@ mod tests {
         // Getting without unlock should fail
         let err = store
             .get("secret")
+            .await
             .expect_err("get should fail when locked");
         assert_eq!(err.code, "IDENTITY_ENCRYPTED");
 
         // Unlock with wrong passphrase should fail
         let err = store
             .unlock("wrong-passphrase")
+            .await
             .expect_err("unlock with wrong passphrase should fail");
         assert_eq!(err.code, "WRONG_PASSPHRASE");
 
         // Unlock with correct passphrase
-        store.unlock(passphrase).expect("unlock should succeed");
+        store
+            .unlock(passphrase)
+            .await
+            .expect("unlock should succeed");
         assert!(store.is_unlocked(), "should be unlocked");
 
         // Now get should work
         let secret = store
             .get("secret")
+            .await
             .expect("get should succeed after unlock");
         assert_eq!(secret.password(), "my-password");
 
@@ -73,13 +81,16 @@ mod tests {
         assert!(!store.is_unlocked(), "should not be unlocked after lock");
 
         // Getting after lock should fail
-        let err = store.get("secret").expect_err("get should fail after lock");
+        let err = store
+            .get("secret")
+            .await
+            .expect_err("get should fail after lock");
         assert_eq!(err.code, "IDENTITY_ENCRYPTED");
     }
 
     /// Two-step setup with passphrase, then unlock.
-    #[test]
-    fn two_step_setup_with_passphrase() {
+    #[tokio::test]
+    async fn two_step_setup_with_passphrase() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) = create_test_git_repo(vec![("test.age", b"hello")], &recipient);
@@ -95,6 +106,7 @@ mod tests {
                 None,
                 None,
             )
+            .await
             .expect("clone_only should succeed");
 
         assert!(store.is_repo_ready());
@@ -103,21 +115,22 @@ mod tests {
         // Step 2: save identity with passphrase
         store
             .save_identity(&identity, Some("mypass"), None)
+            .await
             .expect("save_identity should succeed");
 
         assert!(store.is_configured());
-        assert!(store.is_identity_encrypted());
+        assert!(store.is_identity_encrypted().await);
         assert!(!store.is_unlocked());
 
         // Unlock and decrypt
-        store.unlock("mypass").expect("unlock should succeed");
-        let secret = store.get("test").expect("get should work");
+        store.unlock("mypass").await.expect("unlock should succeed");
+        let secret = store.get("test").await.expect("get should work");
         assert_eq!(secret.password(), "hello");
     }
 
     /// Change passphrase: unlock with old → change → unlock with new.
-    #[test]
-    fn change_passphrase_flow() {
+    #[tokio::test]
+    async fn change_passphrase_flow() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) =
@@ -135,36 +148,40 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .expect("configure should succeed");
 
         // Encrypt
-        store.set_passphrase("old-pass").unwrap();
-        assert!(store.is_identity_encrypted());
+        store.set_passphrase("old-pass").await.unwrap();
+        assert!(store.is_identity_encrypted().await);
 
         // Unlock with old passphrase
-        store.unlock("old-pass").unwrap();
-        let s = store.get("data").unwrap();
+        store.unlock("old-pass").await.unwrap();
+        let s = store.get("data").await.unwrap();
         assert_eq!(s.password(), "s3cret");
 
         // Change passphrase
-        store.change_passphrase("old-pass", "new-pass").unwrap();
+        store
+            .change_passphrase("old-pass", "new-pass")
+            .await
+            .unwrap();
 
         // Cache cleared by change_passphrase
         assert!(!store.is_unlocked());
 
         // Old passphrase no longer works
-        let err = store.unlock("old-pass").unwrap_err();
+        let err = store.unlock("old-pass").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
 
         // New passphrase works
-        store.unlock("new-pass").unwrap();
-        let s = store.get("data").unwrap();
+        store.unlock("new-pass").await.unwrap();
+        let s = store.get("data").await.unwrap();
         assert_eq!(s.password(), "s3cret");
     }
 
     /// Reset clears the cache.
-    #[test]
-    fn reset_clears_cache() {
+    #[tokio::test]
+    async fn reset_clears_cache() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) = create_test_git_repo(vec![("x.age", b"pw")], &recipient);
@@ -181,21 +198,22 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .unwrap();
 
-        store.set_passphrase("pass").unwrap();
-        store.unlock("pass").unwrap();
+        store.set_passphrase("pass").await.unwrap();
+        store.unlock("pass").await.unwrap();
         assert!(store.is_unlocked());
 
         // Reset clears everything including cache
-        store.reset().unwrap();
+        store.reset().await.unwrap();
         assert!(!store.is_unlocked());
         assert!(!store.is_configured());
     }
 
     /// Unlock is idempotent (calling twice is fine).
-    #[test]
-    fn unlock_is_idempotent() {
+    #[tokio::test]
+    async fn unlock_is_idempotent() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) = create_test_git_repo(vec![("a.age", b"x")], &recipient);
@@ -212,24 +230,25 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .unwrap();
 
-        store.set_passphrase("pass").unwrap();
+        store.set_passphrase("pass").await.unwrap();
 
         // Unlock twice
-        store.unlock("pass").unwrap();
+        store.unlock("pass").await.unwrap();
         assert!(store.is_unlocked());
-        store.unlock("pass").unwrap();
+        store.unlock("pass").await.unwrap();
         assert!(store.is_unlocked());
 
         // Should still work
-        let s = store.get("a").unwrap();
+        let s = store.get("a").await.unwrap();
         assert_eq!(s.password(), "x");
     }
 
     /// Lock is idempotent when not unlocked.
-    #[test]
-    fn lock_is_idempotent() {
+    #[tokio::test]
+    async fn lock_is_idempotent() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) = create_test_git_repo(vec![("b.age", b"y")], &recipient);
@@ -246,9 +265,10 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .unwrap();
 
-        store.set_passphrase("pass").unwrap();
+        store.set_passphrase("pass").await.unwrap();
 
         // Lock without unlock
         store.lock();
@@ -257,8 +277,8 @@ mod tests {
     }
 
     /// set_passphrase rejects when already encrypted.
-    #[test]
-    fn set_passphrase_rejects_already_encrypted() {
+    #[tokio::test]
+    async fn set_passphrase_rejects_already_encrypted() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) = create_test_git_repo(vec![("c.age", b"z")], &recipient);
@@ -275,16 +295,17 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .unwrap();
 
-        store.set_passphrase("first").unwrap();
-        let err = store.set_passphrase("second").unwrap_err();
+        store.set_passphrase("first").await.unwrap();
+        let err = store.set_passphrase("second").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_ENCRYPTED");
     }
 
     /// change_passphrase rejects when not encrypted.
-    #[test]
-    fn change_passphrase_rejects_not_encrypted() {
+    #[tokio::test]
+    async fn change_passphrase_rejects_not_encrypted() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) = create_test_git_repo(vec![("d.age", b"w")], &recipient);
@@ -301,15 +322,16 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .unwrap();
 
-        let err = store.change_passphrase("old", "new").unwrap_err();
+        let err = store.change_passphrase("old", "new").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
     }
 
     /// Plaintext identity works without unlock (no encryption).
-    #[test]
-    fn plaintext_identity_no_unlock_needed() {
+    #[tokio::test]
+    async fn plaintext_identity_no_unlock_needed() {
         let (identity, recipient) = generate_test_keypair();
 
         let (bare_dir, _clone_dir) =
@@ -328,13 +350,14 @@ mod tests {
                 &identity,
                 None,
             )
+            .await
             .unwrap();
 
-        assert!(!store.is_identity_encrypted());
+        assert!(!store.is_identity_encrypted().await);
         assert!(!store.is_unlocked());
 
         // Can still decrypt without unlock
-        let secret = store.get("plain").unwrap();
+        let secret = store.get("plain").await.unwrap();
         assert_eq!(secret.password(), "plaintext-secret");
     }
 }
