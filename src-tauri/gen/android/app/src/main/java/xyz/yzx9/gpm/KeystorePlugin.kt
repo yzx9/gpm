@@ -47,7 +47,7 @@ private const val PREFS_NAME = "gpm_keystore"
 private const val PREF_CT = "ct"
 private const val PREF_IV = "iv"
 
-private const val UTF_8: Charset = Charsets.UTF_8
+private val UTF_8: Charset = Charsets.UTF_8
 
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
