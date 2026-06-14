@@ -9,7 +9,7 @@
 | Frontend      | Vue 3 + TypeScript + Vite + pnpm                                     |
 | Crypto        | [age](https://github.com/str4d/rage) (Rust reference implementation) |
 | Clipboard     | tauri-plugin-clipboard-manager                                       |
-| Safe-area     | gpm-plugin-safe-area (local Tauri plugin)                            |
+| Safe-area     | tauri-plugin-safe-area (local Tauri plugin)                          |
 
 ## Setup
 

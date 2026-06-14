@@ -16,8 +16,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
-gpm-plugin-safe-area = { path = "../gpm-plugin-safe-area" }
-gpm-plugin-keystore = { path = "../gpm-plugin-keystore" }
+tauri-plugin-safe-area = { path = "../tauri-plugin-safe-area" }
+tauri-plugin-biometric-keystore = { path = "../tauri-plugin-biometric-keystore" }
 rustpass = { path = "../rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }

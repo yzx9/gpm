@@ -212,7 +212,7 @@ impl<R: Runtime, T: Manager<R>> KeystoreExt<R> for T {
 /// handle. On desktop, manages an inert stub so `KeystoreExt::keystore` is
 /// always callable (operations report unavailable).
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    Builder::new("keystore")
+    Builder::new("biometric-keystore")
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]
             {

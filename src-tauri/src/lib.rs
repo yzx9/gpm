@@ -29,7 +29,7 @@ use serde::Serialize;
 use tokio::task::JoinHandle;
 use zeroize::Zeroizing;
 
-use gpm_plugin_keystore::KeystoreExt;
+use tauri_plugin_biometric_keystore::KeystoreExt;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -124,8 +124,8 @@ impl From<Error> for BiometricError {
     }
 }
 
-impl From<gpm_plugin_keystore::KeystoreError> for BiometricError {
-    fn from(e: gpm_plugin_keystore::KeystoreError) -> Self {
+impl From<tauri_plugin_biometric_keystore::KeystoreError> for BiometricError {
+    fn from(e: tauri_plugin_biometric_keystore::KeystoreError) -> Self {
         Self {
             code: e.code,
             message: e.message,
@@ -606,8 +606,8 @@ fn reset_lock_timer(state: &State<'_, AppState>, app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(gpm_plugin_safe_area::init())
-        .plugin(gpm_plugin_keystore::init())
+        .plugin(tauri_plugin_safe_area::init())
+        .plugin(tauri_plugin_biometric_keystore::init())
         .setup(|app| {
             let config_dir = app
                 .path()

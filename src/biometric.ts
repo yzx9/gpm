@@ -8,7 +8,7 @@ import type { BiometricError } from "./types";
 /**
  * Thin wrappers over the five biometric app commands in `src-tauri/src/lib.rs`.
  *
- * The frontend never talks to `plugin:keystore|*` directly — all secret-
+ * The frontend never talks to `plugin:biometric-keystore|*` directly — all secret-
  * returning operations stay backend-side so passphrases never reach the
  * WebView. `isBiometricAvailable` / `isBiometricUnlockEnabled` swallow errors
  * and return `false` on desktop / below API 30 / when the plugin is absent,

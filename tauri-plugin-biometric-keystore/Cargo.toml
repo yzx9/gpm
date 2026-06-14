@@ -1,10 +1,10 @@
 [package]
-name = "gpm-plugin-keystore"
+name = "tauri-plugin-biometric-keystore"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-links = "gpm-plugin-keystore"
+links = "tauri-plugin-biometric-keystore"
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }

@@ -1,10 +1,10 @@
 [package]
-name = "gpm-plugin-safe-area"
+name = "tauri-plugin-safe-area"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-links = "gpm-plugin-safe-area"
+links = "tauri-plugin-safe-area"
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }

@@ -32,12 +32,12 @@ The crate implements encryption, decryption, Git operations, and repository file
 
 Async Tauri commands, state management, app entry, IPC types. Includes the biometric commands (`is_biometric_available`, `enable_biometric_unlock`, `biometric_unlock`, …) backed by the keystore plugin, plus the shared `unlock_and_arm` helper used by both the password and biometric unlock paths
 
-### Tauri Plugins — `gpm-plugin-safe-area/`, `gpm-plugin-keystore/`
+### Tauri Plugins — `tauri-plugin-safe-area/`, `tauri-plugin-biometric-keystore/`
 
 Local Tauri plugin crates (not published):
 
-- `gpm-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
-- `gpm-plugin-keystore` — stores the identity passphrase in the Android Keystore (AES/GCM, hardware-backed) and retrieves it through a biometric-gated `BiometricPrompt`
+- `tauri-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
+- `tauri-plugin-biometric-keystore` — stores the identity passphrase in the Android Keystore (AES/GCM, hardware-backed) and retrieves it through a biometric-gated `BiometricPrompt`
 
 ## Security Model
 

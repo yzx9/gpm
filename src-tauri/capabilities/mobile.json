@@ -9,6 +9,6 @@
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-clear",
-    "gpm-plugin-safe-area:default"
+    "safe-area:default"
   ]
 }

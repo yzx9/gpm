@@ -1657,33 +1657,16 @@ dependencies = [
 name = "gpm"
 version = "0.4.0"
 dependencies = [
- "gpm-plugin-keystore",
- "gpm-plugin-safe-area",
  "rustpass",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-biometric-keystore",
  "tauri-plugin-clipboard-manager",
+ "tauri-plugin-safe-area",
  "tokio",
  "zeroize",
-]
-
-[[package]]
-name = "gpm-plugin-keystore"
-version = "0.4.0"
-dependencies = [
- "serde",
- "tauri",
- "tauri-plugin",
-]
-
-[[package]]
-name = "gpm-plugin-safe-area"
-version = "0.4.0"
-dependencies = [
- "tauri",
- "tauri-plugin",
 ]
 
 [[package]]
@@ -4454,6 +4437,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-biometric-keystore"
+version = "0.4.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
 name = "tauri-plugin-clipboard-manager"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4466,6 +4458,14 @@ dependencies = [
  "tauri",
  "tauri-plugin",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tauri-plugin-safe-area"
+version = "0.4.0"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

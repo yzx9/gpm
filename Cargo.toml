@@ -3,8 +3,8 @@ resolver = "2"
 members = [
   "rustpass",
   "src-tauri",
-  "gpm-plugin-safe-area",
-  "gpm-plugin-keystore",
+  "tauri-plugin-safe-area",
+  "tauri-plugin-biometric-keystore",
 ]
 
 [workspace.package]
