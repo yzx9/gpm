@@ -16,7 +16,7 @@ unmounts whatever page the user was on. Biometric (plan 0002) ships on that
 route first. This plan replaces the route with a global modal overlay so the
 user re-authenticates **without leaving the page they were on**.
 
-## Process (过程)
+## Process
 
 Move the unlock surface from a routed page (`UnlockPage.vue` + the `/unlock`
 route + the `encrypted && !unlocked → /unlock` redirect in `main.ts`) to a
@@ -27,7 +27,7 @@ auto-prompt, cancel, and key-invalidation logic that plan 0002 puts in
 `UnlockPage.vue` moves into the modal. A blocking backdrop prevents interaction
 with the page behind it while locked.
 
-## Purpose (目的)
+## Purpose
 
 For a password manager that auto-locks every 5 minutes, the redirect-to-unlock
 jarring the user out of the entry they were reading is itself friction — the
@@ -36,7 +36,7 @@ in place and land back on the exact entry they were viewing, which is the
 experience that makes biometric unlock feel worth it. It also collapses two
 surfaces (the page and the future overlay) into one.
 
-## Gains (收获)
+## Gains
 
 - Re-authentication preserves the user's current page and scroll position — no
   losing your place in a long entry list to a route change.
@@ -46,10 +46,10 @@ surfaces (the page and the future overlay) into one.
 - Cleaner router: the guard becomes configured-only, removing the
   `encrypted && !unlocked` redirect.
 
-## Drawbacks (缺点)
+## Drawbacks
 
-- Larger, riskier change than 0002's "biometric on the existing route": touches
-  `App.vue`, the router, and replaces `UnlockPage.vue`.
+- Larger, riskier change than biometric on the existing route: touches `App.vue`,
+  the router, and replaces `UnlockPage.vue`.
 - Secret-containment responsibility shifts: a route unmounts the detail page
   (clearing its revealed password on unmount); a modal keeps it mounted behind
   the overlay. This requires new "clear revealed secrets on lock" wiring (see
@@ -58,7 +58,7 @@ surfaces (the page and the future overlay) into one.
   leaks taps to the locked page behind it.
 - More frontend test surface (modal state machine: show/hide/auto-prompt/re-lock).
 
-## Blockers (Blocker)
+## Blockers
 
 - **Clear revealed secrets on lock (codex Finding 4, hard blocker).** The modal
   keeps `EntryDetailPage` mounted behind the overlay, so a password revealed via
