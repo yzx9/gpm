@@ -12,6 +12,7 @@ just dev               # Desktop dev server with hot reload
 just android-debug     # Build debug APK
 just android-release   # Build release APK (signed if keystore.properties exists)
 just android-dev       # Android dev server (requires device/emulator)
+just kotlin-check      # Fast Kotlin compile gate (catches Android/Kotlin errors before the full build)
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
@@ -52,7 +53,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model and known limitations.
 
 ## Testing
 
-Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration tests in `rustpass/tests/` (store facade, config persistence, crypto). Frontend tests are vitest in `src/**/*.test.ts` (mocked `@tauri-apps/api/core` `invoke`). There is no `src-tauri/tests/` directory.
+Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration tests in `rustpass/tests/` (store facade, config persistence, crypto). Frontend tests are vitest in `src/**/*.test.ts` (mocked `@tauri-apps/api/core` `invoke`). There is no `src-tauri/tests/` directory. When changing Kotlin under `src-tauri/gen/android/`, run `just kotlin-check` before finishing — it compiles the app's Kotlin in seconds and catches errors that otherwise only surface inside the multi-minute `tauri android build`.
 
 ## Conventions
 

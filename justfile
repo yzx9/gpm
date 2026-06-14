@@ -45,6 +45,13 @@ android-release: _gen-icons
 android-dev: _gen-icons
   pnpm tauri android dev
 
+# Fast Kotlin compile gate (seconds, no NDK/Rust cross-compile needed).
+# Catches compile errors in src-tauri/gen/android/app/src/main/java/**/*.kt before the full build.
+# Requires a prior `pnpm tauri android *` run so tauri.settings.gradle points at a real cargo registry.
+# If it errors with "project ':tauri-android' directory does not exist", run `just android-debug` once to regenerate.
+kotlin-check:
+  cd src-tauri/gen/android && ./gradlew :app:compileUniversalDebugKotlin --console=plain
+
 # Install debug APK to connected device (auto-detects arch, or specify e.g. aarch64)
 android-install target='': _gen-icons
   @if [ -z "{{ target }}" ]; then \
