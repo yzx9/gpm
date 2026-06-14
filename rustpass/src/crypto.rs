@@ -291,6 +291,45 @@ pub fn decrypt_identity(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, E
     Ok(output)
 }
 
+/// Validate a passphrase against an SSH private key without producing output.
+///
+/// Parses the key and, if it is passphrase-encrypted, attempts to decrypt it
+/// with `passphrase`. Used by the biometric enable flow to reject a wrong SSH
+/// passphrase before sealing it (plan D4). Unencrypted keys succeed with any
+/// passphrase.
+///
+/// # Errors
+///
+/// Returns `WrongPassphrase` if the SSH key is encrypted and `passphrase` is
+/// incorrect. Returns `InvalidIdentity` if the key cannot be parsed.
+pub fn validate_ssh_key_passphrase(identity_bytes: &[u8], passphrase: &str) -> Result<(), Error> {
+    let identity_str = str::from_utf8(identity_bytes)
+        .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
+    let buf = BufReader::new(identity_str.trim().as_bytes());
+    let ssh_identity =
+        ssh::Identity::from_buffer(buf, Some(passphrase.to_string())).map_err(|e| {
+            Error::new(
+                ErrorCode::InvalidIdentity,
+                format!("Cannot parse SSH private key: {e}"),
+            )
+        })?;
+
+    match ssh_identity {
+        ssh::Identity::Encrypted(enc) => {
+            let secret: SecretString = passphrase.to_string().into();
+            enc.decrypt(secret).map_err(|_| {
+                Error::new(ErrorCode::WrongPassphrase, "Wrong passphrase for SSH key")
+            })?;
+            Ok(())
+        }
+        ssh::Identity::Unencrypted(_) => Ok(()),
+        ssh::Identity::Unsupported(u) => Err(Error::new(
+            ErrorCode::InvalidIdentity,
+            format!("Unsupported SSH key type: {u:?}"),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

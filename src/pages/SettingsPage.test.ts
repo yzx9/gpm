@@ -168,6 +168,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig) // get_config
         .mockResolvedValueOnce(authState) // get_auth_state
+        .mockResolvedValueOnce(false) // is_biometric_available
+        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
         .mockResolvedValueOnce({
           public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItest",
         }); // get_ssh_public_key
@@ -193,6 +195,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig)
         .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
         .mockRejectedValueOnce({
           code: "SSH_KEY_INVALID",
           message: "No SSH key configured",
@@ -235,6 +239,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig) // get_config
         .mockResolvedValueOnce(authState) // get_auth_state
+        .mockResolvedValueOnce(false) // is_biometric_available
+        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
         .mockResolvedValueOnce({
           private_key:
             "-----BEGIN OPENSSH PRIVATE KEY-----\nexported\n-----END OPENSSH PRIVATE KEY-----",
@@ -258,6 +264,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig)
         .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
         .mockRejectedValueOnce({
           code: "SSH_KEY_INVALID",
           message: "Invalid key",
@@ -279,6 +287,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig)
         .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
         .mockResolvedValueOnce({
           private_key: "secret-key-data",
         });
@@ -310,6 +320,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig)
         .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
         .mockResolvedValueOnce({
           public_key: "ssh-ed25519 AAAAtest",
         });
@@ -338,6 +350,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(sshConfig)
         .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
         .mockResolvedValueOnce({
           public_key: "ssh-ed25519 AAAAtest",
         });
@@ -369,6 +383,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(httpsConfig) // get_config
         .mockResolvedValueOnce(authState) // get_auth_state
+        .mockResolvedValueOnce(false) // is_biometric_available
+        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
         .mockResolvedValueOnce(undefined); // reset_config
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
@@ -408,6 +424,8 @@ describe("SettingsPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(httpsConfig)
         .mockResolvedValueOnce(authState)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
         .mockRejectedValueOnce({ code: "Err", message: "Reset failed" });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
@@ -435,6 +453,112 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    });
+  });
+
+  describe("biometric unlock card", () => {
+    // Auth snapshot for an encrypted identity (card is gated on this).
+    const encryptedAuth = {
+      configured: true,
+      encrypted: true,
+      unlocked: false,
+      identity_type: "x25519",
+    };
+
+    it("is hidden when the identity is not encrypted", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(httpsConfig) // get_config
+        .mockResolvedValueOnce(authState) // get_auth_state (encrypted: false)
+        .mockResolvedValueOnce(true) // is_biometric_available
+        .mockResolvedValueOnce(true); // is_biometric_unlock_enabled
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("Biometric Unlock");
+    });
+
+    it("reports unavailable when no biometric is present", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(httpsConfig) // get_config
+        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
+        .mockResolvedValueOnce(false) // is_biometric_available
+        .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("Biometric Unlock");
+      expect(wrapper.text()).toContain("isn't available on this device");
+    });
+
+    it("calls enable_biometric_unlock with the passphrase when enabling", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(httpsConfig) // get_config
+        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
+        .mockResolvedValueOnce(true) // is_biometric_available
+        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled (not yet)
+        .mockResolvedValueOnce(undefined); // enable_biometric_unlock
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const bioInput = wrapper.find('input[type="password"]');
+      await bioInput.setValue("my-pass");
+      const enableBtn = wrapper
+        .findAll(".btn-action")
+        .find((b) => b.text().includes("Enable Biometric"));
+      expect(enableBtn).toBeDefined();
+      await enableBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("enable_biometric_unlock", {
+        passphrase: "my-pass",
+      });
+      expect(wrapper.text()).toContain("Biometric unlock enabled");
+    });
+
+    it("shows an error on a wrong passphrase when enabling", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(httpsConfig) // get_config
+        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
+        .mockResolvedValueOnce(true) // is_biometric_available
+        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+        .mockRejectedValueOnce({
+          code: "WRONG_PASSPHRASE",
+          message: "wrong",
+        }); // enable_biometric_unlock
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const bioInput = wrapper.find('input[type="password"]');
+      await bioInput.setValue("bad");
+      const enableBtn = wrapper
+        .findAll(".btn-action")
+        .find((b) => b.text().includes("Enable Biometric"));
+      await enableBtn!.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain(
+        "Wrong passphrase",
+      );
+    });
+
+    it("calls disable_biometric_unlock when disabling", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(httpsConfig) // get_config
+        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
+        .mockResolvedValueOnce(true) // is_biometric_available
+        .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
+        .mockResolvedValueOnce(undefined); // disable_biometric_unlock
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const disableBtn = wrapper
+        .findAll(".btn-action")
+        .find((b) => b.text().includes("Disable Biometric"));
+      expect(disableBtn).toBeDefined();
+      await disableBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("disable_biometric_unlock");
     });
   });
 });

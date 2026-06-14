@@ -6,9 +6,16 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  disableBiometricUnlock,
+  enableBiometricUnlock,
+  isBiometricAvailable,
+  isBiometricUnlockEnabled,
+} from "../biometric";
 import type {
   AppError,
   AuthState,
+  BiometricError,
   RepoConfig,
   SshPublicKeyResult,
   SshPrivateKeyResult,
@@ -37,6 +44,12 @@ const newPassphrase = ref("");
 const oldPassphrase = ref("");
 const passphraseLoading = ref(false);
 
+// ── Biometric unlock state ──────────────────────────────────────────────
+const biometricAvailable = ref(false);
+const biometricEnabled = ref(false);
+const biometricPassphrase = ref("");
+const biometricLoading = ref(false);
+
 // Whether the stored identity is an SSH key. SSH keys are never
 // passphrase-encrypted by gpm (they rely on their own native protection),
 // so the at-rest encryption UI is hidden for them.
@@ -63,6 +76,8 @@ async function loadConfig() {
     const auth = await invoke<AuthState>("get_auth_state");
     isIdentityEncrypted.value = auth.encrypted;
     identityType.value = auth.identity_type;
+    biometricAvailable.value = await isBiometricAvailable();
+    biometricEnabled.value = await isBiometricUnlockEnabled();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load config";
@@ -123,6 +138,8 @@ async function onSetPassphrase() {
     showSetPassphrase.value = false;
     newPassphrase.value = "";
     showToast("✓ Passphrase set — identity is now encrypted");
+    // Setting a passphrase invalidates any sealed biometric passphrase.
+    biometricEnabled.value = await isBiometricUnlockEnabled();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to set passphrase";
@@ -147,12 +164,46 @@ async function onChangePassphrase() {
     oldPassphrase.value = "";
     newPassphrase.value = "";
     showToast("✓ Passphrase changed");
+    // Changing the passphrase invalidates any sealed biometric passphrase.
+    biometricEnabled.value = await isBiometricUnlockEnabled();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to change passphrase";
   } finally {
     passphraseLoading.value = false;
   }
+}
+
+async function onEnableBiometric() {
+  error.value = "";
+  if (!biometricPassphrase.value) {
+    error.value = "Passphrase is required";
+    return;
+  }
+  biometricLoading.value = true;
+  try {
+    await enableBiometricUnlock(biometricPassphrase.value);
+    biometricEnabled.value = true;
+    biometricPassphrase.value = "";
+    showToast("✓ Biometric unlock enabled");
+  } catch (e) {
+    const err = e as BiometricError;
+    if (err.code === "WRONG_PASSPHRASE") {
+      error.value = "Wrong passphrase";
+    } else if (err.code === "BIOMETRIC_CANCELLED") {
+      // User cancelled the enable prompt — no error toast.
+    } else {
+      error.value = err.message || "Failed to enable biometric";
+    }
+  } finally {
+    biometricLoading.value = false;
+  }
+}
+
+async function onDisableBiometric() {
+  await disableBiometricUnlock();
+  biometricEnabled.value = false;
+  showToast("Biometric unlock disabled");
 }
 
 async function resetConfig() {
@@ -361,6 +412,57 @@ onMounted(() => {
           SSH key identities rely on their own native passphrase protection and
           are not re-encrypted by gpm.
         </p>
+      </section>
+
+      <!-- Biometric unlock (only meaningful when the identity is encrypted) -->
+      <section v-if="isIdentityEncrypted" class="settings-card">
+        <h2 class="text-sm font-medium mb-3">Biometric Unlock</h2>
+
+        <p v-if="!biometricAvailable" class="text-xs text-muted">
+          Biometric unlock isn't available on this device (requires Android 11+
+          with a fingerprint or face enrolled).
+        </p>
+
+        <template v-else-if="!biometricEnabled">
+          <p class="text-xs text-muted mb-2">
+            Unlock with fingerprint or face instead of typing your passphrase on
+            every launch.
+          </p>
+          <div class="flex flex-col gap-2">
+            <input
+              v-model="biometricPassphrase"
+              type="password"
+              placeholder="Current passphrase"
+              autocomplete="current-password"
+              class="input-base"
+              :disabled="biometricLoading"
+            />
+            <button
+              type="button"
+              class="btn-action"
+              :disabled="biometricLoading"
+              @click="onEnableBiometric"
+            >
+              <span
+                v-if="biometricLoading"
+                class="spinner"
+                aria-hidden="true"
+              ></span>
+              Enable Biometric
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <p class="text-xs text-muted mb-2">✓ Biometric unlock is enabled.</p>
+          <button
+            type="button"
+            class="btn-action btn-action-danger"
+            @click="onDisableBiometric"
+          >
+            Disable Biometric
+          </button>
+        </template>
       </section>
 
       <!-- Danger zone -->

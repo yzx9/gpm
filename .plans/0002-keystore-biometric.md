@@ -1,7 +1,7 @@
 # Keystore + biometric unlock
 
 **Priority:** P2
-**Status:** In Progress (plan revised via `/plan-eng-review` + codex outside voice)
+**Status:** Implemented (T1–T5, commit `b63b782` on `feat/biometric-unlock`). Desktop-verified; on-device steps (Kotlin compile, release ProGuard, emulator round-trip) still pending — see [Implementation log](#implementation-log).
 **Phase:** Post-MVP (v1.1)
 
 ## What
@@ -624,14 +624,14 @@ With the modal deferred to 0009, this plan is largely sequential after Phase 1:
 
 ## Implementation Tasks
 
-- [ ] **T1 (P1, human: ~2h / CC: ~15min)** — `rustpass/src/store.rs` — Fix
+- [x] **T1 (P1, human: ~2h / CC: ~15min)** — `rustpass/src/store.rs` — Fix
       `is_unlocked()` to consult `cached_passphrase` (SSH unlock recognition);
       add the SSH-after-unlock regression test; update the plaintext test.
   - Surfaced by: Architecture — the latent SSH-unlock regression (commit
     `48f5d7c`) that blocks SSH biometric and SSH password unlock alike.
   - Files: `rustpass/src/store.rs`
   - Verify: `just test`.
-- [ ] **T2 (P1, human: ~4h / CC: ~20min)** — `gpm-plugin-keystore/`,
+- [x] **T2 (P1, human: ~4h / CC: ~20min)** — `gpm-plugin-keystore/`,
       `KeystorePlugin.kt` — New backend-callable plugin crate + Kotlin Keystore/
       BiometricPrompt with **prompts on both store (D2) and retrieve**, API 30+
       STRONG keys (D3), async variants (F7).
@@ -640,7 +640,7 @@ With the modal deferred to 0009, this plan is largely sequential after Phase 1:
     `src-tauri/gen/android/.../KeystorePlugin.kt`, `build.gradle.kts`,
     workspace `Cargo.toml`, `src-tauri/Cargo.toml`.
   - Verify: emulator round-trip (Phase 2-3 checklist).
-- [ ] **T3 (P1, human: ~3h / CC: ~15min)** — `src-tauri/src/lib.rs`, `src/` —
+- [x] **T3 (P1, human: ~3h / CC: ~15min)** — `src-tauri/src/lib.rs`, `src/` —
       `unlock_and_arm` helper (D5), 5 biometric commands (local error type +
       `From<rustpass::Error>`), `biometric.ts`, `UnlockPage.vue` biometric UI,
       Settings card with **enable-time prompt (D2) + SSH validation (D4)**,
@@ -649,17 +649,53 @@ With the modal deferred to 0009, this plan is largely sequential after Phase 1:
   - Files: `src-tauri/src/lib.rs`, `src/biometric.ts` (new), `UnlockPage.vue`,
     `SettingsPage.vue`, `src/types.ts`.
   - Verify: `just test`; emulator full enable→relaunch→unlock→auto-lock flow.
-- [ ] **T4 (P2, human: ~2h / CC: ~10min)** — D6 vitest: `biometric.test.ts`,
+- [x] **T4 (P2, human: ~2h / CC: ~10min)** — D6 vitest: `biometric.test.ts`,
       `UnlockPage.test.ts` (new), `SettingsPage.test.ts` card cases (mock
       `invoke`).
   - Surfaced by: Test review (D6).
   - Files: `src/biometric.test.ts`, `src/pages/UnlockPage.test.ts`,
     `src/pages/SettingsPage.test.ts`.
   - Verify: `pnpm test`.
-- [ ] **T5 (P2, human: ~1h / CC: ~5min)** — release ProGuard/R8 check + CHANGELOG.
+- [x] **T5 (P2, human: ~1h / CC: ~5min)** — release ProGuard/R8 check + CHANGELOG.
   - Surfaced by: Risks.
   - Files: proguard rules, `CHANGELOG.md`.
   - Verify: `just android-install-release`.
+
+## Implementation log
+
+Shipped in commit `b63b782` (`feat/biometric-unlock`); T1–T5 complete.
+
+**Deviations from the plan (all intentional):**
+
+- **D4 SSH validation** is done via a new `Store::validate_passphrase` (age →
+  `crypto::decrypt_identity`, SSH → new `crypto::validate_ssh_key_passphrase`),
+  returning a uniform `WRONG_PASSPHRASE` — instead of the plan's literal
+  `ssh::Identity::from_buffer` / `identity_to_recipient` from the app layer. This
+  keeps `age` internal to `rustpass` and gives age + SSH the same error code for
+  the frontend. (`Store::validate_passphrase` is not biometric logic — it's a
+  passphrase-validation primitive — so it honors the "rustpass learns nothing
+  about biometric" layering rule.)
+- **Enable path** calls `Store::validate_passphrase` (no-cache) for both age and
+  SSH, rather than `store.unlock` for age — enable runs from Settings where the
+  store is already unlocked, so caching is redundant and uniform validation is
+  cleaner.
+- **`KeystorePlugin.store`** regenerates a fresh key on every call
+  (delete-then-generate) so re-enable-after-invalidation just works, rather than
+  reusing an alias whose key may be dead.
+- **`BiometricPrompt` arg order** confirmed as `reject(message, code)` (against
+  impierce's working v2 plugin) so the `BIOMETRIC_*` codes map correctly through
+  `PluginInvokeError::InvokeRejected(ErrorResponse { code })`.
+
+**Verified on desktop:** `cargo test` + `clippy -D warnings` clean; `pnpm test`
+(109) + `vue-tsc` clean; `cargo fmt` + `prettier` clean. Plugin crate compiles
+and its permission scaffold generates; `invoke.reject(message, code)` order and
+`run_mobile_plugin_async` signature verified against the tauri 2.11.2 source.
+
+**Still pending on-device (Phase 2-3 / Phase 5):** Kotlin compile (needs Maven
+access for `androidx.biometric`), release ProGuard/R8, and the full emulator
+round-trip (`store→retrieve`, cancel, `KeyPermanentlyInvalidatedException`,
+enable→relaunch→auto-lock, both age + SSH). Run `just android-install` /
+`just android-install-release`.
 
 ## GSTACK REVIEW REPORT
 

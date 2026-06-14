@@ -1,0 +1,14 @@
+[package]
+name = "gpm-plugin-keystore"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+links = "gpm-plugin-keystore"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = "2"
+serde = { workspace = true }

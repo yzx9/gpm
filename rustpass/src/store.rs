@@ -121,11 +121,28 @@ impl Store {
     }
 
     /// Check if the identity cache is populated (identity is unlocked).
+    ///
+    /// Returns `true` if either cache holds an unlock:
+    /// - `cached_identity` is populated for age-encrypted identities (the
+    ///   decrypted x25519 key — the passphrase is no longer needed).
+    /// - `cached_passphrase` is populated for SSH identities (there is no
+    ///   decrypted blob to cache; age re-decrypts the SSH key with the
+    ///   passphrase on every entry access, so the cached passphrase *is* the
+    ///   unlock state).
+    ///
+    /// Before `48f5d7c` stopped age-encrypting SSH keys, SSH unlock populated
+    /// `cached_identity` and this checked only that. SSH now populates only
+    /// `cached_passphrase`, so checking both is required for SSH unlock to be
+    /// recognized.
     #[must_use]
     pub fn is_unlocked(&self) -> bool {
         self.cached_identity
             .read()
             .is_ok_and(|guard| guard.is_some())
+            || self
+                .cached_passphrase
+                .read()
+                .is_ok_and(|guard| guard.is_some())
     }
 
     /// Unlock a passphrase-encrypted identity by decrypting and caching it.
@@ -170,6 +187,35 @@ impl Store {
             *cache = Some(Zeroizing::new(passphrase.to_string()));
         }
 
+        Ok(())
+    }
+
+    /// Validate a passphrase against the stored identity WITHOUT caching it.
+    ///
+    /// Used by the biometric enable flow to reject a wrong passphrase before
+    /// sealing it (plan D4). For age-encrypted identities this runs the scrypt
+    /// decrypt; for encrypted SSH keys it decrypts the key; for plaintext or
+    /// unencrypted identities it is a no-op success.
+    ///
+    /// # Errors
+    ///
+    /// Returns `WrongPassphrase` if the passphrase is incorrect for an
+    /// age-encrypted identity or an encrypted SSH key.
+    pub async fn validate_passphrase(&self, passphrase: &str) -> Result<(), Error> {
+        let bytes = self.config.load_identity().await?;
+        let itype = classify_identity(&bytes);
+
+        match itype {
+            IdentityType::AgeEncrypted => {
+                let pw = passphrase.to_string();
+                spawn_blocking(move || crypto::decrypt_identity(&pw, &bytes)).await??;
+            }
+            IdentityType::SshEd25519 | IdentityType::SshRsa => {
+                let pw = passphrase.to_string();
+                spawn_blocking(move || crypto::validate_ssh_key_passphrase(&bytes, &pw)).await??;
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -718,11 +764,52 @@ mod tests {
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        // unlock() now succeeds for plaintext identities — caches passphrase
-        // for encrypted SSH key decryption (no-op for x25519, harmless)
+        // unlock() succeeds for plaintext identities and caches the passphrase.
+        // In production unlock() is never called on a plaintext identity (the
+        // router only routes to /unlock when is_identity_encrypted()), so this
+        // edge case is harmless. With is_unlocked() consulting both caches,
+        // the cached passphrase now trivially marks the store unlocked here.
         store.unlock("passphrase").await.unwrap();
         // cached_identity should NOT be populated (identity is not age-encrypted)
-        assert!(!store.is_unlocked());
+        assert!(
+            store.cached_identity.read().is_ok_and(|g| g.is_none()),
+            "plaintext identity must not populate the decrypted-identity cache"
+        );
+        // ...but the cached passphrase marks the store as unlocked.
+        assert!(
+            store.is_unlocked(),
+            "unlock() caching the passphrase must mark the store unlocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn unlock_marks_ssh_identity_unlocked() {
+        // Regression for the 48f5d7c SSH-unlock recognition bug: an encrypted
+        // SSH identity populates only cached_passphrase (no decrypted blob to
+        // cache), so is_unlocked() must consult cached_passphrase too.
+        let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(encrypted_ssh_key, None).await.unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        assert!(
+            !store.is_unlocked(),
+            "store must start locked for an encrypted SSH identity"
+        );
+
+        store.unlock("test-passphrase").await.unwrap();
+
+        // The decrypted-identity cache stays empty for SSH (there is no
+        // decrypted blob to cache); only the passphrase is cached.
+        assert!(
+            store.cached_identity.read().is_ok_and(|g| g.is_none()),
+            "SSH unlock must not populate the decrypted-identity cache"
+        );
+        assert!(
+            store.is_unlocked(),
+            "an encrypted SSH identity must be recognised as unlocked after unlock()"
+        );
     }
 
     #[tokio::test]
@@ -865,5 +952,56 @@ mod tests {
             store.change_passphrase("old", "").await.unwrap_err().code,
             "IDENTITY_NOT_ENCRYPTED"
         );
+    }
+
+    // ── validate_passphrase (biometric enable D4) ───────────────────────
+
+    #[tokio::test]
+    async fn validate_passphrase_accepts_correct_ssh_passphrase() {
+        let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(encrypted_ssh_key, None).await.unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        store
+            .validate_passphrase("test-passphrase")
+            .await
+            .expect("correct SSH passphrase must validate");
+    }
+
+    #[tokio::test]
+    async fn validate_passphrase_rejects_wrong_ssh_passphrase() {
+        // D4: enabling biometric with a wrong SSH passphrase must fail before
+        // the passphrase is sealed into the Keystore.
+        let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(encrypted_ssh_key, None).await.unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        let err = store
+            .validate_passphrase("wrong-passphrase")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "WRONG_PASSPHRASE",
+            "wrong SSH passphrase must be rejected as WRONG_PASSPHRASE"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_passphrase_age_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        // Save an age-encrypted identity (uses a fixed test recipient).
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", Some("correct-pw"))
+            .await
+            .unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        let err = store.validate_passphrase("nope").await.unwrap_err();
+        assert_eq!(err.code, "WRONG_PASSPHRASE");
     }
 }

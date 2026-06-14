@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-retrieve"
+description = "Enables the retrieve command without any pre-configured scope."
+commands.allow = ["retrieve"]
+
+[[permission]]
+identifier = "deny-retrieve"
+description = "Denies the retrieve command without any pre-configured scope."
+commands.deny = ["retrieve"]

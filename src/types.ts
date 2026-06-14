@@ -71,3 +71,26 @@ export interface IdentityInfoResult {
   key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
   encrypted: boolean;
 }
+
+/** Biometric error codes from the Kotlin plugin / Rust app layer. */
+export type BiometricErrorCode =
+  /** Biometric storage unusable (desktop, Android <11, no biometric enrolled). */
+  | "BIOMETRIC_UNAVAILABLE"
+  /** User cancelled / chose the negative ("Use passphrase") button. */
+  | "BIOMETRIC_CANCELLED"
+  /** Keystore key invalidated (new fingerprint enrolled). */
+  | "BIOMETRIC_KEY_INVALIDATED"
+  /** Too many failed attempts; temporarily locked out. */
+  | "BIOMETRIC_LOCKOUT"
+  /** Nothing sealed (retrieve called with no stored passphrase). */
+  | "BIOMETRIC_NOT_SET"
+  /** Catch-all biometric failure. */
+  | "BIOMETRIC_FAILED"
+  /** Stored passphrase is stale (age path self-heals). */
+  | "WRONG_PASSPHRASE";
+
+/** Error from the biometric commands — same `{ code, message }` shape as AppError. */
+export interface BiometricError {
+  code: BiometricErrorCode | string;
+  message: string;
+}

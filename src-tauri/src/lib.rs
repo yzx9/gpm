@@ -27,7 +27,9 @@ use rustpass::ssh;
 use rustpass::{Entry, Error, KeyType, Recipient, RepoConfig, Store, SyncResult};
 use serde::Serialize;
 use tokio::task::JoinHandle;
+use zeroize::Zeroizing;
 
+use gpm_plugin_keystore::KeystoreExt;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -97,6 +99,38 @@ struct AuthState {
 struct IdentityInfoResult {
     key_type: String,
     encrypted: bool,
+}
+
+/// App-local error for the biometric commands.
+///
+/// Serializes to `{ code, message }` — the same shape as `rustpass::Error` —
+/// so the frontend can destructure both uniformly. Carries the Kotlin
+/// `BIOMETRIC_*` codes (via [`From<KeystoreError>`]) and maps
+/// `rustpass::Error` (via [`From<Error>`]) so a stale stored passphrase's
+/// `WRONG_PASSPHRASE` reaches the frontend. `rustpass::ErrorCode` is not
+/// touched; this type lives entirely in the app layer.
+#[derive(Debug, Clone, Serialize)]
+struct BiometricError {
+    code: String,
+    message: String,
+}
+
+impl From<Error> for BiometricError {
+    fn from(e: Error) -> Self {
+        Self {
+            code: e.code,
+            message: e.message,
+        }
+    }
+}
+
+impl From<gpm_plugin_keystore::KeystoreError> for BiometricError {
+    fn from(e: gpm_plugin_keystore::KeystoreError) -> Self {
+        Self {
+            code: e.code,
+            message: e.message,
+        }
+    }
 }
 
 impl From<Recipient> for RecipientInfo {
@@ -268,12 +302,74 @@ async fn unlock(
     app: AppHandle,
     passphrase: String,
 ) -> Result<(), Error> {
-    // Store::unlock is now async and handles spawn_blocking internally
-    state.store.unlock(&passphrase).await?;
+    unlock_and_arm(&state, &app, &passphrase).await
+}
 
-    // Start auto-lock timer
-    reset_lock_timer(&state, &app);
+// ---------------------------------------------------------------------------
+// Biometric unlock commands
+// ---------------------------------------------------------------------------
 
+/// Whether biometric-gated storage is usable on this device (API 30+ with a
+/// STRONG biometric enrolled). `false` on desktop and Android <11.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn is_biometric_available(app: AppHandle) -> Result<bool, BiometricError> {
+    Ok(app.keystore().is_available()?)
+}
+
+/// Whether a passphrase is sealed in the Keystore — the single source of
+/// truth for "biometric is enabled" (no flag file). `false` on desktop.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn is_biometric_unlock_enabled(app: AppHandle) -> Result<bool, BiometricError> {
+    Ok(app.keystore().has_stored()?)
+}
+
+/// Enable biometric unlock: validate the passphrase (D4), then seal it behind
+/// a biometric prompt (D2 — encrypt also needs auth for a
+/// `setUserAuthenticationRequired` key).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn enable_biometric_unlock(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    passphrase: String,
+) -> Result<(), BiometricError> {
+    // D4: reject a wrong passphrase before sealing it (age or SSH).
+    state.store.validate_passphrase(&passphrase).await?;
+    // D2: the Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
+    app.keystore().store(&passphrase).await?;
+    Ok(())
+}
+
+/// Unlock via biometrics: retrieve the sealed passphrase and run it through
+/// the same `unlock_and_arm` path as the password UI. If the stored passphrase
+/// is stale (age path returns `WRONG_PASSPHRASE`), self-heal by deleting it so
+/// it stops auto-prompting and the form is revealed for re-enabling.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn biometric_unlock(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), BiometricError> {
+    // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used.
+    let passphrase = Zeroizing::new(app.keystore().retrieve().await?);
+
+    if let Err(e) = unlock_and_arm(&state, &app, &passphrase).await {
+        if e.code == "WRONG_PASSPHRASE" {
+            // Stale sealed passphrase — clear it so the page reveals the form.
+            let _ = app.keystore().delete();
+        }
+        return Err(BiometricError::from(e));
+    }
+    Ok(())
+}
+
+/// Disable biometric unlock: best-effort delete the sealed passphrase + key.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn disable_biometric_unlock(app: AppHandle) -> Result<(), BiometricError> {
+    app.keystore().delete()?;
     Ok(())
 }
 
@@ -294,8 +390,15 @@ fn lock(state: State<'_, AppState>) -> Result<(), Error> {
 /// Set a passphrase on an existing plaintext identity.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-async fn set_passphrase(state: State<'_, AppState>, passphrase: String) -> Result<(), Error> {
-    state.store.set_passphrase(&passphrase).await
+async fn set_passphrase(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    passphrase: String,
+) -> Result<(), Error> {
+    state.store.set_passphrase(&passphrase).await?;
+    // The sealed biometric passphrase (if any) is now stale — invalidate it.
+    let _ = app.keystore().delete();
+    Ok(())
 }
 
 /// Change the passphrase on an encrypted identity.
@@ -303,13 +406,17 @@ async fn set_passphrase(state: State<'_, AppState>, passphrase: String) -> Resul
 #[allow(clippy::needless_pass_by_value)]
 async fn change_passphrase(
     state: State<'_, AppState>,
+    app: AppHandle,
     old_passphrase: String,
     new_passphrase: String,
 ) -> Result<(), Error> {
     state
         .store
         .change_passphrase(&old_passphrase, &new_passphrase)
-        .await
+        .await?;
+    // The sealed biometric passphrase (if any) is now stale — invalidate it.
+    let _ = app.keystore().delete();
+    Ok(())
 }
 
 /// List all .age entries in the configured repository.
@@ -439,6 +546,21 @@ async fn export_ssh_private_key(state: State<'_, AppState>) -> Result<SshPrivate
 // Timer helpers
 // ---------------------------------------------------------------------------
 
+/// Unlock the store with `passphrase` and (re)arm the auto-lock timer.
+///
+/// Shared by the password UI ([`unlock`]) and the biometric path
+/// ([`biometric_unlock`]) so both honor the same "unlock + arm timer"
+/// contract — whatever the password flow does, biometric mirrors (plan D5).
+async fn unlock_and_arm(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+    passphrase: &str,
+) -> Result<(), Error> {
+    state.store.unlock(passphrase).await?;
+    reset_lock_timer(state, app);
+    Ok(())
+}
+
 /// Reset the auto-lock timer (cancel-and-respawn pattern).
 fn reset_lock_timer(state: &State<'_, AppState>, app: &AppHandle) {
     let Ok(mut timer) = state.lock_timer.lock() else {
@@ -485,6 +607,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(gpm_plugin_safe_area::init())
+        .plugin(gpm_plugin_keystore::init())
         .setup(|app| {
             let config_dir = app
                 .path()
@@ -509,6 +632,11 @@ pub fn run() {
             lock,
             set_passphrase,
             change_passphrase,
+            is_biometric_available,
+            is_biometric_unlock_enabled,
+            enable_biometric_unlock,
+            biometric_unlock,
+            disable_biometric_unlock,
             list_entries,
             pull_repo,
             copy_password,

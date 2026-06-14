@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["rustpass", "src-tauri", "gpm-plugin-safe-area"]
+members = [
+  "rustpass",
+  "src-tauri",
+  "gpm-plugin-safe-area",
+  "gpm-plugin-keystore",
+]
 
 [workspace.package]
 version = "0.3.0"

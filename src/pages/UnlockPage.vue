@@ -3,15 +3,61 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  asBiometricError,
+  biometricUnlock,
+  disableBiometricUnlock,
+  isBiometricAvailable,
+  isBiometricUnlockEnabled,
+} from "../biometric";
+import type { BiometricError } from "../types";
 
 const router = useRouter();
 
 const passphrase = ref("");
 const loading = ref(false);
 const error = ref("");
+
+// ── Biometric state ───────────────────────────────────────────────────
+const biometricAvailable = ref(false);
+const biometricEnabled = ref(false);
+const biometricLoading = ref(false);
+const biometricNotice = ref("");
+
+async function tryBiometricUnlock() {
+  biometricNotice.value = "";
+  biometricLoading.value = true;
+  try {
+    await biometricUnlock();
+    router.push({ name: "entries" });
+  } catch (e) {
+    const err = asBiometricError(e) as BiometricError;
+    switch (err.code) {
+      case "BIOMETRIC_CANCELLED":
+        // User chose "Use passphrase" — keep the form, stay quiet.
+        break;
+      case "BIOMETRIC_KEY_INVALIDATED":
+        biometricNotice.value =
+          "Biometric was reset (new fingerprint?) — re-enable it in Settings.";
+        await disableBiometricUnlock();
+        biometricEnabled.value = false;
+        break;
+      case "WRONG_PASSPHRASE":
+        biometricNotice.value =
+          "Stored passphrase is invalid — re-enable biometric in Settings.";
+        await disableBiometricUnlock();
+        biometricEnabled.value = false;
+        break;
+      default:
+        biometricNotice.value = err.message || "Biometric unlock failed";
+    }
+  } finally {
+    biometricLoading.value = false;
+  }
+}
 
 async function onUnlock() {
   error.value = "";
@@ -48,6 +94,15 @@ async function onReset() {
     error.value = appError?.message || "Reset failed";
   }
 }
+
+onMounted(async () => {
+  biometricAvailable.value = await isBiometricAvailable();
+  biometricEnabled.value = await isBiometricUnlockEnabled();
+  // Auto-prompt when enabled and available; cancel reveals the form silently.
+  if (biometricEnabled.value && biometricAvailable.value) {
+    await tryBiometricUnlock();
+  }
+});
 </script>
 
 <template>
@@ -60,6 +115,40 @@ async function onReset() {
     >
       <h1 class="text-center text-display mb-1">🔐 gpm</h1>
       <p class="text-center text-muted text-sm mb-6">Identity is locked</p>
+
+      <!-- Biometric notice (reset / stale / failure) -->
+      <div
+        v-if="biometricNotice"
+        class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-4"
+        role="status"
+      >
+        {{ biometricNotice }}
+      </div>
+
+      <!-- Unlock with biometric -->
+      <button
+        v-if="biometricAvailable && biometricEnabled"
+        type="button"
+        :disabled="biometricLoading || loading"
+        class="btn-biometric"
+        @click="tryBiometricUnlock"
+      >
+        <span v-if="biometricLoading" class="spinner" aria-hidden="true"></span>
+        <span v-else>👁</span>
+        <span>{{
+          biometricLoading ? "Unlocking…" : "Unlock with biometric"
+        }}</span>
+      </button>
+
+      <div
+        v-if="biometricAvailable && biometricEnabled"
+        class="flex items-center gap-2 my-4"
+        aria-hidden="true"
+      >
+        <span class="divider-line"></span>
+        <span class="text-xs text-subtle">or use passphrase</span>
+        <span class="divider-line"></span>
+      </div>
 
       <form @submit.prevent="onUnlock" class="flex flex-col gap-4">
         <div class="flex flex-col gap-1">
@@ -144,6 +233,49 @@ async function onReset() {
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.btn-biometric {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--color-surface);
+  color: inherit;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  min-height: 48px;
+}
+
+.btn-biometric:hover:not(:disabled) {
+  background: var(--color-hover);
+}
+
+.btn-biometric:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--color-edge);
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-edge);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
 }
 
 .spinner-white {

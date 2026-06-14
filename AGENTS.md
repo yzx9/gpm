@@ -12,53 +12,38 @@ just dev               # Desktop dev server with hot reload
 just android-debug     # Build debug APK
 just android-release   # Build release APK (signed if keystore.properties exists)
 just android-dev       # Android dev server (requires device/emulator)
-just android-install   # Build + install debug APK to connected device
-just android-install-release # Build + install release APK to connected device
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
 
 ## Architecture
 
-### Frontend (Vue 3 + TypeScript) — `src/`
+### Frontend — `src/`
 
-Four-page SPA with Vue Router:
+SPA web app with Vue3 + TypeScript. All Tauri IPC types live in `src/types.ts`.
 
-- **SetupPage** — Git URL + auth (PAT/SSH key) + age identity (x25519 or SSH private key) → clone repo
-- **EntryListPage** — List/search entries, copy passwords, pull to refresh
-- **EntryDetailPage** — Show password with 30s auto-clear
-- **SettingsPage** — View public key, export private key, reset
+### Backend — `rustpass/`
 
-All Tauri IPC types live in `src/types.ts`.
+The crate implements encryption, decryption, Git operations, and repository file management, with its core functionality encapsulated in a `Store` facade. It is an async-first crate built on `tokio`, using `tokio::fs` for all file I/O, while Git and scrypt operations are wrapped in `spawn_blocking`. At this stage, it supports only age encryption and read-only operations, and does not include write capabilities or any UI/CLI interaction logic.
 
-### Backend (Rust library) — `rustpass/src/`
+`rustpass` was designed to be compatible with and conceptually aligned with `gopass`, drawing heavily from its architecture and design principles, while intentionally narrowing its scope in the current implementation phase.
 
-Async crate using `tokio::fs` for all file I/O. Git and scrypt operations wrapped in `spawn_blocking`.
+### Tauri app — `src-tauri/`
 
-- `lib.rs` — Crate root, re-exports core types
-- `crypto.rs` — Age decryption with zeroize-per-decrypt (x25519 and SSH identities); `decrypt_file` is async, `decrypt_bytes`/`decrypt_identity` are sync
-- `ssh.rs` — SSH key generation (ed25519), public key derivation, private key export
-- `recipient.rs` — Recipient discovery (async), `KeyType` enum (X25519, SshEd25519, SshRsa), identity-to-recipient conversion
-- `store.rs` — Async facade: two-step setup, directory walking, .age file discovery, content parsing; git/scrypt via `spawn_blocking`
-- `git.rs` — Clone + pull (ff-only) via git2 (sync — wrapped in `spawn_blocking` by store.rs)
-- `config.rs` — Async identity + config persistence via `tokio::fs`
-- `error.rs` — Safe error types (no secrets in messages); includes `Cancelled` variant for Phase 2
-- `entry.rs` — Entry type (path, name)
-- `secret.rs` — Decrypted secret type (password, body)
+Async Tauri commands, state management, app entry, IPC types. Includes the biometric commands (`is_biometric_available`, `enable_biometric_unlock`, `biometric_unlock`, …) backed by the keystore plugin, plus the shared `unlock_and_arm` helper used by both the password and biometric unlock paths
 
-### Tauri app — `src-tauri/src/`
+### Tauri Plugins — `gpm-plugin-safe-area/`, `gpm-plugin-keystore/`
 
-- `lib.rs` — Async Tauri commands (14 async, 5 sync), state management, app entry, IPC types
-- `main.rs` — Desktop entry point
+Local Tauri plugin crates (not published):
 
-### Tauri Plugins — `gpm-plugin-safe-area/`
-
-Local Tauri plugin crate (not published). Provides Android safe-area insets to the frontend via standard plugin IPC + event system.
+- `gpm-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
+- `gpm-plugin-keystore` — stores the identity passphrase in the Android Keystore (AES/GCM, hardware-backed) and retrieves it through a biometric-gated `BiometricPrompt`
 
 ## Security Model
 
 - `copy_password` is the primary operation — password never reaches WebView
 - `show_password` is secondary — 30s auto-clear with lifecycle cleanup
+- Biometric (keystore) unlock is called from Rust app commands, with the passphrase passed from Kotlin to Rust and never exposed to the WebView.
 - All decrypted content uses `Zeroizing<String>` and is wiped after use
 - Error messages are sanitized to never contain secrets
 - CSP restricts script/connect sources to `self` + IPC only
@@ -67,17 +52,17 @@ See [SECURITY.md](SECURITY.md) for the full threat model and known limitations.
 
 ## Testing
 
-Integration tests in `src-tauri/tests/fixtures.rs` covering store parsing, content parsing, crypto (correct/wrong identity, corrupted data), and security (no secrets in errors).
+Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration tests in `rustpass/tests/` (store facade, config persistence, crypto). Frontend tests are vitest in `src/**/*.test.ts` (mocked `@tauri-apps/api/core` `invoke`). There is no `src-tauri/tests/` directory.
 
 ## Conventions
 
 - Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
 - SPDX license headers on all source files
 - Nix flake provides the full dev environment (`direnv allow` to activate)
-- Single age identity only (multi-identity deferred); supports x25519 native keys and SSH private keys (ed25519, RSA)
+- Single age identity only (multi-identity deferred); supports x25519 native keys (optionally passphrase-encrypted at rest) and SSH private keys (ed25519, RSA), including passphrase-protected SSH keys
 - HTTPS and SSH Git remotes (SSH key generation + paste)
-- Encrypted SSH private keys as age identities are rejected (passphrase support deferred)
-- `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `SafeAreaPlugin.kt`). Do not assume its contents are auto-generated or disposable.
+- Biometric unlock (fingerprint/face) on Android 11+ for passphrase-protected identities (age or SSH); the passphrase is sealed in the Android Keystore with hardware-backed, biometric-gated encryption. Desktop and Android <11 stay passphrase-only. iOS deferred.
+- `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `SafeAreaPlugin.kt`, `KeystorePlugin.kt`). Do not assume its contents are auto-generated or disposable.
 
 ## Compact Instructions
 

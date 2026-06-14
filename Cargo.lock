@@ -1657,6 +1657,7 @@ dependencies = [
 name = "gpm"
 version = "0.3.0"
 dependencies = [
+ "gpm-plugin-keystore",
  "gpm-plugin-safe-area",
  "rustpass",
  "serde",
@@ -1666,6 +1667,15 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tokio",
  "zeroize",
+]
+
+[[package]]
+name = "gpm-plugin-keystore"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]
