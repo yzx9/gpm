@@ -18,6 +18,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-safe-area = { path = "../tauri-plugin-safe-area" }
 tauri-plugin-biometric-keystore = { path = "../tauri-plugin-biometric-keystore" }
+tauri-plugin-file-picker = { path = "../tauri-plugin-file-picker" }
 rustpass = { path = "../rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }

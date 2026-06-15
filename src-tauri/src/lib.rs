@@ -25,8 +25,8 @@ use std::time::Duration;
 use rustpass::error::ErrorCode;
 use rustpass::ssh;
 use rustpass::{
-    AuthenticityConfig, CommitSigInfo, CommitSigStatus, Entry, Error, KeyType, Recipient,
-    RepoConfig, Store, SyncResult, TrustedKey, VerifyMode,
+    AuthenticityConfig, CommitSigInfo, CommitSigStatus, Entry, Error, IdentityInfo, KeyType,
+    Recipient, RepoConfig, Store, SyncResult, TrustedKey, VerifyMode,
 };
 use serde::Serialize;
 use tokio::task::JoinHandle;
@@ -35,6 +35,7 @@ use zeroize::Zeroizing;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_biometric_keystore::KeystoreExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_file_picker::FilePickerExt;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -104,6 +105,25 @@ struct IdentityInfoResult {
     encrypted: bool,
 }
 
+/// Returned by `pick_identity_file` — identity metadata only. The file contents
+/// are held in backend state and never sent to the `WebView`.
+#[derive(Debug, Clone, Serialize)]
+struct PickedIdentityResult {
+    key_type: String,
+    encrypted: bool,
+    filename: Option<String>,
+    /// Derived public key (recipient). `Some` only when the identity is already
+    /// usable (unencrypted); `None` until a passphrase is verified.
+    recipient: Option<String>,
+}
+
+/// Returned by `verify_picked_identity` — the public key now that the encrypted
+/// identity has been unlocked.
+#[derive(Debug, Clone, Serialize)]
+struct VerifiedIdentityResult {
+    recipient: String,
+}
+
 /// Returned by `get_authenticity_state` — the cached snapshot for the
 /// entry-list indicator badge (mode + current HEAD verification status).
 #[derive(Debug, Clone, Serialize)]
@@ -168,6 +188,24 @@ struct AppState {
     store: Arc<Store>,
     /// Auto-lock timer handle (cancel-and-respawn pattern).
     lock_timer: Mutex<Option<JoinHandle<()>>>,
+    /// Identity picked via the file picker, awaiting its passphrase before
+    /// `complete_setup_from_file` saves it. Held only in memory (`Zeroizing` on
+    /// drop); never persisted.
+    pending_identity: Mutex<Option<PendingIdentity>>,
+}
+
+/// A file-picked identity awaiting save.
+///
+/// Does not derive `Debug` — `identity` is secret. The frontend only ever sees
+/// metadata (via [`PickedIdentityResult`] / [`VerifiedIdentityResult`]).
+struct PendingIdentity {
+    /// The usable identity text `Store::save_identity` receives. For an
+    /// age-encrypted upload this is replaced with the decrypted bare key after
+    /// verification.
+    identity: Zeroizing<String>,
+    /// Type + encryption status of the *current* identity (updated to
+    /// unencrypted after an age-encrypted identity is decrypted at verify time).
+    info: IdentityInfo,
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +238,27 @@ fn identity_type_string(itype: rustpass::identity::IdentityType) -> String {
         IdentityType::Unknown => "unknown",
     }
     .to_string()
+}
+
+/// Map a [`KeyType`] to the stable IPC string used by `validate_identity` and
+/// `pick_identity_file`.
+fn key_type_string(key_type: KeyType) -> &'static str {
+    match key_type {
+        KeyType::X25519 => "x25519",
+        KeyType::SshEd25519 => "ssh_ed25519",
+        KeyType::SshRsa => "ssh_rsa",
+        KeyType::PostQuantum => "post_quantum",
+    }
+}
+
+/// Map a [`tauri_plugin_file_picker::FilePickerError`] into the app's IPC error
+/// type, turning a Kotlin `CANCELLED` into [`ErrorCode::Cancelled`].
+fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError) -> Error {
+    let code = match e.code.as_str() {
+        "CANCELLED" => ErrorCode::Cancelled,
+        _ => ErrorCode::InvalidIdentity,
+    };
+    Error::new(code, e.message)
 }
 
 /// Check if the app has been configured (identity + repo exist).
@@ -251,12 +310,7 @@ async fn list_recipients(state: State<'_, AppState>) -> Result<Vec<RecipientInfo
 fn validate_identity(identity: String) -> Result<IdentityInfoResult, Error> {
     let info = rustpass::recipient::validate_identity(&identity)?;
     Ok(IdentityInfoResult {
-        key_type: match info.key_type {
-            KeyType::X25519 => "x25519".to_string(),
-            KeyType::SshEd25519 => "ssh_ed25519".to_string(),
-            KeyType::SshRsa => "ssh_rsa".to_string(),
-            KeyType::PostQuantum => "post_quantum".to_string(),
-        },
+        key_type: key_type_string(info.key_type).to_string(),
         encrypted: info.encrypted,
     })
 }
@@ -278,6 +332,200 @@ async fn complete_setup(
         .store
         .save_identity(&identity, passphrase.as_deref())
         .await
+}
+
+/// Pick an identity file via the native picker, classify it, and hold it in
+/// backend state. Returns metadata + the public key when already usable
+/// (unencrypted). Encrypted identities return `recipient: None` and must be
+/// unlocked via [`verify_picked_identity`] before they can be used. The file
+/// contents never reach the `WebView`.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn pick_identity_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PickedIdentityResult, Error> {
+    use rustpass::identity::{IdentityType, classify_identity};
+
+    let picked = app
+        .file_picker()
+        .pick()
+        .await
+        .map_err(map_file_picker_error)?;
+
+    let text = std::str::from_utf8(&picked.bytes).map_err(|_| {
+        Error::new(
+            ErrorCode::InvalidIdentity,
+            "Identity file is not valid UTF-8",
+        )
+    })?;
+
+    let (info, recipient) = match classify_identity(&picked.bytes) {
+        IdentityType::X25519 | IdentityType::SshEd25519 | IdentityType::SshRsa => {
+            let info = rustpass::recipient::validate_identity(text)?;
+            // Derive the public key immediately when no passphrase is needed.
+            let recipient = if info.encrypted {
+                None
+            } else {
+                Some(rustpass::recipient::identity_to_recipient(text, None)?)
+            };
+            (info, recipient)
+        }
+        IdentityType::AgeEncrypted => {
+            // A passphrase-encrypted x25519 identity (e.g. encrypted with age).
+            // Cannot be used until unlocked.
+            (
+                IdentityInfo {
+                    key_type: KeyType::X25519,
+                    encrypted: true,
+                },
+                None,
+            )
+        }
+        IdentityType::PostQuantum => {
+            return Err(Error::new(
+                ErrorCode::PostQuantumNotSupported,
+                "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
+            ));
+        }
+        IdentityType::Unknown => {
+            return Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                "File is not a recognized age or SSH identity",
+            ));
+        }
+    };
+
+    let result = PickedIdentityResult {
+        key_type: key_type_string(info.key_type).to_string(),
+        encrypted: info.encrypted,
+        filename: picked.filename.clone(),
+        recipient: recipient.clone(),
+    };
+
+    // Hold the identity text (still encrypted for age-encrypted / SSH); drop any
+    // previously picked identity (Zeroizing on drop).
+    {
+        let mut guard = state
+            .pending_identity
+            .lock()
+            .expect("pending_identity lock poisoned");
+        *guard = Some(PendingIdentity {
+            identity: Zeroizing::new(text.to_string()),
+            info,
+        });
+    }
+    Ok(result)
+}
+
+/// Verify the passphrase for a picked encrypted identity and derive its public
+/// key. On success the pending identity becomes usable (an age-encrypted file is
+/// decrypted to its bare key). On failure the pending identity is **dropped**
+/// (the file is abandoned) and `WRONG_PASSPHRASE` is returned.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn verify_picked_identity(
+    state: State<'_, AppState>,
+    passphrase: String,
+) -> Result<VerifiedIdentityResult, Error> {
+    // Take the pending identity; it is only re-stored on success, so any error
+    // (incl. a wrong passphrase) abandons the file.
+    let pending = {
+        let mut guard = state
+            .pending_identity
+            .lock()
+            .expect("pending_identity lock poisoned");
+        guard.take()
+    }
+    .ok_or_else(|| Error::new(ErrorCode::NoIdentity, "No identity file selected"))?;
+
+    let mut pending = pending;
+
+    let recipient = match (pending.info.key_type, pending.info.encrypted) {
+        // Encrypted SSH: validate the passphrase, then derive the recipient.
+        (KeyType::SshEd25519 | KeyType::SshRsa, true) => {
+            let pw = passphrase.clone();
+            let bytes: Vec<u8> = pending.identity.as_bytes().to_vec();
+            tauri::async_runtime::spawn_blocking(move || {
+                rustpass::crypto::validate_ssh_key_passphrase(&bytes, &pw)
+            })
+            .await
+            .map_err(|e| Error::new(ErrorCode::StoreError, e.to_string()))??;
+            rustpass::recipient::identity_to_recipient(&pending.identity, Some(&passphrase))?
+        }
+        // Age-encrypted x25519: decrypt to the bare key, then derive.
+        (KeyType::X25519, true) => {
+            let pw = passphrase.clone();
+            let enc: Vec<u8> = pending.identity.as_bytes().to_vec();
+            let bare = tauri::async_runtime::spawn_blocking(move || {
+                rustpass::crypto::decrypt_identity(&pw, &enc)
+            })
+            .await
+            .map_err(|e| Error::new(ErrorCode::StoreError, e.to_string()))??;
+            let bare_str = std::str::from_utf8(&bare).map_err(|_| {
+                Error::new(
+                    ErrorCode::InvalidIdentity,
+                    "Decrypted identity is not valid UTF-8",
+                )
+            })?;
+            let bare_info = rustpass::recipient::validate_identity(bare_str)?;
+            let recipient = rustpass::recipient::identity_to_recipient(bare_str, None)?;
+            // The pending identity is now the decrypted bare key.
+            pending.identity = Zeroizing::new(bare_str.to_string());
+            pending.info = bare_info;
+            recipient
+        }
+        _ => {
+            return Err(Error::new(
+                ErrorCode::IdentityNotEncrypted,
+                "Identity is not encrypted — nothing to verify",
+            ));
+        }
+    };
+
+    // Re-store the now-usable identity.
+    {
+        let mut guard = state
+            .pending_identity
+            .lock()
+            .expect("pending_identity lock poisoned");
+        *guard = Some(pending);
+    }
+    Ok(VerifiedIdentityResult { recipient })
+}
+
+/// Step 2 (file path): save the previously picked (and, if encrypted, verified)
+/// identity. The pending identity is already usable at this point.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn complete_setup_from_file(
+    state: State<'_, AppState>,
+    passphrase: Option<String>,
+) -> Result<(), Error> {
+    let pending = state
+        .pending_identity
+        .lock()
+        .expect("pending_identity lock poisoned")
+        .take()
+        .ok_or_else(|| Error::new(ErrorCode::NoIdentity, "No identity file selected"))?;
+
+    state
+        .store
+        .save_identity(&pending.identity, passphrase.as_deref())
+        .await
+}
+
+/// Drop any identity held from a prior `pick_identity_file` (e.g. on back /
+/// unmount), so it cannot be saved later by accident.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+fn clear_pending_identity(state: State<'_, AppState>) -> Result<(), Error> {
+    let _ = state
+        .pending_identity
+        .lock()
+        .expect("pending_identity lock poisoned")
+        .take();
+    Ok(())
 }
 
 /// Full setup: validate identity, clone repo, save config.
@@ -734,6 +982,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_safe_area::init())
         .plugin(tauri_plugin_biometric_keystore::init())
+        .plugin(tauri_plugin_file_picker::init())
         .setup(|app| {
             let config_dir = app
                 .path()
@@ -742,6 +991,7 @@ pub fn run() {
             app.manage(AppState {
                 store: Arc::new(Store::new(config_dir)),
                 lock_timer: Mutex::new(None),
+                pending_identity: Mutex::new(None),
             });
             Ok(())
         })
@@ -753,6 +1003,10 @@ pub fn run() {
             list_recipients,
             validate_identity,
             complete_setup,
+            pick_identity_file,
+            verify_picked_identity,
+            complete_setup_from_file,
+            clear_pending_identity,
             setup,
             unlock,
             lock,

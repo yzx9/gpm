@@ -69,6 +69,25 @@ pub fn classify_identity(bytes: &[u8]) -> IdentityType {
     }
 }
 
+/// Strip `age-keygen`-style `#` comment lines and return the bare identity.
+///
+/// `age-keygen` writes an identity file with `# created:` / `# public key:`
+/// comment lines before the `AGE-SECRET-KEY-1...` line. For a native age
+/// identity this returns just that key line; for SSH private keys and
+/// age-armored blobs (which never contain such a line) the trimmed input is
+/// returned unchanged.
+#[must_use]
+pub fn normalize_identity_text(text: &str) -> &str {
+    let trimmed = text.trim();
+    for line in trimmed.lines() {
+        let line = line.trim();
+        if line.starts_with("AGE-SECRET-KEY-") {
+            return line;
+        }
+    }
+    trimmed
+}
+
 /// Validate that `identity_bytes` contains a recognized private key format.
 ///
 /// Delegates to [`classify_identity`] for the actual prefix detection, keeping
@@ -166,6 +185,32 @@ mod tests {
     #[test]
     fn classify_empty() {
         assert_eq!(classify_identity(b""), IdentityType::Unknown);
+    }
+
+    // --- normalize_identity_text tests ---
+
+    #[test]
+    fn normalize_strips_age_keygen_comments() {
+        let file = "# created: 2026-06-15T21:00:00+08:00\n\
+                    # public key: age1q9jzl3a...\n\
+                    AGE-SECRET-KEY-1SHQZY5UXJD4SVFMG9VKKK5P27H2K4726362NDYGVHRVNN29V5T3SUTKE7L\n";
+        assert_eq!(
+            normalize_identity_text(file),
+            "AGE-SECRET-KEY-1SHQZY5UXJD4SVFMG9VKKK5P27H2K4726362NDYGVHRVNN29V5T3SUTKE7L",
+        );
+    }
+
+    #[test]
+    fn normalize_passes_through_bare_key() {
+        let key = "AGE-SECRET-KEY-1TEST1234567890ABCDEF";
+        assert_eq!(normalize_identity_text(key), key);
+    }
+
+    #[test]
+    fn normalize_passes_through_ssh_key() {
+        let key = "-----BEGIN OPENSSH PRIVATE KEY-----\ndata\n-----END OPENSSH PRIVATE KEY-----";
+        // SSH keys have no AGE-SECRET-KEY- line → returned trimmed.
+        assert_eq!(normalize_identity_text(key), key.trim());
     }
 
     // --- validate_identity_format tests ---

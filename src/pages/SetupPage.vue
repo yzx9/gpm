@@ -3,14 +3,16 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError,
   IdentityInfoResult,
+  PickedIdentityResult,
   RecipientInfo,
   SshKeyPairResult,
+  VerifiedIdentityResult,
 } from "../types";
 
 const router = useRouter();
@@ -55,6 +57,14 @@ const identityType = ref<string>("");
 const isIdentityEncrypted = ref(false);
 const loadingRecipients = ref(false);
 const loadingIdentity = ref(false);
+
+// Whether the identity comes from a pasted key ("paste") or a picked file
+// ("file"). In file mode the textarea is disabled and the bytes live only in
+// backend state — the contents never reach the WebView.
+const identitySource = ref<"paste" | "file">("paste");
+const pickedFile = ref<PickedIdentityResult | null>(null);
+const picking = ref(false);
+const verifying = ref(false);
 
 const isSshUrl = computed(() => {
   const url = repoUrl.value.trim();
@@ -192,6 +202,15 @@ async function fetchRecipients() {
 }
 
 function validateStep2(): string | null {
+  // File path: a usable (verified) identity is required — i.e. a public key
+  // has been derived. Encrypted files must be unlocked first.
+  if (identitySource.value === "file") {
+    if (!pickedFile.value) return "No identity file selected";
+    if (!pickedFile.value.recipient) return "Unlock the identity file first";
+    if (recipients.value.length > 0 && !selectedRecipient.value)
+      return "Please select a recipient";
+    return null;
+  }
   if (!identity.value.trim()) return "Age identity is required";
   const trimmed = identity.value.trim();
   const isAgeKey = trimmed.startsWith("AGE-SECRET-KEY-");
@@ -218,10 +237,18 @@ async function onCompleteSetup() {
 
   loadingIdentity.value = true;
   try {
-    await invoke("complete_setup", {
-      identity: identity.value,
-      passphrase: passphrase.value || null,
-    });
+    if (identitySource.value === "file") {
+      // Bytes are held in backend state; only the passphrase (used to unlock
+      // an encrypted file, and applied as at-rest encryption) crosses IPC.
+      await invoke("complete_setup_from_file", {
+        passphrase: passphrase.value || null,
+      });
+    } else {
+      await invoke("complete_setup", {
+        identity: identity.value,
+        passphrase: passphrase.value || null,
+      });
+    }
     router.push({ name: "entries" });
   } catch (e) {
     const appError = e as AppError;
@@ -231,10 +258,80 @@ async function onCompleteSetup() {
   }
 }
 
+// Backend picks + parses the file; only metadata is returned. The bytes never
+// reach the WebView.
+async function onPickFile() {
+  picking.value = true;
+  error.value = "";
+  try {
+    const info = await invoke<PickedIdentityResult>("pick_identity_file");
+    pickedFile.value = info;
+    identityType.value = info.key_type;
+    isIdentityEncrypted.value = info.encrypted;
+    passphrase.value = "";
+    identitySource.value = "file";
+    identity.value = ""; // watch is guarded in file mode
+  } catch (e) {
+    const appError = e as AppError;
+    // CANCELLED just means the user dismissed the picker — not an error.
+    if (appError?.code !== "CANCELLED") {
+      error.value = appError?.message || "Failed to read identity file";
+    }
+  } finally {
+    picking.value = false;
+  }
+}
+
+// Verify the passphrase for an encrypted picked file. On success the backend
+// unlocks it and returns the public key; on failure the file is abandoned.
+async function onVerify() {
+  if (!passphrase.value) return;
+  verifying.value = true;
+  error.value = "";
+  try {
+    const res = await invoke<VerifiedIdentityResult>("verify_picked_identity", {
+      passphrase: passphrase.value,
+    });
+    if (pickedFile.value) pickedFile.value.recipient = res.recipient;
+  } catch (e) {
+    const appError = e as AppError;
+    // The backend abandoned the file on failure — drop it and return to paste.
+    error.value =
+      appError?.code === "WRONG_PASSPHRASE"
+        ? "Wrong passphrase — the file was discarded"
+        : appError?.message || "Verification failed";
+    onUsePaste();
+  } finally {
+    verifying.value = false;
+  }
+}
+
+// Drop the picked file and return to the paste path.
+function onUsePaste() {
+  identitySource.value = "paste";
+  pickedFile.value = null;
+  identityType.value = "";
+  isIdentityEncrypted.value = false;
+  passphrase.value = "";
+  identity.value = "";
+  invoke("clear_pending_identity").catch(() => {});
+}
+
+// Drop any held picked-file bytes when leaving the identity step so they
+// cannot be saved later by accident.
+function clearPendingFile() {
+  if (identitySource.value === "file") {
+    invoke("clear_pending_identity").catch(() => {});
+  }
+}
+
 function goBack() {
   error.value = "";
+  clearPendingFile();
   step.value = 1;
 }
+
+onUnmounted(clearPendingFile);
 
 function truncateKey(key: string): string {
   if (key.length <= 24) return key;
@@ -250,6 +347,9 @@ watch(step, (s) => {
 
 // Detect identity type and SSH-key encryption status when identity changes
 watch(identity, async (val) => {
+  // In file mode the textarea is disabled; an identity change here is our own
+  // programmatic clear — don't clobber the picked-file metadata.
+  if (identitySource.value === "file") return;
   const trimmed = val.trim();
   if (trimmed.startsWith("AGE-SECRET-KEY-PQ-1")) {
     identityType.value = "post_quantum";
@@ -566,7 +666,9 @@ watch(identity, async (val) => {
 
         <!-- SSH key reuse offer -->
         <button
-          v-if="canReuseSshKey && !identity.trim()"
+          v-if="
+            canReuseSshKey && !identity.trim() && identitySource === 'paste'
+          "
           type="button"
           class="btn-secondary text-sm"
           @click="useSshKeyForIdentity"
@@ -581,21 +683,86 @@ watch(identity, async (val) => {
             v-model="identity"
             placeholder="AGE-SECRET-KEY-...&#10;or paste an SSH private key"
             rows="5"
-            required
             autocomplete="off"
             spellcheck="false"
-            :disabled="loadingIdentity"
+            :disabled="loadingIdentity || identitySource === 'file'"
             class="input-base"
           />
-          <small class="text-xs text-muted"
+
+          <!-- Picked-file panel: the bytes live in backend state, not here -->
+          <div
+            v-if="identitySource === 'file' && pickedFile"
+            class="flex flex-col gap-2 text-xs bg-[var(--color-input)] border border-[var(--color-edge)] rounded-[var(--radius-md)] p-2 px-2.5"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 truncate">
+                📄 {{ pickedFile.filename || "identity file" }} ·
+                {{ pickedFile.key_type
+                }}<span v-if="pickedFile.encrypted"> · encrypted</span>
+              </span>
+              <button
+                type="button"
+                class="shrink-0 text-muted hover:text-danger transition-colors"
+                @click="onUsePaste"
+              >
+                Remove
+              </button>
+            </div>
+
+            <!-- Public key, once usable (unencrypted, or unlocked) -->
+            <div v-if="pickedFile.recipient" class="flex flex-col gap-0.5">
+              <span class="text-muted">Public key</span>
+              <code class="font-mono break-all">{{
+                truncateKey(pickedFile.recipient)
+              }}</code>
+            </div>
+
+            <!-- Encrypted: unlock + verify before the key is usable -->
+            <div v-else class="flex flex-col gap-1">
+              <input
+                v-model="passphrase"
+                type="password"
+                placeholder="Passphrase to unlock this file"
+                autocomplete="off"
+                :disabled="verifying"
+                class="input-base"
+              />
+              <button
+                type="button"
+                class="btn-secondary"
+                :disabled="verifying || !passphrase"
+                @click="onVerify"
+              >
+                {{ verifying ? "Verifying…" : "Unlock & verify" }}
+              </button>
+              <small class="text-muted"
+                >Enter the file's passphrase to verify it and reveal its public
+                key. A wrong passphrase discards the file.</small
+              >
+            </div>
+          </div>
+          <small v-else class="text-xs text-muted"
             >Paste your age secret key (AGE-SECRET-KEY-...) or SSH private
             key</small
           >
+
+          <!-- Upload via the native picker (hidden once a file is picked) -->
+          <button
+            v-if="identitySource !== 'file'"
+            type="button"
+            class="btn-secondary text-sm"
+            :disabled="picking || loadingIdentity"
+            @click="onPickFile"
+          >
+            {{ picking ? "Reading…" : "📁 Upload identity file…" }}
+          </button>
         </div>
 
-        <!-- SSH key passphrase (required when identity is an encrypted SSH key) -->
+        <!-- SSH key passphrase (paste path: required for an encrypted SSH key) -->
         <div
-          v-if="isSshIdentity && isIdentityEncrypted"
+          v-if="
+            identitySource === 'paste' && isSshIdentity && isIdentityEncrypted
+          "
           class="flex flex-col gap-1"
         >
           <label for="passphrase" class="text-sm font-medium"
@@ -616,9 +783,11 @@ watch(identity, async (val) => {
           >
         </div>
 
-        <!-- Optional at-rest encryption (x25519 keys only; SSH keys rely on
-             their own native passphrase protection) -->
-        <div v-else-if="identityType === 'x25519'" class="flex flex-col gap-1">
+        <!-- Optional at-rest encryption (paste path; x25519 keys only) -->
+        <div
+          v-else-if="identitySource === 'paste' && identityType === 'x25519'"
+          class="flex flex-col gap-1"
+        >
           <label for="passphrase" class="text-sm font-medium"
             >Passphrase (optional)</label
           >

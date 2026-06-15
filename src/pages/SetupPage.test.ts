@@ -354,6 +354,224 @@ describe("SetupPage", () => {
     });
   });
 
+  // ── Step 2: File upload ────────────────────────────────────────────────
+
+  describe("step 2 file upload", () => {
+    // Mount directly at step 2 (repo ready, empty recipients) and return the
+    // "Upload identity file…" button.
+    async function mountStep2WithUpload() {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]); // list_recipients
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      const pickBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"));
+      return { wrapper, pickBtn };
+    }
+
+    it("picks an unencrypted file and shows its public key", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          filename: "key.txt",
+          recipient: "age1abc1234567890",
+        }); // pick_identity_file
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+
+      const pickBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"));
+      await pickBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("pick_identity_file");
+      expect(wrapper.text()).toContain("key.txt");
+      expect(wrapper.text()).toContain("Public key");
+      expect(wrapper.text()).toContain("age1abc1234567890");
+      // Bytes never enter the textarea — it's disabled in file mode.
+      expect(
+        (wrapper.find('textarea[id="identity"]').element as HTMLTextAreaElement)
+          .disabled,
+      ).toBe(true);
+    });
+
+    it("shows no error when the picker is cancelled", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockRejectedValueOnce({ code: "CANCELLED", message: "cancelled" });
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      const pickBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"));
+      await pickBtn!.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").exists()).toBe(false);
+    });
+
+    it("shows an error when the picker fails (non-cancel)", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockRejectedValueOnce({
+          code: "INVALID_IDENTITY",
+          message: "Not a key",
+        });
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      const pickBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"));
+      await pickBtn!.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toBe("Not a key");
+    });
+
+    it("saves a picked identity via complete_setup_from_file", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          filename: "key.txt",
+          recipient: "age1abc1234567890",
+        }) // pick_identity_file
+        .mockResolvedValueOnce(undefined); // complete_setup_from_file
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"))!
+        .trigger("click");
+      await flushPromises();
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("complete_setup_from_file", {
+        passphrase: null,
+      });
+    });
+
+    it("unlocks an encrypted file and reveals its public key", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "ssh_ed25519",
+          encrypted: true,
+          filename: "id_ed25519",
+          recipient: null,
+        }); // pick_identity_file — encrypted, no recipient yet
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"))!
+        .trigger("click");
+      await flushPromises();
+
+      // Encrypted: no public key yet, the unlock form is shown instead.
+      expect(wrapper.text()).not.toContain("Public key");
+      const unlockBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Unlock & verify"));
+      expect(unlockBtn).toBeDefined();
+
+      vi.mocked(invoke).mockResolvedValueOnce({
+        recipient: "ssh-ed25519 AAAAderivedrecipient",
+      }); // verify_picked_identity
+      await wrapper.find('input[type="password"]').setValue("the-passphrase");
+      await unlockBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("verify_picked_identity", {
+        passphrase: "the-passphrase",
+      });
+      expect(wrapper.text()).toContain("Public key");
+    });
+
+    it("discards the file when the passphrase is wrong", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "ssh_ed25519",
+          encrypted: true,
+          filename: "id_ed25519",
+          recipient: null,
+        }) // pick_identity_file
+        .mockRejectedValueOnce({
+          code: "WRONG_PASSPHRASE",
+          message: "wrong",
+        }); // verify_picked_identity
+
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"))!
+        .trigger("click");
+      await flushPromises();
+
+      await wrapper.find('input[type="password"]').setValue("bad-pass");
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Unlock & verify"))!
+        .trigger("click");
+      await flushPromises();
+
+      // File abandoned → error shown and back to paste mode.
+      expect(wrapper.find("[role='alert']").text()).toContain("discarded");
+      expect(
+        wrapper
+          .findAll("button")
+          .some((b) => b.text().includes("Upload identity file")),
+      ).toBe(true);
+    });
+
+    it("removes a picked file and returns to paste mode", async () => {
+      const { wrapper, pickBtn } = await mountStep2WithUpload();
+      vi.mocked(invoke).mockResolvedValueOnce({
+        key_type: "x25519",
+        encrypted: false,
+        filename: "key.txt",
+        recipient: "age1abc1234567890",
+      });
+      await pickBtn!.trigger("click");
+      await flushPromises();
+
+      const removeBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text() === "Remove");
+      await removeBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("clear_pending_identity");
+      // Upload button reappears in paste mode.
+      expect(
+        wrapper
+          .findAll("button")
+          .some((b) => b.text().includes("Upload identity file")),
+      ).toBe(true);
+    });
+  });
+
   // ── Back navigation ────────────────────────────────────────────────────
 
   describe("navigation between steps", () => {

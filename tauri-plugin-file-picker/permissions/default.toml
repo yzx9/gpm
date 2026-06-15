@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Backend-only native file picker (SAF on Android, dialog on desktop) that reads the picked file's bytes into Rust. No frontend capability is granted."
+permissions = []

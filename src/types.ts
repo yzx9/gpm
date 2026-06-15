@@ -75,6 +75,22 @@ export interface IdentityInfoResult {
   encrypted: boolean;
 }
 
+/** Identity metadata from pick_identity_file — bytes stay backend-side. */
+export interface PickedIdentityResult {
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
+  encrypted: boolean;
+  /** Best-effort display name from the picker (null if unknown). */
+  filename: string | null;
+  /** Derived public key. Present when already usable (unencrypted); null until
+   * a passphrase is verified for an encrypted file. */
+  recipient: string | null;
+}
+
+/** Result of verify_picked_identity — the public key once unlocked. */
+export interface VerifiedIdentityResult {
+  recipient: string;
+}
+
 /** Biometric error codes from the Kotlin plugin / Rust app layer. */
 export type BiometricErrorCode =
   /** Biometric storage unusable (desktop, Android <11, no biometric enrolled). */

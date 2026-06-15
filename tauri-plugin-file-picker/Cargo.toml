@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-file-picker"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+links = "tauri-plugin-file-picker"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = "2"
+serde = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+base64 = "0.22"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-dialog = "2"

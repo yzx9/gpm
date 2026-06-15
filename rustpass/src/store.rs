@@ -328,7 +328,10 @@ impl Store {
         identity: &str,
         passphrase: Option<&str>,
     ) -> Result<(), Error> {
-        let identity_bytes = identity.trim().as_bytes();
+        // age-keygen writes # comment lines before the key; keep only the key
+        // so it is parsed and stored consistently with the paste path.
+        let identity = crate::identity::normalize_identity_text(identity);
+        let identity_bytes = identity.as_bytes();
         validate_identity_format(identity_bytes)?;
 
         let itype = classify_identity(identity_bytes);
@@ -381,7 +384,10 @@ impl Store {
         identity: &str,
         identity_passphrase: Option<&str>,
     ) -> Result<(), Error> {
-        let identity_bytes = identity.trim().as_bytes();
+        // age-keygen writes # comment lines before the key; keep only the key
+        // so it is parsed and stored consistently with the paste path.
+        let identity = crate::identity::normalize_identity_text(identity);
+        let identity_bytes = identity.as_bytes();
         validate_identity_format(identity_bytes)?;
 
         // Validate identity can derive a recipient (verifies key is usable)

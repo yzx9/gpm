@@ -175,7 +175,8 @@ fn parse_ssh_recipient_line(key_part: &str, hash_comment: Option<String>) -> Opt
 /// uses an unsupported key type, or an encrypted SSH key is provided
 /// without a passphrase.
 pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result<String, Error> {
-    let trimmed = identity.trim();
+    // age-keygen files include # comment lines before the key; use the bare key.
+    let trimmed = crate::identity::normalize_identity_text(identity);
 
     if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
         Err(Error::new(
@@ -264,7 +265,8 @@ pub struct IdentityInfo {
 ///
 /// Returns an error if the identity format is invalid or cannot be parsed.
 pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
-    let trimmed = identity.trim();
+    // age-keygen files include # comment lines before the key; use the bare key.
+    let trimmed = crate::identity::normalize_identity_text(identity);
 
     if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
         return Err(Error::new(

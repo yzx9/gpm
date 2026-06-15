@@ -5,6 +5,7 @@ members = [
   "src-tauri",
   "tauri-plugin-safe-area",
   "tauri-plugin-biometric-keystore",
+  "tauri-plugin-file-picker",
 ]
 
 [workspace.package]
