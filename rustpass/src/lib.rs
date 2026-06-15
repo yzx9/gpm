@@ -76,4 +76,4 @@ pub use signing::{
     AuthenticityConfig, CommitSigInfo, CommitSigStatus, IgnoredIssue, TrustedKey, VerifyMode,
     fingerprint_of_public_key,
 };
-pub use store::{Store, SyncResult};
+pub use store::{Store, SyncResult, WriteResult};

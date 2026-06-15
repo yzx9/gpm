@@ -26,6 +26,10 @@ pub enum ErrorCode {
     NetworkError,
     /// Requested entry not found in repository.
     EntryNotFound,
+    /// Secret name was invalid (empty, path traversal, control chars, …).
+    InvalidEntryName,
+    /// A git push was rejected (non-fast-forward — remote has diverged).
+    PushRejected,
     /// Filesystem I/O error.
     IoError,
     /// Configuration read/write error.
@@ -68,6 +72,8 @@ impl Error {
                 ErrorCode::NoIdentity => "NO_IDENTITY",
                 ErrorCode::NetworkError => "NETWORK_ERROR",
                 ErrorCode::EntryNotFound => "ENTRY_NOT_FOUND",
+                ErrorCode::InvalidEntryName => "INVALID_ENTRY_NAME",
+                ErrorCode::PushRejected => "PUSH_REJECTED",
                 ErrorCode::IoError => "IO_ERROR",
                 ErrorCode::ConfigError => "CONFIG_ERROR",
                 ErrorCode::StoreError => "STORE_ERROR",
@@ -156,6 +162,8 @@ mod tests {
             ErrorCode::NoIdentity => "NO_IDENTITY",
             ErrorCode::NetworkError => "NETWORK_ERROR",
             ErrorCode::EntryNotFound => "ENTRY_NOT_FOUND",
+            ErrorCode::InvalidEntryName => "INVALID_ENTRY_NAME",
+            ErrorCode::PushRejected => "PUSH_REJECTED",
             ErrorCode::IoError => "IO_ERROR",
             ErrorCode::ConfigError => "CONFIG_ERROR",
             ErrorCode::StoreError => "STORE_ERROR",
@@ -179,6 +187,8 @@ mod tests {
             ErrorCode::NoIdentity,
             ErrorCode::NetworkError,
             ErrorCode::EntryNotFound,
+            ErrorCode::InvalidEntryName,
+            ErrorCode::PushRejected,
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
@@ -210,6 +220,8 @@ mod tests {
             ErrorCode::NoIdentity,
             ErrorCode::NetworkError,
             ErrorCode::EntryNotFound,
+            ErrorCode::InvalidEntryName,
+            ErrorCode::PushRejected,
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,

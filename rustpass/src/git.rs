@@ -136,6 +136,122 @@ pub fn pull_repo(
     pull_verified(&repo, &mut remote, callbacks, policy)
 }
 
+/// The commit author gpm writes under. gpm is a single-user client and does not
+/// (yet) SSH-sign its own commits; remote commits are verified on pull via the
+/// authenticity layer. A fixed identity keeps the author stable across devices.
+fn gpm_signature() -> Result<git2::Signature<'static>, Error> {
+    git2::Signature::now("gpm", "gpm@local").map_err(|e| {
+        Error::new(
+            ErrorCode::StoreError,
+            format!("Failed to build signature: {e}"),
+        )
+    })
+}
+
+/// Stage `rel_paths` (paths relative to the worktree root), create a commit on
+/// the current branch, and return the new commit OID.
+fn add_and_commit(
+    repo: &Repository,
+    rel_paths: &[String],
+    message: &str,
+) -> Result<git2::Oid, Error> {
+    let mut index = repo.index()?;
+    for p in rel_paths {
+        index
+            .add_path(Path::new(p))
+            .map_err(|e| Error::new(ErrorCode::StoreError, format!("Failed to stage {p}: {e}")))?;
+    }
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+
+    let head_oid = repo
+        .head()?
+        .target()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit to build on"))?;
+    let parent = repo.find_commit(head_oid)?;
+
+    let sig = gpm_signature()?;
+    Ok(repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?)
+}
+
+/// Push the current branch to `origin` using `auth`.
+///
+/// `Err` here means the push was rejected — most commonly a non-fast-forward
+/// because the remote advanced (the write-path conflict case).
+fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(), Error> {
+    let branch = repo
+        .head()?
+        .shorthand()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot push"))?
+        .to_string();
+
+    let mut remote = repo.find_remote("origin").map_err(|e| {
+        Error::new(
+            ErrorCode::NetworkError,
+            format!("Cannot find origin remote: {}", e.message()),
+        )
+    })?;
+
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    let mut opts = git2::PushOptions::new();
+    opts.remote_callbacks(build_remote_callbacks(auth));
+    remote
+        .push(&[&refspec], Some(&mut opts))
+        .map_err(|e| classify_push_error(&e.to_string()))
+}
+
+/// Commit staged-to-`rel_paths` changes and push to origin. Returns the short
+/// hash of the new HEAD commit.
+///
+/// This is gopass's `gitCommitAndPush` (commit + `PushPull`'s push leg),
+/// expressed in libgit2. Unlike gopass we do not re-pull here — the caller is
+/// expected to have synced immediately before writing, and commit 2 layers
+/// conflict handling on top of a rejected push.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened, staging or committing fails,
+/// or the push is rejected (non-fast-forward / network / auth).
+pub fn commit_and_push(
+    repo_path: &Path,
+    auth: &GitAuth,
+    rel_paths: &[String],
+    message: &str,
+) -> Result<String, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    add_and_commit(&repo, rel_paths, message)?;
+    push_current_branch(&repo, auth)?;
+    let head = repo
+        .head()?
+        .target()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD after commit"))?;
+    Ok(short_hash(&head))
+}
+
+/// Map a libgit2 push error onto an [`Error`]. A non-fast-forward rejection
+/// becomes `PushRejected` so the write path can distinguish "remote moved" from
+/// generic network/auth failures.
+fn classify_push_error(msg: &str) -> Error {
+    if msg.contains("non-fast-forward")
+        || msg.contains("fetch first")
+        || msg.contains("rejected")
+        || msg.contains("would clobber")
+    {
+        Error::new(
+            ErrorCode::PushRejected,
+            "Push rejected: remote has diverged. A sync/merge is required.",
+        )
+    } else if msg.contains("authentication") || msg.contains("credential") {
+        Error::new(ErrorCode::CloneFailed, format!("Push auth failed: {msg}"))
+    } else if msg.contains("unable to connect") || msg.contains("timeout") {
+        Error::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
+    } else {
+        Error::new(ErrorCode::StoreError, format!("Push failed: {msg}"))
+    }
+}
+
 /// An empty authenticity result for a given mode (Off pull, no-op pull).
 fn empty_authenticity(mode: VerifyMode) -> AuthenticityResult {
     AuthenticityResult {

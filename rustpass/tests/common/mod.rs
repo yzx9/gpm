@@ -63,6 +63,18 @@ pub fn create_test_git_repo(
     entries: Vec<(&str, &[u8])>,
     recipient_str: &str,
 ) -> (tempfile::TempDir, tempfile::TempDir) {
+    create_test_git_repo_with(entries, vec![], recipient_str)
+}
+
+/// Like [`create_test_git_repo`], but also commits `plaintext_files` verbatim
+/// (not encrypted). Used to seed a `.gopass-recipients` file so write tests can
+/// encrypt new secrets, and (later) `.pass-template` files for template tests.
+#[allow(dead_code)]
+pub fn create_test_git_repo_with(
+    entries: Vec<(&str, &[u8])>,
+    plaintext_files: Vec<(&str, &[u8])>,
+    recipient_str: &str,
+) -> (tempfile::TempDir, tempfile::TempDir) {
     let bare_dir = tempfile::tempdir().unwrap();
     let clone_dir = tempfile::tempdir().unwrap();
 
@@ -72,7 +84,7 @@ pub fn create_test_git_repo(
 
     let sig = git2::Signature::new("Test", "test@test.com", &git2_time(0)).unwrap();
 
-    // Write entries to the working tree
+    // Write encrypted entries to the working tree
     for (path, content) in &entries {
         let file_path = work_dir.path().join(path);
         if let Some(parent) = file_path.parent() {
@@ -80,6 +92,15 @@ pub fn create_test_git_repo(
         }
         let encrypted = encrypt_to_recipient(content, recipient_str);
         std::fs::write(&file_path, encrypted).unwrap();
+    }
+
+    // Write plaintext files verbatim (recipients file, templates, …)
+    for (path, content) in &plaintext_files {
+        let file_path = work_dir.path().join(path);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file_path, content).unwrap();
     }
 
     // Stage and commit all entries

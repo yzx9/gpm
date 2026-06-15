@@ -55,6 +55,13 @@ pub struct AuthenticityResult {
     pub blocked: bool,
 }
 
+/// Result of a successful write (`Store::set`) — the new HEAD commit hash.
+#[derive(Debug, Clone, Serialize)]
+pub struct WriteResult {
+    /// Short hash (7 chars) of the commit that recorded the write.
+    pub commit: String,
+}
+
 /// Password store — aligned with `gopass.Store` interface.
 ///
 /// Provides read-only operations on a gopass-compatible password store:
@@ -464,6 +471,80 @@ impl Store {
         let decrypted =
             crypto::decrypt_file(&file_path, &identity_bytes, passphrase.as_deref()).await?;
         Secret::parse(&decrypted)
+    }
+
+    /// Encrypt and write a secret to the store, then commit and push.
+    ///
+    /// This is gopass's `set` (write) command. The plaintext is encrypted to
+    /// every recipient in the store's `.gopass-recipients` / `.age-recipients`,
+    /// with our own key guaranteed to be among the encryption targets (mirroring
+    /// gopass's `ensureOurKeyID`, so we can always read back what we wrote),
+    /// written to `<name>.age`, committed, and pushed to `origin`.
+    ///
+    /// Following gopass's `PushPull`, the store is synced (pulled) immediately
+    /// before writing and the result is pushed immediately after. This first
+    /// version assumes the remote has not diverged during the write; conflict
+    /// handling for a rejected push is added in a later change.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidEntryName` for a malformed name, `InvalidIdentity` if no
+    /// usable recipient (and our own key) can be derived, or a git error if
+    /// staging, committing, or pushing fails.
+    pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteResult, Error> {
+        validate_secret_name(name)?;
+
+        // gopass PushPull: pull before we touch anything, so we build on the
+        // latest remote state.
+        self.sync().await?;
+
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let auth = repo_config.to_git_auth();
+
+        let passfile = passfile_rel(name);
+        let file_path = repo_path.join(&passfile);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        // Defense-in-depth traversal guard (validate_secret_name already
+        // rejects ".." and absolute names). The parent now exists.
+        assert_within_repo(&repo_path, file_path.parent().unwrap_or(Path::new("")))?;
+
+        // Recipients: everyone in the store, plus our own key (ensureOurKeyID).
+        let recipients = recipient::list_recipients(&repo_path).await?;
+        let identity_bytes = self.get_identity_bytes().await?;
+        let identity_str = str::from_utf8(&identity_bytes)
+            .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
+        let passphrase = self.get_cached_passphrase();
+        let our_recipient = recipient::identity_to_recipient(identity_str, passphrase.as_deref())?;
+        let mut recipients_str: Vec<String> =
+            recipients.iter().map(|r| r.public_key.clone()).collect();
+        if !recipients_str.iter().any(|r| r == &our_recipient) {
+            recipients_str.push(our_recipient);
+        }
+
+        // Encrypt on a blocking thread (age recipient setup is CPU-bound).
+        let plaintext_owned = Zeroizing::new(plaintext.to_vec());
+        let ciphertext = spawn_blocking(move || {
+            crypto::encrypt_to_recipients(&plaintext_owned, &recipients_str)
+        })
+        .await??;
+
+        // Atomic write of the ciphertext to the worktree.
+        write_atomic(&file_path, &ciphertext).await?;
+
+        // git add + commit + push.
+        let message = format!("Save secret: {name}");
+        let repo_path_for_git = repo_path.clone();
+        let passfile_for_git = passfile.clone();
+        let head = spawn_blocking(move || {
+            let paths = vec![passfile_for_git];
+            git::commit_and_push(&repo_path_for_git, &auth, &paths, &message)
+        })
+        .await??;
+
+        Ok(WriteResult { commit: head })
     }
 
     /// Get identity bytes for decryption.
@@ -995,6 +1076,91 @@ pub fn resolve_entry_path(repo_path: &Path, entry_path: &str) -> Result<PathBuf,
     }
 
     Ok(full_path)
+}
+
+/// The on-disk relative path for a secret named `name` (gopass `passfile`).
+///
+/// A leading `/` is stripped; if the name already ends in `.age` it is kept
+/// as-is, otherwise `.age` is appended. Matches the resolution `get` uses.
+fn passfile_rel(name: &str) -> String {
+    let name = name.trim_start_matches('/');
+    if Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
+    {
+        name.to_string()
+    } else {
+        format!("{name}.age")
+    }
+}
+
+/// Validate a secret name before writing (gopass `ValidateSecretName`).
+///
+/// Rejects empty/whitespace names, leading or trailing `/`, empty segments
+/// (`//`), backslashes, NUL and other control characters, and `.`/`..` path
+/// segments. This is the front-line path-traversal guard; [`assert_within_repo`]
+/// is the defense-in-depth backstop.
+fn validate_secret_name(name: &str) -> Result<(), Error> {
+    if name.trim().is_empty() {
+        return Err(invalid_name("Secret name must not be empty"));
+    }
+    if name.starts_with('/') || name.ends_with('/') {
+        return Err(invalid_name("Secret name must not start or end with '/'"));
+    }
+    if name.contains("//") {
+        return Err(invalid_name(
+            "Secret name must not contain empty path segments",
+        ));
+    }
+    if name.contains('\\') || name.contains('\0') {
+        return Err(invalid_name(
+            "Secret name must not contain backslashes or NUL bytes",
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(invalid_name(
+            "Secret name must not contain control characters",
+        ));
+    }
+    if name.split('/').any(|seg| seg == ".." || seg == ".") {
+        return Err(invalid_name(
+            "Secret name must not contain '.' or '..' segments",
+        ));
+    }
+    Ok(())
+}
+
+/// Defense-in-depth check that `dir` resolves inside `repo_path`.
+///
+/// Used after creating a secret's parent directory: the directory exists, so it
+/// can be canonicalized, and we assert it is contained by the canonical repo
+/// root. Catches any traversal a name-validation gap would otherwise allow.
+fn assert_within_repo(repo_path: &Path, dir: &Path) -> Result<(), Error> {
+    let canonical_repo = repo_path.canonicalize()?;
+    let canonical_dir = dir.canonicalize()?;
+    if !canonical_dir.starts_with(&canonical_repo) {
+        return Err(Error::new(
+            ErrorCode::EntryNotFound,
+            "Entry path is outside repository",
+        ));
+    }
+    Ok(())
+}
+
+/// Atomic write: write to a temp file beside the target, then rename over it.
+///
+/// Mirrors [`Config`'s](crate::config::Config) atomic write so a failed write
+/// can never leave a half-written ciphertext behind.
+async fn write_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
+    let temp_path = path.with_extension("tmp");
+    fs::write(&temp_path, data).await?;
+    fs::rename(&temp_path, path).await?;
+    Ok(())
+}
+
+/// Build an `InvalidEntryName` error (keeps call sites terse).
+fn invalid_name(message: &str) -> Error {
+    Error::new(ErrorCode::InvalidEntryName, message)
 }
 
 #[cfg(test)]

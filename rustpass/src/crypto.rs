@@ -4,7 +4,7 @@
 
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
-use std::str;
+use std::str::{self, FromStr};
 
 use age::armor::{ArmoredReader, ArmoredWriter, Format};
 use age::secrecy::SecretString;
@@ -163,6 +163,104 @@ pub fn decrypt_bytes(
     }
 
     Ok(output)
+}
+
+/// Encrypt plaintext to one or more age recipients, returning binary ciphertext.
+///
+/// Each recipient string may be a native x25519 public key (`age1...`) or an SSH
+/// public key (`ssh-ed25519 ...` / `ssh-rsa ...`), exactly as they appear in a
+/// gopass `.gopass-recipients` / `.age-recipients` file. This mirrors gopass's
+/// `age` crypto backend, which encrypts every secret to all store recipients.
+///
+/// The output is unarmored (binary) age — the standard on-disk format for
+/// gopass secrets and what [`decrypt_bytes`] expects.
+///
+/// # Errors
+///
+/// Returns `InvalidIdentity` if the recipient list is empty or any recipient
+/// string cannot be parsed (unknown format, post-quantum key, malformed SSH
+/// key). Returns `DecryptFailed` if the age encryption step itself fails.
+pub fn encrypt_to_recipients(plaintext: &[u8], recipients: &[String]) -> Result<Vec<u8>, Error> {
+    if recipients.is_empty() {
+        return Err(Error::new(
+            ErrorCode::InvalidIdentity,
+            "Cannot encrypt without at least one recipient",
+        ));
+    }
+
+    let mut parsed: Vec<Box<dyn age::Recipient>> = Vec::with_capacity(recipients.len());
+    for r in recipients {
+        parsed.push(parse_recipient(r)?);
+    }
+
+    let encryptor =
+        Encryptor::with_recipients(parsed.iter().map(AsRef::as_ref)).map_err(|err| {
+            Error::new(
+                ErrorCode::DecryptFailed,
+                format!("Encryption setup failed: {err}"),
+            )
+        })?;
+
+    let mut ciphertext = Vec::new();
+    let mut writer = encryptor.wrap_output(&mut ciphertext).map_err(|err| {
+        Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Encryption failed: {err}"),
+        )
+    })?;
+
+    writer.write_all(plaintext).map_err(|err| {
+        Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Encryption write failed: {err}"),
+        )
+    })?;
+
+    writer.finish().map_err(|err| {
+        Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Encryption finish failed: {err}"),
+        )
+    })?;
+
+    Ok(ciphertext)
+}
+
+/// Parse a recipient string into an age `Recipient`.
+///
+/// Dispatches by prefix: `age1pq1` is rejected as unsupported post-quantum,
+/// `age1` is a native x25519 recipient, `ssh-` is an SSH recipient. This is the
+/// same classification [`recipient::parse_recipients`](crate::recipient) uses,
+/// kept here so the crypto module is self-contained for encryption.
+fn parse_recipient(recipient: &str) -> Result<Box<dyn age::Recipient>, Error> {
+    let trimmed = recipient.trim();
+    if trimmed.starts_with("age1pq1") {
+        Err(Error::new(
+            ErrorCode::PostQuantumNotSupported,
+            "Post-quantum age recipients aren't supported yet",
+        ))
+    } else if trimmed.starts_with("age1") {
+        let r = age::x25519::Recipient::from_str(trimmed).map_err(|_| {
+            Error::new(
+                ErrorCode::InvalidIdentity,
+                "Cannot parse age recipient (age1...) key",
+            )
+        })?;
+        Ok(Box::new(r))
+    } else if trimmed.starts_with("ssh-") {
+        let r: ssh::Recipient = trimmed.parse().map_err(|e| {
+            Error::new(
+                ErrorCode::InvalidIdentity,
+                format!("Cannot parse SSH recipient key: {e:?}"),
+            )
+        })?;
+        Ok(Box::new(r))
+    } else {
+        Err(Error::new(
+            ErrorCode::InvalidIdentity,
+            "Recipient must be an age public key (age1...) or SSH public key (ssh-...)",
+        ))
+    }
 }
 
 /// Encrypt identity bytes with a passphrase using age scrypt, producing armored output.
