@@ -62,6 +62,57 @@ pub struct WriteResult {
     pub commit: String,
 }
 
+/// Outcome of a write attempt.
+///
+/// gopass syncs (pulls) before writing and pushes immediately after; if the
+/// remote advanced in between, the push is rejected. Unlike gopass — which
+/// surfaces a raw git merge conflict on the binary `.age` file — gpm detects
+/// the specific *same-name* collision and offers a decrypt-aware resolution.
+#[derive(Debug, Clone, Serialize)]
+pub enum WriteOutcome {
+    /// The secret was written, committed, and pushed. Carries the new HEAD.
+    Written(WriteResult),
+    /// The remote already has a different version of the same entry. No data
+    /// was pushed; the local store was rolled back to the pre-write state. The
+    /// caller must ask the user how to proceed via
+    /// [`Store::resolve_write_conflict`].
+    ///
+    /// Note: this carries **no plaintext**. If `remote_decryptable` is true the
+    /// caller can show the remote version through the existing secure `get`
+    /// path (30s auto-clear), never by embedding it here.
+    Conflict(WriteConflict),
+}
+
+/// Description of a write-path conflict on a same-name remote entry.
+#[derive(Debug, Clone, Serialize)]
+pub struct WriteConflict {
+    /// The entry name that collided.
+    pub name: String,
+    /// Whether the remote's version of this entry could be decrypted with our
+    /// key. If `true` it was encrypted to us (a legitimate co-recipient) and
+    /// the user may inspect it and choose freely. If `false` we cannot read it
+    /// — overwriting it would destroy data we can't see, so `KeepMine` is
+    /// refused (use `KeepMineForce` to override).
+    pub remote_decryptable: bool,
+}
+
+/// How to resolve a [`WriteConflict`] (the user's choice).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ConflictChoice {
+    /// Overwrite the remote with our version (replay the write on the remote
+    /// tip and push). Refused with `UnsafeOverwrite` when the remote version is
+    /// undecryptable to us — that would silently destroy data we can't read.
+    KeepMine,
+    /// Like `KeepMine` but proceeds even when the remote version is
+    /// undecryptable. Destructive: the caller must have explicitly confirmed.
+    KeepMineForce,
+    /// Discard our write and adopt the remote version as-is.
+    KeepRemote,
+    /// Back out: leave the local store at the pre-write state. A later `sync`
+    /// will fast-forward to the remote.
+    Cancel,
+}
+
 /// Password store — aligned with `gopass.Store` interface.
 ///
 /// Provides read-only operations on a gopass-compatible password store:
@@ -482,37 +533,176 @@ impl Store {
     /// written to `<name>.age`, committed, and pushed to `origin`.
     ///
     /// Following gopass's `PushPull`, the store is synced (pulled) immediately
-    /// before writing and the result is pushed immediately after. This first
-    /// version assumes the remote has not diverged during the write; conflict
-    /// handling for a rejected push is added in a later change.
+    /// before writing and the result is pushed immediately after. If the remote
+    /// advanced in between:
+    /// - when it did **not** create a same-name entry, the write is transparently
+    ///   replayed on the remote tip (the divergence was on other files);
+    /// - when it **did** create a same-name entry, this returns
+    ///   [`WriteOutcome::Conflict`] for the caller to resolve via
+    ///   [`Store::resolve_write_conflict`].
     ///
     /// # Errors
     ///
     /// Returns `InvalidEntryName` for a malformed name, `InvalidIdentity` if no
     /// usable recipient (and our own key) can be derived, or a git error if
-    /// staging, committing, or pushing fails.
-    pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteResult, Error> {
+    /// staging, committing, or pushing fails (other than a recoverable
+    /// same-name conflict, which is returned as [`WriteOutcome::Conflict`]).
+    pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteOutcome, Error> {
         validate_secret_name(name)?;
 
         // gopass PushPull: pull before we touch anything, so we build on the
         // latest remote state.
         self.sync().await?;
+        let pre_write_head = self.current_head_hash().await?;
 
+        // Happy path: encrypt + write + commit + push.
+        if let Some(hash) = self.write_commit_push(name, plaintext).await? {
+            return Ok(WriteOutcome::Written(WriteResult { commit: hash }));
+        }
+
+        // Push rejected: roll back the write so the repo is at the synced state.
+        self.reset_hard_to(&pre_write_head).await?;
+
+        // Did the remote add a same-name entry, or just move on other files?
+        let passfile = passfile_rel(name);
+        let remote_blob = self.fetch_remote_blob(&passfile).await?;
+        if remote_blob.is_none() {
+            // No same-name collision — the divergence is on other files. Replay
+            // our write on top of the remote tip and push again.
+            self.fast_forward_to_remote().await?;
+            if let Some(hash) = self.write_commit_push(name, plaintext).await? {
+                return Ok(WriteOutcome::Written(WriteResult { commit: hash }));
+            }
+            // Still rejected (another concurrent change): fall through to a
+            // conflict with no decryptable remote blob.
+        }
+
+        let remote_decryptable = match &remote_blob {
+            Some(blob) => self.can_decrypt(blob).await,
+            None => false,
+        };
+
+        Ok(WriteOutcome::Conflict(WriteConflict {
+            name: name.to_string(),
+            remote_decryptable,
+        }))
+    }
+
+    /// Apply the user's choice for a [`WriteConflict`] returned by [`set`].
+    ///
+    /// - [`ConflictChoice::KeepMine`] replays our write on the remote tip and
+    ///   pushes (refused with `UnsafeOverwrite` if the remote version is
+    ///   undecryptable — see [`ConflictChoice::KeepMineForce`]).
+    /// - [`ConflictChoice::KeepMineForce`] does the same, overwriting an
+    ///   undecryptable remote (destructive; caller-confirmed).
+    /// - [`ConflictChoice::KeepRemote`] fast-forwards to the remote, discarding
+    ///   our write.
+    /// - [`ConflictChoice::Cancel`] leaves the store at the pre-write state.
+    ///
+    /// Returns `Some(WriteResult)` when a write was pushed (`KeepMine`/`Force`),
+    /// `None` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns `UnsafeOverwrite` if `KeepMine` is chosen for an undecryptable
+    /// remote, or a git error if the underlying fetch/push fails.
+    pub async fn resolve_write_conflict(
+        &self,
+        name: &str,
+        plaintext: &[u8],
+        choice: ConflictChoice,
+    ) -> Result<Option<WriteResult>, Error> {
+        validate_secret_name(name)?;
+        let passfile = passfile_rel(name);
+        let remote_blob = self.fetch_remote_blob(&passfile).await?;
+        let decryptable = match &remote_blob {
+            Some(blob) => self.can_decrypt(blob).await,
+            None => false,
+        };
+
+        match choice {
+            ConflictChoice::KeepMine | ConflictChoice::KeepMineForce => {
+                if !decryptable && choice == ConflictChoice::KeepMine {
+                    return Err(Error::new(
+                        ErrorCode::UnsafeOverwrite,
+                        "Refusing to overwrite a remote secret we can't decrypt. \
+                         Confirm with KeepMineForce to override.",
+                    ));
+                }
+                // Build on the remote tip, then write+push our version.
+                self.fast_forward_to_remote().await?;
+                match self.write_commit_push(name, plaintext).await? {
+                    Some(hash) => Ok(Some(WriteResult { commit: hash })),
+                    // Remote moved again mid-resolution — surface the conflict.
+                    None => Err(Error::new(
+                        ErrorCode::PushRejected,
+                        "Remote moved again while resolving the conflict; retry.",
+                    )),
+                }
+            }
+            ConflictChoice::KeepRemote => {
+                self.fast_forward_to_remote().await?;
+                Ok(None)
+            }
+            ConflictChoice::Cancel => Ok(None),
+        }
+    }
+
+    /// Encrypt to the store recipients (+ our key), write `<name>.age` to the
+    /// worktree, commit, and push. Assumes the repo is at a clean synced HEAD.
+    ///
+    /// Returns `Ok(Some(hash))` on a successful push, `Ok(None)` if the push
+    /// was rejected (non-fast-forward) — the caller rolls back / handles it.
+    /// The written file and commit are left in place on rejection; the caller
+    /// is expected to reset.
+    async fn write_commit_push(
+        &self,
+        name: &str,
+        plaintext: &[u8],
+    ) -> Result<Option<String>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
 
+        let passfile = self.encrypt_and_write(name, plaintext, &repo_path).await?;
+
+        // Commit, then push separately so we can detect a rejection.
+        let message = format!("Save secret: {name}");
+        let repo_path_for_commit = repo_path.clone();
+        let passfile_for_commit = passfile.clone();
+        let head = spawn_blocking(move || {
+            let paths = vec![passfile_for_commit];
+            git::commit(&repo_path_for_commit, &paths, &message)
+        })
+        .await??;
+
+        let repo_path_for_push = repo_path.clone();
+        let push_result = spawn_blocking(move || git::push(&repo_path_for_push, &auth)).await?;
+        match push_result {
+            Ok(()) => Ok(Some(head)),
+            Err(e) if e.code == "PUSH_REJECTED" => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Encrypt `plaintext` to the store recipients (ensuring our own key is
+    /// included) and write it to `<name>.age` atomically. Returns the passfile
+    /// path relative to the repo root.
+    async fn encrypt_and_write(
+        &self,
+        name: &str,
+        plaintext: &[u8],
+        repo_path: &Path,
+    ) -> Result<String, Error> {
         let passfile = passfile_rel(name);
         let file_path = repo_path.join(&passfile);
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        // Defense-in-depth traversal guard (validate_secret_name already
-        // rejects ".." and absolute names). The parent now exists.
-        assert_within_repo(&repo_path, file_path.parent().unwrap_or(Path::new("")))?;
+        assert_within_repo(repo_path, file_path.parent().unwrap_or(Path::new("")))?;
 
         // Recipients: everyone in the store, plus our own key (ensureOurKeyID).
-        let recipients = recipient::list_recipients(&repo_path).await?;
+        let recipients = recipient::list_recipients(repo_path).await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let identity_str = str::from_utf8(&identity_bytes)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
@@ -524,27 +714,51 @@ impl Store {
             recipients_str.push(our_recipient);
         }
 
-        // Encrypt on a blocking thread (age recipient setup is CPU-bound).
         let plaintext_owned = Zeroizing::new(plaintext.to_vec());
         let ciphertext = spawn_blocking(move || {
             crypto::encrypt_to_recipients(&plaintext_owned, &recipients_str)
         })
         .await??;
 
-        // Atomic write of the ciphertext to the worktree.
         write_atomic(&file_path, &ciphertext).await?;
+        Ok(passfile)
+    }
 
-        // git add + commit + push.
-        let message = format!("Save secret: {name}");
-        let repo_path_for_git = repo_path.clone();
-        let passfile_for_git = passfile.clone();
-        let head = spawn_blocking(move || {
-            let paths = vec![passfile_for_git];
-            git::commit_and_push(&repo_path_for_git, &auth, &paths, &message)
+    /// Whether `blob` (an age ciphertext) decrypts with our identity.
+    async fn can_decrypt(&self, blob: &[u8]) -> bool {
+        let Ok(identity_bytes) = self.get_identity_bytes().await else {
+            return false;
+        };
+        let passphrase = self.get_cached_passphrase();
+        let blob_owned = blob.to_vec();
+        spawn_blocking(move || {
+            crypto::decrypt_bytes(&blob_owned, &identity_bytes, passphrase.as_deref()).is_ok()
         })
-        .await??;
+        .await
+        .unwrap_or(false)
+    }
 
-        Ok(WriteResult { commit: head })
+    // ── thin wrappers over git ops (load config + spawn_blocking) ───────────
+
+    async fn reset_hard_to(&self, oid: &str) -> Result<(), Error> {
+        let repo_path = self.repo_path().await?;
+        let oid = oid.to_string();
+        spawn_blocking(move || git::reset_hard_to(&repo_path, &oid)).await?
+    }
+
+    async fn fast_forward_to_remote(&self) -> Result<(), Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let auth = repo_config.to_git_auth();
+        spawn_blocking(move || git::fast_forward_to_remote(&repo_path, &auth)).await?
+    }
+
+    async fn fetch_remote_blob(&self, rel_path: &str) -> Result<Option<Vec<u8>>, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let auth = repo_config.to_git_auth();
+        let rel = rel_path.to_string();
+        spawn_blocking(move || git::fetch_remote_blob(&repo_path, &auth, &rel)).await?
     }
 
     /// Get identity bytes for decryption.

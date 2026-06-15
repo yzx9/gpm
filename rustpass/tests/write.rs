@@ -7,8 +7,16 @@ mod common;
 mod tests {
     use super::common::*;
     use rustpass::crypto;
-    use rustpass::store::Store;
+    use rustpass::store::{Store, WriteOutcome, WriteResult};
     use std::path::Path;
+
+    /// Unwrap a `WriteOutcome::Written`, panicking on `Conflict`.
+    fn written(outcome: WriteOutcome) -> WriteResult {
+        match outcome {
+            WriteOutcome::Written(r) => r,
+            other => panic!("expected WriteOutcome::Written, got {other:?}"),
+        }
+    }
 
     /// Read a file straight from a bare repo's HEAD tree (the pushed remote).
     fn read_from_bare(bare_path: &Path, rel_path: &str) -> Vec<u8> {
@@ -88,10 +96,12 @@ mod tests {
             .await
             .expect("configure should succeed");
 
-        let result = store
-            .set("cloud/aws/root", b"s3kr3t-password\nuser: admin")
-            .await
-            .expect("set should succeed");
+        let result = written(
+            store
+                .set("cloud/aws/root", b"s3kr3t-password\nuser: admin")
+                .await
+                .expect("set should succeed"),
+        );
         assert!(!result.commit.is_empty(), "set should return a commit hash");
 
         // 1. The remote (bare) advanced by exactly one commit.

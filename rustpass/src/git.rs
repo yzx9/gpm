@@ -201,28 +201,16 @@ fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(), Error> {
         .map_err(|e| classify_push_error(&e.to_string()))
 }
 
-/// Commit staged-to-`rel_paths` changes and push to origin. Returns the short
-/// hash of the new HEAD commit.
-///
-/// This is gopass's `gitCommitAndPush` (commit + `PushPull`'s push leg),
-/// expressed in libgit2. Unlike gopass we do not re-pull here — the caller is
-/// expected to have synced immediately before writing, and commit 2 layers
-/// conflict handling on top of a rejected push.
+/// Stage `rel_paths` and commit on the current branch. Returns the short hash
+/// of the new HEAD commit. (Commit half of gopass's `gitCommitAndPush`.)
 ///
 /// # Errors
 ///
-/// Returns an error if the repo cannot be opened, staging or committing fails,
-/// or the push is rejected (non-fast-forward / network / auth).
-pub fn commit_and_push(
-    repo_path: &Path,
-    auth: &GitAuth,
-    rel_paths: &[String],
-    message: &str,
-) -> Result<String, Error> {
+/// Returns an error if the repo cannot be opened or staging/committing fails.
+pub fn commit(repo_path: &Path, rel_paths: &[String], message: &str) -> Result<String, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
     add_and_commit(&repo, rel_paths, message)?;
-    push_current_branch(&repo, auth)?;
     let head = repo
         .head()?
         .target()
@@ -230,22 +218,169 @@ pub fn commit_and_push(
     Ok(short_hash(&head))
 }
 
+/// Push the current branch to `origin`. (Push half of gopass's
+/// `gitCommitAndPush`.)
+///
+/// # Errors
+///
+/// Returns `PushRejected` when the remote has diverged (non-fast-forward), or a
+/// network/auth error otherwise.
+pub fn push(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    push_current_branch(&repo, auth)
+}
+
+/// Stage, commit, and push in one shot. Returns the new HEAD short hash.
+/// Convenience wrapper kept for the simple write paths.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened, staging/committing fails, or
+/// the push is rejected.
+pub fn commit_and_push(
+    repo_path: &Path,
+    auth: &GitAuth,
+    rel_paths: &[String],
+    message: &str,
+) -> Result<String, Error> {
+    let head = commit(repo_path, rel_paths, message)?;
+    push(repo_path, auth)?;
+    Ok(head)
+}
+
+/// Hard-reset the current branch and worktree to `oid_str` (a full commit
+/// hash). Used to roll back an unpushed write when its push is rejected.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened, the hash is invalid, or the
+/// reset fails.
+pub fn reset_hard_to(repo_path: &Path, oid_str: &str) -> Result<(), Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    let oid = git2::Oid::from_str(oid_str)?;
+    let target = repo.find_commit(oid)?;
+    let mut opts = git2::build::CheckoutBuilder::new();
+    opts.force();
+    repo.reset(target.as_object(), git2::ResetType::Hard, Some(&mut opts))?;
+    Ok(())
+}
+
+/// Fetch `origin`'s current branch into a temp ref and return
+/// `(branch_name, temp_ref_name, fetched_oid)`. The caller **must** delete the
+/// temp ref when done. Mirrors the verified-pull probe so we can inspect remote
+/// objects without moving the working branch.
+fn fetch_remote_into_temp(
+    repo: &Repository,
+    auth: &GitAuth,
+) -> Result<(String, String, git2::Oid), Error> {
+    let branch = repo
+        .head()?
+        .shorthand()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot fetch"))?
+        .to_string();
+
+    let temp_ref = format!("refs/gpm/probe/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{temp_ref}");
+
+    let mut remote = repo.find_remote("origin").map_err(|e| {
+        Error::new(
+            ErrorCode::NetworkError,
+            format!("Cannot find origin remote: {}", e.message()),
+        )
+    })?;
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.remote_callbacks(build_remote_callbacks(auth));
+    remote.fetch(&[&refspec], Some(&mut fetch_opts), None)?;
+
+    let oid = repo.refname_to_id(&temp_ref).map_err(|e| {
+        Error::new(
+            ErrorCode::NetworkError,
+            format!("Fetch produced no ref: {e}"),
+        )
+    })?;
+    Ok((branch, temp_ref, oid))
+}
+
+/// Drop a temp ref if it exists (best-effort cleanup).
+fn delete_temp_ref(repo: &Repository, temp_ref: &str) {
+    drop(repo.find_reference(temp_ref).and_then(|mut r| r.delete()));
+}
+
+/// Read the blob content of `rel_path` at `commit_oid`, or `None` if the path
+/// is absent from that commit's tree.
+fn blob_at_commit(repo: &Repository, commit_oid: git2::Oid, rel_path: &str) -> Option<Vec<u8>> {
+    let commit = repo.find_commit(commit_oid).ok()?;
+    let tree = commit.tree().ok()?;
+    let entry = tree.get_path(Path::new(rel_path)).ok()?;
+    let blob = repo.find_blob(entry.id()).ok()?;
+    Some(blob.content().to_vec())
+}
+
+/// Fetch `origin` and return the content of `rel_path` at the remote branch
+/// tip, or `None` if the remote has no such file.
+///
+/// Used by the write path to detect a same-name remote entry and to assess
+/// whether it is decryptable to us.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened or the fetch fails.
+pub fn fetch_remote_blob(
+    repo_path: &Path,
+    auth: &GitAuth,
+    rel_path: &str,
+) -> Result<Option<Vec<u8>>, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    let (_branch, temp_ref, tip) = fetch_remote_into_temp(&repo, auth)?;
+    let blob = blob_at_commit(&repo, tip, rel_path);
+    delete_temp_ref(&repo, &temp_ref);
+    Ok(blob)
+}
+
+/// Fast-forward the current branch and worktree to `origin`'s branch tip
+/// (discarding any local-only commits). Used by conflict resolution to adopt
+/// the remote state (`KeepRemote`) or as the base for replaying our write.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened or the fetch fails.
+pub fn fast_forward_to_remote(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    let (_branch, temp_ref, tip) = fetch_remote_into_temp(&repo, auth)?;
+    let target = repo.find_commit(tip)?;
+    let mut opts = git2::build::CheckoutBuilder::new();
+    opts.force();
+    repo.reset(target.as_object(), git2::ResetType::Hard, Some(&mut opts))?;
+    delete_temp_ref(&repo, &temp_ref);
+    Ok(())
+}
+
 /// Map a libgit2 push error onto an [`Error`]. A non-fast-forward rejection
 /// becomes `PushRejected` so the write path can distinguish "remote moved" from
 /// generic network/auth failures.
 fn classify_push_error(msg: &str) -> Error {
-    if msg.contains("non-fast-forward")
-        || msg.contains("fetch first")
-        || msg.contains("rejected")
-        || msg.contains("would clobber")
-    {
+    // libgit2 reports divergence variously: "non-fast-forward",
+    // "cannot push non-fastforwardable reference", code "NotFastForward", plus
+    // the server-side "rejected" / "fetch first". Match case-insensitively.
+    let lower = msg.to_ascii_lowercase();
+    let rejected = lower.contains("non-fast-forward")
+        || lower.contains("non-fastforward")
+        || lower.contains("fastforwardable")
+        || lower.contains("notfastforward")
+        || lower.contains("fetch first")
+        || lower.contains("rejected");
+    if rejected {
         Error::new(
             ErrorCode::PushRejected,
             "Push rejected: remote has diverged. A sync/merge is required.",
         )
-    } else if msg.contains("authentication") || msg.contains("credential") {
+    } else if lower.contains("authentication") || lower.contains("credential") {
         Error::new(ErrorCode::CloneFailed, format!("Push auth failed: {msg}"))
-    } else if msg.contains("unable to connect") || msg.contains("timeout") {
+    } else if lower.contains("unable to connect") || lower.contains("timeout") {
         Error::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
     } else {
         Error::new(ErrorCode::StoreError, format!("Push failed: {msg}"))

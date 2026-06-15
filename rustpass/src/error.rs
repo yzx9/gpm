@@ -30,6 +30,9 @@ pub enum ErrorCode {
     InvalidEntryName,
     /// A git push was rejected (non-fast-forward — remote has diverged).
     PushRejected,
+    /// Refused to overwrite a remote secret we cannot decrypt (would destroy
+    /// data we can't read). Requires an explicit force choice.
+    UnsafeOverwrite,
     /// Filesystem I/O error.
     IoError,
     /// Configuration read/write error.
@@ -74,6 +77,7 @@ impl Error {
                 ErrorCode::EntryNotFound => "ENTRY_NOT_FOUND",
                 ErrorCode::InvalidEntryName => "INVALID_ENTRY_NAME",
                 ErrorCode::PushRejected => "PUSH_REJECTED",
+                ErrorCode::UnsafeOverwrite => "UNSAFE_OVERWRITE",
                 ErrorCode::IoError => "IO_ERROR",
                 ErrorCode::ConfigError => "CONFIG_ERROR",
                 ErrorCode::StoreError => "STORE_ERROR",
@@ -164,6 +168,7 @@ mod tests {
             ErrorCode::EntryNotFound => "ENTRY_NOT_FOUND",
             ErrorCode::InvalidEntryName => "INVALID_ENTRY_NAME",
             ErrorCode::PushRejected => "PUSH_REJECTED",
+            ErrorCode::UnsafeOverwrite => "UNSAFE_OVERWRITE",
             ErrorCode::IoError => "IO_ERROR",
             ErrorCode::ConfigError => "CONFIG_ERROR",
             ErrorCode::StoreError => "STORE_ERROR",
@@ -189,6 +194,7 @@ mod tests {
             ErrorCode::EntryNotFound,
             ErrorCode::InvalidEntryName,
             ErrorCode::PushRejected,
+            ErrorCode::UnsafeOverwrite,
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
@@ -222,6 +228,7 @@ mod tests {
             ErrorCode::EntryNotFound,
             ErrorCode::InvalidEntryName,
             ErrorCode::PushRejected,
+            ErrorCode::UnsafeOverwrite,
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
