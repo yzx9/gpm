@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-06-15
+
 ### Added
 
 - Upload an identity file instead of pasting it during setup. The file is opened, read, and parsed entirely on-device by the backend; its contents never reach the app UI. Encrypted files (a passphrase-protected SSH key, or an age-encrypted identity) prompt for the passphrase immediately and discard the file on a wrong one; once usable, the derived public key is shown so you can confirm it matches a recipient. Files produced by `age-keygen` (with `#` comment lines) are also supported
@@ -68,7 +70,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/yzx9/gpm/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/yzx9/gpm/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/yzx9/gpm/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/yzx9/gpm/compare/v0.1.0...v0.2.0
