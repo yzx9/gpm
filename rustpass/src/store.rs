@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -23,7 +24,7 @@ use crate::secret::Secret;
 use crate::signing::{
     self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedKey, VerifyMode,
 };
-use crate::{crypto, git};
+use crate::{crypto, git, template};
 
 /// Default auto-lock timeout in seconds (5 minutes).
 pub const DEFAULT_LOCK_TIMEOUT_SECS: u64 = 300;
@@ -646,6 +647,82 @@ impl Store {
             }
             ConflictChoice::Cancel => Ok(None),
         }
+    }
+
+    /// Look up the content template (`.pass-template`) that applies to `name`,
+    /// walking up the directory tree (gopass `LookupTemplate`).
+    ///
+    /// Returns `Ok(None)` when no template applies. Templates are stored as
+    /// plaintext, so this reads straight from the worktree.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store is not configured.
+    pub async fn lookup_template(&self, name: &str) -> Result<Option<String>, Error> {
+        let repo_path = self.repo_path().await?;
+        let name_owned = name.to_string();
+        // Filesystem walk; cheap enough to run on a blocking thread.
+        Ok(
+            spawn_blocking(move || template::lookup_template_in_repo(&repo_path, &name_owned))
+                .await?,
+        )
+    }
+
+    /// Create a secret, applying a matching `.pass-template` if one exists
+    /// (gopass `renderTemplate`).
+    ///
+    /// `content` becomes the template's `.Content` (usually the password); the
+    /// rendered template is what gets stored. When no template applies, the
+    /// content is stored verbatim. Either way the result is written, committed,
+    /// and pushed via [`Store::set`] — so conflict handling applies as usual.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidEntryName` for a bad name, `TemplateError` if a template
+    /// references an unknown variable, or whatever [`Store::set`] returns
+    /// (including [`WriteOutcome::Conflict`]).
+    pub async fn create(&self, name: &str, content: &[u8]) -> Result<WriteOutcome, Error> {
+        validate_secret_name(name)?;
+
+        // Templates render against text; secrets are text, so a non-UTF-8
+        // payload just skips templating and is written verbatim.
+        let rendered = match (
+            str::from_utf8(content).ok(),
+            self.lookup_template(name).await?,
+        ) {
+            (Some(text), Some(tpl)) if !tpl.trim().is_empty() => {
+                Some(template::render(&tpl, &template_vars(name, text))?)
+            }
+            _ => None,
+        };
+
+        let final_bytes = rendered.map_or_else(|| content.to_vec(), String::into_bytes);
+        self.set(name, &final_bytes).await
+    }
+
+    /// Create a secret from one of the built-in presets (gopass `gopass create`
+    /// wizard). `fields` maps each preset field key to its value; the `password`
+    /// field becomes the secret's first line and the rest become `key: value`
+    /// body lines. The secret is generated at `<prefix>/<name-from-fields>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidEntryName` if the preset is unknown or a required field
+    /// is missing, or whatever [`Store::create`] returns.
+    pub async fn create_from_preset<S: ::std::hash::BuildHasher>(
+        &self,
+        preset_id: &str,
+        fields: &HashMap<&str, String, S>,
+    ) -> Result<WriteOutcome, Error> {
+        let preset = template::find_preset(preset_id).ok_or_else(|| {
+            Error::new(
+                ErrorCode::InvalidEntryName,
+                format!("unknown create preset: {preset_id:?}"),
+            )
+        })?;
+        let name = template::preset_name(preset, fields)?;
+        let body = template::preset_body(preset, fields)?;
+        self.create(&name, &body).await
     }
 
     /// Encrypt to the store recipients (+ our key), write `<name>.age` to the
@@ -1290,6 +1367,21 @@ pub fn resolve_entry_path(repo_path: &Path, entry_path: &str) -> Result<PathBuf,
     }
 
     Ok(full_path)
+}
+
+/// Build the [`template::TemplateVars`] for an entry named `name` with the
+/// given content text. All name-derived slices borrow `name`.
+fn template_vars<'a>(name: &'a str, content: &'a str) -> template::TemplateVars<'a> {
+    let base = name.rfind('/').map_or(name, |i| &name[i + 1..]);
+    let dir = name.rfind('/').map_or("", |i| &name[..i]);
+    let dirname = dir.rfind('/').map_or(dir, |i| &dir[i + 1..]);
+    template::TemplateVars {
+        content,
+        name: base,
+        path: name,
+        dir,
+        dirname,
+    }
 }
 
 /// The on-disk relative path for a secret named `name` (gopass `passfile`).

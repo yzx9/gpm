@@ -33,6 +33,8 @@ pub enum ErrorCode {
     /// Refused to overwrite a remote secret we cannot decrypt (would destroy
     /// data we can't read). Requires an explicit force choice.
     UnsafeOverwrite,
+    /// A `.pass-template` failed to render (unknown variable, bad syntax).
+    TemplateError,
     /// Filesystem I/O error.
     IoError,
     /// Configuration read/write error.
@@ -78,6 +80,7 @@ impl Error {
                 ErrorCode::InvalidEntryName => "INVALID_ENTRY_NAME",
                 ErrorCode::PushRejected => "PUSH_REJECTED",
                 ErrorCode::UnsafeOverwrite => "UNSAFE_OVERWRITE",
+                ErrorCode::TemplateError => "TEMPLATE_ERROR",
                 ErrorCode::IoError => "IO_ERROR",
                 ErrorCode::ConfigError => "CONFIG_ERROR",
                 ErrorCode::StoreError => "STORE_ERROR",
@@ -169,6 +172,7 @@ mod tests {
             ErrorCode::InvalidEntryName => "INVALID_ENTRY_NAME",
             ErrorCode::PushRejected => "PUSH_REJECTED",
             ErrorCode::UnsafeOverwrite => "UNSAFE_OVERWRITE",
+            ErrorCode::TemplateError => "TEMPLATE_ERROR",
             ErrorCode::IoError => "IO_ERROR",
             ErrorCode::ConfigError => "CONFIG_ERROR",
             ErrorCode::StoreError => "STORE_ERROR",
@@ -195,6 +199,7 @@ mod tests {
             ErrorCode::InvalidEntryName,
             ErrorCode::PushRejected,
             ErrorCode::UnsafeOverwrite,
+            ErrorCode::TemplateError,
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,
@@ -229,6 +234,7 @@ mod tests {
             ErrorCode::InvalidEntryName,
             ErrorCode::PushRejected,
             ErrorCode::UnsafeOverwrite,
+            ErrorCode::TemplateError,
             ErrorCode::IoError,
             ErrorCode::ConfigError,
             ErrorCode::StoreError,

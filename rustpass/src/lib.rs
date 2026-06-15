@@ -65,6 +65,8 @@ pub mod signing;
 pub mod ssh;
 /// High-level store facade (gopass.Store aligned).
 pub mod store;
+/// gopass-compatible content templates and create presets.
+pub mod template;
 
 // Re-export core types at crate root (gopass-aligned)
 pub use config::{Config, RepoConfig};
