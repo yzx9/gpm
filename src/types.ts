@@ -23,6 +23,7 @@ export interface SensitiveContent {
 export interface PullResult {
   changed: boolean;
   head: string;
+  authenticity: AuthenticityResult;
 }
 
 export interface RepoConfig {
@@ -31,6 +32,8 @@ export interface RepoConfig {
   ssh_key: string | null;
   ssh_passphrase: string | null;
   local_path: string;
+  /** Repository authenticity config. Absent when Off/empty. */
+  authenticity?: AuthenticityConfig;
 }
 
 export interface AppError {
@@ -93,4 +96,66 @@ export type BiometricErrorCode =
 export interface BiometricError {
   code: BiometricErrorCode | string;
   message: string;
+}
+
+// ── Repository authenticity ────────────────────────────────────────────────
+
+/** Verification mode (serde `lowercase`). */
+export type VerifyMode = "off" | "audit" | "enforce";
+
+/** A commit's verification outcome (serde tagged by `kind`, snake_case). */
+export type CommitSigStatus =
+  | { kind: "verified"; signer_fp: string }
+  | { kind: "untrusted_key"; signer_fp: string }
+  | { kind: "unsigned" }
+  | { kind: "bad_signature" }
+  | { kind: "unsupported_format"; format: string }
+  | { kind: "unknown" };
+
+/** A trusted signing public key (public — no secret). */
+export interface TrustedKey {
+  public_key: string;
+  fingerprint: string;
+  label: string;
+  /** HEAD hash when the key was trusted (provenance). */
+  added_at_commit: string;
+}
+
+/** A user-dismissed commit issue (scoped per commit + status). */
+export interface IgnoredIssue {
+  commit: string;
+  status: CommitSigStatus;
+  ignored_at_commit: string;
+}
+
+/** Persisted authenticity config (signing.json). */
+export interface AuthenticityConfig {
+  mode: VerifyMode;
+  trusted_keys: TrustedKey[];
+  ignored: IgnoredIssue[];
+}
+
+/** A commit's metadata + verification status (history list / detail). */
+export interface CommitSigInfo {
+  hash: string;
+  short_hash: string;
+  author: string;
+  date: string;
+  subject: string;
+  status: CommitSigStatus;
+  ignored: boolean;
+}
+
+/** Authenticity outcome of a pull (Audit issues / Enforce block). */
+export interface AuthenticityResult {
+  mode: VerifyMode;
+  new_commits: CommitSigInfo[];
+  open_issues: CommitSigInfo[];
+  blocked: boolean;
+}
+
+/** Cached snapshot for the entry-list indicator badge. */
+export interface AuthenticityState {
+  mode: VerifyMode;
+  head_status: CommitSigStatus;
 }

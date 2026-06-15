@@ -59,6 +59,8 @@ pub mod identity;
 pub mod recipient;
 /// Decrypted secret type (gopass.Secret aligned).
 pub mod secret;
+/// Git commit signature extraction + SSH-sig verification (repo authenticity).
+pub mod signing;
 /// SSH key generation and management.
 pub mod ssh;
 /// High-level store facade (gopass.Store aligned).
@@ -70,4 +72,8 @@ pub use entry::Entry;
 pub use error::{Error, ErrorCode};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use secret::Secret;
+pub use signing::{
+    AuthenticityConfig, CommitSigInfo, CommitSigStatus, IgnoredIssue, TrustedKey, VerifyMode,
+    fingerprint_of_public_key,
+};
 pub use store::{Store, SyncResult};

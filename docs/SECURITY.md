@@ -11,6 +11,15 @@ physical access to an unlocked device, or a malicious app that somehow injects
 script into the WebView. It does **not** defend against a fully compromised OS
 or a determined attacker with root access.
 
+A foundational assumption is that **no local attacker has write access to the
+app's private storage**. gpm's private files — the age/SSH `identity` and
+`repo.json` (which carries the git credentials and the `authenticity` trust
+set) — are not integrity-protected; a process able to modify them could swap
+the decryption identity, redirect the repository, or replace the trusted
+signing keys, defeating both confidentiality and the commit-signature
+authenticity feature. On Android this rests on the app sandbox; on desktop it
+rests on the user account not being compromised.
+
 ## Two Password Operation Paths
 
 ### `copy_password` — primary operation (no IPC exposure)
@@ -49,6 +58,46 @@ Mitigations:
 | Error sanitization      | Error messages contain only codes and generic descriptions                   |
 | Path traversal guard    | Resolved paths validated to stay within repository; symlink escape detection |
 | Content Security Policy | CSP restricts `script-src`, `connect-src` to `self` and IPC only             |
+| Commit signature verify | Optional SSH-signed-commit verification on every pull (see below)            |
+
+## Repository authenticity
+
+`age` guarantees **confidentiality** but not **authenticity** of the store
+history. A successful `git pull` only proves you received a valid git object
+graph — not that it came from someone you trust. An attacker who controls the
+remote can feed age blobs that decrypt fine but contain data they also know
+(e.g. a new `aws/root.age` with a password they chose).
+
+To close this, gpm offers optional **SSH-signed commit verification** (git ≥
+2.34 `gpg.format = ssh`, verified against a user-managed trusted-signing-key
+set). It is a tri-state per-repo setting:
+
+- **Off** — no verification (the default).
+- **Audit** — verify every pulled commit; warn on a mismatch, always pull.
+- **Enforce** — verify every pulled commit; a non-ignored blocking issue
+  aborts the pull, leaving HEAD and the working tree on the last verified
+  state.
+
+On each pull every commit in the range `(old HEAD, new HEAD]` is verified (not
+just the tip — a buried malicious commit behind a signed tip is still caught).
+Verification reuses the already-present `ssh-key` crate; **no new crypto
+dependency**. GPG-signed commits are out of scope and surface as "signed but
+not verifiable by gpm". The trusted-signing-key set is public, non-secret
+data; it lives as the `authenticity` field of `repo.json`.
+
+**Defeats** (Enforce; detects in Audit): a compromised remote feeding unsigned
+or attacker-signed commits, or tampering with a signed commit's contents (any
+edit invalidates the SSH signature → `BadSignature`).
+
+**Does not defeat**: the signing key itself being compromised (rotation/
+revocation is the countermeasure); a malicious commit made before the feature
+was enabled (verification is forward-looking — use the History screen to audit
+the past); transport-level spoofing (handled by HTTPS/SSH transport trust).
+
+**Irreducible first-use assumption:** trusting the current HEAD's signer at
+enable time assumes that HEAD isn't already an attacker commit. The explicit
+confirm step is the mitigation; the History screen is the escape hatch for a
+paranoid user.
 
 ## Known Limitations
 

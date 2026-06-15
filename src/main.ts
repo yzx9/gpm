@@ -16,6 +16,7 @@ import UnlockPage from "./pages/UnlockPage.vue";
 import EntryListPage from "./pages/EntryListPage.vue";
 import EntryDetailPage from "./pages/EntryDetailPage.vue";
 import SettingsPage from "./pages/SettingsPage.vue";
+import HistoryPage from "./pages/HistoryPage.vue";
 
 const routes = [
   { path: "/", redirect: "/setup" },
@@ -29,6 +30,7 @@ const routes = [
     props: true,
   },
   { path: "/settings", name: "settings", component: SettingsPage },
+  { path: "/history", name: "history", component: HistoryPage },
 ];
 
 const router = createRouter({

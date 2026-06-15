@@ -15,10 +15,12 @@ import {
 import type {
   AppError,
   AuthState,
+  AuthenticityConfig,
   BiometricError,
   RepoConfig,
   SshPublicKeyResult,
   SshPrivateKeyResult,
+  VerifyMode,
 } from "../types";
 
 const router = useRouter();
@@ -49,6 +51,13 @@ const biometricAvailable = ref(false);
 const biometricEnabled = ref(false);
 const biometricPassphrase = ref("");
 const biometricLoading = ref(false);
+
+// ── Repository authenticity state ────────────────────────────────────────
+const authConfig = ref<AuthenticityConfig | null>(null);
+const authLoading = ref(false);
+const showAddKey = ref(false);
+const newPublicKey = ref("");
+const newKeyLabel = ref("");
 
 // Whether the stored identity is an SSH key. SSH keys are never
 // passphrase-encrypted by gpm (they rely on their own native protection),
@@ -206,6 +215,107 @@ async function onDisableBiometric() {
   showToast("Biometric unlock disabled");
 }
 
+// ── Repository authenticity ──────────────────────────────────────────────
+async function loadAuthConfig() {
+  try {
+    authConfig.value = await invoke<AuthenticityConfig>(
+      "get_authenticity_config",
+    );
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to load authenticity config";
+  }
+}
+
+async function onModeChange(mode: VerifyMode) {
+  if (!authConfig.value) return;
+  authLoading.value = true;
+  error.value = "";
+  try {
+    const effective = await invoke<VerifyMode>("set_verification_mode", {
+      mode,
+    });
+    authConfig.value.mode = effective;
+  } catch (e) {
+    const appError = e as AppError;
+    if (mode === "enforce") {
+      error.value =
+        "Add a trusted signing key before enabling Enforce (it would block every pull).";
+      // Revert the radio to the current effective mode.
+      authConfig.value.mode = authConfig.value.mode;
+    } else {
+      error.value = appError?.message || "Failed to set mode";
+    }
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+async function onAddKey() {
+  error.value = "";
+  const key = newPublicKey.value.trim();
+  if (!key) {
+    error.value = "Paste an SSH signing public key";
+    return;
+  }
+  authLoading.value = true;
+  try {
+    await invoke("add_trusted_key", {
+      publicKey: key,
+      label: newKeyLabel.value.trim() || "signer",
+    });
+    newPublicKey.value = "";
+    newKeyLabel.value = "";
+    showAddKey.value = false;
+    showToast("✓ Trusted signing key added");
+    await loadAuthConfig();
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to add key";
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+async function onRemoveKey(fingerprint: string) {
+  if (!confirm("Remove this trusted signing key?")) return;
+  authLoading.value = true;
+  try {
+    await invoke("remove_trusted_key", { fingerprint });
+    showToast("Trusted key removed");
+    await loadAuthConfig();
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to remove key";
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+async function onTrustHead() {
+  const label = window.prompt(
+    "Trust this repo's current signer?\nEnter a label:",
+    "signer",
+  );
+  if (label === null) return;
+  authLoading.value = true;
+  try {
+    await invoke("trust_head_signer", { label: label.trim() || "signer" });
+    showToast("✓ HEAD signer trusted");
+    await loadAuthConfig();
+  } catch (e) {
+    const appError = e as AppError;
+    error.value =
+      appError?.message || "HEAD is not SSH-signed — paste a key instead";
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+function openHistory() {
+  router.push({ name: "history" });
+}
+
 async function resetConfig() {
   if (!confirm("Reset gpm? This will remove all local data and configuration."))
     return;
@@ -224,6 +334,7 @@ function goBack() {
 
 onMounted(() => {
   loadConfig();
+  loadAuthConfig();
 });
 </script>
 
@@ -465,6 +576,131 @@ onMounted(() => {
         </template>
       </section>
 
+      <!-- Repository authenticity -->
+      <section v-if="authConfig" class="settings-card">
+        <h2 class="text-sm font-medium mb-3">Repository Authenticity</h2>
+        <p class="text-xs text-muted mb-3">
+          Verify SSH-signed commits on every pull to detect a compromised remote
+          feeding validly encrypted but wrong entries.
+        </p>
+
+        <!-- Mode selector -->
+        <fieldset class="border-0 p-0 m-0 mb-3" :disabled="authLoading">
+          <legend class="text-xs text-muted mb-1">Verification</legend>
+          <div class="flex gap-2">
+            <label
+              v-for="m in ['off', 'audit', 'enforce'] as VerifyMode[]"
+              :key="m"
+              class="mode-pill"
+              :class="{ 'mode-active': authConfig.mode === m }"
+            >
+              <input
+                type="radio"
+                name="verify-mode"
+                class="sr-only"
+                :checked="authConfig.mode === m"
+                @change="onModeChange(m)"
+              />
+              <span class="capitalize">{{ m }}</span>
+            </label>
+          </div>
+          <p class="text-xs text-subtle mt-1">
+            <template v-if="authConfig.mode === 'off'"
+              >No verification.</template
+            >
+            <template v-else-if="authConfig.mode === 'audit'"
+              >Verify and warn, but always pull.</template
+            >
+            <template v-else>Block pulls with unverified commits.</template>
+          </p>
+        </fieldset>
+
+        <!-- Trusted signing keys -->
+        <div class="text-xs text-muted mb-1">
+          Trusted signing keys ({{ authConfig.trusted_keys.length }})
+        </div>
+        <ul
+          v-if="authConfig.trusted_keys.length"
+          class="flex flex-col gap-1 mb-2"
+        >
+          <li
+            v-for="k in authConfig.trusted_keys"
+            :key="k.fingerprint"
+            class="key-row"
+          >
+            <code class="text-xs break-all flex-1">{{ k.fingerprint }}</code>
+            <span class="text-xs text-muted mx-2 truncate">{{ k.label }}</span>
+            <button
+              type="button"
+              class="btn-copy"
+              @click="onRemoveKey(k.fingerprint)"
+            >
+              Remove
+            </button>
+          </li>
+        </ul>
+        <p v-else class="text-xs text-subtle mb-2">
+          No trusted keys yet. Trust this repo's signer or paste a key below.
+        </p>
+
+        <div class="flex flex-col gap-2">
+          <button
+            v-if="authConfig.trusted_keys.length === 0"
+            type="button"
+            class="btn-action"
+            @click="onTrustHead"
+          >
+            🔑 Trust this repo's signer (HEAD)
+          </button>
+          <button
+            v-if="!showAddKey"
+            type="button"
+            class="btn-action"
+            @click="showAddKey = true"
+          >
+            + Add a signing public key
+          </button>
+          <div v-if="showAddKey" class="flex flex-col gap-2">
+            <textarea
+              v-model="newPublicKey"
+              placeholder="ssh-ed25519 AAAA… [comment]"
+              rows="2"
+              class="input-base font-mono text-xs"
+            ></textarea>
+            <input
+              v-model="newKeyLabel"
+              type="text"
+              placeholder="Label (e.g. Alice — laptop)"
+              class="input-base"
+            />
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="btn-action flex-1"
+                :disabled="authLoading"
+                @click="onAddKey"
+              >
+                Save key
+              </button>
+              <button
+                type="button"
+                class="btn-action flex-1"
+                @click="
+                  showAddKey = false;
+                  newPublicKey = '';
+                  newKeyLabel = '';
+                "
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+          <button type="button" class="btn-action" @click="openHistory">
+            📜 View commit history &amp; signatures
+          </button>
+        </div>
+      </section>
+
       <!-- Danger zone -->
       <section class="settings-card settings-card-danger">
         <h2 class="text-sm font-medium mb-2 text-danger">Danger Zone</h2>
@@ -601,5 +837,49 @@ onMounted(() => {
   animation: spin 0.6s linear infinite;
   margin-right: 0.4rem;
   vertical-align: middle;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mode-pill {
+  flex: 1;
+  text-align: center;
+  padding: 0.5rem 0.6rem;
+  font-size: var(--text-sm);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mode-pill:hover {
+  background: var(--color-hover);
+}
+.mode-active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-ring);
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
 }
 </style>

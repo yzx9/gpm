@@ -11,11 +11,13 @@ use crate::crypto;
 use crate::error::{Error, ErrorCode};
 use crate::git::GitAuth;
 use crate::identity::{IdentityType, classify_identity};
+use crate::signing::AuthenticityConfig;
 
 /// Atomic write: write data to a temp file then rename over the target.
 ///
-/// Prevents identity file corruption if the write fails mid-operation.
-async fn save_identity_raw(path: &Path, data: &[u8]) -> Result<(), Error> {
+/// Prevents file corruption if the write fails mid-operation. Used for both
+/// the identity file and `signing.json`.
+async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
     let temp_path = path.with_extension("tmp");
     fs::write(&temp_path, data).await?;
     fs::rename(&temp_path, path).await?;
@@ -77,7 +79,7 @@ impl Config {
             _ => identity.to_vec(),
         };
 
-        save_identity_raw(&self.identity_path(), &data).await
+        save_atomic(&self.identity_path(), &data).await
     }
 
     /// Check if the stored identity file is passphrase-encrypted.
@@ -143,10 +145,24 @@ impl Config {
             ssh_key: ssh_key.map(String::from),
             ssh_passphrase: ssh_passphrase.map(String::from),
             local_path: local_path.to_string(),
+            authenticity: AuthenticityConfig::default(),
         };
         let json = serde_json::to_string_pretty(&config)?;
         fs::write(self.repo_config_path(), json).await?;
         Ok(())
+    }
+
+    /// Persist a full [`RepoConfig`] atomically (used by the
+    /// authenticity-mutation paths, which load → mutate a field → save).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory cannot be created or the file
+    /// cannot be written.
+    pub async fn save_repo_config_full(&self, config: &RepoConfig) -> Result<(), Error> {
+        fs::create_dir_all(&self.config_dir).await?;
+        let json = serde_json::to_string_pretty(config)?;
+        save_atomic(&self.repo_config_path(), json.as_bytes()).await
     }
 
     /// Load repository configuration.
@@ -197,7 +213,7 @@ impl Config {
 }
 
 /// Repository configuration persisted to disk.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RepoConfig {
     /// Remote repository URL.
     pub url: String,
@@ -211,6 +227,12 @@ pub struct RepoConfig {
     pub ssh_passphrase: Option<String>,
     /// Local filesystem path where the repo is cloned.
     pub local_path: String,
+    /// Repository authenticity config (verification mode + trusted signing
+    /// keys + ignored issues). Skipped from serialization when default so
+    /// users who never enable authenticity see no change to `repo.json`'s
+    /// shape.
+    #[serde(default, skip_serializing_if = "AuthenticityConfig::is_default")]
+    pub authenticity: AuthenticityConfig,
 }
 
 impl RepoConfig {
@@ -532,6 +554,7 @@ mod tests {
             ssh_key: Some("test-key".to_string()),
             ssh_passphrase: Some("test-pass".to_string()),
             local_path: "/local".to_string(),
+            ..Default::default()
         };
 
         let auth = cfg.to_git_auth();
@@ -557,6 +580,7 @@ mod tests {
             ssh_key: None,
             ssh_passphrase: None,
             local_path: "/local".to_string(),
+            ..Default::default()
         };
 
         let auth = cfg.to_git_auth();
@@ -574,6 +598,7 @@ mod tests {
             ssh_key: None,
             ssh_passphrase: None,
             local_path: "/local".to_string(),
+            ..Default::default()
         };
 
         let auth = cfg.to_git_auth();
@@ -592,6 +617,7 @@ mod tests {
             ssh_key: Some("ssh-key".to_string()),
             ssh_passphrase: None,
             local_path: "/local".to_string(),
+            ..Default::default()
         };
 
         let auth = cfg.to_git_auth();

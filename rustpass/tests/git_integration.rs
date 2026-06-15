@@ -9,6 +9,7 @@ mod tests {
     use rustpass::crypto;
     use rustpass::git;
     use rustpass::secret::Secret;
+    use rustpass::signing::AuthenticityConfig;
     use rustpass::store;
 
     // -----------------------------------------------------------------------
@@ -95,8 +96,12 @@ mod tests {
             "add second entry",
         );
 
-        let result =
-            git::pull_repo(clone_dir.path(), &git::GitAuth::None).expect("pull should succeed");
+        let result = git::pull_repo(
+            clone_dir.path(),
+            &git::GitAuth::None,
+            &AuthenticityConfig::default(),
+        )
+        .expect("pull should succeed");
 
         assert_ne!(
             result.head,
@@ -116,8 +121,12 @@ mod tests {
         let (_bare_dir, clone_dir) =
             create_test_git_repo(vec![("sole.age", b"only-password")], &recipient);
 
-        let result =
-            git::pull_repo(clone_dir.path(), &git::GitAuth::None).expect("pull should succeed");
+        let result = git::pull_repo(
+            clone_dir.path(),
+            &git::GitAuth::None,
+            &AuthenticityConfig::default(),
+        )
+        .expect("pull should succeed");
         assert!(
             !result.changed,
             "pull should report no changes when upstream is unchanged"
@@ -128,7 +137,11 @@ mod tests {
     fn pull_nonexistent_repo_errors() {
         let nowhere = tempfile::tempdir().expect("failed to create temp dir");
 
-        let result = git::pull_repo(nowhere.path(), &git::GitAuth::None);
+        let result = git::pull_repo(
+            nowhere.path(),
+            &git::GitAuth::None,
+            &AuthenticityConfig::default(),
+        );
         let err = result.expect_err("pull on non-repo dir should fail");
         assert_eq!(
             err.code, "NO_REPO",

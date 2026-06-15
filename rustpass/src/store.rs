@@ -20,6 +20,9 @@ use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity, validate_identity_format};
 use crate::recipient::{self, Recipient};
 use crate::secret::Secret;
+use crate::signing::{
+    self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedKey, VerifyMode,
+};
 use crate::{crypto, git};
 
 /// Default auto-lock timeout in seconds (5 minutes).
@@ -28,10 +31,28 @@ pub const DEFAULT_LOCK_TIMEOUT_SECS: u64 = 300;
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncResult {
-    /// Whether any new commits were pulled.
+    /// Whether any new commits were pulled (HEAD advanced).
     pub changed: bool,
-    /// Short hash (7 chars) of the new HEAD commit.
+    /// Short hash (7 chars) of the (current) HEAD commit.
     pub head: String,
+    /// Repository-authenticity outcome of this pull.
+    pub authenticity: AuthenticityResult,
+}
+
+/// Authenticity outcome of a sync (pull) — surfaced to the frontend so it can
+/// pop the Audit mismatch modal / Enforce-block modal without re-verifying.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthenticityResult {
+    /// The mode in force during this pull.
+    pub mode: VerifyMode,
+    /// Commits in the pulled range `(old HEAD, new HEAD]`, newest first.
+    /// Empty for `VerifyMode::Off` (no verification is done).
+    pub new_commits: Vec<CommitSigInfo>,
+    /// Subset of `new_commits` that are non-Verified and not ignored — the
+    /// actionable issues.
+    pub open_issues: Vec<CommitSigInfo>,
+    /// `true` only when Enforce refused checkout (HEAD did not advance).
+    pub blocked: bool,
 }
 
 /// Password store — aligned with `gopass.Store` interface.
@@ -561,15 +582,312 @@ impl Store {
 
     /// Pull latest changes from the remote (fast-forward only).
     ///
+    /// Applies repository-authenticity verification (per the stored
+    /// [`AuthenticityConfig`]) before checkout: in Audit mode issues are
+    /// reported without blocking, in Enforce mode a blocking issue aborts the
+    /// pull leaving HEAD unchanged.
+    ///
     /// # Errors
     ///
     /// Returns an error if the store is not configured, the remote is
-    /// unreachable, or the branches have diverged.
+    /// unreachable, the branches have diverged, or Enforce mode refuses the
+    /// pull.
     pub async fn sync(&self) -> Result<SyncResult, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
-        spawn_blocking(move || git::pull_repo(&repo_path, &auth)).await?
+        let policy = repo_config.authenticity;
+        spawn_blocking(move || git::pull_repo(&repo_path, &auth, &policy)).await?
+    }
+
+    // ── Repository authenticity ───────────────────────────────────────────
+
+    /// The configured repo path, or an error if not configured.
+    async fn repo_path(&self) -> Result<PathBuf, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        Ok(Path::new(&repo_config.local_path).to_path_buf())
+    }
+
+    /// Load the persisted authenticity config (the `authenticity` field of
+    /// `repo.json`). Defaults to Off / empty when the repo isn't configured
+    /// yet — pre-setup there is nothing to verify.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `repo.json` exists but cannot be read or parsed.
+    pub async fn authenticity_config(&self) -> Result<AuthenticityConfig, Error> {
+        match self.config.load_repo_config().await {
+            Ok(rc) => Ok(rc.authenticity),
+            // No repo configured yet → authenticity is trivially Off.
+            Err(e) if e.code == "NO_REPO" => Ok(AuthenticityConfig::default()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Set the verification mode. Refuses [`VerifyMode::Enforce`] when no
+    /// trusted key is recorded yet (Enforce with zero keys would block every
+    /// pull). Returns the effective stored mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::ConfigError`] if Enforce is requested with no
+    /// trusted keys, or the config cannot be persisted.
+    pub async fn set_verification_mode(&self, mode: VerifyMode) -> Result<VerifyMode, Error> {
+        let mut rc = self.config.load_repo_config().await?;
+        if mode == VerifyMode::Enforce && rc.authenticity.trusted_keys.is_empty() {
+            return Err(Error::new(
+                ErrorCode::ConfigError,
+                "Add a trusted signing key before enabling Enforce.",
+            ));
+        }
+        rc.authenticity.mode = mode;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc.authenticity.mode)
+    }
+
+    /// Add a trusted signing public key. Validates the key, derives its
+    /// fingerprint, and dedupes — if a key with the same fingerprint is already
+    /// trusted, the existing entry is returned unchanged (idempotent).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::SshKeyInvalid`] if the public key is not a
+    /// parseable OpenSSH key, or the config cannot be persisted.
+    pub async fn add_trusted_key(
+        &self,
+        public_key: &str,
+        label: &str,
+    ) -> Result<TrustedKey, Error> {
+        let fingerprint = signing::fingerprint_of_public_key(public_key)?;
+
+        let mut rc = self.config.load_repo_config().await?;
+        if let Some(existing) = rc
+            .authenticity
+            .trusted_keys
+            .iter()
+            .find(|k| k.fingerprint == fingerprint)
+            .cloned()
+        {
+            return Ok(existing);
+        }
+
+        let head = self.current_head_hash().await.unwrap_or_default();
+        let key = TrustedKey {
+            public_key: public_key.trim().to_string(),
+            fingerprint,
+            label: label.to_string(),
+            added_at_commit: head,
+        };
+        rc.authenticity.trusted_keys.push(key.clone());
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(key)
+    }
+
+    /// Remove a trusted signing key by fingerprint. Removing the last key
+    /// while in Enforce downgrades to Audit (Enforce with zero keys would
+    /// block everything).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be persisted.
+    pub async fn remove_trusted_key(&self, fingerprint: &str) -> Result<(), Error> {
+        let mut rc = self.config.load_repo_config().await?;
+        rc.authenticity
+            .trusted_keys
+            .retain(|k| k.fingerprint != fingerprint);
+        if rc.authenticity.trusted_keys.is_empty() && rc.authenticity.mode == VerifyMode::Enforce {
+            rc.authenticity.mode = VerifyMode::Audit;
+        }
+        self.config.save_repo_config_full(&rc).await
+    }
+
+    /// Record a per-commit ignore, scoped to this commit + its **current**
+    /// status. The status is recomputed server-side (the caller passes only the
+    /// hash), so the recorded `IgnoredIssue.status` always matches what
+    /// `verify_range` will later compute — keeping the per-status ignore match
+    /// stable. Idempotent.
+    ///
+    /// No-op (still Ok) for a commit whose status is not an issue (e.g.
+    /// `Verified`) — there is nothing to ignore.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the commit hash is invalid, the repo cannot be
+    /// opened, or the config cannot be persisted.
+    pub async fn ignore_commit_issue(&self, commit: &str) -> Result<(), Error> {
+        let repo_path = self.repo_path().await?;
+        let mut rc = self.config.load_repo_config().await?;
+        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+
+        // Recompute the commit's current status so the recorded ignore matches
+        // what verification will see later.
+        let commit_owned = commit.to_string();
+        let status = spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            let oid = git2::Oid::from_str(&commit_owned)?;
+            signing::status_of_commit(&repo, oid, &trusted)
+        })
+        .await??;
+
+        // Nothing to ignore for a non-issue.
+        if !status.is_issue() {
+            return Ok(());
+        }
+
+        let already = rc
+            .authenticity
+            .ignored
+            .iter()
+            .any(|i| i.commit == commit && i.status == status);
+        if !already {
+            let head = self.current_head_hash().await.unwrap_or_default();
+            rc.authenticity.ignored.push(signing::IgnoredIssue {
+                commit: commit.to_string(),
+                status,
+                ignored_at_commit: head,
+            });
+            self.config.save_repo_config_full(&rc).await?;
+        }
+        Ok(())
+    }
+
+    /// The verification status of the current HEAD commit (cheap; cached
+    /// config, single commit verify). Used by the indicator badge.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo cannot be opened or HEAD cannot be read.
+    pub async fn head_signature_status(&self) -> Result<CommitSigStatus, Error> {
+        let repo_path = self.repo_path().await?;
+        let rc = self.config.load_repo_config().await?;
+        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            signing::head_status(&repo, &trusted)
+        })
+        .await?
+    }
+
+    /// The OpenSSH public key of HEAD's SSH-signature signer (for the
+    /// "trust this signer" TOFU flow), or `None` if HEAD is unsigned or not
+    /// SSH-signed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo cannot be opened or HEAD cannot be read.
+    pub async fn head_signer_public_key(&self) -> Result<Option<String>, Error> {
+        let repo_path = self.repo_path().await?;
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            signing::head_signer_public_key(&repo)
+        })
+        .await?
+    }
+
+    /// Trust the SSH-signature signer of a specific commit ("trust this
+    /// signer" TOFU from the history detail view). Errors if the commit is
+    /// unsigned or not SSH-signed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::SshKeyInvalid`] if the commit has no SSH signer,
+    /// or [`ErrorCode::SshKeyInvalid`] if the public key is invalid.
+    pub async fn trust_commit_signer(
+        &self,
+        commit_hash: &str,
+        label: &str,
+    ) -> Result<TrustedKey, Error> {
+        let repo_path = self.repo_path().await?;
+        let hash_owned = commit_hash.to_string();
+        let public_key = spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            let oid = repo.revparse_single(&hash_owned)?.id();
+            signing::signer_public_key(&repo, oid)
+        })
+        .await??;
+        let public_key = public_key.ok_or_else(|| {
+            Error::new(
+                ErrorCode::SshKeyInvalid,
+                "This commit is not signed by an SSH key — nothing to trust.",
+            )
+        })?;
+        self.add_trusted_key(&public_key, label).await
+    }
+
+    /// The full hash of the current HEAD commit, for provenance fields.
+    async fn current_head_hash(&self) -> Result<String, Error> {
+        let repo_path = self.repo_path().await?;
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            let head = repo
+                .head()?
+                .target()
+                .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit"))?;
+            Ok(head.to_string())
+        })
+        .await?
+    }
+
+    /// Verify every commit in the half-open range `(from, to]` (newest first)
+    /// against the trusted set + ignore list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the hashes are invalid, the repo cannot be opened,
+    /// or the walk fails.
+    pub async fn verify_range(&self, from: &str, to: &str) -> Result<Vec<CommitSigInfo>, Error> {
+        let repo_path = self.repo_path().await?;
+        let rc = self.config.load_repo_config().await?;
+        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let ignored = rc.authenticity.ignored.clone();
+        let from_owned = from.to_string();
+        let to_owned = to.to_string();
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            let from = git2::Oid::from_str(&from_owned)?;
+            let to = git2::Oid::from_str(&to_owned)?;
+            signing::verify_range(&repo, from, to, &trusted, &ignored)
+        })
+        .await?
+    }
+
+    /// The `limit` most recent commits (HEAD and ancestors, newest first) with
+    /// per-commit verification status. Used by the `/history` screen.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo cannot be opened or HEAD cannot be read.
+    pub async fn list_commit_signatures(&self, limit: usize) -> Result<Vec<CommitSigInfo>, Error> {
+        let repo_path = self.repo_path().await?;
+        let rc = self.config.load_repo_config().await?;
+        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let ignored = rc.authenticity.ignored.clone();
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            signing::list_commit_signatures(&repo, limit, &trusted, &ignored)
+        })
+        .await?
+    }
+
+    /// A single commit's metadata + verification status (the `/history` detail
+    /// sheet). `commit_hash` may be a full or short hash.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the hash is invalid, the commit cannot be found,
+    /// or its signature cannot be read.
+    pub async fn commit_signature(&self, commit_hash: &str) -> Result<CommitSigInfo, Error> {
+        let repo_path = self.repo_path().await?;
+        let rc = self.config.load_repo_config().await?;
+        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let ignored = rc.authenticity.ignored.clone();
+        let hash_owned = commit_hash.to_string();
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)?;
+            let oid = repo.revparse_single(&hash_owned)?.id();
+            signing::commit_sig_info(&repo, oid, &trusted, &ignored)
+        })
+        .await?
     }
 
     /// Reset all configuration and local data. Clears the identity cache.

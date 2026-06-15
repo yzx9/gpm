@@ -7,7 +7,8 @@ use std::path::Path;
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 
 use crate::error::{Error, ErrorCode};
-use crate::store::SyncResult;
+use crate::signing::{self, AuthenticityConfig, VerifyMode};
+use crate::store::{AuthenticityResult, SyncResult};
 
 /// Credentials for Git remote authentication.
 #[derive(Debug, Clone)]
@@ -92,15 +93,28 @@ pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
     Ok(())
 }
 
-/// Pull (fetch + fast-forward only merge) from origin/main.
+/// Pull (fetch + fast-forward only merge) from origin.
 ///
-/// Returns whether any commits were pulled and the new HEAD hash.
+/// Applies repository-authenticity verification according to `policy`:
+/// - **[`VerifyMode::Off`]** — today's behaviour: in-place fetch + checkout.
+///   Byte-for-byte equivalent to the pre-authenticity pull.
+/// - **[`VerifyMode::Audit`]/[`VerifyMode::Enforce`]** — fetch the current
+///   branch into a temp ref, verify every commit in `(old HEAD, new HEAD]`,
+///   then (Audit) always advance + check out reporting open issues, or
+///   (Enforce) refuse to advance when a non-ignored blocking issue remains —
+///   HEAD and the working tree stay put.
+///
+/// Returns whether HEAD advanced and the current HEAD hash.
 ///
 /// # Errors
 ///
 /// Returns an error if the repository cannot be found, the remote is
 /// unreachable, or the branches have diverged (non-fast-forward).
-pub fn pull_repo(repo_path: &Path, auth: &GitAuth) -> Result<SyncResult, Error> {
+pub fn pull_repo(
+    repo_path: &Path,
+    auth: &GitAuth,
+    policy: &AuthenticityConfig,
+) -> Result<SyncResult, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
 
@@ -113,50 +127,60 @@ pub fn pull_repo(repo_path: &Path, auth: &GitAuth) -> Result<SyncResult, Error> 
 
     let callbacks = build_remote_callbacks(auth);
 
-    // Capture HEAD before fetch so we can detect changes.
-    // The fetch refspec `refs/heads/*:refs/heads/*` updates local branches
-    // in-place during fetch, so reading HEAD after fetch would already
-    // reflect the update. We must compare pre-fetch vs post-fetch.
+    // Off mode: original in-place fetch + checkout path (unchanged behaviour).
+    if policy.mode == VerifyMode::Off {
+        return pull_off(&repo, &mut remote, callbacks);
+    }
+
+    // Audit / Enforce: verify-before-checkout.
+    pull_verified(&repo, &mut remote, callbacks, policy)
+}
+
+/// An empty authenticity result for a given mode (Off pull, no-op pull).
+fn empty_authenticity(mode: VerifyMode) -> AuthenticityResult {
+    AuthenticityResult {
+        mode,
+        new_commits: Vec::new(),
+        open_issues: Vec::new(),
+        blocked: false,
+    }
+}
+
+/// Off-mode pull: in-place refspec fetch + forced checkout. Today's behaviour,
+/// byte-for-byte.
+fn pull_off(
+    repo: &Repository,
+    remote: &mut git2::Remote<'_>,
+    callbacks: RemoteCallbacks<'_>,
+) -> Result<SyncResult, Error> {
+    // Capture HEAD before fetch (the in-place refspec moves refs during fetch).
     let pre_fetch_oid = repo.head().ok().and_then(|r| r.target());
 
-    // Fetch from remote
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
     remote.fetch(&["refs/heads/*:refs/heads/*"], Some(&mut fetch_opts), None)?;
 
-    // Read HEAD after fetch
     let post_fetch_oid = repo
         .head()?
         .target()
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Cannot determine current HEAD"))?;
 
-    // If HEAD hasn't moved, there's nothing to do
-    let Some(pre_oid) = pre_fetch_oid else {
-        return Ok(SyncResult {
-            changed: false,
-            head: short_hash(&post_fetch_oid),
-        });
-    };
-
-    if post_fetch_oid == pre_oid {
-        return Ok(SyncResult {
-            changed: false,
-            head: short_hash(&post_fetch_oid),
-        });
+    if let Some(pre_oid) = pre_fetch_oid {
+        if post_fetch_oid == pre_oid {
+            return Ok(SyncResult {
+                changed: false,
+                head: short_hash(&post_fetch_oid),
+                authenticity: empty_authenticity(VerifyMode::Off),
+            });
+        }
+        if !repo.graph_descendant_of(post_fetch_oid, pre_oid)? {
+            return Err(Error::new(
+                ErrorCode::PullFfFailed,
+                "Cannot fast-forward: branches have diverged. Resolve on desktop.",
+            ));
+        }
     }
 
-    // Verify fast-forward: new HEAD must be a descendant of old HEAD
-    if !repo.graph_descendant_of(post_fetch_oid, pre_oid)? {
-        return Err(Error::new(
-            ErrorCode::PullFfFailed,
-            "Cannot fast-forward: branches have diverged. Resolve on desktop.",
-        ));
-    }
-
-    // Checkout the new HEAD to update the working tree.
-    // The in-place refspec fetch updates refs but not the working tree,
-    // so we must explicitly checkout. Use FORCE strategy to ensure all files
-    // (including newly added ones) are written to disk.
     let mut checkout_builder = git2::build::CheckoutBuilder::new();
     checkout_builder.force();
     repo.checkout_head(Some(&mut checkout_builder))?;
@@ -164,7 +188,140 @@ pub fn pull_repo(repo_path: &Path, auth: &GitAuth) -> Result<SyncResult, Error> 
     Ok(SyncResult {
         changed: true,
         head: short_hash(&post_fetch_oid),
+        authenticity: empty_authenticity(VerifyMode::Off),
     })
+}
+
+/// Audit/Enforce pull: fetch the current branch into a temp ref, verify the
+/// new range, then conditionally advance + check out.
+fn pull_verified(
+    repo: &Repository,
+    remote: &mut git2::Remote<'_>,
+    callbacks: RemoteCallbacks<'_>,
+    policy: &AuthenticityConfig,
+) -> Result<SyncResult, Error> {
+    let mode = policy.mode;
+
+    // The current branch HEAD sits on (e.g. "main"). gpm always operates on a
+    // single default branch; a detached HEAD is unsupported.
+    let branch_name = repo
+        .head()?
+        .shorthand()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot pull"))?
+        .to_string();
+
+    let pre_fetch_oid = repo.head().ok().and_then(|r| r.target());
+
+    // Fetch the remote branch into a temp ref — bring all new commit objects
+    // into the store WITHOUT moving the working branch, so extract_signature
+    // works on the fetched tip and its ancestors.
+    let temp_ref = format!("refs/gpm/pending/{branch_name}");
+    let refspec = format!("+refs/heads/{branch_name}:{temp_ref}");
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.remote_callbacks(callbacks);
+    remote.fetch(&[&refspec], Some(&mut fetch_opts), None)?;
+
+    let fetched_oid = repo.refname_to_id(&temp_ref).map_err(|e| {
+        Error::new(
+            ErrorCode::NetworkError,
+            format!("Fetch produced no ref: {e}"),
+        )
+    })?;
+
+    // Always clean up the temp ref before returning.
+    let cleanup = || {
+        drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
+    };
+
+    // No prior HEAD (first pull anomaly): advance without verifying a range.
+    let Some(pre_oid) = pre_fetch_oid else {
+        advance_branch(repo, &branch_name, fetched_oid)?;
+        cleanup();
+        return Ok(SyncResult {
+            changed: true,
+            head: short_hash(&fetched_oid),
+            authenticity: AuthenticityResult {
+                mode,
+                new_commits: Vec::new(),
+                open_issues: Vec::new(),
+                blocked: false,
+            },
+        });
+    };
+
+    if fetched_oid == pre_oid {
+        cleanup();
+        return Ok(SyncResult {
+            changed: false,
+            head: short_hash(&fetched_oid),
+            authenticity: AuthenticityResult {
+                mode,
+                new_commits: Vec::new(),
+                open_issues: Vec::new(),
+                blocked: false,
+            },
+        });
+    }
+
+    // Fast-forward only: fetched tip must descend from the current HEAD.
+    if !repo.graph_descendant_of(fetched_oid, pre_oid)? {
+        cleanup();
+        return Err(Error::new(
+            ErrorCode::PullFfFailed,
+            "Cannot fast-forward: branches have diverged. Resolve on desktop.",
+        ));
+    }
+
+    // Verify every commit in (pre_oid, fetched_oid].
+    let trusted = signing::trusted_fingerprints(policy);
+    let new_commits = signing::verify_range(repo, pre_oid, fetched_oid, &trusted, &policy.ignored)?;
+    let open_issues: Vec<_> = new_commits
+        .iter()
+        .filter(|c| !c.ignored && c.status.is_issue())
+        .cloned()
+        .collect();
+
+    // Enforce: refuse to advance when a non-ignored blocking issue remains.
+    let blocked = mode == VerifyMode::Enforce && !open_issues.is_empty();
+    if blocked {
+        // Do NOT move the branch; HEAD and the working tree stay put.
+        cleanup();
+        return Ok(SyncResult {
+            changed: false,
+            head: short_hash(&pre_oid),
+            authenticity: AuthenticityResult {
+                mode,
+                new_commits,
+                open_issues,
+                blocked: true,
+            },
+        });
+    }
+
+    // Audit (always) or Enforce (no blocking issues): advance + check out.
+    advance_branch(repo, &branch_name, fetched_oid)?;
+    cleanup();
+    Ok(SyncResult {
+        changed: true,
+        head: short_hash(&fetched_oid),
+        authenticity: AuthenticityResult {
+            mode,
+            new_commits,
+            open_issues,
+            blocked: false,
+        },
+    })
+}
+
+/// Move the branch ref to `target` and check out HEAD (forced), updating the
+/// working tree.
+fn advance_branch(repo: &Repository, branch_name: &str, target: git2::Oid) -> Result<(), Error> {
+    let branch_ref = format!("refs/heads/{branch_name}");
+    repo.reference(&branch_ref, target, true, "gpm pull")?;
+    let mut checkout_builder = git2::build::CheckoutBuilder::new();
+    checkout_builder.force();
+    repo.checkout_head(Some(&mut checkout_builder))?;
+    Ok(())
 }
 
 /// Classify a git2 error message into the appropriate [`Error`].

@@ -24,13 +24,16 @@ use std::time::Duration;
 
 use rustpass::error::ErrorCode;
 use rustpass::ssh;
-use rustpass::{Entry, Error, KeyType, Recipient, RepoConfig, Store, SyncResult};
+use rustpass::{
+    AuthenticityConfig, CommitSigInfo, CommitSigStatus, Entry, Error, KeyType, Recipient,
+    RepoConfig, Store, SyncResult, TrustedKey, VerifyMode,
+};
 use serde::Serialize;
 use tokio::task::JoinHandle;
 use zeroize::Zeroizing;
 
-use tauri_plugin_biometric_keystore::KeystoreExt;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_biometric_keystore::KeystoreExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 // ---------------------------------------------------------------------------
@@ -99,6 +102,14 @@ struct AuthState {
 struct IdentityInfoResult {
     key_type: String,
     encrypted: bool,
+}
+
+/// Returned by `get_authenticity_state` — the cached snapshot for the
+/// entry-list indicator badge (mode + current HEAD verification status).
+#[derive(Debug, Clone, Serialize)]
+struct AuthenticityState {
+    mode: VerifyMode,
+    head_status: CommitSigStatus,
 }
 
 /// App-local error for the biometric commands.
@@ -543,6 +554,121 @@ async fn export_ssh_private_key(state: State<'_, AppState>) -> Result<SshPrivate
 }
 
 // ---------------------------------------------------------------------------
+// Repository authenticity commands
+// ---------------------------------------------------------------------------
+
+/// Cached authenticity snapshot for the entry-list indicator badge.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn get_authenticity_state(state: State<'_, AppState>) -> Result<AuthenticityState, Error> {
+    let mode = state
+        .store
+        .authenticity_config()
+        .await
+        .map_or(VerifyMode::Off, |c| c.mode);
+    // If HEAD status can't be computed (e.g. repo mid-clone), surface Unknown.
+    let head_status = state
+        .store
+        .head_signature_status()
+        .await
+        .unwrap_or(CommitSigStatus::Unknown);
+    Ok(AuthenticityState { mode, head_status })
+}
+
+/// Set the verification mode (Off / Audit / Enforce). Enforce is refused
+/// until at least one trusted signing key is recorded.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn set_verification_mode(
+    state: State<'_, AppState>,
+    mode: VerifyMode,
+) -> Result<VerifyMode, Error> {
+    state.store.set_verification_mode(mode).await
+}
+
+/// Read the persisted authenticity config (no secrets — public trust anchors).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn get_authenticity_config(state: State<'_, AppState>) -> Result<AuthenticityConfig, Error> {
+    state.store.authenticity_config().await
+}
+
+/// Add a trusted signing public key (validated + deduped by fingerprint).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn add_trusted_key(
+    state: State<'_, AppState>,
+    public_key: String,
+    label: String,
+) -> Result<TrustedKey, Error> {
+    state.store.add_trusted_key(&public_key, &label).await
+}
+
+/// Remove a trusted signing key by fingerprint (last-key removal in Enforce
+/// auto-downgrades to Audit).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn remove_trusted_key(state: State<'_, AppState>, fingerprint: String) -> Result<(), Error> {
+    state.store.remove_trusted_key(&fingerprint).await
+}
+
+/// Trust HEAD's SSH-signature signer ("trust this signer" TOFU). Errors if HEAD
+/// is unsigned or not SSH-signed.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn trust_head_signer(state: State<'_, AppState>, label: String) -> Result<TrustedKey, Error> {
+    let public_key = state.store.head_signer_public_key().await?.ok_or_else(|| {
+        Error::new(
+            ErrorCode::SshKeyInvalid,
+            "HEAD is not signed by an SSH key — nothing to trust.",
+        )
+    })?;
+    state.store.add_trusted_key(&public_key, &label).await
+}
+
+/// Trust the SSH-signature signer of a specific commit ("trust this signer"
+/// TOFU from the history detail view).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn trust_commit_signer(
+    state: State<'_, AppState>,
+    commit: String,
+    label: String,
+) -> Result<TrustedKey, Error> {
+    state.store.trust_commit_signer(&commit, &label).await
+}
+
+/// Dismiss a specific commit's issue (per-commit + per-status ignore).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn ignore_commit_issue(state: State<'_, AppState>, commit: String) -> Result<(), Error> {
+    state.store.ignore_commit_issue(&commit).await
+}
+
+/// List recent commits with per-commit signature status (the `/history` screen).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn list_commit_signatures(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<CommitSigInfo>, Error> {
+    state
+        .store
+        .list_commit_signatures(limit.unwrap_or(50))
+        .await
+}
+
+/// A single commit's signature detail (the per-commit detail sheet).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn get_commit_signature(
+    state: State<'_, AppState>,
+    hash: String,
+) -> Result<CommitSigInfo, Error> {
+    state.store.commit_signature(&hash).await
+}
+
+// ---------------------------------------------------------------------------
 // Timer helpers
 // ---------------------------------------------------------------------------
 
@@ -646,6 +772,16 @@ pub fn run() {
             generate_ssh_key,
             get_ssh_public_key,
             export_ssh_private_key,
+            get_authenticity_state,
+            set_verification_mode,
+            get_authenticity_config,
+            add_trusted_key,
+            remove_trusted_key,
+            trust_head_signer,
+            trust_commit_signer,
+            ignore_commit_issue,
+            list_commit_signatures,
+            get_commit_signature,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

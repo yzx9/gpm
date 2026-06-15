@@ -6,9 +6,16 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import type { Entry, PullResult, AppError } from "../types";
+import type {
+  AppError,
+  AuthenticityState,
+  CommitSigInfo,
+  Entry,
+  PullResult,
+} from "../types";
 import { formatRelativeTime } from "../utils/format";
 import { filterEntries } from "../utils/filter";
+import { statusGlyph, statusLabel } from "../utils/signature";
 
 const router = useRouter();
 
@@ -25,6 +32,45 @@ const lastSyncTime = ref<number | null>(null);
 const now = ref(Date.now());
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
+// ── Authenticity (badge + pull modals) ───────────────────────────────────
+const authState = ref<AuthenticityState | null>(null);
+/** Audit-mode open issues from the last pull → drives the mismatch modal. */
+const auditIssues = ref<CommitSigInfo[] | null>(null);
+/** Enforce-block result from the last pull → drives the block modal. */
+const blockIssues = ref<CommitSigInfo[] | null>(null);
+
+/** The indicator badge for the current authenticity state. */
+const badge = computed<{ glyph: string; cls: string; title: string }>(() => {
+  const s = authState.value;
+  if (!s || s.mode === "off") {
+    return {
+      glyph: "⚪",
+      cls: "badge-off",
+      title: "Signature verification off",
+    };
+  }
+  switch (s.head_status.kind) {
+    case "verified":
+      return {
+        glyph: "✓",
+        cls: "badge-ok",
+        title: "HEAD signed by a trusted key",
+      };
+    case "unknown":
+      return {
+        glyph: "—",
+        cls: "badge-none",
+        title: "Signature not checked yet",
+      };
+    default:
+      return {
+        glyph: "⚠",
+        cls: "badge-warn",
+        title: `${statusLabel(s.head_status)} — tap to review`,
+      };
+  }
+});
+
 const lastSyncLabel = computed(() => {
   if (!lastSyncTime.value) return null;
   return formatRelativeTime(now.value, lastSyncTime.value);
@@ -33,6 +79,14 @@ const lastSyncLabel = computed(() => {
 const filteredEntries = () => {
   return filterEntries(entries.value, search.value);
 };
+
+async function loadAuthState() {
+  try {
+    authState.value = await invoke<AuthenticityState>("get_authenticity_state");
+  } catch {
+    // Verification unavailable (e.g. repo mid-clone) — leave the badge as-is.
+  }
+}
 
 async function loadEntries() {
   loading.value = true;
@@ -52,6 +106,8 @@ async function pullRepo() {
   pulling.value = true;
   pullResult.value = "";
   error.value = "";
+  auditIssues.value = null;
+  blockIssues.value = null;
   try {
     const result = await invoke<PullResult>("pull_repo");
     if (result.changed) {
@@ -61,7 +117,21 @@ async function pullRepo() {
     } else {
       pullResult.value = "Already up to date";
     }
-    // Clear pull result after 3 seconds
+    // Refresh the badge with the new HEAD state.
+    await loadAuthState();
+
+    // Audit mismatch → informational modal (pull already succeeded).
+    if (
+      result.authenticity.mode === "audit" &&
+      result.authenticity.open_issues.length > 0
+    ) {
+      auditIssues.value = result.authenticity.open_issues;
+    }
+    // Enforce block → HEAD did not advance; explain + offer actions.
+    if (result.authenticity.blocked) {
+      blockIssues.value = result.authenticity.open_issues;
+    }
+
     setTimeout(() => {
       pullResult.value = "";
     }, 3000);
@@ -80,6 +150,55 @@ function showToast(message: string) {
     toast.value = "";
     toastTimer = null;
   }, 3000);
+}
+
+async function ignoreIssue(commit: CommitSigInfo) {
+  try {
+    await invoke("ignore_commit_issue", { commit: commit.hash });
+    showToast("Ignored this commit's issue");
+    // Remove it from the modal list.
+    if (auditIssues.value) {
+      auditIssues.value = auditIssues.value.filter(
+        (c) => c.hash !== commit.hash,
+      );
+      if (auditIssues.value.length === 0) auditIssues.value = null;
+    }
+  } catch (e) {
+    const appError = e as AppError;
+    showToast(appError?.message || "Failed to ignore");
+  }
+}
+
+async function trustBlockSigner(commit: CommitSigInfo) {
+  const label = window.prompt(
+    "Trust this signer? Enter a label:",
+    commit.short_hash,
+  );
+  if (label === null) return;
+  try {
+    await invoke("trust_commit_signer", {
+      commit: commit.hash,
+      label: label.trim() || commit.short_hash,
+    });
+    showToast("✓ Signer trusted — pull again");
+    blockIssues.value = null;
+    await loadAuthState();
+  } catch (e) {
+    const appError = e as AppError;
+    showToast(appError?.message || "Failed to trust signer");
+  }
+}
+
+async function switchToAudit() {
+  try {
+    await invoke("set_verification_mode", { mode: "audit" });
+    showToast("Switched to Audit — pull again");
+    blockIssues.value = null;
+    await loadAuthState();
+  } catch (e) {
+    const appError = e as AppError;
+    showToast(appError?.message || "Failed to switch mode");
+  }
 }
 
 async function copyPassword(entry: Entry) {
@@ -107,8 +226,13 @@ function openSettings() {
   router.push({ name: "settings" });
 }
 
+function openHistory() {
+  router.push({ name: "history" });
+}
+
 onMounted(() => {
   loadEntries();
+  loadAuthState();
   tickTimer = setInterval(() => {
     now.value = Date.now();
   }, 60_000);
@@ -126,7 +250,16 @@ onBeforeUnmount(() => {
   <main class="max-w-[480px] md:max-w-[600px] mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-4" role="banner">
       <h1 class="text-xl">🔐 gpm</h1>
-      <div class="flex gap-2">
+      <div class="flex gap-2 items-center">
+        <button
+          @click="openHistory"
+          class="badge-btn"
+          :class="badge.cls"
+          :aria-label="badge.title"
+          :title="badge.title"
+        >
+          <span aria-hidden="true">{{ badge.glyph }}</span>
+        </button>
         <button
           @click="pullRepo"
           :disabled="pulling"
@@ -244,6 +377,101 @@ onBeforeUnmount(() => {
         </button>
       </li>
     </ul>
+
+    <!-- Audit-mode mismatch modal (pull succeeded; informational) -->
+    <div
+      v-if="auditIssues"
+      class="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Signature check"
+    >
+      <div class="modal-card w-full max-w-[480px]">
+        <h2 class="text-base font-medium mb-1">Signature check</h2>
+        <p class="text-xs text-muted mb-3">
+          Pulled {{ auditIssues.length }}
+          {{ auditIssues.length === 1 ? "commit has" : "commits have" }} a
+          signature issue:
+        </p>
+        <ul class="flex flex-col gap-2 mb-3">
+          <li
+            v-for="c in auditIssues"
+            :key="c.hash"
+            class="flex items-center gap-2 text-sm"
+          >
+            <span class="text-lg" aria-hidden="true">{{
+              statusGlyph(c.status)
+            }}</span>
+            <code class="text-xs text-muted">{{ c.short_hash }}</code>
+            <span class="flex-1 truncate">{{ c.subject }}</span>
+            <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
+          </li>
+        </ul>
+        <div class="flex gap-2">
+          <button class="btn-sm flex-1" @click="openHistory">
+            Review in history
+          </button>
+          <button
+            v-if="auditIssues.length === 1"
+            class="btn-sm flex-1"
+            @click="ignoreIssue(auditIssues[0]!)"
+          >
+            Ignore this commit
+          </button>
+          <button class="btn-sm flex-1" @click="auditIssues = null">
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Enforce-block modal (HEAD did not advance) -->
+    <div
+      v-if="blockIssues"
+      class="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pull blocked"
+    >
+      <div class="modal-card w-full max-w-[480px]">
+        <h2 class="text-base font-medium mb-1 text-danger">Pull blocked</h2>
+        <p class="text-xs text-muted mb-3">
+          Enforce mode refused to update the store — HEAD did not advance.
+          Resolve the signature issue, then pull again.
+        </p>
+        <ul class="flex flex-col gap-2 mb-3">
+          <li
+            v-for="c in blockIssues"
+            :key="c.hash"
+            class="flex items-center gap-2 text-sm"
+          >
+            <span class="text-lg" aria-hidden="true">{{
+              statusGlyph(c.status)
+            }}</span>
+            <code class="text-xs text-muted">{{ c.short_hash }}</code>
+            <span class="flex-1 truncate">{{ c.subject }}</span>
+            <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
+          </li>
+        </ul>
+        <div class="flex flex-col gap-2">
+          <button
+            v-if="blockIssues.some((c) => c.status.kind === 'untrusted_key')"
+            class="btn-sm"
+            @click="
+              trustBlockSigner(
+                blockIssues.find((c) => c.status.kind === 'untrusted_key')!,
+              )
+            "
+          >
+            Trust this signer
+          </button>
+          <button class="btn-sm" @click="switchToAudit">
+            Switch to Audit mode
+          </button>
+          <button class="btn-sm" @click="blockIssues = null">Cancel</button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -309,5 +537,39 @@ onBeforeUnmount(() => {
   animation: spin 0.6s linear infinite;
   margin-right: 0.5rem;
   vertical-align: middle;
+}
+
+.badge-btn {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.badge-btn:hover {
+  background: var(--color-hover);
+}
+.badge-ok {
+  color: var(--color-success, #3a9);
+}
+.badge-warn {
+  color: var(--color-warning, #c93);
+}
+.badge-off,
+.badge-none {
+  color: var(--color-subtle, #999);
+}
+
+.modal-card {
+  padding: 1rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 </style>

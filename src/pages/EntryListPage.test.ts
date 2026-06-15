@@ -37,10 +37,46 @@ const sampleEntries: Entry[] = [
   { path: "servers/prod.age", name: "prod-server" },
 ];
 
+/** Default successful return values per command (order-independent). */
+const defaults: Record<string, unknown> = {
+  list_entries: sampleEntries,
+  get_authenticity_state: { mode: "off", head_status: { kind: "unsigned" } },
+  pull_repo: {
+    changed: false,
+    head: "abc",
+    authenticity: {
+      mode: "off",
+      new_commits: [],
+      open_issues: [],
+      blocked: false,
+    },
+  },
+  copy_password: { entry_name: "x", cleared_after_secs: 30 },
+};
+
 describe("EntryListPage", () => {
+  // Per-command overrides: value to resolve, or `{ reject: payload }` to reject.
+  const overrides: Record<string, { value?: unknown; reject?: unknown }> = {};
+
+  function when(cmd: string, value: unknown) {
+    overrides[cmd] = { value };
+  }
+  function reject(cmd: string, payload: unknown) {
+    overrides[cmd] = { reject: payload };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
+    for (const k of Object.keys(overrides)) delete overrides[k];
     vi.useFakeTimers();
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd in overrides) {
+        const o = overrides[cmd];
+        if (o && o.reject !== undefined) return Promise.reject(o.reject);
+        return Promise.resolve(o ? o.value : defaults[cmd]);
+      }
+      return Promise.resolve(defaults[cmd]);
+    });
   });
 
   afterEach(() => {
@@ -53,7 +89,6 @@ describe("EntryListPage", () => {
 
   describe("entry loading", () => {
     it("calls list_entries on mount", async () => {
-      vi.mocked(invoke).mockResolvedValue(sampleEntries);
       mountPage();
       await flushPromises();
 
@@ -61,7 +96,7 @@ describe("EntryListPage", () => {
     });
 
     it("displays entries after loading", async () => {
-      vi.mocked(invoke).mockResolvedValue(sampleEntries);
+      when("list_entries", sampleEntries);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -71,7 +106,7 @@ describe("EntryListPage", () => {
     });
 
     it("shows error when loading fails", async () => {
-      vi.mocked(invoke).mockRejectedValue({
+      reject("list_entries", {
         code: "StoreError",
         message: "Store not found",
       });
@@ -84,9 +119,22 @@ describe("EntryListPage", () => {
     });
 
     it("shows retry button on error", async () => {
-      vi.mocked(invoke)
-        .mockRejectedValueOnce({ code: "Err", message: "fail" })
-        .mockResolvedValueOnce(sampleEntries);
+      // First list_entries rejects; the retry resolves with entries.
+      let listCall = 0;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "list_entries") {
+          listCall += 1;
+          return listCall === 1
+            ? Promise.reject({ code: "Err", message: "fail" })
+            : Promise.resolve(sampleEntries);
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -94,12 +142,11 @@ describe("EntryListPage", () => {
       await wrapper.find(".btn-retry").trigger("click");
       await flushPromises();
 
-      expect(invoke).toHaveBeenCalledTimes(2);
       expect(wrapper.text()).toContain("github-token");
     });
 
     it("shows empty state when no entries", async () => {
-      vi.mocked(invoke).mockResolvedValue([]);
+      when("list_entries", []);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -107,10 +154,9 @@ describe("EntryListPage", () => {
     });
 
     it("shows loading spinner while loading", async () => {
-      // Return a promise that never resolves to keep loading state
-      vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+      // list_entries never resolves → loading stays true.
+      when("list_entries", new Promise(() => {}));
       const wrapper = mountPage();
-      // Flush Vue's reactive render so loading=true appears in DOM
       await flushPromises();
 
       expect(wrapper.text()).toContain("Loading entries...");
@@ -119,20 +165,19 @@ describe("EntryListPage", () => {
 
   describe("search/filter", () => {
     it("filters entries by search input", async () => {
-      vi.mocked(invoke).mockResolvedValue(sampleEntries);
+      when("list_entries", sampleEntries);
       const wrapper = mountPage();
       await flushPromises();
 
       await wrapper.find('input[type="search"]').setValue("git");
       await flushPromises();
 
-      // Only github-token should be visible
       expect(wrapper.text()).toContain("github-token");
       expect(wrapper.text()).not.toContain("work-email");
     });
 
     it("shows no matches message when search has no results", async () => {
-      vi.mocked(invoke).mockResolvedValue(sampleEntries);
+      when("list_entries", sampleEntries);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -145,12 +190,11 @@ describe("EntryListPage", () => {
 
   describe("copyPassword", () => {
     it("calls copy_password and shows success toast", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sampleEntries) // list_entries
-        .mockResolvedValueOnce({
-          entry_name: "github-token",
-          cleared_after_secs: 45,
-        });
+      when("list_entries", sampleEntries);
+      when("copy_password", {
+        entry_name: "github-token",
+        cleared_after_secs: 45,
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -164,12 +208,11 @@ describe("EntryListPage", () => {
     });
 
     it("auto-clears toast after 3 seconds", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sampleEntries)
-        .mockResolvedValueOnce({
-          entry_name: "github-token",
-          cleared_after_secs: 45,
-        });
+      when("list_entries", sampleEntries);
+      when("copy_password", {
+        entry_name: "github-token",
+        cleared_after_secs: 45,
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -185,9 +228,8 @@ describe("EntryListPage", () => {
     });
 
     it("shows error toast on copy failure", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sampleEntries)
-        .mockRejectedValueOnce({ code: "Err", message: "Copy failed" });
+      when("list_entries", sampleEntries);
+      reject("copy_password", { code: "Err", message: "Copy failed" });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -200,9 +242,16 @@ describe("EntryListPage", () => {
 
   describe("pullRepo", () => {
     it("shows 'Already up to date' when no changes", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sampleEntries) // list_entries on mount
-        .mockResolvedValueOnce({ changed: false, head: "abc" }); // pull_repo
+      when("pull_repo", {
+        changed: false,
+        head: "abc",
+        authenticity: {
+          mode: "off",
+          new_commits: [],
+          open_issues: [],
+          blocked: false,
+        },
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -217,10 +266,33 @@ describe("EntryListPage", () => {
         ...sampleEntries,
         { path: "new.age", name: "new-entry" },
       ];
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sampleEntries) // initial load
-        .mockResolvedValueOnce({ changed: true, head: "def456" }) // pull_repo
-        .mockResolvedValueOnce(updatedEntries); // reload after pull
+      let listCall = 0;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "list_entries") {
+          listCall += 1;
+          return Promise.resolve(
+            listCall === 1 ? sampleEntries : updatedEntries,
+          );
+        }
+        if (cmd === "pull_repo") {
+          return Promise.resolve({
+            changed: true,
+            head: "def456",
+            authenticity: {
+              mode: "off",
+              new_commits: [],
+              open_issues: [],
+              blocked: false,
+            },
+          });
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -234,7 +306,6 @@ describe("EntryListPage", () => {
 
   describe("settings navigation", () => {
     it("navigates to settings page when settings button clicked", async () => {
-      vi.mocked(invoke).mockResolvedValue(sampleEntries);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -242,6 +313,18 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(mockPush).toHaveBeenCalledWith({ name: "settings" });
+    });
+  });
+
+  describe("authenticity badge", () => {
+    it("opens the history page when the badge is tapped", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find('button[aria-label^="Signature"]').trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "history" });
     });
   });
 });

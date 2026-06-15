@@ -48,8 +48,45 @@ const httpsConfig = {
 };
 
 describe("SettingsPage", () => {
+  /** Default successful return values per command (order-independent). */
+  const defaults: Record<string, unknown> = {
+    get_config: httpsConfig,
+    get_auth_state: {
+      configured: true,
+      encrypted: false,
+      unlocked: false,
+      identity_type: "x25519",
+    },
+    is_biometric_available: false,
+    is_biometric_unlock_enabled: false,
+    get_authenticity_config: { mode: "off", trusted_keys: [], ignored: [] },
+    get_ssh_public_key: { public_key: "ssh-ed25519 default" },
+    export_ssh_private_key: { private_key: "default-private" },
+  };
+
+  // Per-command overrides: value to resolve, or `{ reject: payload }` to reject.
+  const overrides: Record<string, { value?: unknown; reject?: unknown }> = {};
+
+  function when(cmd: string, value: unknown) {
+    overrides[cmd] = { value };
+  }
+  function reject(cmd: string, payload: unknown) {
+    overrides[cmd] = { reject: payload };
+  }
+  function installMock() {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd in overrides) {
+        const o = overrides[cmd];
+        if (o && o.reject !== undefined) return Promise.reject(o.reject);
+        return Promise.resolve(o ? o.value : defaults[cmd]);
+      }
+      return Promise.resolve(defaults[cmd]);
+    });
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
+    for (const k of Object.keys(overrides)) delete overrides[k];
     vi.useFakeTimers();
     vi.stubGlobal(
       "navigator",
@@ -59,6 +96,7 @@ describe("SettingsPage", () => {
         },
       }),
     );
+    installMock();
   });
 
   afterEach(() => {
@@ -66,23 +104,12 @@ describe("SettingsPage", () => {
     vi.restoreAllMocks();
   });
 
-  const authState = {
-    configured: true,
-    encrypted: false,
-    unlocked: false,
-  };
-
   function mountPage() {
     return mount(SettingsPage);
   }
 
   describe("config loading", () => {
     it("calls get_config on mount", async () => {
-      vi.mocked(invoke).mockResolvedValueOnce(sshConfig).mockResolvedValueOnce({
-        configured: true,
-        encrypted: false,
-        unlocked: false,
-      });
       mountPage();
       await flushPromises();
 
@@ -91,7 +118,7 @@ describe("SettingsPage", () => {
     });
 
     it("displays repo URL from config", async () => {
-      vi.mocked(invoke).mockResolvedValue(sshConfig);
+      when("get_config", sshConfig);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -99,7 +126,7 @@ describe("SettingsPage", () => {
     });
 
     it("shows SSH Key auth type for SSH config", async () => {
-      vi.mocked(invoke).mockResolvedValue(sshConfig);
+      when("get_config", sshConfig);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -107,7 +134,6 @@ describe("SettingsPage", () => {
     });
 
     it("shows PAT auth type for HTTPS config with token", async () => {
-      vi.mocked(invoke).mockResolvedValue(httpsConfig);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -115,7 +141,7 @@ describe("SettingsPage", () => {
     });
 
     it("shows None auth type for public HTTPS config", async () => {
-      vi.mocked(invoke).mockResolvedValue({ ...httpsConfig, pat: null });
+      when("get_config", { ...httpsConfig, pat: null });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -123,7 +149,7 @@ describe("SettingsPage", () => {
     });
 
     it("shows error when config loading fails", async () => {
-      vi.mocked(invoke).mockRejectedValue({
+      reject("get_config", {
         code: "ConfigError",
         message: "Config not found",
       });
@@ -136,7 +162,7 @@ describe("SettingsPage", () => {
     });
 
     it("shows loading state before config loads", async () => {
-      vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+      when("get_config", new Promise(() => {}));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -146,7 +172,7 @@ describe("SettingsPage", () => {
 
   describe("SSH key management", () => {
     it("shows SSH Key section when SSH is configured", async () => {
-      vi.mocked(invoke).mockResolvedValue(sshConfig);
+      when("get_config", sshConfig);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -156,7 +182,6 @@ describe("SettingsPage", () => {
     });
 
     it("hides SSH Key section when HTTPS is configured", async () => {
-      vi.mocked(invoke).mockResolvedValue(httpsConfig);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -165,18 +190,13 @@ describe("SettingsPage", () => {
     });
 
     it("shows public key when Show Public Key is clicked", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sshConfig) // get_config
-        .mockResolvedValueOnce(authState) // get_auth_state
-        .mockResolvedValueOnce(false) // is_biometric_available
-        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-        .mockResolvedValueOnce({
-          public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItest",
-        }); // get_ssh_public_key
+      when("get_config", sshConfig);
+      when("get_ssh_public_key", {
+        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItest",
+      });
       const wrapper = mountPage();
       await flushPromises();
 
-      // Click Show Public Key button (first btn-action)
       const buttons = wrapper.findAll(".btn-action");
       const showPublicBtn = buttons.find((b) =>
         b.text().includes("Show Public Key"),
@@ -192,15 +212,11 @@ describe("SettingsPage", () => {
     });
 
     it("shows error when get_ssh_public_key fails", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sshConfig)
-        .mockResolvedValueOnce(authState)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockRejectedValueOnce({
-          code: "SSH_KEY_INVALID",
-          message: "No SSH key configured",
-        });
+      when("get_config", sshConfig);
+      reject("get_ssh_public_key", {
+        code: "SSH_KEY_INVALID",
+        message: "No SSH key configured",
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -216,7 +232,7 @@ describe("SettingsPage", () => {
     });
 
     it("does nothing when export private key is cancelled", async () => {
-      vi.mocked(invoke).mockResolvedValue(sshConfig);
+      when("get_config", sshConfig);
       vi.mocked(globalThis.confirm).mockReturnValue(false);
       const wrapper = mountPage();
       await flushPromises();
@@ -229,22 +245,17 @@ describe("SettingsPage", () => {
       await exportBtn!.trigger("click");
       await flushPromises();
 
-      // No new invoke calls beyond initial get_config
       expect((invoke as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
         invokeCount,
       );
     });
 
     it("shows private key when export is confirmed", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sshConfig) // get_config
-        .mockResolvedValueOnce(authState) // get_auth_state
-        .mockResolvedValueOnce(false) // is_biometric_available
-        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-        .mockResolvedValueOnce({
-          private_key:
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nexported\n-----END OPENSSH PRIVATE KEY-----",
-        }); // export_ssh_private_key
+      when("get_config", sshConfig);
+      when("export_ssh_private_key", {
+        private_key:
+          "-----BEGIN OPENSSH PRIVATE KEY-----\nexported\n-----END OPENSSH PRIVATE KEY-----",
+      });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
@@ -261,15 +272,11 @@ describe("SettingsPage", () => {
     });
 
     it("shows error when export_ssh_private_key fails", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sshConfig)
-        .mockResolvedValueOnce(authState)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockRejectedValueOnce({
-          code: "SSH_KEY_INVALID",
-          message: "Invalid key",
-        });
+      when("get_config", sshConfig);
+      reject("export_ssh_private_key", {
+        code: "SSH_KEY_INVALID",
+        message: "Invalid key",
+      });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
@@ -284,19 +291,12 @@ describe("SettingsPage", () => {
     });
 
     it("hides private key when Hide button is clicked", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sshConfig)
-        .mockResolvedValueOnce(authState)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce({
-          private_key: "secret-key-data",
-        });
+      when("get_config", sshConfig);
+      when("export_ssh_private_key", { private_key: "secret-key-data" });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
 
-      // Show private key first
       const exportBtn = wrapper
         .findAll(".btn-action")
         .find((b) => b.text().includes("Export Private Key"));
@@ -305,7 +305,6 @@ describe("SettingsPage", () => {
 
       expect(wrapper.text()).toContain("secret-key-data");
 
-      // Click Hide button
       const hideBtn = wrapper
         .findAll(".btn-action")
         .find((b) => b.text().includes("Hide Private Key"));
@@ -317,25 +316,17 @@ describe("SettingsPage", () => {
     });
 
     it("copies public key to clipboard", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sshConfig)
-        .mockResolvedValueOnce(authState)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce({
-          public_key: "ssh-ed25519 AAAAtest",
-        });
+      when("get_config", sshConfig);
+      when("get_ssh_public_key", { public_key: "ssh-ed25519 AAAAtest" });
       const wrapper = mountPage();
       await flushPromises();
 
-      // Show public key first
       const showPublicBtn = wrapper
         .findAll(".btn-action")
         .find((b) => b.text().includes("Show Public Key"));
       await showPublicBtn!.trigger("click");
       await flushPromises();
 
-      // Click Copy button next to public key
       const copyButtons = wrapper.findAll(".btn-copy");
       await copyButtons[0].trigger("click");
       await flushPromises();
@@ -347,18 +338,11 @@ describe("SettingsPage", () => {
     });
 
     it("auto-clears toast after 3 seconds", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(sshConfig)
-        .mockResolvedValueOnce(authState)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce({
-          public_key: "ssh-ed25519 AAAAtest",
-        });
+      when("get_config", sshConfig);
+      when("get_ssh_public_key", { public_key: "ssh-ed25519 AAAAtest" });
       const wrapper = mountPage();
       await flushPromises();
 
-      // Show + copy to trigger toast
       const showPublicBtn = wrapper
         .findAll(".btn-action")
         .find((b) => b.text().includes("Show Public Key"));
@@ -380,12 +364,7 @@ describe("SettingsPage", () => {
 
   describe("reset", () => {
     it("calls reset_config and navigates when confirmed", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(httpsConfig) // get_config
-        .mockResolvedValueOnce(authState) // get_auth_state
-        .mockResolvedValueOnce(false) // is_biometric_available
-        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-        .mockResolvedValueOnce(undefined); // reset_config
+      when("reset_config", undefined);
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
@@ -402,7 +381,6 @@ describe("SettingsPage", () => {
     });
 
     it("does nothing when reset is cancelled", async () => {
-      vi.mocked(invoke).mockResolvedValue(httpsConfig);
       vi.mocked(globalThis.confirm).mockReturnValue(false);
       const wrapper = mountPage();
       await flushPromises();
@@ -421,12 +399,7 @@ describe("SettingsPage", () => {
     });
 
     it("shows error when reset fails", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(httpsConfig)
-        .mockResolvedValueOnce(authState)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockRejectedValueOnce({ code: "Err", message: "Reset failed" });
+      reject("reset_config", { code: "Err", message: "Reset failed" });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
@@ -443,7 +416,6 @@ describe("SettingsPage", () => {
 
   describe("navigation", () => {
     it("navigates back to entries when Back button clicked", async () => {
-      vi.mocked(invoke).mockResolvedValue(httpsConfig);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -466,11 +438,8 @@ describe("SettingsPage", () => {
     };
 
     it("is hidden when the identity is not encrypted", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(httpsConfig) // get_config
-        .mockResolvedValueOnce(authState) // get_auth_state (encrypted: false)
-        .mockResolvedValueOnce(true) // is_biometric_available
-        .mockResolvedValueOnce(true); // is_biometric_unlock_enabled
+      when("is_biometric_available", true);
+      when("is_biometric_unlock_enabled", true);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -478,11 +447,7 @@ describe("SettingsPage", () => {
     });
 
     it("reports unavailable when no biometric is present", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(httpsConfig) // get_config
-        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
-        .mockResolvedValueOnce(false) // is_biometric_available
-        .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+      when("get_auth_state", encryptedAuth);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -491,12 +456,10 @@ describe("SettingsPage", () => {
     });
 
     it("calls enable_biometric_unlock with the passphrase when enabling", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(httpsConfig) // get_config
-        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
-        .mockResolvedValueOnce(true) // is_biometric_available
-        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled (not yet)
-        .mockResolvedValueOnce(undefined); // enable_biometric_unlock
+      when("get_auth_state", encryptedAuth);
+      when("is_biometric_available", true);
+      when("is_biometric_unlock_enabled", false);
+      when("enable_biometric_unlock", undefined);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -516,15 +479,13 @@ describe("SettingsPage", () => {
     });
 
     it("shows an error on a wrong passphrase when enabling", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(httpsConfig) // get_config
-        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
-        .mockResolvedValueOnce(true) // is_biometric_available
-        .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-        .mockRejectedValueOnce({
-          code: "WRONG_PASSPHRASE",
-          message: "wrong",
-        }); // enable_biometric_unlock
+      when("get_auth_state", encryptedAuth);
+      when("is_biometric_available", true);
+      when("is_biometric_unlock_enabled", false);
+      reject("enable_biometric_unlock", {
+        code: "WRONG_PASSPHRASE",
+        message: "wrong",
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -542,12 +503,10 @@ describe("SettingsPage", () => {
     });
 
     it("calls disable_biometric_unlock when disabling", async () => {
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(httpsConfig) // get_config
-        .mockResolvedValueOnce(encryptedAuth) // get_auth_state
-        .mockResolvedValueOnce(true) // is_biometric_available
-        .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
-        .mockResolvedValueOnce(undefined); // disable_biometric_unlock
+      when("get_auth_state", encryptedAuth);
+      when("is_biometric_available", true);
+      when("is_biometric_unlock_enabled", true);
+      when("disable_biometric_unlock", undefined);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -559,6 +518,79 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("disable_biometric_unlock");
+    });
+  });
+
+  describe("repository authenticity card", () => {
+    it("shows the card and the off-mode hint by default", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("Repository Authenticity");
+      expect(wrapper.text()).toContain("No verification.");
+      expect(wrapper.text()).toContain("Trusted signing keys (0)");
+    });
+
+    it("lists trusted keys and offers removal", async () => {
+      when("get_authenticity_config", {
+        mode: "audit",
+        trusted_keys: [
+          {
+            public_key: "ssh-ed25519 AAAA",
+            fingerprint: "SHA256:abcd",
+            label: "Alice",
+            added_at_commit: "deadbeef",
+          },
+        ],
+        ignored: [],
+      });
+      vi.mocked(globalThis.confirm).mockReturnValue(true);
+      when("remove_trusted_key", undefined);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("SHA256:abcd");
+      expect(wrapper.text()).toContain("Alice");
+
+      const removeBtn = wrapper
+        .findAll(".btn-copy")
+        .find((b) => b.text().includes("Remove"));
+      expect(removeBtn).toBeDefined();
+      await removeBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("remove_trusted_key", {
+        fingerprint: "SHA256:abcd",
+      });
+    });
+
+    it("switches verification mode", async () => {
+      when("set_verification_mode", "audit");
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const radios = wrapper.findAll('input[name="verify-mode"]');
+      expect(radios.length).toBe(3);
+      await radios[1]!.trigger("change"); // audit
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_verification_mode", {
+        mode: "audit",
+      });
+    });
+
+    it("opens the history page", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const historyBtn = wrapper
+        .findAll(".btn-action")
+        .find((b) => b.text().includes("View commit history"));
+      expect(historyBtn).toBeDefined();
+      await historyBtn!.trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "history" });
     });
   });
 });
