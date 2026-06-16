@@ -31,7 +31,9 @@ The crate implements encryption, decryption, Git operations, and repository file
 
 ### Tauri app — `src-tauri/`
 
-Async Tauri commands, state management, app entry, IPC types. Includes the biometric commands (`is_biometric_available`, `enable_biometric_unlock`, `biometric_unlock`, …) backed by the keystore plugin, plus the shared `unlock_and_arm` helper used by both the password and biometric unlock paths
+Async Tauri commands, shared app state (`AppState`), and the entry point (`run()`). `lib.rs` is a thin shell — just
+`AppState` + `run()`; every command group lives in its own `pub(crate)` module under `src-tauri/src/`, registered in
+`run()`'s `invoke_handler`.
 
 ### Tauri Plugins — `tauri-plugin-*/`
 

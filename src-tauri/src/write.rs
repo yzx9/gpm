@@ -2,11 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Secret-creation commands — the write side of the store.
+//! Secret writes & sync — the write/sync side of the store.
 //!
 //! These wrap [`rustpass::Store`]'s gopass-style create / template / conflict
 //! APIs ([`Store::create`], [`Store::preview_create`], and
-//! [`Store::resolve_write_conflict`]) and expose them to the `WebView`.
+//! [`Store::resolve_write_conflict`]) plus [`Store::sync`] (pull), and expose
+//! them to the `WebView`.
 //!
 //! ## Conflict stash
 //!
@@ -29,11 +30,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use rustpass::template::{self, CreatePreset};
-use rustpass::{ConflictChoice, Error, ErrorCode, WriteOutcome, WriteResult};
+use rustpass::{ConflictChoice, Error, ErrorCode, SyncResult, WriteOutcome, WriteResult};
 use tauri::{AppHandle, State};
 use zeroize::Zeroizing;
 
-use crate::{AppState, reset_lock_timer};
+use crate::AppState;
+use crate::identity::reset_lock_timer;
 
 /// A write that collided with a newer remote copy and is awaiting the user's
 /// resolution. Held only in memory; `plaintext` is [`Zeroizing`] and the struct
@@ -188,6 +190,13 @@ pub(crate) async fn resolve_write_conflict(
         .await;
     reset_lock_timer(&state, &app);
     result
+}
+
+/// Pull latest changes from the remote (fast-forward only).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn pull_repo(state: State<'_, AppState>) -> Result<SyncResult, Error> {
+    state.store.sync().await
 }
 
 #[cfg(test)]
