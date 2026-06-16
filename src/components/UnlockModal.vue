@@ -32,7 +32,8 @@ async function tryBiometricUnlock() {
   biometricLoading.value = true;
   try {
     await biometricUnlock();
-    router.push({ name: "entries" });
+    // Success: the backend emits `identity-lock-state { locked: false }`, which
+    // App.vue's `v-if` reacts to and unmounts this overlay. Nothing to do here.
   } catch (e) {
     const err = asBiometricError(e) as BiometricError;
     switch (err.code) {
@@ -70,7 +71,8 @@ async function onUnlock() {
   loading.value = true;
   try {
     await invoke("unlock", { passphrase: passphrase.value });
-    router.push({ name: "entries" });
+    // Success: the backend emits `identity-lock-state { locked: false }`, which
+    // App.vue reacts to and unmounts this overlay. Nothing to do here.
   } catch (e) {
     const appError = e as { code?: string; message?: string };
     if (appError?.code === "WRONG_PASSPHRASE") {
@@ -88,6 +90,8 @@ async function onReset() {
     return;
   try {
     await invoke("reset_config");
+    // The backend emits `identity-lock-state { locked: false }` on reset, which
+    // closes this overlay. Then drop the user on Setup to reconfigure.
     router.push({ name: "setup" });
   } catch (e) {
     const appError = e as { message?: string };
@@ -106,13 +110,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main
-    class="min-h-screen flex items-center justify-center max-[480px]:items-start p-4 max-[480px]:pt-6 max-[480px]:pb-0"
-    role="main"
+  <div
+    class="overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Unlock identity"
   >
-    <div
-      class="w-full max-w-[420px] bg-surface rounded-lg p-8 shadow-[0_2px_12px_rgba(0,0,0,0.08)] max-[480px]:p-4 max-[480px]:pb-[calc(3rem+4rem)]"
-    >
+    <div class="card">
       <h1 class="text-center text-display mb-1">🔐 gpm</h1>
       <p class="text-center text-muted text-sm mb-6">Identity is locked</p>
 
@@ -192,10 +196,35 @@ onMounted(async () => {
         </button>
       </form>
     </div>
-  </main>
+  </div>
 </template>
 
 <style scoped>
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  /* Honor notch/gesture insets; the overlay sits above the safe-area-padded shell. */
+  padding-top: calc(1rem + var(--safe-area-inset-top, 0px));
+  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, 0px));
+  background: rgba(0, 0, 0, 0.4);
+  /* The backdrop must fully capture interaction with the locked page behind it. */
+  overscroll-behavior: contain;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
 .input-base {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-edge);

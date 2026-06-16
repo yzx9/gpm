@@ -15,6 +15,7 @@ import type {
   WriteOutcome,
 } from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
+import { onLock } from "../utils/useLockState";
 
 const router = useRouter();
 
@@ -53,6 +54,14 @@ const {
   reveal: revealRemote,
   clear: clearRemote,
 } = useSecretReveal();
+
+// The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
+// secret the moment the identity locks (the remote reveal above is wiped via the
+// shared composable's own onLock).
+onLock(() => {
+  fields.value = {};
+  customContent.value = "";
+});
 
 function showToast(message: string) {
   toast.value = message;

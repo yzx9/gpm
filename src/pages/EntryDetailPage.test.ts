@@ -7,6 +7,7 @@ import { mount } from "@vue/test-utils";
 import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import EntryDetailPage from "./EntryDetailPage.vue";
+import { useLockState, __resetLockStateForTests } from "../utils/useLockState";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -38,6 +39,7 @@ describe("EntryDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    __resetLockStateForTests();
   });
 
   afterEach(() => {
@@ -202,6 +204,28 @@ describe("EntryDetailPage", () => {
       // The key assertion: no memory leak of timers
       // (can't directly check internal state after unmount,
       //  but we verify no lingering setTimeout throws)
+    });
+
+    it("clears sensitive data on identity lock", async () => {
+      const { setLocked } = useLockState();
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "notes",
+      });
+      // The modal keeps the page mounted, so a lock transition must wipe in place.
+      setLocked(false);
+      const wrapper = mountPage();
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises();
+
+      // Password is in the DOM
+      expect(wrapper.text()).toContain("s3cret");
+
+      // Lock fires the shared composable's onLock(clear) without unmounting.
+      setLocked(true);
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("s3cret");
     });
 
     it("handles ESC key to go back", async () => {

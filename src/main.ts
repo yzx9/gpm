@@ -5,14 +5,12 @@
 import { createApp } from "vue";
 import { createRouter, createWebHashHistory } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import App from "./App.vue";
 import "./assets/main.css";
 
 import type { AuthState } from "./types";
 
 import SetupPage from "./pages/SetupPage.vue";
-import UnlockPage from "./pages/UnlockPage.vue";
 import EntryListPage from "./pages/EntryListPage.vue";
 import EntryDetailPage from "./pages/EntryDetailPage.vue";
 import SettingsPage from "./pages/SettingsPage.vue";
@@ -20,9 +18,8 @@ import HistoryPage from "./pages/HistoryPage.vue";
 import CreatePage from "./pages/CreatePage.vue";
 
 const routes = [
-  { path: "/", redirect: "/setup" },
+  { path: "/", redirect: "/entries" },
   { path: "/setup", name: "setup", component: SetupPage },
-  { path: "/unlock", name: "unlock", component: UnlockPage },
   { path: "/entries", name: "entries", component: EntryListPage },
   { path: "/create", name: "create", component: CreatePage },
   {
@@ -40,7 +37,9 @@ const router = createRouter({
   routes,
 });
 
-// Navigation guard: redirect based on auth state
+// Navigation guard: configured-only. The locked state is enforced by the global
+// `UnlockModal` overlay (driven by `useLockState`), not by a route redirect, so
+// the user re-authenticates in place instead of being navigated off their page.
 router.beforeEach(async (to) => {
   // Allow access to setup page always
   if (to.name === "setup") return true;
@@ -49,21 +48,11 @@ router.beforeEach(async (to) => {
     const auth = await invoke<AuthState>("get_auth_state");
 
     if (!auth.configured) return { name: "setup" };
-    if (auth.encrypted && !auth.unlocked) return { name: "unlock" };
   } catch {
     return { name: "setup" };
   }
 
   return true;
-});
-
-// Listen for identity-locked event (timer expiry) and redirect
-listen("identity-locked", () => {
-  const currentRoute = router.currentRoute.value;
-  // Don't redirect if already on unlock or setup
-  if (currentRoute.name !== "unlock" && currentRoute.name !== "setup") {
-    router.push({ name: "unlock" });
-  }
 });
 
 createApp(App).use(router).mount("#app");

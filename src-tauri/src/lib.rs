@@ -19,6 +19,7 @@
     clippy::pedantic
 )]
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -190,6 +191,11 @@ struct AppState {
     store: Arc<Store>,
     /// Auto-lock timer handle (cancel-and-respawn pattern).
     lock_timer: Mutex<Option<JoinHandle<()>>>,
+    /// Monotonic generation tag for the auto-lock timer. Bumped on every (re)arm; the spawned
+    /// task captures its generation and self-disarms if a newer arm happened while it slept.
+    /// Kills the spurious re-lock race where a stale timer wakes right after a fresh unlock
+    /// — the modal auto-prompts, so such a re-lock would visibly re-show the overlay.
+    lock_generation: Arc<AtomicU64>,
     /// Identity picked via the file picker, awaiting its passphrase before
     /// `complete_setup_from_file` saves it. Held only in memory (`Zeroizing` on
     /// drop); never persisted.
@@ -331,13 +337,18 @@ fn validate_identity(identity: String) -> Result<IdentityInfoResult, Error> {
 #[allow(clippy::needless_pass_by_value)]
 async fn complete_setup(
     state: State<'_, AppState>,
+    app: AppHandle,
     identity: String,
     passphrase: Option<String>,
 ) -> Result<(), Error> {
     state
         .store
         .save_identity(&identity, passphrase.as_deref())
-        .await
+        .await?;
+    // Setup may leave an encrypted identity locked (the passphrase isn't cached);
+    // emit the real state so the frontend shows the unlock overlay if needed.
+    emit_lock_state(&app, &state.store).await;
+    Ok(())
 }
 
 /// Pick an identity file via the native picker, classify it, and hold it in
@@ -506,6 +517,7 @@ async fn verify_picked_identity(
 #[allow(clippy::needless_pass_by_value)]
 async fn complete_setup_from_file(
     state: State<'_, AppState>,
+    app: AppHandle,
     passphrase: Option<String>,
 ) -> Result<(), Error> {
     let pending = state
@@ -518,7 +530,10 @@ async fn complete_setup_from_file(
     state
         .store
         .save_identity(&pending.identity, passphrase.as_deref())
-        .await
+        .await?;
+    // See [`complete_setup`]: emit the real post-setup lock state.
+    emit_lock_state(&app, &state.store).await;
+    Ok(())
 }
 
 /// Drop any identity held from a prior `pick_identity_file` (e.g. on back /
@@ -640,17 +655,21 @@ async fn disable_biometric_unlock(app: AppHandle) -> Result<(), BiometricError> 
 
 /// Lock the store: clear cached identity and cancel auto-lock timer.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
-fn lock(state: State<'_, AppState>) -> Result<(), Error> {
+#[allow(clippy::needless_pass_by_value)]
+async fn lock(state: State<'_, AppState>, app: AppHandle) -> Result<(), Error> {
     // Cancel timer
     if let Ok(mut timer) = state.lock_timer.lock()
         && let Some(handle) = timer.take()
     {
         handle.abort();
     }
+    // Disarm any racing in-flight timer task (see [`reset_lock_timer`]).
+    state.lock_generation.fetch_add(1, Ordering::SeqCst);
     state.store.lock();
     // A conflict left pending would be undecryptable behind the wiped identity.
     write::clear_pending(&state.pending_write);
+    // Emit the current lock state — same path the auto-lock timer takes.
+    emit_lock_state(&app, &state.store).await;
     Ok(())
 }
 
@@ -665,6 +684,9 @@ async fn set_passphrase(
     state.store.set_passphrase(&passphrase).await?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
     let _ = app.keystore().delete();
+    // Setting a passphrase locks the store (forces re-auth with the new
+    // passphrase); emit the real state so the frontend shows the overlay.
+    emit_lock_state(&app, &state.store).await;
     Ok(())
 }
 
@@ -683,6 +705,8 @@ async fn change_passphrase(
         .await?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
     let _ = app.keystore().delete();
+    // Changing the passphrase locks the store; emit the real state.
+    emit_lock_state(&app, &state.store).await;
     Ok(())
 }
 
@@ -762,14 +786,18 @@ async fn get_config(state: State<'_, AppState>) -> Result<RepoConfig, Error> {
 /// Reset all configuration and local data.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-async fn reset_config(state: State<'_, AppState>) -> Result<(), Error> {
+async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> Result<(), Error> {
     // Cancel timer
     if let Ok(mut timer) = state.lock_timer.lock()
         && let Some(handle) = timer.take()
     {
         handle.abort();
     }
-    state.store.reset().await
+    state.store.reset().await?;
+    // After a reset there is no identity, so the app is no longer locked — emit
+    // the real state so any open unlock overlay closes.
+    emit_lock_state(&app, &state.store).await;
+    Ok(())
 }
 
 /// Generate a new ed25519 SSH keypair for setup.
@@ -940,7 +968,26 @@ async fn unlock_and_arm(
 ) -> Result<(), Error> {
     state.store.unlock(passphrase).await?;
     reset_lock_timer(state, app);
+    // The backend is the single source of truth for lock state; tell the frontend.
+    emit_lock_state(app, &state.store).await;
     Ok(())
+}
+
+/// Snapshot of the identity lock state, emitted on every lock/unlock transition.
+///
+/// The frontend's `locked` ref is a pure mirror of this — it must never decide
+/// lock state on its own (it used to, after its own `unlock` call, which desynced
+/// from the backend on reset and on setup of an encrypted identity).
+#[derive(Debug, Clone, Copy, Serialize)]
+struct LockState {
+    locked: bool,
+}
+
+/// Compute the current lock state from the store and emit it as
+/// `identity-lock-state`, so the frontend mirrors the backend.
+async fn emit_lock_state(app: &AppHandle, store: &Store) {
+    let locked = store.is_identity_encrypted().await && !store.is_unlocked();
+    let _ = app.emit("identity-lock-state", LockState { locked });
 }
 
 /// Reset the auto-lock timer (cancel-and-respawn pattern).
@@ -954,16 +1001,27 @@ fn reset_lock_timer(state: &State<'_, AppState>, app: &AppHandle) {
         handle.abort();
     }
 
+    // Bump the generation so any still-in-flight older task self-disarms on wake.
+    let generation = state.lock_generation.fetch_add(1, Ordering::SeqCst) + 1;
+
     // Spawn new timer
     let app_handle = app.clone();
     let store = state.store.clone();
     let pending = state.pending_write.clone();
+    let generation_cell = state.lock_generation.clone();
 
     let handle = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(
             rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS,
         ))
         .await;
+
+        // Stale-task guard: if a newer (re)arm happened while we slept, a fresher
+        // unlock is in effect — do not lock/emit. `abort` is not a generation check,
+        // so without this a task already past its sleep can fire right after an unlock.
+        if generation_cell.load(Ordering::SeqCst) != generation {
+            return;
+        }
 
         // Clear any stashed conflict plaintext before wiping the identity —
         // otherwise it would be undecryptable and linger in memory.
@@ -972,8 +1030,9 @@ fn reset_lock_timer(state: &State<'_, AppState>, app: &AppHandle) {
         // Lock the real store (clears cached identity + passphrase)
         store.lock();
 
-        // Emit lock event so frontend can redirect
-        let _ = app_handle.emit("identity-locked", ());
+        // Emit the current lock state so the frontend shows the unlock overlay
+        // + clears revealed secrets.
+        emit_lock_state(&app_handle, &store).await;
     });
 
     *timer = Some(handle);
@@ -1004,6 +1063,7 @@ pub fn run() {
             app.manage(AppState {
                 store: Arc::new(Store::new(config_dir)),
                 lock_timer: Mutex::new(None),
+                lock_generation: Arc::new(AtomicU64::new(0)),
                 pending_identity: Mutex::new(None),
                 pending_write: Arc::new(Mutex::new(None)),
             });

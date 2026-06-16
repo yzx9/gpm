@@ -4,15 +4,17 @@
 
 import { ref, onMounted, onBeforeUnmount } from "vue";
 import type { SensitiveContent } from "../types";
+import { onLock } from "./useLockState";
 
 /** How long a revealed secret stays in the DOM before being wiped. */
 const AUTO_CLEAR_MS = 30_000;
 
 /**
  * Reveal sensitive content (a decrypted secret) under the app's secure-reveal
- * contract: auto-clear after 30s, wipe on unmount, and wipe on browser back
- * navigation. Shared by the entry detail view and the create-conflict "View
- * existing" path so the lifecycle lives in exactly one place.
+ * contract: auto-clear after 30s, wipe on unmount, wipe on browser back
+ * navigation, and wipe on identity lock. Shared by the entry detail view and the
+ * create-conflict "View existing" path so the lifecycle lives in exactly one
+ * place.
  *
  * Must be called during a component's `setup()`.
  */
@@ -50,6 +52,11 @@ export function useSecretReveal() {
     window.removeEventListener("popstate", clear);
     clear();
   });
+
+  // The global unlock modal keeps this component mounted behind the overlay on
+  // auto-lock, so an unmount no longer guarantees a wipe — clear explicitly on
+  // the lock event too.
+  onLock(clear);
 
   return { password, notes, revealed, reveal, clear };
 }

@@ -12,6 +12,7 @@ import {
   isBiometricAvailable,
   isBiometricUnlockEnabled,
 } from "../biometric";
+import { onLock } from "../utils/useLockState";
 import type {
   AppError,
   AuthState,
@@ -66,6 +67,21 @@ const isSshIdentity = computed(
   () =>
     identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
 );
+
+// The unlock modal keeps this page mounted on auto-lock, so wipe any in-DOM
+// secret material (exported keys, typed passphrases) and close reveal panels
+// the moment the identity locks.
+onLock(() => {
+  publicKey.value = "";
+  privateKey.value = "";
+  showPublic.value = false;
+  showPrivate.value = false;
+  showSetPassphrase.value = false;
+  showChangePassphrase.value = false;
+  newPassphrase.value = "";
+  oldPassphrase.value = "";
+  biometricPassphrase.value = "";
+});
 
 function showToast(message: string) {
   toast.value = message;

@@ -10,6 +10,12 @@ vi.mock("@tauri-apps/api/core", () => ({
   addPluginListener: vi.fn().mockResolvedValue(() => {}),
 }));
 
+// Mock Tauri event listener — default resolves a no-op unlisten; tests grab the
+// handler from `vi.mocked(listen).mock.calls[n][1]` to fire events.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(vi.fn()),
+}));
+
 // Mock vue-router
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),
