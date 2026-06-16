@@ -17,12 +17,14 @@ import EntryListPage from "./pages/EntryListPage.vue";
 import EntryDetailPage from "./pages/EntryDetailPage.vue";
 import SettingsPage from "./pages/SettingsPage.vue";
 import HistoryPage from "./pages/HistoryPage.vue";
+import CreatePage from "./pages/CreatePage.vue";
 
 const routes = [
   { path: "/", redirect: "/setup" },
   { path: "/setup", name: "setup", component: SetupPage },
   { path: "/unlock", name: "unlock", component: UnlockPage },
   { path: "/entries", name: "entries", component: EntryListPage },
+  { path: "/create", name: "create", component: CreatePage },
   {
     path: "/entry/:pathMatch(.*)",
     name: "entry",

@@ -9,7 +9,7 @@ use std::sync::RwLock;
 use std::{fmt, str};
 
 use age::ssh;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::task::spawn_blocking;
 use walkdir::WalkDir;
@@ -70,6 +70,7 @@ pub struct WriteResult {
 /// surfaces a raw git merge conflict on the binary `.age` file — gpm detects
 /// the specific *same-name* collision and offers a decrypt-aware resolution.
 #[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WriteOutcome {
     /// The secret was written, committed, and pushed. Carries the new HEAD.
     Written(WriteResult),
@@ -98,7 +99,8 @@ pub struct WriteConflict {
 }
 
 /// How to resolve a [`WriteConflict`] (the user's choice).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ConflictChoice {
     /// Overwrite the remote with our version (replay the write on the remote
     /// tip and push). Refused with `UnsafeOverwrite` when the remote version is
@@ -683,21 +685,49 @@ impl Store {
     /// (including [`WriteOutcome::Conflict`]).
     pub async fn create(&self, name: &str, content: &[u8]) -> Result<WriteOutcome, Error> {
         validate_secret_name(name)?;
-
-        // Templates render against text; secrets are text, so a non-UTF-8
-        // payload just skips templating and is written verbatim.
-        let rendered = match (
-            str::from_utf8(content).ok(),
-            self.lookup_template(name).await?,
-        ) {
-            (Some(text), Some(tpl)) if !tpl.trim().is_empty() => {
-                Some(template::render(&tpl, &template_vars(name, text))?)
-            }
-            _ => None,
-        };
-
+        let rendered = self.resolve_template(name, content).await?;
         let final_bytes = rendered.map_or_else(|| content.to_vec(), String::into_bytes);
         self.set(name, &final_bytes).await
+    }
+
+    /// Resolve a `.pass-template` for `name` against `content` and return the
+    /// rendered body, or `None` when no (non-empty) template applies or the
+    /// payload isn't UTF-8. Shared by [`Store::create`] and
+    /// [`Store::preview_create`].
+    async fn resolve_template(&self, name: &str, content: &[u8]) -> Result<Option<String>, Error> {
+        // Templates render against text; secrets are text, so a non-UTF-8
+        // payload just skips templating.
+        Ok(
+            match (
+                str::from_utf8(content).ok(),
+                self.lookup_template(name).await?,
+            ) {
+                (Some(text), Some(tpl)) if !tpl.trim().is_empty() => {
+                    Some(template::render(&tpl, &template_vars(name, text))?)
+                }
+                _ => None,
+            },
+        )
+    }
+
+    /// Preview what [`Store::create`] would store for `name` + `content`: the
+    /// rendered template body when a `.pass-template` applies, or `None` when no
+    /// template applies (in which case `content` is stored verbatim). Writes
+    /// nothing — used by the UI to show what a template will produce before save.
+    ///
+    /// `content` becomes the template's `.Content`, exactly as in [`create`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidEntryName` for a bad name, or `TemplateError` if a
+    /// template references an unknown variable.
+    pub async fn preview_create(
+        &self,
+        name: &str,
+        content: &[u8],
+    ) -> Result<Option<String>, Error> {
+        validate_secret_name(name)?;
+        self.resolve_template(name, content).await
     }
 
     /// Create a secret from one of the built-in presets (gopass `gopass create`

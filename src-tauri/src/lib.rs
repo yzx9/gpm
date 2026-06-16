@@ -37,6 +37,8 @@ use tauri_plugin_biometric_keystore::KeystoreExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_file_picker::FilePickerExt;
 
+mod write;
+
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
 // ---------------------------------------------------------------------------
@@ -192,6 +194,10 @@ struct AppState {
     /// `complete_setup_from_file` saves it. Held only in memory (`Zeroizing` on
     /// drop); never persisted.
     pending_identity: Mutex<Option<PendingIdentity>>,
+    /// A write that collided with a newer remote copy, awaiting the user's
+    /// resolution. Wrapped in `Arc` so the auto-lock timer closure can clear it.
+    /// See `write::PendingWrite` / `write::clear_pending`.
+    pending_write: Arc<Mutex<Option<write::PendingWrite>>>,
 }
 
 /// A file-picked identity awaiting save.
@@ -643,6 +649,8 @@ fn lock(state: State<'_, AppState>) -> Result<(), Error> {
         handle.abort();
     }
     state.store.lock();
+    // A conflict left pending would be undecryptable behind the wiped identity.
+    write::clear_pending(&state.pending_write);
     Ok(())
 }
 
@@ -949,12 +957,17 @@ fn reset_lock_timer(state: &State<'_, AppState>, app: &AppHandle) {
     // Spawn new timer
     let app_handle = app.clone();
     let store = state.store.clone();
+    let pending = state.pending_write.clone();
 
     let handle = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(
             rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS,
         ))
         .await;
+
+        // Clear any stashed conflict plaintext before wiping the identity —
+        // otherwise it would be undecryptable and linger in memory.
+        write::clear_pending(&pending);
 
         // Lock the real store (clears cached identity + passphrase)
         store.lock();
@@ -992,6 +1005,7 @@ pub fn run() {
                 store: Arc::new(Store::new(config_dir)),
                 lock_timer: Mutex::new(None),
                 pending_identity: Mutex::new(None),
+                pending_write: Arc::new(Mutex::new(None)),
             });
             Ok(())
         })
@@ -1036,6 +1050,12 @@ pub fn run() {
             ignore_commit_issue,
             list_commit_signatures,
             get_commit_signature,
+            write::list_create_presets,
+            write::lookup_template,
+            write::preview_create,
+            write::create_secret,
+            write::create_from_preset_secret,
+            write::resolve_write_conflict,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -222,6 +222,10 @@ function openEntry(entry: Entry) {
   router.push({ name: "entry", params: { pathMatch: entry.path } });
 }
 
+function openCreate() {
+  router.push({ name: "create" });
+}
+
 function openSettings() {
   router.push({ name: "settings" });
 }
@@ -251,6 +255,14 @@ onBeforeUnmount(() => {
     <header class="flex justify-between items-center mb-4" role="banner">
       <h1 class="text-xl">🔐 gpm</h1>
       <div class="flex gap-2 items-center">
+        <button
+          @click="openCreate"
+          class="btn-sm"
+          aria-label="Create a new secret"
+          title="Create a new secret"
+        >
+          <span aria-hidden="true">＋</span>
+        </button>
         <button
           @click="openHistory"
           class="badge-btn"

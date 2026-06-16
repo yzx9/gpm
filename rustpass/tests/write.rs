@@ -7,7 +7,7 @@ mod common;
 mod tests {
     use super::common::*;
     use rustpass::crypto;
-    use rustpass::store::{Store, WriteOutcome, WriteResult};
+    use rustpass::store::{ConflictChoice, Store, WriteConflict, WriteOutcome, WriteResult};
     use std::path::Path;
 
     /// Unwrap a `WriteOutcome::Written`, panicking on `Conflict`.
@@ -275,5 +275,43 @@ mod tests {
             crypto::decrypt_bytes(&pushed, identity.as_bytes(), None).unwrap(),
             b"new-password"
         );
+    }
+
+    /// `WriteOutcome` serializes as a `kind`-tagged object — the IPC contract
+    /// the frontend consumes as a discriminated union.
+    #[test]
+    fn write_outcome_serializes_tagged() {
+        let written = WriteOutcome::Written(WriteResult {
+            commit: "abc1234".into(),
+        });
+        assert_eq!(
+            serde_json::to_string(&written).unwrap(),
+            r#"{"kind":"written","commit":"abc1234"}"#
+        );
+
+        let conflict = WriteOutcome::Conflict(WriteConflict {
+            name: "sites/foo".into(),
+            remote_decryptable: true,
+        });
+        assert_eq!(
+            serde_json::to_string(&conflict).unwrap(),
+            r#"{"kind":"conflict","name":"sites/foo","remote_decryptable":true}"#
+        );
+    }
+
+    /// `ConflictChoice` round-trips as snake_case — it crosses IPC as a
+    /// `resolve_write_conflict` command argument.
+    #[test]
+    fn conflict_choice_round_trips_snake_case() {
+        for (choice, s) in [
+            (ConflictChoice::KeepMine, "\"keep_mine\""),
+            (ConflictChoice::KeepMineForce, "\"keep_mine_force\""),
+            (ConflictChoice::KeepRemote, "\"keep_remote\""),
+            (ConflictChoice::Cancel, "\"cancel\""),
+        ] {
+            assert_eq!(serde_json::to_string(&choice).unwrap(), s);
+            let back: ConflictChoice = serde_json::from_str(s).unwrap();
+            assert_eq!(back, choice);
+        }
     }
 }

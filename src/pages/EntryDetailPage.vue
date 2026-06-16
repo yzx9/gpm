@@ -3,10 +3,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, onBeforeUnmount, onMounted } from "vue";
+import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type { SensitiveContent, AppError } from "../types";
+import { useSecretReveal } from "../utils/useSecretReveal";
 
 const route = useRoute();
 const router = useRouter();
@@ -18,14 +19,12 @@ const entryPath = decodeURIComponent(
 );
 const entryName = entryPath.replace(/\.age$/, "");
 
-// Sensitive state — must be nulled on page leave and auto-cleared
-const password = ref<string | null>(null);
-const notes = ref<string | null>(null);
+// Sensitive state lives in the shared secure-reveal composable: 30s auto-clear,
+// wipe on unmount, wipe on browser back. `copyPassword` calls `clear()` itself.
+const { password, notes, revealed, reveal, clear } = useSecretReveal();
 const loading = ref(false);
 const error = ref("");
-const revealed = ref(false);
 const toast = ref("");
-let autoHideTimer: ReturnType<typeof setTimeout> | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function showPassword() {
@@ -35,20 +34,7 @@ async function showPassword() {
     const result = await invoke<SensitiveContent>("show_password", {
       entryPath,
     });
-    // Clear any previous auto-hide timer
-    if (autoHideTimer) {
-      clearTimeout(autoHideTimer);
-      autoHideTimer = null;
-    }
-
-    password.value = result.password;
-    notes.value = result.notes;
-    revealed.value = true;
-
-    // Auto-clear after 30 seconds
-    autoHideTimer = setTimeout(() => {
-      clearSensitive();
-    }, 30_000);
+    reveal(result);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Decryption failed";
@@ -66,9 +52,7 @@ async function copyPassword() {
         entryPath,
       },
     );
-    revealed.value = false;
-    notes.value = null;
-    password.value = null;
+    clear();
     toast.value = `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`;
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
@@ -81,18 +65,8 @@ async function copyPassword() {
   }
 }
 
-function clearSensitive() {
-  password.value = null;
-  notes.value = null;
-  revealed.value = false;
-  if (autoHideTimer) {
-    clearTimeout(autoHideTimer);
-    autoHideTimer = null;
-  }
-}
-
 function goBack() {
-  clearSensitive();
+  clear();
   router.push({ name: "entries" });
 }
 
@@ -101,20 +75,6 @@ function handleKeydown(e: KeyboardEvent) {
     goBack();
   }
 }
-
-// Clean up on page leave — security lifecycle
-onBeforeUnmount(() => {
-  clearSensitive();
-});
-
-// Also handle browser back navigation
-onMounted(() => {
-  window.addEventListener("popstate", clearSensitive);
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener("popstate", clearSensitive);
-});
 </script>
 
 <template>

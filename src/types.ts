@@ -175,3 +175,47 @@ export interface AuthenticityState {
   mode: VerifyMode;
   head_status: CommitSigStatus;
 }
+
+// ── Secret creation (write) ─────────────────────────────────────────────────
+
+/** One input field of a create preset (mirrors `rustpass::template::PresetField`). */
+export interface PresetField {
+  key: string;
+  label: string;
+  required: boolean;
+}
+
+/** A built-in secret-creation preset (mirrors `rustpass::template::CreatePreset`). */
+export interface CreatePreset {
+  id: string;
+  label: string;
+  /** Directory prefix the secret is generated under (e.g. "websites"). */
+  prefix: string;
+  /** Field keys whose values join to form the secret's name under `prefix`. */
+  name_from: string[];
+  fields: PresetField[];
+}
+
+/** A successful write — short hash of the commit that recorded it. */
+export interface WriteResult {
+  commit: string;
+}
+
+/** A write-path conflict on a same-name remote entry. Carries NO plaintext. */
+export interface WriteConflict {
+  name: string;
+  /** Whether the remote version decrypts with our key. */
+  remote_decryptable: boolean;
+}
+
+/** Outcome of a create attempt (serde tagged by `kind`, snake_case). */
+export type WriteOutcome =
+  | { kind: "written"; commit: string }
+  | { kind: "conflict"; name: string; remote_decryptable: boolean };
+
+/** How the user chose to resolve a `WriteOutcome` conflict (serde snake_case). */
+export type ConflictChoice =
+  | "keep_mine"
+  | "keep_mine_force"
+  | "keep_remote"
+  | "cancel";

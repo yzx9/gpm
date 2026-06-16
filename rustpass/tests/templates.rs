@@ -206,4 +206,47 @@ mod tests {
         assert!(ids.contains(&"website"));
         assert!(ids.contains(&"pin"));
     }
+
+    /// `preview_create` renders the matching template without writing anything.
+    #[tokio::test]
+    async fn preview_create_renders_template() {
+        let (_bare, _cfg, store) = templated_store(Some("{{ .Content }}\nuser: ")).await;
+
+        let preview = store
+            .preview_create("email/gmail", b"s3kr3t")
+            .await
+            .expect("preview");
+        assert_eq!(preview.as_deref(), Some("s3kr3t\nuser: "));
+
+        // Nothing was written — the entry is absent.
+        let err = store.get("email/gmail").await.unwrap_err();
+        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+    }
+
+    /// With no template, `preview_create` returns `None` (content stored verbatim).
+    #[tokio::test]
+    async fn preview_create_none_without_template() {
+        let (_bare, _cfg, store) = templated_store(None).await;
+        let preview = store
+            .preview_create("plain/x", b"pw")
+            .await
+            .expect("preview");
+        assert!(preview.is_none());
+    }
+
+    /// A template referencing an unknown variable surfaces a `TemplateError`.
+    #[tokio::test]
+    async fn preview_create_bad_template_errors() {
+        let (_bare, _cfg, store) = templated_store(Some("{{ .Content }} {{ .Nope }}")).await;
+        let err = store.preview_create("bad/x", b"pw").await.unwrap_err();
+        assert_eq!(err.code, "TEMPLATE_ERROR");
+    }
+
+    /// Invalid names are rejected before lookup (same gate as `create`/`set`).
+    #[tokio::test]
+    async fn preview_create_rejects_bad_name() {
+        let (_bare, _cfg, store) = templated_store(None).await;
+        let err = store.preview_create("../escape", b"pw").await.unwrap_err();
+        assert_eq!(err.code, "INVALID_ENTRY_NAME");
+    }
 }
