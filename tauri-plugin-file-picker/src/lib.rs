@@ -18,7 +18,7 @@ use tauri::{Manager, Runtime};
 
 /// Android package hosting the `FilePickerPlugin` Kotlin class.
 #[cfg(target_os = "android")]
-const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm";
+const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.filepicker";
 
 /// A picked file's raw contents plus a best-effort display name.
 #[derive(Debug, Clone)]
@@ -175,10 +175,10 @@ impl<R: Runtime, T: Manager<R>> FilePickerExt<R> for T {
 /// On other targets, manages a handle that drives `tauri-plugin-dialog`.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("file-picker")
-        .setup(|app, _api| {
+        .setup(|app, #[allow(unused_variables)] api| {
             #[cfg(target_os = "android")]
             {
-                let handle = _api.register_android_plugin(PLUGIN_IDENTIFIER, "FilePickerPlugin")?;
+                let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "FilePickerPlugin")?;
                 app.manage(FilePicker(handle));
             }
             #[cfg(not(target_os = "android"))]

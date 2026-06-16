@@ -14,7 +14,7 @@
 // rather than just the content:// URI, so Rust can read identity files without
 // the fs plugin's content:// handling.
 
-package xyz.yzx9.gpm
+package xyz.yzx9.gpm.filepicker
 
 import android.app.Activity
 import android.content.Intent
@@ -35,7 +35,7 @@ import java.io.InputStream
 /**
  * Backend-only SAF file picker that reads the picked file's bytes into Rust.
  *
- * Registered from Rust via `register_android_plugin("xyz.yzx9.gpm",
+ * Registered from Rust via `register_android_plugin("xyz.yzx9.gpm.filepicker",
  * "FilePickerPlugin")` and invoked through the `tauri-plugin-file-picker` handle.
  */
 @TauriPlugin

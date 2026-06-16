@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package xyz.yzx9.gpm
+package xyz.yzx9.gpm.safearea
 
 import android.app.Activity
 import android.webkit.WebView

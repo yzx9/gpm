@@ -33,12 +33,13 @@ The crate implements encryption, decryption, Git operations, and repository file
 
 Async Tauri commands, state management, app entry, IPC types. Includes the biometric commands (`is_biometric_available`, `enable_biometric_unlock`, `biometric_unlock`, …) backed by the keystore plugin, plus the shared `unlock_and_arm` helper used by both the password and biometric unlock paths
 
-### Tauri Plugins — `tauri-plugin-safe-area/`, `tauri-plugin-biometric-keystore/`
+### Tauri Plugins — `tauri-plugin-*/`
 
-Local Tauri plugin crates (not published):
+Local Tauri plugin crates (not published). Each follows the standard Tauri mobile-plugin layout: Rust in `src/`, and its Android Kotlin in its own `android/` Gradle library module (own namespace + build) under a `xyz.yzx9.gpm.{plugin}` package. Tauri auto-discovers each `android/` dir and wires it into the app's gradle build on `tauri android *` runs.
 
 - `tauri-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
 - `tauri-plugin-biometric-keystore` — stores the identity passphrase in the Android Keystore (AES/GCM, hardware-backed) and retrieves it through a biometric-gated `BiometricPrompt`
+- `tauri-plugin-file-picker` — opens the Android Storage Access Framework picker and reads the picked file's bytes into Rust (backend-only; desktop falls back to `tauri-plugin-dialog`)
 
 ## Security Model
 
@@ -53,7 +54,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model and known limitations.
 
 ## Testing
 
-Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration tests in `rustpass/tests/` (store facade, config persistence, crypto). Frontend tests are vitest in `src/**/*.test.ts` (mocked `@tauri-apps/api/core` `invoke`). There is no `src-tauri/tests/` directory. When changing Kotlin under `src-tauri/gen/android/`, run `just kotlin-check` before finishing — it compiles the app's Kotlin in seconds and catches errors that otherwise only surface inside the multi-minute `tauri android build`.
+Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration tests in `rustpass/tests/` (store facade, config persistence, crypto). Frontend tests are vitest in `src/**/*.test.ts` (mocked `@tauri-apps/api/core` `invoke`). There is no `src-tauri/tests/` directory. When changing Kotlin — app code under `src-tauri/gen/android/app/` or a plugin's `android/src/main/java/` — run `just kotlin-check` before finishing — it compiles the app's Kotlin in seconds and catches errors that otherwise only surface inside the multi-minute `tauri android build`.
 
 ## Conventions
 
@@ -63,7 +64,7 @@ Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration t
 - Single age identity only (multi-identity deferred); supports x25519 native keys (optionally passphrase-encrypted at rest) and SSH private keys (ed25519, RSA), including passphrase-protected SSH keys
 - HTTPS and SSH Git remotes (SSH key generation + paste)
 - Biometric unlock (fingerprint/face) on Android 11+ for passphrase-protected identities (age or SSH); the passphrase is sealed in the Android Keystore with hardware-backed, biometric-gated encryption. Desktop and Android <11 stay passphrase-only. iOS deferred.
-- `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `SafeAreaPlugin.kt`, `KeystorePlugin.kt`). Do not assume its contents are auto-generated or disposable.
+- `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `MainActivity.kt`, `AndroidManifest.xml`, resources, the app `build.gradle.kts`). Plugin Kotlin lives in each plugin crate's own `android/` module, not here. Do not assume `gen/android/` contents are auto-generated or disposable.
 
 ## Compact Instructions
 

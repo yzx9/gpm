@@ -44,6 +44,14 @@ src-tauri/gen/android/.gradle/
 src-tauri/gen/android/app/build/
 src-tauri/gen/android/app/tauri.build.gradle.kts
 src-tauri/gen/android/build/
+# Ignore build/IDE outputs in local plugin android modules (tauri-plugin-*/android/)
+tauri-plugin-*/android/.tauri/
+tauri-plugin-*/android/.gradle/
+tauri-plugin-*/android/build/
+tauri-plugin-*/android/.cxx/
+tauri-plugin-*/android/captures/
+tauri-plugin-*/android/local.properties
+tauri-plugin-*/android/**/*.iml
 
 # Android signing
 *.jks

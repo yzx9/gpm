@@ -7,6 +7,10 @@
 use tauri::Runtime;
 use tauri::plugin::{Builder, TauriPlugin};
 
+/// Android package hosting the `SafeAreaPlugin` Kotlin class.
+#[cfg(target_os = "android")]
+const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.safearea";
+
 /// Initializes the safe-area plugin.
 ///
 /// On Android, registers the Kotlin `SafeAreaPlugin` class.
@@ -14,9 +18,9 @@ use tauri::plugin::{Builder, TauriPlugin};
 /// and CSS `var()` fallbacks of `0px` apply.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("safe-area")
-        .setup(|_app, _api| {
+        .setup(|_app, #[allow(unused_variables)] api| {
             #[cfg(target_os = "android")]
-            _api.register_android_plugin("xyz.yzx9.gpm", "SafeAreaPlugin")?;
+            api.register_android_plugin(PLUGIN_IDENTIFIER, "SafeAreaPlugin")?;
             Ok(())
         })
         .build()

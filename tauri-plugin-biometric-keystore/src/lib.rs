@@ -23,7 +23,7 @@ use tauri::{Manager, Runtime};
 
 /// Android package hosting the `KeystorePlugin` Kotlin class.
 #[cfg(target_os = "android")]
-const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm";
+const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.biometrickeystore";
 
 // ---------------------------------------------------------------------------
 // Error type (unified across mobile/desktop)
@@ -213,15 +213,15 @@ impl<R: Runtime, T: Manager<R>> KeystoreExt<R> for T {
 /// always callable (operations report unavailable).
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("biometric-keystore")
-        .setup(|_app, _api| {
+        .setup(|app, #[allow(unused_variables)] api| {
             #[cfg(target_os = "android")]
             {
-                let handle = _api.register_android_plugin(PLUGIN_IDENTIFIER, "KeystorePlugin")?;
-                _app.manage(Keystore(handle));
+                let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "KeystorePlugin")?;
+                app.manage(Keystore(handle));
             }
             #[cfg(not(target_os = "android"))]
             {
-                _app.manage(Keystore::<R>(std::marker::PhantomData));
+                app.manage(Keystore::<R>(std::marker::PhantomData));
             }
             Ok(())
         })

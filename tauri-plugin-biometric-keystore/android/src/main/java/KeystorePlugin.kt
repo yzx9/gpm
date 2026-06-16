@@ -14,7 +14,7 @@
 // use. (A JVM String is unavoidable at the invoke.resolve hop that crosses
 // back to Rust — see the plan's Finding 2 — and lives only briefly.)
 
-package xyz.yzx9.gpm
+package xyz.yzx9.gpm.biometrickeystore
 
 import android.app.Activity
 import android.content.Context
