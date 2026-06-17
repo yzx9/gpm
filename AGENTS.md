@@ -68,6 +68,27 @@ Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration t
 - Biometric unlock (fingerprint/face) on Android 11+ for passphrase-protected identities (age or SSH); the passphrase is sealed in the Android Keystore with hardware-backed, biometric-gated encryption. Desktop and Android <11 stay passphrase-only. iOS deferred.
 - `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `MainActivity.kt`, `AndroidManifest.xml`, resources, the app `build.gradle.kts`). Plugin Kotlin lives in each plugin crate's own `android/` module, not here. Do not assume `gen/android/` contents are auto-generated or disposable.
 
+## Design RFCs — `.plans/`
+
+`.plans/` holds lightweight design RFCs. It is the parking lot for work that is deliberately out of the current PR or phase: ideas discovered during implementation, deferred scope, and larger future improvements. An RFC captures the **problem, the design decision, and the rationale** — not the implementation.
+
+Write an RFC when:
+
+- A decision is non-obvious, reversible only with effort, or touches the architecture or threat model.
+- A thought came up during implementation but does not belong in the current PR.
+- A phase just landed and you want to record the next, larger improvement.
+
+### How to write one
+
+- One file per RFC: `NNNN-kebab-title.md`.
+- `NNNN` is 4-digit zero-padded; **next number = current max + 1**
+- Follow the template in `0000-rfc-template.md`.
+- If an RFC is completed or superseded, it may be removed.
+
+### Altitude — the one rule
+
+If you are writing file paths, line numbers, struct fields, function signatures, or code, you have dropped below RFC altitude — move it into the implementation. An RFC should still read cleanly after the code it describes has been rewritten twice. The RFC records _why_; the implementation records _how_.
+
 ## Compact Instructions
 
 When compressing, preserve in priority order:
