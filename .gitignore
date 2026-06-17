@@ -60,5 +60,6 @@ src-tauri/gen/android/.keystores/
 src-tauri/gen/android/keystore.properties
 
 # agentic tools
+.claude/worktrees/
 .gstack/
 .playwright-mcp/
