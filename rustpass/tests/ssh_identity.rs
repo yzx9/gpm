@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! End-to-end coverage for SSH-key identities — the one identity shape with no
-//! prior integration test. Exercises the 0013 cache (unlock decrypts the SSH
-//! key once; `get` skips the bcrypt KDF) and the 0014 write path (`set` derives
-//! our recipient from the cached unencrypted PEM with `passphrase = None`).
+//! prior integration test. Exercises the SSH-identity cache (unlock decrypts the
+//! key once; `get` skips the bcrypt KDF) and the write path (`set` derives our
+//! recipient from the cached unencrypted PEM with `passphrase = None`).
 
 mod common;
 
@@ -14,7 +14,7 @@ mod tests {
     use rustpass::store::Store;
     use rustpass::WriteOutcome;
 
-    /// 0013 + 0014 round-trip with an encrypted ed25519 SSH identity:
+    /// Round-trip with an encrypted ed25519 SSH identity:
     /// configure → unlock (caches the decrypted key) → get twice (cache hit, no
     /// re-KDF) → set a new secret (recipient derived from the cached PEM,
     /// passphrase=None) → get it back → lock.
@@ -62,7 +62,7 @@ mod tests {
             .expect_err("get should fail while locked");
         assert_eq!(err.code, "IDENTITY_ENCRYPTED");
 
-        // unlock() decrypts the SSH key once and caches the unencrypted PEM (0013).
+        // unlock() decrypts the SSH key once and caches the unencrypted PEM.
         store
             .unlock(passphrase)
             .await
@@ -78,7 +78,7 @@ mod tests {
         assert_eq!(again.password(), "my-password");
 
         // set() derives our recipient from the cached unencrypted PEM with
-        // passphrase = None (0014), encrypts, commits, and pushes.
+        // passphrase = None, encrypts, commits, and pushes.
         let outcome = store
             .set("new-secret", b"new-password\n")
             .await

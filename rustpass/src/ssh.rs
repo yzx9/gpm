@@ -252,7 +252,7 @@ mod tests {
         assert!(result.is_err(), "should reject invalid key");
     }
 
-    // ── to_unencrypted_pem (Phase-1 gate + regression) ───────────────────
+    // ── to_unencrypted_pem ──────────────────────────────────────────────
 
     /// Encrypt `plaintext` to an SSH recipient string, returning ciphertext.
     fn encrypt_to_ssh_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
@@ -284,8 +284,8 @@ mod tests {
         out
     }
 
-    /// Phase-1 gate: an encrypted ed25519 key decrypts to an unencrypted PEM
-    /// that age parses onto the no-KDF Unencrypted path and can decrypt with.
+    /// An encrypted ed25519 key decrypts to an unencrypted PEM that age parses
+    /// onto the no-KDF Unencrypted path and can decrypt with.
     #[test]
     fn to_unencrypted_pem_round_trips_ed25519() {
         let pair = generate_keypair(Some("gate-passphrase")).unwrap();
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(decrypted.as_slice(), plaintext);
     }
 
-    /// G2: a wrong passphrase for an encrypted key returns `WrongPassphrase`.
+    /// A wrong passphrase for an encrypted key returns `WrongPassphrase`.
     #[test]
     fn to_unencrypted_pem_wrong_passphrase() {
         let pair = generate_keypair(Some("correct")).unwrap();

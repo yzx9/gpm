@@ -77,6 +77,7 @@ Write an RFC when:
 - A decision is non-obvious, reversible only with effort, or touches the architecture or threat model.
 - A thought came up during implementation but does not belong in the current PR.
 - A phase just landed and you want to record the next, larger improvement.
+- Do not reference temporary RFCs, review labels, or planning artifacts in code, docs, comments, or commit messages; instead, write self-contained explanations of the what and why.
 
 ### How to write one
 
