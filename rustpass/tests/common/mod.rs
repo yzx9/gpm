@@ -23,6 +23,7 @@ pub fn expect_fast_forwarded(outcome: SyncOutcome) -> SyncResult {
 }
 
 /// Generate a random x25519 keypair, returning `(identity_str, recipient_str)`.
+#[allow(dead_code)]
 pub fn generate_test_keypair() -> (String, String) {
     let sk = Identity::generate();
     let pk = sk.to_public();
@@ -34,6 +35,29 @@ pub fn generate_test_keypair() -> (String, String) {
 /// Encrypt `plaintext` to the given recipient string, returning ciphertext bytes.
 pub fn encrypt_to_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
     let recipient = Recipient::from_str(recipient_str).unwrap();
+    let encryptor =
+        age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
+            .unwrap();
+    let mut encrypted = Vec::new();
+    let mut writer = encryptor.wrap_output(&mut encrypted).unwrap();
+    writer.write_all(plaintext).unwrap();
+    writer.finish().unwrap();
+    encrypted
+}
+
+/// Generate an ed25519 SSH keypair encrypted with `passphrase`, returning
+/// `(private_pem, public_key)`. Used by SSH-identity integration tests.
+#[allow(dead_code)]
+pub fn generate_ssh_test_keypair(passphrase: &str) -> (String, String) {
+    let pair = rustpass::ssh::generate_keypair(Some(passphrase)).expect("SSH keygen");
+    (pair.private_key.to_string(), pair.public_key)
+}
+
+/// Encrypt `plaintext` to an SSH recipient string (e.g. `ssh-ed25519 AAAA…`).
+#[allow(dead_code)]
+pub fn encrypt_to_ssh_recipient(plaintext: &[u8], ssh_recipient_str: &str) -> Vec<u8> {
+    use age::ssh;
+    let recipient: ssh::Recipient = ssh_recipient_str.parse().expect("valid SSH recipient");
     let encryptor =
         age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
             .unwrap();

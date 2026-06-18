@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - When gpm auto-locks after 5 minutes (or on launch of a passphrase-protected identity), the unlock prompt now appears as an overlay over whatever screen you were on, and unlocking drops you back exactly where you were — your scroll position and current entry are preserved. The biometric auto-prompt, cancel, and reset handling moved into the overlay unchanged
+- Unlocking with an SSH key is faster: the key is decrypted once when you unlock, so opening each secret afterwards is quicker instead of paying that cost on every copy or show. The unlock passphrase is also no longer held in memory for the whole session — it's used to decrypt your identity and then dropped
 
 ### Fixed
 

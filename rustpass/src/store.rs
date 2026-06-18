@@ -162,8 +162,6 @@ pub struct Store {
     config: Config,
     /// Cached decrypted identity (populated after unlock).
     cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
-    /// Cached passphrase for encrypted SSH key decryption.
-    cached_passphrase: RwLock<Option<Zeroizing<String>>>,
 }
 
 impl fmt::Debug for Store {
@@ -185,7 +183,6 @@ impl Store {
         Self {
             config: Config::new(config_dir),
             cached_identity: RwLock::new(None),
-            cached_passphrase: RwLock::new(None),
         }
     }
 
@@ -241,37 +238,28 @@ impl Store {
 
     /// Check if the identity cache is populated (identity is unlocked).
     ///
-    /// Returns `true` if either cache holds an unlock:
-    /// - `cached_identity` is populated for age-encrypted identities (the
-    ///   decrypted x25519 key — the passphrase is no longer needed).
-    /// - `cached_passphrase` is populated for SSH identities (there is no
-    ///   decrypted blob to cache; age re-decrypts the SSH key with the
-    ///   passphrase on every entry access, so the cached passphrase *is* the
-    ///   unlock state).
-    ///
-    /// Before `48f5d7c` stopped age-encrypting SSH keys, SSH unlock populated
-    /// `cached_identity` and this checked only that. SSH now populates only
-    /// `cached_passphrase`, so checking both is required for SSH unlock to be
-    /// recognized.
+    /// After 0013, `unlock()` populates `cached_identity` for every encrypted
+    /// identity type — the decrypted x25519 key (age) or the unencrypted SSH
+    /// PEM (SSH) — so this is the sole unlock signal. The raw passphrase is no
+    /// longer cached (0014). Plaintext identities are never `unlock()`-ed, so
+    /// they report `false` (they decrypt straight from disk).
     #[must_use]
     pub fn is_unlocked(&self) -> bool {
         self.cached_identity
             .read()
             .is_ok_and(|guard| guard.is_some())
-            || self
-                .cached_passphrase
-                .read()
-                .is_ok_and(|guard| guard.is_some())
     }
 
     /// Unlock a passphrase-encrypted identity by decrypting and caching it.
     ///
     /// Calling `unlock()` when already unlocked is idempotent (re-decrypts
-    /// and overwrites the cache).
+    /// and overwrites the cache). For a non-encrypted (plaintext) identity this
+    /// is a no-op success — in production it is never called on plaintext (the
+    /// router gates `/unlock` on
+    /// [`is_identity_encrypted`](Store::is_identity_encrypted)).
     ///
     /// # Errors
     ///
-    /// Returns `IdentityNotEncrypted` if the identity is not encrypted.
     /// Returns `WrongPassphrase` if the passphrase is incorrect.
     /// Returns `NoIdentity` if no identity is configured.
     pub async fn unlock(&self, passphrase: &str) -> Result<(), Error> {
@@ -317,16 +305,6 @@ impl Store {
             }
         }
 
-        // Cache passphrase for encrypted SSH key decryption (works for both
-        // age-encrypted and plaintext encrypted SSH keys)
-        {
-            let mut cache = self
-                .cached_passphrase
-                .write()
-                .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
-            *cache = Some(Zeroizing::new(passphrase.to_string()));
-        }
-
         Ok(())
     }
 
@@ -359,14 +337,11 @@ impl Store {
         Ok(())
     }
 
-    /// Lock the store: zeroize the cached identity and passphrase.
+    /// Lock the store: zeroize the cached identity.
     ///
     /// Idempotent — safe to call when already locked.
     pub fn lock(&self) {
         if let Ok(mut cache) = self.cached_identity.write() {
-            *cache = None;
-        }
-        if let Ok(mut cache) = self.cached_passphrase.write() {
             *cache = None;
         }
     }
@@ -579,9 +554,7 @@ impl Store {
 
         let file_path = resolve_entry_path(repo_path, &entry_path)?;
         let identity_bytes = self.get_identity_bytes().await?;
-        let passphrase = self.get_cached_passphrase();
-        let decrypted =
-            crypto::decrypt_file(&file_path, &identity_bytes, passphrase.as_deref()).await?;
+        let decrypted = crypto::decrypt_file(&file_path, &identity_bytes, None).await?;
         Secret::parse(&decrypted)
     }
 
@@ -898,8 +871,7 @@ impl Store {
         let identity_bytes = self.get_identity_bytes().await?;
         let identity_str = str::from_utf8(&identity_bytes)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
-        let passphrase = self.get_cached_passphrase();
-        let our_recipient = recipient::identity_to_recipient(identity_str, passphrase.as_deref())?;
+        let our_recipient = recipient::identity_to_recipient(identity_str, None)?;
         let mut recipients_str: Vec<String> =
             recipients.iter().map(|r| r.public_key.clone()).collect();
         if !recipients_str.iter().any(|r| r == &our_recipient) {
@@ -921,10 +893,9 @@ impl Store {
         let Ok(identity_bytes) = self.get_identity_bytes().await else {
             return false;
         };
-        let passphrase = self.get_cached_passphrase();
         let blob_owned = blob.to_vec();
         spawn_blocking(move || {
-            crypto::decrypt_bytes(&blob_owned, &identity_bytes, passphrase.as_deref()).is_ok()
+            crypto::decrypt_bytes(&blob_owned, &identity_bytes, None).is_ok()
         })
         .await
         .unwrap_or(false)
@@ -976,16 +947,6 @@ impl Store {
         }
 
         Ok(raw_bytes)
-    }
-
-    /// Get the cached passphrase, if any.
-    ///
-    /// Returns `None` if the store has not been unlocked or has been locked.
-    fn get_cached_passphrase(&self) -> Option<String> {
-        self.cached_passphrase
-            .read()
-            .ok()
-            .and_then(|guard| guard.as_ref().map(|p| (**p).clone()))
     }
 
     /// Set a passphrase on an existing plaintext identity.
@@ -1666,7 +1627,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unlock_caches_passphrase_for_plaintext_identity() {
+    async fn unlock_is_noop_for_plaintext_identity() {
+        // 0014: the raw-passphrase cache is gone, so unlock() on a plaintext
+        // identity is now a true no-op — nothing is cached and is_unlocked()
+        // stays false. (In production unlock() is never called on plaintext: the
+        // router gates /unlock on is_identity_encrypted().) Plaintext identities
+        // decrypt straight from disk via get() without unlocking.
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
         config
@@ -1675,21 +1641,14 @@ mod tests {
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        // unlock() succeeds for plaintext identities and caches the passphrase.
-        // In production unlock() is never called on a plaintext identity (the
-        // router only routes to /unlock when is_identity_encrypted()), so this
-        // edge case is harmless. With is_unlocked() consulting both caches,
-        // the cached passphrase now trivially marks the store unlocked here.
         store.unlock("passphrase").await.unwrap();
-        // cached_identity should NOT be populated (identity is not age-encrypted)
         assert!(
             store.cached_identity.read().is_ok_and(|g| g.is_none()),
             "plaintext identity must not populate the decrypted-identity cache"
         );
-        // ...but the cached passphrase marks the store as unlocked.
         assert!(
-            store.is_unlocked(),
-            "unlock() caching the passphrase must mark the store unlocked"
+            !store.is_unlocked(),
+            "unlock() on a plaintext identity must not mark the store unlocked"
         );
     }
 
