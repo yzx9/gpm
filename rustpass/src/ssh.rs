@@ -29,7 +29,7 @@ pub struct SshKeyPair {
 ///
 /// Returns `SSH_KEY_INVALID` if key generation or encryption fails.
 pub fn generate_keypair(passphrase: Option<&str>) -> Result<SshKeyPair, Error> {
-    use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
+    use ssh_key::{rand_core::OsRng, Algorithm, LineEnding, PrivateKey};
 
     let key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).map_err(|e| {
         Error::new(
@@ -123,6 +123,50 @@ pub fn export_private_key(private_key_pem: &str) -> Result<Zeroizing<String>, Er
     })
 }
 
+/// Decrypt an SSH private key (if encrypted) and return it as an UNENCRYPTED
+/// OpenSSH PEM, for caching after `Store::unlock`. The cached bytes let
+/// `crypto::decrypt_bytes(.., None)` take age's no-KDF `Unencrypted` path,
+/// collapsing the per-entry bcrypt KDF to a one-time unlock cost.
+///
+/// Handles **OpenSSH** format (`-----BEGIN OPENSSH PRIVATE KEY-----`) via
+/// `ssh_key::PrivateKey::from_openssh`. This is the only format routed here:
+/// `Store::is_identity_encrypted` returns `true` only when age classifies the
+/// key as `Encrypted(_)`, which happens exclusively for OpenSSH-encrypted keys.
+/// Legacy `-----BEGIN RSA PRIVATE KEY-----` PEM is never encrypted-classified
+/// (age reads unencrypted PEM as `Unencrypted`, encrypted PEM as
+/// `Unsupported`), so it never reaches `unlock()` — and unencrypted legacy RSA
+/// still decrypts entries via the normal `get()` path without unlocking.
+///
+/// # Errors
+///
+/// Returns `WrongPassphrase` if the key is encrypted and `passphrase` is
+/// incorrect (mirrors `crypto::validate_ssh_key_passphrase`). Returns
+/// `SshKeyInvalid` if the key cannot be parsed or serialized.
+pub fn to_unencrypted_pem(pem: &str, passphrase: &str) -> Result<Zeroizing<String>, Error> {
+    use ssh_key::{LineEnding, PrivateKey};
+
+    let key = PrivateKey::from_openssh(pem.trim()).map_err(|e| {
+        Error::new(
+            ErrorCode::SshKeyInvalid,
+            format!("Cannot parse SSH private key: {e}"),
+        )
+    })?;
+
+    let key = if key.is_encrypted() {
+        key.decrypt(passphrase)
+            .map_err(|_| Error::new(ErrorCode::WrongPassphrase, "Wrong passphrase for SSH key"))?
+    } else {
+        key
+    };
+
+    key.to_openssh(LineEnding::default()).map_err(|e| {
+        Error::new(
+            ErrorCode::SshKeyInvalid,
+            format!("Private key serialization failed: {e}"),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +250,74 @@ mod tests {
     fn export_private_key_rejects_garbage() {
         let result = export_private_key("garbage");
         assert!(result.is_err(), "should reject invalid key");
+    }
+
+    // ── to_unencrypted_pem (Phase-1 gate + regression) ───────────────────
+
+    /// Encrypt `plaintext` to an SSH recipient string, returning ciphertext.
+    fn encrypt_to_ssh_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
+        use age::{ssh, Encryptor};
+        use std::io::Write;
+        let recipient: ssh::Recipient = recipient_str.parse().unwrap();
+        let recipients: Vec<Box<dyn age::Recipient>> = vec![Box::new(recipient)];
+        let encryptor = Encryptor::with_recipients(recipients.iter().map(AsRef::as_ref)).unwrap();
+        let mut encrypted = Vec::new();
+        let mut writer = encryptor.wrap_output(&mut encrypted).unwrap();
+        writer.write_all(plaintext).unwrap();
+        writer.finish().unwrap();
+        encrypted
+    }
+
+    /// Decrypt `ciphertext` with an UNENCRYPTED SSH PEM (the cached form),
+    /// proving the serialized PEM lands on age's no-KDF Unencrypted path.
+    fn decrypt_with_unencrypted_pem(ciphertext: &[u8], unencrypted_pem: &str) -> Vec<u8> {
+        use age::{ssh, Decryptor};
+        use std::io::Read;
+        let identity = ssh::Identity::from_buffer(unencrypted_pem.as_bytes(), None).unwrap();
+        let identities: Vec<Box<dyn age::Identity>> = vec![Box::new(identity)];
+        let decryptor = Decryptor::new(ciphertext).unwrap();
+        let mut reader = decryptor
+            .decrypt(identities.iter().map(AsRef::as_ref))
+            .unwrap();
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        out
+    }
+
+    /// Phase-1 gate: an encrypted ed25519 key decrypts to an unencrypted PEM
+    /// that age parses onto the no-KDF Unencrypted path and can decrypt with.
+    #[test]
+    fn to_unencrypted_pem_round_trips_ed25519() {
+        let pair = generate_keypair(Some("gate-passphrase")).unwrap();
+        let unenc = to_unencrypted_pem(&pair.private_key, "gate-passphrase").unwrap();
+
+        // Serialized as OpenSSH PEM.
+        assert!(
+            unenc.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"),
+            "expected OpenSSH PEM, got: {}",
+            unenc.as_str()
+        );
+        // age must classify the cached PEM as Unencrypted (no bcrypt KDF) — the
+        // whole point of caching it. (The cipher is "none", but it lives inside
+        // the base64 payload, so we assert the parsed variant, not a substring.)
+        let parsed = age::ssh::Identity::from_buffer(unenc.as_bytes(), None).unwrap();
+        assert!(
+            matches!(parsed, age::ssh::Identity::Unencrypted(_)),
+            "cached PEM must parse as Unencrypted"
+        );
+
+        // age re-parses onto the Unencrypted (no-KDF) path and decrypts a stanza.
+        let plaintext = b"gate-secret";
+        let ciphertext = encrypt_to_ssh_recipient(plaintext, &pair.public_key);
+        let decrypted = decrypt_with_unencrypted_pem(&ciphertext, &unenc);
+        assert_eq!(decrypted.as_slice(), plaintext);
+    }
+
+    /// G2: a wrong passphrase for an encrypted key returns `WrongPassphrase`.
+    #[test]
+    fn to_unencrypted_pem_wrong_passphrase() {
+        let pair = generate_keypair(Some("correct")).unwrap();
+        let err = to_unencrypted_pem(&pair.private_key, "wrong").unwrap_err();
+        assert_eq!(err.code, "WRONG_PASSPHRASE");
     }
 }

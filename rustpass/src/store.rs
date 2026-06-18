@@ -294,6 +294,27 @@ impl Store {
                     .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
                 *cache = Some(zeroizing);
             }
+        } else if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
+            // Encrypted SSH key: decrypt once (the bcrypt KDF is blocking work)
+            // and cache the UNENCRYPTED PEM, so per-entry decrypts skip the KDF
+            // entirely — age parses the cached PEM as the no-KDF `Unencrypted`
+            // variant instead of re-deriving the key every call.
+            let pw = passphrase.to_string();
+            let decrypted_pem = spawn_blocking(move || {
+                let pem = str::from_utf8(&encrypted_bytes).map_err(|_| {
+                    Error::new(ErrorCode::InvalidIdentity, "SSH identity is not valid UTF-8")
+                })?;
+                crate::ssh::to_unencrypted_pem(pem, &pw)
+            })
+            .await??;
+            let identity_bytes = Zeroizing::new(decrypted_pem.as_str().as_bytes().to_vec());
+            {
+                let mut cache = self
+                    .cached_identity
+                    .write()
+                    .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
+                *cache = Some(identity_bytes);
+            }
         }
 
         // Cache passphrase for encrypted SSH key decryption (works for both
@@ -1673,32 +1694,81 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unlock_marks_ssh_identity_unlocked() {
-        // Regression for the 48f5d7c SSH-unlock recognition bug: an encrypted
-        // SSH identity populates only cached_passphrase (no decrypted blob to
-        // cache), so is_unlocked() must consult cached_passphrase too.
+    async fn unlock_caches_decrypted_ssh_identity() {
+        // 0013: an encrypted SSH identity now decrypts ONCE at unlock() and
+        // caches the UNENCRYPTED PEM in cached_identity (previously only the
+        // passphrase was cached and the key was re-derived per entry). The
+        // cached bytes must be an unencrypted OpenSSH PEM so per-entry decrypts
+        // skip the bcrypt KDF.
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf());
-        assert!(
-            !store.is_unlocked(),
-            "store must start locked for an encrypted SSH identity"
-        );
+        assert!(!store.is_unlocked(), "store must start locked");
 
         store.unlock("test-passphrase").await.unwrap();
 
-        // The decrypted-identity cache stays empty for SSH (there is no
-        // decrypted blob to cache); only the passphrase is cached.
+        let guard = store
+            .cached_identity
+            .read()
+            .expect("cache lock");
+        let cached = guard
+            .as_ref()
+            .expect("cached_identity must be populated for an SSH identity");
+        let pem = str::from_utf8(cached).expect("cached bytes are a PEM string");
         assert!(
-            store.cached_identity.read().is_ok_and(|g| g.is_none()),
-            "SSH unlock must not populate the decrypted-identity cache"
+            pem.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"),
+            "cached SSH identity must be an OpenSSH PEM"
+        );
+        assert!(
+            matches!(
+                ssh::Identity::from_buffer(pem.as_bytes(), None),
+                Ok(ssh::Identity::Unencrypted(_))
+            ),
+            "cached SSH PEM must parse as Unencrypted (no KDF)"
         );
         assert!(
             store.is_unlocked(),
             "an encrypted SSH identity must be recognised as unlocked after unlock()"
+        );
+    }
+
+    /// G3: a wrong passphrase for an encrypted SSH identity returns
+    /// `WrongPassphrase` — the exact code `UnlockModal` and biometric
+    /// self-healing key on.
+    #[tokio::test]
+    async fn unlock_wrong_ssh_passphrase_returns_wrong_passphrase() {
+        let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(encrypted_ssh_key, None).await.unwrap();
+
+        let store = Store::new(dir.path().to_path_buf());
+        let err = store.unlock("wrong-passphrase").await.unwrap_err();
+        assert_eq!(err.code, "WRONG_PASSPHRASE");
+        assert!(!store.is_unlocked(), "a failed unlock must not unlock the store");
+    }
+
+    /// Regression guard (codex finding 1): a legacy RSA PEM identity is NOT
+    /// classified as encrypted, so `unlock()` is never routed to the
+    /// SSH-caching path for it. This is what keeps legacy RSA identities working
+    /// after 0013/0014 — `to_unencrypted_pem` is OpenSSH-only, but it never sees
+    /// legacy RSA because `is_identity_encrypted()` returns false (age reads
+    /// unencrypted PEM as `Unencrypted`, encrypted PEM as `Unsupported` — never
+    /// `Encrypted`). Unencrypted legacy RSA still decrypts via the normal
+    /// `get()` path without unlocking.
+    #[tokio::test]
+    async fn is_identity_encrypted_false_for_legacy_rsa_pem() {
+        let rsa_key = b"-----BEGIN RSA PRIVATE KEY-----\nMIIEogIBAAKCAQEAxO5yF0xjbmkQTfbaCP8DQC7kHnPJr5bdIie6Nzmg9lL6Chye\n0vK5iJ+BYkA1Hnf1WnNzoVIm3otZPkwZptertkY95JYFmTiA4IvHeL1yiOTd2AYc\na947EPpM9XPomeM/7U7c99OvuCuOl1YlTFsMsoPY/NiZ+NZjgMvb3XgyH0OXy3mh\nqp+SsJU+tRjZGfqM1iv2TZUCJTQnKF8YSVCyLPV67XM1slQQHmtZ5Q6NFhzg3j8a\nCY5rDR66UF5+Zn/TvN8bNdKn01I50VLePI0ZnnRcuLXK2t0Bpkk0NymZ3vsF10m9\nHCKVyxr2Y0Ejx4BtYXOK97gaYks73rBi7+/VywIDAQABAoIBADGsf8TWtOH9yGoS\nES9hu90ttsbjqAUNhdv+r18Mv0hC5+UzEPDe3uPScB1rWrrDwXS+WHVhtoI+HhWz\ntmi6UArbLvOA0Aq1EPUS7Q7Mop5bNIYwDG09EiMXL+BeC1b91nsygFRW5iULf502\n0pOvB8XjshEdRcFZuqGbSmtTzTjLLxYS/aboBtZLHrH4cRlFMpHWCSuJng8Psahp\nSnJbkjL7fHG81dlH+M3qm5EwdDJ1UmNkBfoSfGRs2pupk2cSJaL+SPkvNX+6Xyoy\nyvfnbJzKUTcV6rf+0S0P0yrWK3zRK9maPJ1N60lFui9LvFsunCLkSAluGKiMwEjb\nfm40F4kCgYEA+QzIeIGMwnaOQdAW4oc7hX5MgRPXJ836iALy56BCkZpZMjZ+VKpk\n8P4E1HrEywpgqHMox08hfCTGX3Ph6fFIlS1/mkLojcgkrqmg1IrRvh8vvaZqzaAf\nGKEhxxRta9Pvm44E2nUY97iCKzE3Vfh+FIyQLRuc+0COu49Me4HPtBUCgYEAym1T\nvNZKPfC/eTMh+MbWMsQArOePdoHQyRC38zeWrLaDFOUVzwzEvCQ0IzSs0PnLWkZ4\nxx60wBg5ZdU4iH4cnOYgjavQrbRFrCmZ1KDUm2+NAMw3avcLQqu41jqzyAlkktUL\nfZzyqHIBmKYLqut5GslkGnQVg6hB4psutHhiel8CgYA3yy9WH9/C6QBxqgaWdSlW\nfLby69j1p+WKdu6oCXUgXW3CHActPIckniPC3kYcHpUM58+o5wdfYnW2iKWB3XYf\nRXQiwP6MVNwy7PmE5Byc9Sui1xdyPX75648/pEnnMDGrraNUtYsEZCd1Oa9l6SeF\nvv/Fuzvt5caUKkQ+HxTDCQKBgFhqUiXr7zeIvQkiFVeE+a/ovmbHKXlYkCoSPFZm\nVFCR00VAHjt2V0PaCE/MRSNtx61hlIVcWxSAQCnDbNLpSnQZa+SVRCtqzve4n/Eo\nYlSV75+GkzoMN4XiXXRs5XOc7qnXlhJCiBac3Segdv4rpZTWm/uV8oOz7TseDtNS\ntai/AoGAC0CiIJAzmmXscXNS/stLrL9bb3Yb+VZi9zN7Cb/w7B0IJ35N5UOFmKWA\nQIGpMU4gh6p52S1eLttpIf2+39rEDzo8pY6BVmEp3fKN3jWmGS4mJQ31tWefupC+\nfGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=\n-----END RSA PRIVATE KEY-----";
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        config.save_identity(rsa_key, None).await.unwrap();
+        let store = Store::new(dir.path().to_path_buf());
+        assert!(
+            !store.is_identity_encrypted().await,
+            "legacy RSA PEM must not be treated as encrypted"
         );
     }
 
