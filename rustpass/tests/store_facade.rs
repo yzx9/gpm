@@ -56,7 +56,7 @@ mod tests {
         assert!(secret.body().contains("user: admin"));
 
         // 5. Sync (no changes)
-        let sync_result = store.sync().await.expect("sync should succeed");
+        let sync_result = expect_fast_forwarded(store.sync().await.expect("sync should succeed"));
         assert!(!sync_result.changed, "no upstream changes expected");
 
         // 6. Config
@@ -283,7 +283,7 @@ mod tests {
             .await
             .expect("configure should succeed");
 
-        let result = store.sync().await.expect("sync should succeed");
+        let result = expect_fast_forwarded(store.sync().await.expect("sync should succeed"));
         assert!(
             !result.changed,
             "sync with no changes should report unchanged"
@@ -324,7 +324,7 @@ mod tests {
         );
 
         // Sync should pick up the change
-        let sync_result = store.sync().await.expect("sync should succeed");
+        let sync_result = expect_fast_forwarded(store.sync().await.expect("sync should succeed"));
         assert!(sync_result.changed, "sync should detect upstream changes");
 
         // List should now show 2 entries

@@ -302,6 +302,39 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).toContain("Updated to def456");
       expect(wrapper.text()).toContain("new-entry");
     });
+
+    it("shows the divergence modal when diverged", async () => {
+      when("pull_repo", {
+        kind: "diverged",
+        local_ahead: 2,
+        remote_ahead: 1,
+        remote_tip: "deadbeefdeadbeef",
+        local_only_entries: ["local-only"],
+        modified_entries: ["shared"],
+        other_changed_files: ["notes.txt"],
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find('button[aria-label="Pull updates"]').trigger("click");
+      await flushPromises();
+
+      // Modal surfaces, listing every local-side change category.
+      expect(wrapper.text()).toContain("Local and remote have diverged");
+      expect(wrapper.text()).toContain("local-only");
+      expect(wrapper.text()).toContain("shared");
+      expect(wrapper.text()).toContain("notes.txt");
+
+      // Adopt is gated behind the confirmation checkbox.
+      const checkbox = wrapper.find('input[type="checkbox"]');
+      expect(checkbox.exists()).toBe(true);
+      expect(wrapper.find(".btn-danger").attributes("disabled")).toBeDefined();
+
+      await checkbox.setValue(true);
+      expect(
+        wrapper.find(".btn-danger").attributes("disabled"),
+      ).toBeUndefined();
+    });
   });
 
   describe("settings navigation", () => {

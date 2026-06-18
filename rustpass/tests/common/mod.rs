@@ -9,6 +9,18 @@ use std::str::FromStr;
 
 use age::secrecy::ExposeSecret;
 use age::x25519::{Identity, Recipient};
+use rustpass::{SyncOutcome, SyncResult};
+
+/// Unwrap a [`SyncOutcome::FastForwarded`] to its inner [`SyncResult`],
+/// panicking on `Diverged`. Existing fast-forward / verified-pull tests do not
+/// expect a divergence (that is covered by `sync_divergence.rs`).
+#[allow(dead_code)]
+pub fn expect_fast_forwarded(outcome: SyncOutcome) -> SyncResult {
+    match outcome {
+        SyncOutcome::FastForwarded(r) => r,
+        other => panic!("expected FastForwarded sync, got {other:?}"),
+    }
+}
 
 /// Generate a random x25519 keypair, returning `(identity_str, recipient_str)`.
 pub fn generate_test_keypair() -> (String, String) {

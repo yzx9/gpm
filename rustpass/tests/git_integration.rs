@@ -96,12 +96,14 @@ mod tests {
             "add second entry",
         );
 
-        let result = git::pull_repo(
-            clone_dir.path(),
-            &git::GitAuth::None,
-            &AuthenticityConfig::default(),
-        )
-        .expect("pull should succeed");
+        let result = expect_fast_forwarded(
+            git::pull_repo(
+                clone_dir.path(),
+                &git::GitAuth::None,
+                &AuthenticityConfig::default(),
+            )
+            .expect("pull should succeed"),
+        );
 
         assert_ne!(
             result.head,
@@ -121,12 +123,14 @@ mod tests {
         let (_bare_dir, clone_dir) =
             create_test_git_repo(vec![("sole.age", b"only-password")], &recipient);
 
-        let result = git::pull_repo(
-            clone_dir.path(),
-            &git::GitAuth::None,
-            &AuthenticityConfig::default(),
-        )
-        .expect("pull should succeed");
+        let result = expect_fast_forwarded(
+            git::pull_repo(
+                clone_dir.path(),
+                &git::GitAuth::None,
+                &AuthenticityConfig::default(),
+            )
+            .expect("pull should succeed"),
+        );
         assert!(
             !result.changed,
             "pull should report no changes when upstream is unchanged"

@@ -26,6 +26,25 @@ export interface PullResult {
   authenticity: AuthenticityResult;
 }
 
+/** Local-vs-remote divergence preview (no secrets — names/paths only). */
+export interface SyncDivergence {
+  local_ahead: number;
+  remote_ahead: number;
+  /** Full hash of the reviewed remote tip; passed back to resolve_sync_divergence. */
+  remote_tip: string;
+  /** Secret entries (`.age` stripped) present locally, absent remotely — deleted by adopt. */
+  local_only_entries: string[];
+  /** Secret entries present on both sides whose bytes differ — overwritten by adopt. */
+  modified_entries: string[];
+  /** Non-secret tracked files changed locally — also discarded/overwritten by a hard reset. */
+  other_changed_files: string[];
+}
+
+/** Outcome of `pull_repo`: a normal pull, or a divergence to resolve. */
+export type SyncOutcome =
+  | ({ kind: "fast_forwarded" } & PullResult)
+  | ({ kind: "diverged" } & SyncDivergence);
+
 export interface RepoConfig {
   url: string;
   pat: string | null;

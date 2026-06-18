@@ -30,7 +30,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use rustpass::template::{self, CreatePreset};
-use rustpass::{ConflictChoice, Error, ErrorCode, SyncResult, WriteOutcome, WriteResult};
+use rustpass::{
+    ConflictChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
+};
 use tauri::{AppHandle, State};
 use zeroize::Zeroizing;
 
@@ -192,11 +194,28 @@ pub(crate) async fn resolve_write_conflict(
     result
 }
 
-/// Pull latest changes from the remote (fast-forward only).
+/// Pull latest changes from the remote. Returns a `SyncOutcome`: a normal
+/// fast-forward, or `Diverged` when local/remote have diverged (the frontend
+/// shows a resolution modal).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn pull_repo(state: State<'_, AppState>) -> Result<SyncResult, Error> {
+pub(crate) async fn pull_repo(state: State<'_, AppState>) -> Result<SyncOutcome, Error> {
     state.store.sync().await
+}
+
+/// Resolve a pull/sync divergence by adopting the remote tip the user reviewed
+/// (`expected_remote_oid`). "Cancel" is client-side — the frontend just doesn't
+/// call this. Returns the post-adopt result so the badge can refresh.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn resolve_sync_divergence(
+    state: State<'_, AppState>,
+    expected_remote_oid: String,
+) -> Result<SyncResult, Error> {
+    state
+        .store
+        .resolve_sync_divergence(&expected_remote_oid)
+        .await
 }
 
 #[cfg(test)]

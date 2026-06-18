@@ -56,6 +56,43 @@ pub struct AuthenticityResult {
     pub blocked: bool,
 }
 
+/// Outcome of a sync (pull): a normal pull, or a divergence the caller must
+/// resolve. Replaces the bare [`SyncResult`] return of [`Store::sync`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SyncOutcome {
+    /// Normal fast-forward pull (changed or not).
+    FastForwarded(SyncResult),
+    /// Local and remote have diverged; the working branch is unchanged. The
+    /// caller must resolve via [`Store::resolve_sync_divergence`].
+    Diverged(SyncDivergence),
+}
+
+/// Local-vs-remote divergence, surfaced so the user can decide whether to
+/// discard local-only changes and adopt the remote. Carries no secrets — entry
+/// *names* / file paths only.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncDivergence {
+    /// Commits reachable from local HEAD but not the merge base.
+    pub local_ahead: usize,
+    /// Commits reachable from the remote tip but not the merge base.
+    pub remote_ahead: usize,
+    /// Full hash of the remote tip this preview was computed against. Passed
+    /// back to [`Store::resolve_sync_divergence`] so we adopt exactly what was
+    /// reviewed (no stale-confirmation TOCTOU).
+    pub remote_tip: String,
+    /// Secret entries (`.age` stripped) present locally, absent remotely —
+    /// **deleted** by "adopt remote".
+    pub local_only_entries: Vec<String>,
+    /// Secret entries present on both sides whose `.age` bytes differ —
+    /// **overwritten** by "adopt remote". (May over-report identical-plaintext
+    /// re-encryptions until the decrypt-and-compare enhancement lands.)
+    pub modified_entries: Vec<String>,
+    /// Non-secret tracked files changed on the local side (templates,
+    /// recipients, …) — also discarded/overwritten by a hard reset.
+    pub other_changed_files: Vec<String>,
+}
+
 /// Result of a successful write (`Store::set`) — the new HEAD commit hash.
 #[derive(Debug, Clone, Serialize)]
 pub struct WriteResult {
@@ -553,8 +590,12 @@ impl Store {
     pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteOutcome, Error> {
         validate_secret_name(name)?;
 
-        // gopass PushPull: pull before we touch anything, so we build on the
-        // latest remote state.
+        // gopass PushPull: best-effort pull before writing so we build on the
+        // latest remote. Divergence is tolerated — the push-rejection flow
+        // below (rollback → replay | same-name Conflict) handles a diverged or
+        // moved remote authoritatively, since the push result is ground truth,
+        // not this pre-sync. See .plans/0016-set-auto-sync-removal.md for the
+        // deferred question of removing this pre-sync entirely.
         self.sync().await?;
         let pre_write_head = self.current_head_hash().await?;
 
@@ -649,6 +690,29 @@ impl Store {
             }
             ConflictChoice::Cancel => Ok(None),
         }
+    }
+
+    /// Resolve a [`SyncOutcome::Diverged`] by adopting the remote tip exactly
+    /// as the user reviewed it (`expected_remote_oid`). Re-fetches fresh and
+    /// refuses ([`ErrorCode::PullFfFailed`]) if the remote has advanced since
+    /// the preview. "Cancel" is client-side (the frontend just doesn't call
+    /// this). Carries no plaintext, so (unlike the write path) there is no
+    /// stash and no auto-lock coupling.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::PullFfFailed`] if the remote moved past the
+    /// reviewed tip, or a git/signing error from the underlying adopt.
+    pub async fn resolve_sync_divergence(
+        &self,
+        expected_remote_oid: &str,
+    ) -> Result<SyncResult, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let auth = repo_config.to_git_auth();
+        let policy = repo_config.authenticity;
+        let expected = expected_remote_oid.to_string();
+        spawn_blocking(move || git::adopt_remote(&repo_path, &auth, &policy, &expected)).await?
     }
 
     /// Look up the content template (`.pass-template`) that applies to `name`,
@@ -1000,7 +1064,7 @@ impl Store {
     /// Returns an error if the store is not configured, the remote is
     /// unreachable, the branches have diverged, or Enforce mode refuses the
     /// pull.
-    pub async fn sync(&self) -> Result<SyncResult, Error> {
+    pub async fn sync(&self) -> Result<SyncOutcome, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();

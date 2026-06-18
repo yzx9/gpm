@@ -12,6 +12,8 @@ import type {
   CommitSigInfo,
   Entry,
   PullResult,
+  SyncDivergence,
+  SyncOutcome,
 } from "../types";
 import { formatRelativeTime } from "../utils/format";
 import { filterEntries } from "../utils/filter";
@@ -38,6 +40,13 @@ const authState = ref<AuthenticityState | null>(null);
 const auditIssues = ref<CommitSigInfo[] | null>(null);
 /** Enforce-block result from the last pull → drives the block modal. */
 const blockIssues = ref<CommitSigInfo[] | null>(null);
+
+// ── Pull divergence (adopt-remote modal) ─────────────────────────────────
+/** Diverged pull → drives the adopt-remote modal. */
+const divergence = ref<SyncDivergence | null>(null);
+const adopting = ref(false);
+const adoptConfirmed = ref(false);
+const adoptError = ref("");
 
 /** The indicator badge for the current authenticity state. */
 const badge = computed<{ glyph: string; cls: string; title: string }>(() => {
@@ -109,7 +118,14 @@ async function pullRepo() {
   auditIssues.value = null;
   blockIssues.value = null;
   try {
-    const result = await invoke<PullResult>("pull_repo");
+    const result = await invoke<SyncOutcome>("pull_repo");
+    if (result.kind === "diverged") {
+      // Surface the divergence for resolution instead of erroring.
+      divergence.value = result;
+      adoptConfirmed.value = false;
+      adoptError.value = "";
+      return;
+    }
     if (result.changed) {
       pullResult.value = `Updated to ${result.head}`;
       await loadEntries();
@@ -141,6 +157,52 @@ async function pullRepo() {
   } finally {
     pulling.value = false;
   }
+}
+
+/** Resolve a divergence by adopting the reviewed remote tip. */
+async function adoptRemote() {
+  if (!divergence.value) return;
+  adopting.value = true;
+  adoptError.value = "";
+  try {
+    const result = await invoke<PullResult>("resolve_sync_divergence", {
+      expectedRemoteOid: divergence.value.remote_tip,
+    });
+    divergence.value = null;
+    adoptConfirmed.value = false;
+    pullResult.value = `Updated to ${result.head}`;
+    await loadEntries();
+    lastSyncTime.value = Date.now();
+    await loadAuthState();
+    // Enforce may refuse the adopt (unverified remote commits) — surface it.
+    if (result.authenticity.blocked) {
+      blockIssues.value = result.authenticity.open_issues;
+    }
+    setTimeout(() => {
+      pullResult.value = "";
+    }, 3000);
+  } catch (e) {
+    const appError = e as AppError;
+    if (appError?.code === "PULL_FF_FAILED") {
+      // Remote moved since the user reviewed the divergence — recheck.
+      adoptError.value =
+        "The remote changed since you reviewed this. Rechecking…";
+      divergence.value = null;
+      adoptConfirmed.value = false;
+      await pullRepo();
+    } else {
+      adoptError.value = appError?.message || "Adopt failed";
+    }
+  } finally {
+    adopting.value = false;
+  }
+}
+
+/** Dismiss the divergence modal without changing anything. */
+function cancelDivergence() {
+  divergence.value = null;
+  adoptConfirmed.value = false;
+  adoptError.value = "";
 }
 
 function showToast(message: string) {
@@ -484,6 +546,100 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+    <!-- Divergence modal (local & remote diverged) -->
+    <div
+      v-if="divergence"
+      class="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Local and remote have diverged"
+    >
+      <div class="modal-card w-full max-w-[480px]">
+        <h2 class="text-base font-medium mb-1 text-danger">
+          Local and remote have diverged
+        </h2>
+        <p class="text-xs text-muted mb-3">
+          Your branch is {{ divergence.local_ahead }}
+          {{ divergence.local_ahead === 1 ? "commit" : "commits" }} ahead.
+          Adopting the remote discards the local-only changes below — this
+          cannot be undone.
+        </p>
+
+        <div class="flex flex-col gap-2 mb-3 div-scroll">
+          <div
+            v-if="divergence.local_only_entries.length"
+            class="div-block div-danger"
+          >
+            <div class="div-head text-danger">
+              Will be deleted · {{ divergence.local_only_entries.length }}
+            </div>
+            <ul class="div-list">
+              <li v-for="n in divergence.local_only_entries" :key="n">
+                <code>{{ n }}</code>
+              </li>
+            </ul>
+          </div>
+          <div
+            v-if="divergence.modified_entries.length"
+            class="div-block div-warn"
+          >
+            <div class="div-head text-warning">
+              Will be overwritten · {{ divergence.modified_entries.length }}
+            </div>
+            <ul class="div-list">
+              <li v-for="n in divergence.modified_entries" :key="n">
+                <code>{{ n }}</code>
+              </li>
+            </ul>
+          </div>
+          <div
+            v-if="divergence.other_changed_files.length"
+            class="div-block div-muted"
+          >
+            <div class="div-head text-muted">
+              Other local changes · {{ divergence.other_changed_files.length }}
+            </div>
+            <ul class="div-list">
+              <li v-for="n in divergence.other_changed_files" :key="n">
+                <code>{{ n }}</code>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <p v-if="adoptError" class="text-xs text-danger mb-2" role="alert">
+          {{ adoptError }}
+        </p>
+
+        <label class="flex items-start gap-2 text-sm mb-3 cursor-pointer">
+          <input
+            type="checkbox"
+            class="mt-1"
+            :disabled="adopting"
+            v-model="adoptConfirmed"
+          />
+          <span>
+            I understand this discards my {{ divergence.local_ahead }}
+            {{ divergence.local_ahead === 1 ? "commit" : "commits" }} and the
+            changes listed above.
+          </span>
+        </label>
+
+        <div class="flex flex-col gap-2">
+          <button
+            class="btn-danger"
+            :disabled="!adoptConfirmed || adopting"
+            @click="adoptRemote"
+          >
+            <span v-if="adopting" class="spinner" aria-hidden="true"></span>
+            {{ adopting ? "Adopting…" : "Adopt remote (discard local)" }}
+          </button>
+          <button class="btn-sm" :disabled="adopting" @click="cancelDivergence">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -583,5 +739,63 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+}
+
+.btn-danger {
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-sm);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  min-height: 48px;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-danger);
+  color: var(--color-surface);
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.div-scroll {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.div-block {
+  border-left: 3px solid var(--color-edge);
+  padding-left: 0.5rem;
+}
+
+.div-danger {
+  border-left-color: var(--color-danger);
+}
+
+.div-warn {
+  border-left-color: var(--color-warning, #c93);
+}
+
+.div-muted {
+  border-left-color: var(--color-subtle, #999);
+}
+
+.div-head {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  margin-bottom: 0.15rem;
+}
+
+.div-list {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.div-list li {
+  font-size: var(--text-xs);
 }
 </style>

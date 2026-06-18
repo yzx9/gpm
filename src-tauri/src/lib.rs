@@ -117,6 +117,7 @@ pub fn run() {
             read::show_password,
             // write / sync
             write::pull_repo,
+            write::resolve_sync_divergence,
             write::list_create_presets,
             write::lookup_template,
             write::preview_create,

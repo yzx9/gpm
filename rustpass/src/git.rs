@@ -8,7 +8,7 @@ use git2::{FetchOptions, RemoteCallbacks, Repository};
 
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
-use crate::store::{AuthenticityResult, SyncResult};
+use crate::store::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
 
 /// Credentials for Git remote authentication.
 #[derive(Debug, Clone)]
@@ -104,7 +104,9 @@ pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
 ///   (Enforce) refuse to advance when a non-ignored blocking issue remains —
 ///   HEAD and the working tree stay put.
 ///
-/// Returns whether HEAD advanced and the current HEAD hash.
+/// Returns a [`SyncOutcome`]: [`SyncOutcome::FastForwarded`] for a normal
+/// pull, or [`SyncOutcome::Diverged`] when the branches have diverged — the
+/// caller surfaces this for resolution instead of erroring.
 ///
 /// # Errors
 ///
@@ -114,7 +116,7 @@ pub fn pull_repo(
     repo_path: &Path,
     auth: &GitAuth,
     policy: &AuthenticityConfig,
-) -> Result<SyncResult, Error> {
+) -> Result<SyncOutcome, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
 
@@ -127,7 +129,7 @@ pub fn pull_repo(
 
     let callbacks = build_remote_callbacks(auth);
 
-    // Off mode: original in-place fetch + checkout path (unchanged behaviour).
+    // Off mode: temp-ref fetch + fast-forward (divergence surfaced, not errored).
     if policy.mode == VerifyMode::Off {
         return pull_off(&repo, &mut remote, callbacks);
     }
@@ -397,50 +399,72 @@ fn empty_authenticity(mode: VerifyMode) -> AuthenticityResult {
     }
 }
 
-/// Off-mode pull: in-place refspec fetch + forced checkout. Today's behaviour,
-/// byte-for-byte.
+/// Off-mode pull: fetch the current branch into a temp ref, then fast-forward
+/// (or report divergence). gpm operates on a single default branch, so fetching
+/// one branch is correct; using a temp ref (like the verified path) means
+/// divergence is detected reliably, and the working branch is never moved
+/// speculatively — so a `Diverged` result leaves the repo byte-identical.
 fn pull_off(
     repo: &Repository,
     remote: &mut git2::Remote<'_>,
     callbacks: RemoteCallbacks<'_>,
-) -> Result<SyncResult, Error> {
-    // Capture HEAD before fetch (the in-place refspec moves refs during fetch).
-    let pre_fetch_oid = repo.head().ok().and_then(|r| r.target());
+) -> Result<SyncOutcome, Error> {
+    let branch_name = repo
+        .head()?
+        .shorthand()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot pull"))?
+        .to_string();
+    let pre_oid = repo.head().ok().and_then(|r| r.target());
 
+    let temp_ref = format!("refs/gpm/pending/{branch_name}");
+    let refspec = format!("+refs/heads/{branch_name}:{temp_ref}");
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
-    remote.fetch(&["refs/heads/*:refs/heads/*"], Some(&mut fetch_opts), None)?;
+    remote.fetch(&[&refspec], Some(&mut fetch_opts), None)?;
 
-    let post_fetch_oid = repo
-        .head()?
-        .target()
-        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Cannot determine current HEAD"))?;
+    let fetched_oid = repo.refname_to_id(&temp_ref).map_err(|e| {
+        Error::new(
+            ErrorCode::NetworkError,
+            format!("Fetch produced no ref: {e}"),
+        )
+    })?;
+    let cleanup = || {
+        drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
+    };
 
-    if let Some(pre_oid) = pre_fetch_oid {
-        if post_fetch_oid == pre_oid {
-            return Ok(SyncResult {
-                changed: false,
-                head: short_hash(&post_fetch_oid),
-                authenticity: empty_authenticity(VerifyMode::Off),
-            });
-        }
-        if !repo.graph_descendant_of(post_fetch_oid, pre_oid)? {
-            return Err(Error::new(
-                ErrorCode::PullFfFailed,
-                "Cannot fast-forward: branches have diverged. Resolve on desktop.",
-            ));
-        }
+    let Some(pre_oid) = pre_oid else {
+        advance_branch(repo, &branch_name, fetched_oid)?;
+        cleanup();
+        return Ok(SyncOutcome::FastForwarded(SyncResult {
+            changed: true,
+            head: short_hash(&fetched_oid),
+            authenticity: empty_authenticity(VerifyMode::Off),
+        }));
+    };
+
+    if fetched_oid == pre_oid {
+        cleanup();
+        return Ok(SyncOutcome::FastForwarded(SyncResult {
+            changed: false,
+            head: short_hash(&fetched_oid),
+            authenticity: empty_authenticity(VerifyMode::Off),
+        }));
     }
 
-    let mut checkout_builder = git2::build::CheckoutBuilder::new();
-    checkout_builder.force();
-    repo.checkout_head(Some(&mut checkout_builder))?;
+    // Fetched tip is not a descendant of HEAD → diverged; surface for resolution.
+    if !repo.graph_descendant_of(fetched_oid, pre_oid)? {
+        let div = divergence_info(repo, pre_oid, fetched_oid)?;
+        cleanup();
+        return Ok(SyncOutcome::Diverged(div));
+    }
 
-    Ok(SyncResult {
+    advance_branch(repo, &branch_name, fetched_oid)?;
+    cleanup();
+    Ok(SyncOutcome::FastForwarded(SyncResult {
         changed: true,
-        head: short_hash(&post_fetch_oid),
+        head: short_hash(&fetched_oid),
         authenticity: empty_authenticity(VerifyMode::Off),
-    })
+    }))
 }
 
 /// Audit/Enforce pull: fetch the current branch into a temp ref, verify the
@@ -450,7 +474,7 @@ fn pull_verified(
     remote: &mut git2::Remote<'_>,
     callbacks: RemoteCallbacks<'_>,
     policy: &AuthenticityConfig,
-) -> Result<SyncResult, Error> {
+) -> Result<SyncOutcome, Error> {
     let mode = policy.mode;
 
     // The current branch HEAD sits on (e.g. "main"). gpm always operates on a
@@ -488,7 +512,7 @@ fn pull_verified(
     let Some(pre_oid) = pre_fetch_oid else {
         advance_branch(repo, &branch_name, fetched_oid)?;
         cleanup();
-        return Ok(SyncResult {
+        return Ok(SyncOutcome::FastForwarded(SyncResult {
             changed: true,
             head: short_hash(&fetched_oid),
             authenticity: AuthenticityResult {
@@ -497,12 +521,12 @@ fn pull_verified(
                 open_issues: Vec::new(),
                 blocked: false,
             },
-        });
+        }));
     };
 
     if fetched_oid == pre_oid {
         cleanup();
-        return Ok(SyncResult {
+        return Ok(SyncOutcome::FastForwarded(SyncResult {
             changed: false,
             head: short_hash(&fetched_oid),
             authenticity: AuthenticityResult {
@@ -511,16 +535,15 @@ fn pull_verified(
                 open_issues: Vec::new(),
                 blocked: false,
             },
-        });
+        }));
     }
 
-    // Fast-forward only: fetched tip must descend from the current HEAD.
+    // Fast-forward only: fetched tip must descend from the current HEAD,
+    // otherwise the branches have diverged — surface it for resolution.
     if !repo.graph_descendant_of(fetched_oid, pre_oid)? {
+        let div = divergence_info(repo, pre_oid, fetched_oid)?;
         cleanup();
-        return Err(Error::new(
-            ErrorCode::PullFfFailed,
-            "Cannot fast-forward: branches have diverged. Resolve on desktop.",
-        ));
+        return Ok(SyncOutcome::Diverged(div));
     }
 
     // Verify every commit in (pre_oid, fetched_oid].
@@ -537,7 +560,7 @@ fn pull_verified(
     if blocked {
         // Do NOT move the branch; HEAD and the working tree stay put.
         cleanup();
-        return Ok(SyncResult {
+        return Ok(SyncOutcome::FastForwarded(SyncResult {
             changed: false,
             head: short_hash(&pre_oid),
             authenticity: AuthenticityResult {
@@ -546,13 +569,13 @@ fn pull_verified(
                 open_issues,
                 blocked: true,
             },
-        });
+        }));
     }
 
     // Audit (always) or Enforce (no blocking issues): advance + check out.
     advance_branch(repo, &branch_name, fetched_oid)?;
     cleanup();
-    Ok(SyncResult {
+    Ok(SyncOutcome::FastForwarded(SyncResult {
         changed: true,
         head: short_hash(&fetched_oid),
         authenticity: AuthenticityResult {
@@ -561,7 +584,7 @@ fn pull_verified(
             open_issues,
             blocked: false,
         },
-    })
+    }))
 }
 
 /// Move the branch ref to `target` and check out HEAD (forced), updating the
@@ -573,6 +596,176 @@ fn advance_branch(repo: &Repository, branch_name: &str, target: git2::Oid) -> Re
     checkout_builder.force();
     repo.checkout_head(Some(&mut checkout_builder))?;
     Ok(())
+}
+
+/// Count commits reachable from `tip` but not from `base` (first-parent only).
+fn count_ahead(repo: &Repository, tip: git2::Oid, base: git2::Oid) -> Result<usize, Error> {
+    let mut walk = repo.revwalk()?;
+    walk.push(tip)?;
+    walk.hide(base)?;
+    walk.simplify_first_parent()?;
+    Ok(walk.filter_map(Result::ok).count())
+}
+
+/// Classify one local-side file loss for the divergence preview: `.age` files
+/// become entry names (suffix stripped) and land in `secrets`; anything else
+/// lands in `other` by path.
+fn classify_loss(path: &Path, secrets: &mut Vec<String>, other: &mut Vec<String>) {
+    let is_age = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("age"));
+    let s = path.to_string_lossy().into_owned();
+    if is_age {
+        secrets.push(s.trim_end_matches(".age").to_string());
+    } else {
+        other.push(s);
+    }
+}
+
+/// Build the divergence preview for a local-vs-remote split: ahead counts plus
+/// the full set of local-side tracked-file changes an "adopt remote" would
+/// discard/overwrite. Pure git tree diff — no decryption (so identical-plaintext
+/// re-encryptions are over-reported as `modified` until a future enhancement).
+fn divergence_info(
+    repo: &Repository,
+    local_oid: git2::Oid,
+    remote_oid: git2::Oid,
+) -> Result<SyncDivergence, Error> {
+    let base = repo.merge_base(local_oid, remote_oid)?;
+    let local_ahead = count_ahead(repo, local_oid, base)?;
+    let remote_ahead = count_ahead(repo, remote_oid, base)?;
+
+    let local_tree = repo.find_commit(local_oid)?.tree()?;
+    let remote_tree = repo.find_commit(remote_oid)?.tree()?;
+    // diff_tree_to_tree(old=local, new=remote): old_file() is the local side.
+    let diff = repo.diff_tree_to_tree(Some(&local_tree), Some(&remote_tree), None)?;
+
+    let mut local_only = Vec::new();
+    let mut modified = Vec::new();
+    let mut other = Vec::new();
+    for delta in diff.deltas() {
+        match delta.status() {
+            // Present locally, absent remotely → deleted by an adopt.
+            git2::Delta::Deleted => {
+                if let Some(p) = delta.old_file().path() {
+                    classify_loss(p, &mut local_only, &mut other);
+                }
+            }
+            // Present on both sides but differing (incl. rename/copy) → overwritten.
+            git2::Delta::Modified | git2::Delta::Renamed | git2::Delta::Copied => {
+                if let Some(p) = delta.old_file().path() {
+                    classify_loss(p, &mut modified, &mut other);
+                }
+            }
+            // Added remotely (absent locally): adopting remote gains it — not a loss.
+            _ => {}
+        }
+    }
+
+    Ok(SyncDivergence {
+        local_ahead,
+        remote_ahead,
+        remote_tip: remote_oid.to_string(),
+        local_only_entries: local_only,
+        modified_entries: modified,
+        other_changed_files: other,
+    })
+}
+
+/// Adopt the remote tip exactly as reviewed (`expected_remote_oid`): re-fetch,
+/// refuse if the remote has moved past it, then under the configured
+/// authenticity policy verify the remote-only commits and hard-advance the
+/// branch to the remote tip. Mirrors `pull_verified` minus the fast-forward
+/// guard (we are *resolving* divergence, so we adopt regardless).
+///
+/// # Errors
+///
+/// Returns [`ErrorCode::PullFfFailed`] if the remote advanced since the user
+/// reviewed the divergence, or a git/signing error otherwise.
+pub fn adopt_remote(
+    repo_path: &Path,
+    auth: &GitAuth,
+    policy: &AuthenticityConfig,
+    expected_remote_oid: &str,
+) -> Result<SyncResult, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+
+    let branch_name = repo
+        .head()?
+        .shorthand()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot pull"))?
+        .to_string();
+
+    let (_branch, temp_ref, fetched_oid) = fetch_remote_into_temp(&repo, auth)?;
+    let cleanup = || {
+        drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
+    };
+
+    // Stale-confirmation guard: adopt exactly the tip the user reviewed.
+    let expected = git2::Oid::from_str(expected_remote_oid)?;
+    if fetched_oid != expected {
+        cleanup();
+        return Err(Error::new(
+            ErrorCode::PullFfFailed,
+            "Remote changed since you reviewed the divergence; pull again.",
+        ));
+    }
+
+    let pre_oid = repo.head().ok().and_then(|r| r.target());
+    let mode = policy.mode;
+
+    if mode == VerifyMode::Off {
+        advance_branch(&repo, &branch_name, fetched_oid)?;
+        cleanup();
+        return Ok(SyncResult {
+            changed: pre_oid != Some(fetched_oid),
+            head: short_hash(&fetched_oid),
+            authenticity: empty_authenticity(VerifyMode::Off),
+        });
+    }
+
+    // Audit/Enforce: verify the remote-only range (merge_base, fetched] — NOT
+    // (pre_oid, fetched], which would violate `verify_range`'s descendant
+    // contract on a divergence.
+    let pre = pre_oid.unwrap_or(fetched_oid);
+    let base = repo.merge_base(pre, fetched_oid).unwrap_or(pre);
+    let trusted = signing::trusted_fingerprints(policy);
+    let new_commits = signing::verify_range(&repo, base, fetched_oid, &trusted, &policy.ignored)?;
+    let open_issues: Vec<_> = new_commits
+        .iter()
+        .filter(|c| !c.ignored && c.status.is_issue())
+        .cloned()
+        .collect();
+
+    let blocked = mode == VerifyMode::Enforce && !open_issues.is_empty();
+    if blocked {
+        cleanup();
+        return Ok(SyncResult {
+            changed: false,
+            head: short_hash(&pre),
+            authenticity: AuthenticityResult {
+                mode,
+                new_commits,
+                open_issues,
+                blocked: true,
+            },
+        });
+    }
+
+    advance_branch(&repo, &branch_name, fetched_oid)?;
+    cleanup();
+    Ok(SyncResult {
+        changed: true,
+        head: short_hash(&fetched_oid),
+        authenticity: AuthenticityResult {
+            mode,
+            new_commits,
+            open_issues,
+            blocked: false,
+        },
+    })
 }
 
 /// Classify a git2 error message into the appropriate [`Error`].

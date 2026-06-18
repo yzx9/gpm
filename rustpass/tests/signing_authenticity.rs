@@ -233,7 +233,7 @@ fn audit_pull_reports_unsigned_issue_but_advances() {
     // Remote feeds an unsigned commit.
     add_unsigned_commit_to_bare(bare_dir.path(), &recipient, "unsigned update");
 
-    let result = block_on(store.sync()).expect("audit pull");
+    let result = common::expect_fast_forwarded(block_on(store.sync()).expect("audit pull"));
     assert!(result.changed, "Audit must still advance HEAD");
     assert!(!result.authenticity.blocked, "Audit never blocks");
     assert!(
@@ -274,7 +274,9 @@ fn enforce_aborts_pull_on_unsigned_commit_head_unchanged() {
     // Remote feeds an unsigned commit.
     add_unsigned_commit_to_bare(bare_dir.path(), &recipient, "malicious unsigned");
 
-    let result = block_on(store.sync()).expect("sync returns (blocked, not error)");
+    let result = common::expect_fast_forwarded(
+        block_on(store.sync()).expect("sync returns (blocked, not error)"),
+    );
     assert!(
         !result.changed,
         "Enforce must NOT advance HEAD on a blocking issue"
@@ -325,7 +327,7 @@ fn enforce_allows_pull_when_signed_by_trusted_key() {
         &fixture.private,
     );
 
-    let result = block_on(store.sync()).expect("enforce pull");
+    let result = common::expect_fast_forwarded(block_on(store.sync()).expect("enforce pull"));
     assert!(
         result.changed,
         "Enforce must advance HEAD when the new commit is signed by a trusted key"
@@ -377,7 +379,7 @@ fn enforce_blocks_on_untrusted_signer() {
         &attacker.private,
     );
 
-    let result = block_on(store.sync()).expect("sync");
+    let result = common::expect_fast_forwarded(block_on(store.sync()).expect("sync"));
     assert!(!result.changed, "Enforce must block an untrusted signer");
     assert!(result.authenticity.blocked);
     assert_eq!(
@@ -409,7 +411,7 @@ fn ignored_issue_no_longer_blocks_enforce() {
     add_unsigned_commit_to_bare(bare_dir.path(), &recipient, "unsigned");
 
     // First pull blocks.
-    let blocked = block_on(store.sync()).expect("sync1");
+    let blocked = common::expect_fast_forwarded(block_on(store.sync()).expect("sync1"));
     assert!(blocked.authenticity.blocked);
     assert_eq!(store_head(&store), head_before);
 
@@ -418,7 +420,7 @@ fn ignored_issue_no_longer_blocks_enforce() {
     block_on(store.ignore_commit_issue(&offending.hash)).expect("ignore");
 
     // Second pull: the unsigned commit is now ignored → Enforce advances.
-    let result = block_on(store.sync()).expect("sync2");
+    let result = common::expect_fast_forwarded(block_on(store.sync()).expect("sync2"));
     assert!(result.changed, "an ignored issue must not block Enforce");
     assert!(!result.authenticity.blocked);
     assert!(result.authenticity.open_issues.is_empty());
