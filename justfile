@@ -90,6 +90,6 @@ release new_version:
   git commit -m "build: release v{{new_version}}"
   git tag "v{{new_version}}" -m "build: release v{{new_version}}"
 
-# [private] Regenerate app icons if source is newer
+# [private] Regenerate app icons + web favicons if source is newer
 _gen-icons:
-  [ src-tauri/icons/128x128.png -nt assets/app-icon.png ] || pnpm tauri icon assets/app-icon.png
+  ./scripts/gen-icons.sh

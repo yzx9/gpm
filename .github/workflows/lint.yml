@@ -38,7 +38,7 @@ jobs:
         run: pnpm install
 
       - name: Generate icons
-        run: pnpm tauri icon assets/app-icon.png
+        run: sh scripts/gen-icons.sh
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
