@@ -167,6 +167,34 @@ describe("SetupPage", () => {
       expect(wrapper.find('textarea[id="identity"]').exists()).toBe(true);
     });
 
+    it("saves a custom commit identity from Advanced during clone", async () => {
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await fillStep1(wrapper, { repoUrl: "https://github.com/user/repo.git" });
+      await wrapper.find('input[id="su-commit-name"]').setValue("Alice");
+      await wrapper
+        .find('input[id="su-commit-email"]')
+        .setValue("alice@example.com");
+      await submitStep1(wrapper);
+
+      expect(invoke).toHaveBeenCalledWith("set_commit_identity", {
+        name: "Alice",
+        email: "alice@example.com",
+      });
+    });
+
+    it("does not save a commit identity when Advanced is left blank", async () => {
+      const wrapper = mount(SetupPage);
+      await flushPromises();
+      await fillStep1(wrapper, { repoUrl: "https://github.com/user/repo.git" });
+      await submitStep1(wrapper);
+
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_commit_identity",
+        expect.anything(),
+      );
+    });
+
     it("displays error from clone failure", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(false) // is_repo_ready

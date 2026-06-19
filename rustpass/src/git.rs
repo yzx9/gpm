@@ -138,11 +138,19 @@ pub fn pull_repo(
     pull_verified(&repo, &mut remote, callbacks, policy)
 }
 
-/// The commit author gpm writes under. gpm is a single-user client and does not
+/// The signature gpm commits under. `name` / `email` come from the configured
+/// commit identity and fall back to the app default when `None`. gpm does not
 /// (yet) SSH-sign its own commits; remote commits are verified on pull via the
-/// authenticity layer. A fixed identity keeps the author stable across devices.
-fn gpm_signature() -> Result<git2::Signature<'static>, Error> {
-    git2::Signature::now("gpm", "gpm@local").map_err(|e| {
+/// authenticity layer.
+fn gpm_signature(
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<git2::Signature<'static>, Error> {
+    git2::Signature::now(
+        name.unwrap_or(crate::config::DEFAULT_COMMIT_NAME),
+        email.unwrap_or(crate::config::DEFAULT_COMMIT_EMAIL),
+    )
+    .map_err(|e| {
         Error::new(
             ErrorCode::StoreError,
             format!("Failed to build signature: {e}"),
@@ -156,6 +164,8 @@ fn add_and_commit(
     repo: &Repository,
     rel_paths: &[String],
     message: &str,
+    name: Option<&str>,
+    email: Option<&str>,
 ) -> Result<git2::Oid, Error> {
     let mut index = repo.index()?;
     for p in rel_paths {
@@ -173,7 +183,7 @@ fn add_and_commit(
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit to build on"))?;
     let parent = repo.find_commit(head_oid)?;
 
-    let sig = gpm_signature()?;
+    let sig = gpm_signature(name, email)?;
     Ok(repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?)
 }
 
@@ -209,10 +219,16 @@ fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(), Error> {
 /// # Errors
 ///
 /// Returns an error if the repo cannot be opened or staging/committing fails.
-pub fn commit(repo_path: &Path, rel_paths: &[String], message: &str) -> Result<String, Error> {
+pub fn commit(
+    repo_path: &Path,
+    rel_paths: &[String],
+    message: &str,
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<String, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
-    add_and_commit(&repo, rel_paths, message)?;
+    add_and_commit(&repo, rel_paths, message, name, email)?;
     let head = repo
         .head()?
         .target()
@@ -245,8 +261,10 @@ pub fn commit_and_push(
     auth: &GitAuth,
     rel_paths: &[String],
     message: &str,
+    name: Option<&str>,
+    email: Option<&str>,
 ) -> Result<String, Error> {
-    let head = commit(repo_path, rel_paths, message)?;
+    let head = commit(repo_path, rel_paths, message, name, email)?;
     push(repo_path, auth)?;
     Ok(head)
 }

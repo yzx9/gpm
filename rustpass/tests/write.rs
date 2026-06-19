@@ -42,6 +42,18 @@ fn head_commit_count(repo_path: &Path) -> usize {
     revwalk.count()
 }
 
+/// Read the (name, email) of a repo's HEAD commit author.
+fn author_of_head(repo_path: &Path) -> (Option<String>, Option<String>) {
+    let repo = git2::Repository::open(repo_path).expect("open repo");
+    let head = repo.head().expect("head").target().expect("oid");
+    let commit = repo.find_commit(head).expect("find commit");
+    let author = commit.author();
+    (
+        author.name().map(String::from),
+        author.email().map(String::from),
+    )
+}
+
 /// Configure a store backed by a fresh bare repo that ships a recipients
 /// file, so `set` has recipients to encrypt to. Generates its own keypair.
 async fn writable_store() -> (tempfile::TempDir, tempfile::TempDir, Store, Vec<u8>) {
@@ -123,6 +135,48 @@ async fn set_writes_encrypts_commits_and_pushes() {
     let secret = store.get("cloud/aws/root").await.expect("get");
     assert_eq!(secret.password(), "s3kr3t-password");
     assert!(secret.body().contains("user: admin"));
+}
+
+/// A configured commit identity flows into the pushed commit's author.
+#[tokio::test]
+async fn write_commit_uses_configured_identity() {
+    let (bare_dir, _config_dir, store, _id) = writable_store().await;
+    store
+        .set_commit_identity(
+            Some("Alice".to_string()),
+            Some("alice@example.com".to_string()),
+        )
+        .await
+        .expect("set_commit_identity");
+
+    written(
+        store
+            .set("cloud/aws/root", b"s3kr3t\n")
+            .await
+            .expect("set should succeed"),
+    );
+
+    let (name, email) = author_of_head(bare_dir.path());
+    assert_eq!(name.as_deref(), Some("Alice"));
+    assert_eq!(email.as_deref(), Some("alice@example.com"));
+}
+
+/// With no identity configured, commits fall back to the shipped default.
+#[tokio::test]
+async fn write_commit_falls_back_to_default_identity() {
+    let (bare_dir, _config_dir, store, _id) = writable_store().await;
+
+    written(
+        store
+            .set("cloud/aws/root", b"s3kr3t\n")
+            .await
+            .expect("set should succeed"),
+    );
+
+    let default = Store::commit_identity_default();
+    let (name, email) = author_of_head(bare_dir.path());
+    assert_eq!(name.as_deref(), Some(default.name.as_str()));
+    assert_eq!(email.as_deref(), Some(default.email.as_str()));
 }
 
 /// Writing a nested entry creates intermediate directories.

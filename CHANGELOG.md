@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create new secrets right from the app: pick a Website login, PIN code, or a custom name, and gpm encrypts and pushes it just like gopass. A `.pass-template` in a folder automatically shapes any new secret created beneath it, and you can preview the result before saving
 - If a new secret collides with a newer remote copy, the app asks how to resolve it instead of failing — keep yours, keep the existing one, or cancel. When the existing copy is one you can read, you can preview it first; overwriting one you can't read is blocked behind an explicit confirmation so you can't unknowingly destroy it
 - When a pull finds the local and remote password stores have diverged, the app lists the local-only and modified secrets (and other files) that would be lost and offers to adopt the remote, discarding those local changes behind an explicit confirmation — instead of failing with an unresolvable error
+- You can now choose the name and email gpm writes on each git commit — set it under Advanced Settings during setup, or change it later in Settings. Leave it blank to keep the built-in default, which follows app updates until you pick your own
 
 ### Changed
 

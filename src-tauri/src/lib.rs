@@ -126,6 +126,8 @@ pub fn run() {
             write::resolve_write_conflict,
             // config
             config::get_config,
+            config::set_commit_identity,
+            config::get_commit_identity_default,
             config::reset_config,
             // biometric
             biometric::is_biometric_available,

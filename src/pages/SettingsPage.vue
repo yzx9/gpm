@@ -18,6 +18,7 @@ import type {
   AuthState,
   AuthenticityConfig,
   BiometricError,
+  CommitIdentity,
   RepoConfig,
   SshPublicKeyResult,
   SshPrivateKeyResult,
@@ -59,6 +60,12 @@ const authLoading = ref(false);
 const showAddKey = ref(false);
 const newPublicKey = ref("");
 const newKeyLabel = ref("");
+
+// ── Commit identity state ───────────────────────────────────────────────
+const commitName = ref("");
+const commitEmail = ref("");
+const commitLoading = ref(false);
+const commitDefault = ref<CommitIdentity | null>(null);
 
 // Whether the stored identity is an SSH key. SSH keys are never
 // passphrase-encrypted by gpm (they rely on their own native protection),
@@ -103,11 +110,36 @@ async function loadConfig() {
     identityType.value = auth.identity_type;
     biometricAvailable.value = await isBiometricAvailable();
     biometricEnabled.value = await isBiometricUnlockEnabled();
+    commitName.value = config.value.commit_user_name ?? "";
+    commitEmail.value = config.value.commit_user_email ?? "";
+    commitDefault.value = await invoke<CommitIdentity>(
+      "get_commit_identity_default",
+    );
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load config";
   } finally {
     loading.value = false;
+  }
+}
+
+async function onSaveCommitIdentity() {
+  error.value = "";
+  commitLoading.value = true;
+  try {
+    const updated = await invoke<RepoConfig>("set_commit_identity", {
+      name: commitName.value.trim() || null,
+      email: commitEmail.value.trim() || null,
+    });
+    config.value = updated;
+    commitName.value = updated.commit_user_name ?? "";
+    commitEmail.value = updated.commit_user_email ?? "";
+    showToast("Commit identity saved");
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to save commit identity";
+  } finally {
+    commitLoading.value = false;
   }
 }
 
@@ -381,6 +413,50 @@ onMounted(() => {
         <div class="text-xs text-subtle mt-1">
           Auth: {{ isSsh ? "SSH Key" : config.pat ? "PAT" : "None (public)" }}
         </div>
+      </section>
+
+      <!-- Commit identity -->
+      <section class="settings-card">
+        <h2 class="text-sm font-medium mb-2">Commit Identity</h2>
+        <p class="text-xs text-muted mb-3">
+          Name and email written to each git commit. Leave blank to use the
+          default<span v-if="commitDefault">
+            ({{ commitDefault.name }} &lt;{{ commitDefault.email }}&gt;)</span
+          >.
+        </p>
+        <div class="flex flex-col gap-1 mb-3">
+          <label for="commit-name" class="text-xs text-muted">Name</label>
+          <input
+            id="commit-name"
+            v-model="commitName"
+            type="text"
+            placeholder="Name"
+            autocomplete="off"
+            :disabled="commitLoading"
+            class="input-base"
+          />
+        </div>
+        <div class="flex flex-col gap-1 mb-3">
+          <label for="commit-email" class="text-xs text-muted">Email</label>
+          <input
+            id="commit-email"
+            v-model="commitEmail"
+            type="email"
+            placeholder="Email"
+            autocomplete="off"
+            :disabled="commitLoading"
+            class="input-base"
+          />
+        </div>
+        <button
+          type="button"
+          class="btn-action"
+          :disabled="commitLoading"
+          @click="onSaveCommitIdentity"
+        >
+          <span v-if="commitLoading" class="spinner" aria-hidden="true"></span>
+          Save
+        </button>
       </section>
 
       <!-- SSH key management -->

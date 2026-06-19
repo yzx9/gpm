@@ -71,6 +71,96 @@ async fn store_facade_full_lifecycle() {
     );
 }
 
+/// `set_commit_identity` persists a custom author, trims whitespace, and
+/// clears (reverts to the default) on `None`/blank — the auto-update rule.
+#[tokio::test]
+async fn set_commit_identity_persists_trims_and_clears() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf());
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            None,
+            None,
+            None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    // Freshly configured → no commit identity (uses the shipped default).
+    let rc = store.config().await.expect("config");
+    assert_eq!(rc.commit_user_name, None);
+    assert_eq!(rc.commit_user_email, None);
+
+    // Custom values are trimmed and persisted; the call returns the result.
+    let rc = store
+        .set_commit_identity(
+            Some("  Alice  ".to_string()),
+            Some("alice@example.com".to_string()),
+        )
+        .await
+        .expect("set_commit_identity");
+    assert_eq!(rc.commit_user_name.as_deref(), Some("Alice"));
+    assert_eq!(rc.commit_user_email.as_deref(), Some("alice@example.com"));
+
+    // A reload confirms it landed on disk.
+    let rc = store.config().await.expect("config reload");
+    assert_eq!(rc.commit_user_name.as_deref(), Some("Alice"));
+    assert_eq!(rc.commit_user_email.as_deref(), Some("alice@example.com"));
+
+    // Blank/None clears the field → reverts to the default (auto-update).
+    let rc = store
+        .set_commit_identity(Some("   ".to_string()), None)
+        .await
+        .expect("set_commit_identity clear");
+    assert_eq!(rc.commit_user_name, None);
+    assert_eq!(rc.commit_user_email, None);
+}
+
+/// `set_commit_identity` rejects characters that corrupt a commit's
+/// `Name <email>` line (newlines, `<`, `>`, control bytes) and persists
+/// nothing on rejection.
+#[tokio::test]
+async fn set_commit_identity_rejects_invalid_characters() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf());
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            None,
+            None,
+            None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    // A newline corrupts the author line.
+    let err = store
+        .set_commit_identity(Some("Alice\nMallory".to_string()), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "CONFIG_ERROR");
+    // `<` / `>` break the `Name <email>` envelope.
+    let err = store
+        .set_commit_identity(None, Some("a@b> <evil@x".to_string()))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "CONFIG_ERROR");
+
+    // Nothing persisted — still the default (None).
+    let rc = store.config().await.expect("config");
+    assert_eq!(rc.commit_user_name, None);
+    assert_eq!(rc.commit_user_email, None);
+}
+
 /// Get the same entry twice — identity loading/zeroize must not break subsequent calls.
 #[tokio::test]
 async fn store_facade_get_same_entry_twice() {

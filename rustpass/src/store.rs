@@ -100,6 +100,16 @@ pub struct WriteResult {
     pub commit: String,
 }
 
+/// The default commit author identity, surfaced to the UI so it can display
+/// what's in effect without hardcoding the value.
+#[derive(Debug, Clone, Serialize)]
+pub struct CommitIdentity {
+    /// Commit author name.
+    pub name: String,
+    /// Commit author email.
+    pub email: String,
+}
+
 /// Outcome of a write attempt.
 ///
 /// gopass syncs (pulls) before writing and pushes immediately after; if the
@@ -838,9 +848,17 @@ impl Store {
         let message = format!("Save secret: {name}");
         let repo_path_for_commit = repo_path.clone();
         let passfile_for_commit = passfile.clone();
+        let commit_name = repo_config.commit_user_name.clone();
+        let commit_email = repo_config.commit_user_email.clone();
         let head = spawn_blocking(move || {
             let paths = vec![passfile_for_commit];
-            git::commit(&repo_path_for_commit, &paths, &message)
+            git::commit(
+                &repo_path_for_commit,
+                &paths,
+                &message,
+                commit_name.as_deref(),
+                commit_email.as_deref(),
+            )
         })
         .await??;
 
@@ -1098,6 +1116,63 @@ impl Store {
         rc.authenticity.mode = mode;
         self.config.save_repo_config_full(&rc).await?;
         Ok(rc.authenticity.mode)
+    }
+
+    /// Set the git commit author identity. `None` (or blank) for a field clears
+    /// it, reverting to the app default so the value keeps tracking future
+    /// shipped defaults. Values are trimmed; characters that would corrupt a
+    /// commit (`<`, `>`, control bytes) are rejected. Returns the persisted
+    /// [`RepoConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::ConfigError`] if a value contains an invalid
+    /// character, or if the config cannot be loaded or persisted.
+    pub async fn set_commit_identity(
+        &self,
+        name: Option<String>,
+        email: Option<String>,
+    ) -> Result<RepoConfig, Error> {
+        let normalize = |v: Option<String>| -> Result<Option<String>, Error> {
+            let Some(s) = v else {
+                return Ok(None);
+            };
+            let t = s.trim();
+            if t.is_empty() {
+                return Ok(None);
+            }
+            // Reject characters that corrupt the commit's `Name <email>` line:
+            // control bytes (newline, NUL, …) and the envelope delimiters. The
+            // `git` CLI rejects these for user.name/user.email; libgit2's
+            // `Signature::now` validates nothing, so gpm must.
+            if let Some(c) = t.chars().find(|&c| c.is_control() || c == '<' || c == '>') {
+                return Err(Error::new(
+                    ErrorCode::ConfigError,
+                    format!(
+                        "Commit identity contains an invalid character ({c:?}). Newlines, \
+                         angle brackets, and control characters corrupt git commits."
+                    ),
+                ));
+            }
+            Ok(Some(t.to_string()))
+        };
+        let name = normalize(name)?;
+        let email = normalize(email)?;
+        let mut rc = self.config.load_repo_config().await?;
+        rc.commit_user_name = name;
+        rc.commit_user_email = email;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
+    /// The default commit author identity, for UI display. Reads the shipped
+    /// default so the frontend never hardcodes it.
+    #[must_use]
+    pub fn commit_identity_default() -> CommitIdentity {
+        CommitIdentity {
+            name: crate::config::DEFAULT_COMMIT_NAME.to_string(),
+            email: crate::config::DEFAULT_COMMIT_EMAIL.to_string(),
+        }
     }
 
     /// Add a trusted signing public key. Validates the key, derives its

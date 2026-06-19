@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Repository / app configuration commands — repo config display and a full
-//! reset. Only two today; expected to grow (import/export, per-repo settings).
-//! When it does, this file can graduate to a `config/` directory of submodules.
+//! Repository / app configuration commands — repo config display, the commit
+//! author identity, and a full reset. When this grows further (import/export,
+//! per-repo settings), it can graduate to a `config/` directory of submodules.
 
-use rustpass::{Error, RepoConfig};
+use rustpass::{CommitIdentity, Error, RepoConfig, Store};
 use tauri::{AppHandle, State};
 
 use crate::AppState;
@@ -34,4 +34,22 @@ pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> 
     // the real state so any open unlock overlay closes.
     emit_lock_state(&app, &state.store).await;
     Ok(())
+}
+
+/// Set the git commit author identity. A `null` field clears it, reverting to
+/// the app default. Returns the updated repo config.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_commit_identity(
+    state: State<'_, AppState>,
+    name: Option<String>,
+    email: Option<String>,
+) -> Result<RepoConfig, Error> {
+    state.store.set_commit_identity(name, email).await
+}
+
+/// The default commit author identity (for UI display).
+#[tauri::command]
+pub(crate) async fn get_commit_identity_default() -> CommitIdentity {
+    Store::commit_identity_default()
 }

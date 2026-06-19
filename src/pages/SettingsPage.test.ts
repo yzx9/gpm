@@ -60,6 +60,7 @@ describe("SettingsPage", () => {
     is_biometric_available: false,
     is_biometric_unlock_enabled: false,
     get_authenticity_config: { mode: "off", trusted_keys: [], ignored: [] },
+    get_commit_identity_default: { name: "gpm", email: "gpm@local" },
     get_ssh_public_key: { public_key: "ssh-ed25519 default" },
     export_ssh_private_key: { private_key: "default-private" },
   };
@@ -576,6 +577,30 @@ describe("SettingsPage", () => {
 
       expect(invoke).toHaveBeenCalledWith("set_verification_mode", {
         mode: "audit",
+      });
+    });
+
+    it("saves the commit identity", async () => {
+      when("set_commit_identity", {
+        ...httpsConfig,
+        commit_user_name: "Alice",
+        commit_user_email: "alice@example.com",
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find("#commit-name").setValue("Alice");
+      await wrapper.find("#commit-email").setValue("alice@example.com");
+      const saveBtn = wrapper
+        .findAll(".btn-action")
+        .find((b) => b.text().includes("Save"));
+      expect(saveBtn).toBeDefined();
+      await saveBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_commit_identity", {
+        name: "Alice",
+        email: "alice@example.com",
       });
     });
 

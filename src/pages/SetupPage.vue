@@ -8,6 +8,7 @@ import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError,
+  CommitIdentity,
   IdentityInfoResult,
   PickedIdentityResult,
   RecipientInfo,
@@ -47,6 +48,11 @@ let progressTimer: ReturnType<typeof setInterval> | null = null;
 const sshKeySource = ref<"paste" | "generate">("paste");
 const generatedPublicKey = ref("");
 const generating = ref(false);
+
+// ── Commit identity (Advanced) ──────────────────────────────────────────
+const commitName = ref("");
+const commitEmail = ref("");
+const commitDefault = ref<CommitIdentity | null>(null);
 
 // ── Step 2 state: identity ──────────────────────────────────────────────
 const recipients = ref<RecipientInfo[]>([]);
@@ -173,6 +179,18 @@ async function onClone() {
       sshKey: isSshUrl.value ? sshKey.value : null,
       sshPassphrase: isSshUrl.value ? sshPassphrase.value || null : null,
     });
+    // Persist a custom commit identity if the user set one under Advanced.
+    // Best-effort: a failure must not block the (already-cloned) setup.
+    if (commitName.value.trim() || commitEmail.value.trim()) {
+      try {
+        await invoke("set_commit_identity", {
+          name: commitName.value.trim() || null,
+          email: commitEmail.value.trim() || null,
+        });
+      } catch {
+        // Non-critical — editable later in Settings.
+      }
+    }
     step.value = 2;
   } catch (e) {
     const appError = e as AppError;
@@ -180,6 +198,19 @@ async function onClone() {
   } finally {
     stopProgress();
     loading.value = false;
+  }
+}
+
+// Fetch the default commit identity lazily when Advanced is first opened, so
+// setup mount doesn't fire an extra IPC (and stays out of the test sequence).
+async function onAdvancedToggle(e: Event) {
+  if (!(e.target as HTMLDetailsElement).open || commitDefault.value) return;
+  try {
+    commitDefault.value = await invoke<CommitIdentity>(
+      "get_commit_identity_default",
+    );
+  } catch {
+    // Non-critical — the default hint just won't render.
   }
 }
 
@@ -575,6 +606,51 @@ watch(identity, async (val) => {
             </div>
           </template>
         </template>
+
+        <!-- Advanced: commit identity -->
+        <details @toggle="onAdvancedToggle">
+          <summary class="text-sm text-muted cursor-pointer select-none">
+            Advanced Settings
+          </summary>
+          <div class="flex flex-col gap-3 mt-3">
+            <p class="text-xs text-muted">
+              Name and email written to each git commit. Leave blank to use the
+              default<span v-if="commitDefault">
+                ({{ commitDefault.name }} &lt;{{
+                  commitDefault.email
+                }}&gt;)</span
+              >.
+            </p>
+            <div class="flex flex-col gap-1">
+              <label for="su-commit-name" class="text-xs text-muted"
+                >Name</label
+              >
+              <input
+                id="su-commit-name"
+                v-model="commitName"
+                type="text"
+                placeholder="Name"
+                autocomplete="off"
+                :disabled="loading"
+                class="input-base"
+              />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label for="su-commit-email" class="text-xs text-muted"
+                >Email</label
+              >
+              <input
+                id="su-commit-email"
+                v-model="commitEmail"
+                type="email"
+                placeholder="Email"
+                autocomplete="off"
+                :disabled="loading"
+                class="input-base"
+              />
+            </div>
+          </div>
+        </details>
 
         <div
           v-if="error"

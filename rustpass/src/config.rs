@@ -13,6 +13,12 @@ use crate::git::GitAuth;
 use crate::identity::{IdentityType, classify_identity};
 use crate::signing::AuthenticityConfig;
 
+/// Default commit author name used when none is configured. Single source of
+/// the value — read by the commit fallback and surfaced to the UI for display.
+pub(crate) const DEFAULT_COMMIT_NAME: &str = "gpm";
+/// Default commit author email used when none is configured.
+pub(crate) const DEFAULT_COMMIT_EMAIL: &str = "gpm@local";
+
 /// Atomic write: write data to a temp file then rename over the target.
 ///
 /// Prevents file corruption if the write fails mid-operation. Used for both
@@ -145,6 +151,10 @@ impl Config {
             ssh_key: ssh_key.map(String::from),
             ssh_passphrase: ssh_passphrase.map(String::from),
             local_path: local_path.to_string(),
+            // Setup never pins the default — left `None` so an uncustomized
+            // identity auto-tracks the shipped default across versions.
+            commit_user_name: None,
+            commit_user_email: None,
             authenticity: AuthenticityConfig::default(),
         };
         let json = serde_json::to_string_pretty(&config)?;
@@ -227,6 +237,12 @@ pub struct RepoConfig {
     pub ssh_passphrase: Option<String>,
     /// Local filesystem path where the repo is cloned.
     pub local_path: String,
+    /// Optional git commit author name; `None` uses the app default.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub commit_user_name: Option<String>,
+    /// Optional git commit author email; `None` uses the app default.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub commit_user_email: Option<String>,
     /// Repository authenticity config (verification mode + trusted signing
     /// keys + ignored issues). Skipped from serialization when default so
     /// users who never enable authenticity see no change to `repo.json`'s
@@ -672,6 +688,63 @@ mod tests {
             !json.contains("ssh_passphrase"),
             "ssh_passphrase should not appear in JSON when None"
         );
+    }
+
+    #[tokio::test]
+    async fn repo_config_commit_identity_roundtrip() {
+        let (config, _dir) = create_config();
+
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let rc = RepoConfig {
+            url: "https://example.com/repo.git".to_string(),
+            pat: None,
+            ssh_key: None,
+            ssh_passphrase: None,
+            local_path: "/local/path".to_string(),
+            commit_user_name: Some("Alice".to_string()),
+            commit_user_email: Some("alice@example.com".to_string()),
+            ..Default::default()
+        };
+        config.save_repo_config_full(&rc).await.unwrap();
+
+        let cfg = config.load_repo_config().await.unwrap();
+        assert_eq!(cfg.commit_user_name.as_deref(), Some("Alice"));
+        assert_eq!(cfg.commit_user_email.as_deref(), Some("alice@example.com"));
+    }
+
+    #[tokio::test]
+    async fn repo_config_backward_compat_no_commit_identity() {
+        let (config, _dir) = create_config();
+
+        // Old config JSON written before commit identity existed.
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let old_json =
+            r#"{"url":"https://example.com/repo.git","pat":"my-token","local_path":"/local/path"}"#;
+        std::fs::write(config.repo_config_path(), old_json).unwrap();
+
+        let cfg = config.load_repo_config().await.unwrap();
+        assert_eq!(cfg.commit_user_name, None);
+        assert_eq!(cfg.commit_user_email, None);
+    }
+
+    #[tokio::test]
+    async fn repo_config_commit_identity_omitted_when_none() {
+        let (config, _dir) = create_config();
+
+        config
+            .save_repo_config(
+                "https://example.com/repo.git",
+                Some("pat"),
+                None,
+                None,
+                "/local/path",
+            )
+            .await
+            .unwrap();
+
+        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        assert!(!json.contains("commit_user_name"));
+        assert!(!json.contains("commit_user_email"));
     }
 
     #[tokio::test]
