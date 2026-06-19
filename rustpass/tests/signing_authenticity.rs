@@ -12,9 +12,10 @@ mod common;
 use std::path::Path;
 
 use git2::Repository;
-use rustpass::signing::{CommitSigStatus, VerifyMode, fingerprint_of_public_key};
+use ssh_key::{rand_core::OsRng, Algorithm, HashAlg, LineEnding, PrivateKey};
+
+use rustpass::signing::{fingerprint_of_public_key, CommitSigStatus, VerifyMode};
 use rustpass::store::Store;
-use ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey, rand_core::OsRng};
 
 /// A signing keypair + its public-key string + fingerprint (test fixture).
 struct SigningFixture {

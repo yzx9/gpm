@@ -29,7 +29,7 @@ pub struct SshKeyPair {
 ///
 /// Returns `SSH_KEY_INVALID` if key generation or encryption fails.
 pub fn generate_keypair(passphrase: Option<&str>) -> Result<SshKeyPair, Error> {
-    use ssh_key::{rand_core::OsRng, Algorithm, LineEnding, PrivateKey};
+    use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
 
     let key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).map_err(|e| {
         Error::new(
@@ -256,7 +256,7 @@ mod tests {
 
     /// Encrypt `plaintext` to an SSH recipient string, returning ciphertext.
     fn encrypt_to_ssh_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
-        use age::{ssh, Encryptor};
+        use age::{Encryptor, ssh};
         use std::io::Write;
         let recipient: ssh::Recipient = recipient_str.parse().unwrap();
         let recipients: Vec<Box<dyn age::Recipient>> = vec![Box::new(recipient)];
@@ -271,7 +271,7 @@ mod tests {
     /// Decrypt `ciphertext` with an UNENCRYPTED SSH PEM (the cached form),
     /// proving the serialized PEM lands on age's no-KDF Unencrypted path.
     fn decrypt_with_unencrypted_pem(ciphertext: &[u8], unencrypted_pem: &str) -> Vec<u8> {
-        use age::{ssh, Decryptor};
+        use age::{Decryptor, ssh};
         use std::io::Read;
         let identity = ssh::Identity::from_buffer(unencrypted_pem.as_bytes(), None).unwrap();
         let identities: Vec<Box<dyn age::Identity>> = vec![Box::new(identity)];

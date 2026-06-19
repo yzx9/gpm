@@ -290,7 +290,10 @@ impl Store {
             let pw = passphrase.to_string();
             let decrypted_pem = spawn_blocking(move || {
                 let pem = str::from_utf8(&encrypted_bytes).map_err(|_| {
-                    Error::new(ErrorCode::InvalidIdentity, "SSH identity is not valid UTF-8")
+                    Error::new(
+                        ErrorCode::InvalidIdentity,
+                        "SSH identity is not valid UTF-8",
+                    )
                 })?;
                 crate::ssh::to_unencrypted_pem(pem, &pw)
             })
@@ -894,11 +897,9 @@ impl Store {
             return false;
         };
         let blob_owned = blob.to_vec();
-        spawn_blocking(move || {
-            crypto::decrypt_bytes(&blob_owned, &identity_bytes, None).is_ok()
-        })
-        .await
-        .unwrap_or(false)
+        spawn_blocking(move || crypto::decrypt_bytes(&blob_owned, &identity_bytes, None).is_ok())
+            .await
+            .unwrap_or(false)
     }
 
     // ── thin wrappers over git ops (load config + spawn_blocking) ───────────
@@ -1668,10 +1669,7 @@ mod tests {
 
         store.unlock("test-passphrase").await.unwrap();
 
-        let guard = store
-            .cached_identity
-            .read()
-            .expect("cache lock");
+        let guard = store.cached_identity.read().expect("cache lock");
         let cached = guard
             .as_ref()
             .expect("cached_identity must be populated for an SSH identity");
@@ -1706,7 +1704,10 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf());
         let err = store.unlock("wrong-passphrase").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
-        assert!(!store.is_unlocked(), "a failed unlock must not unlock the store");
+        assert!(
+            !store.is_unlocked(),
+            "a failed unlock must not unlock the store"
+        );
     }
 
     /// A legacy RSA PEM identity is NOT classified as encrypted, so `unlock()`

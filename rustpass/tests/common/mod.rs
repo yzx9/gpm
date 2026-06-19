@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use age::secrecy::ExposeSecret;
 use age::x25519::{Identity, Recipient};
+
 use rustpass::{SyncOutcome, SyncResult};
 
 /// Unwrap a [`SyncOutcome::FastForwarded`] to its inner [`SyncResult`],
