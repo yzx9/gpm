@@ -163,28 +163,142 @@ describe("EntryListPage", () => {
     });
   });
 
-  describe("search/filter", () => {
-    it("filters entries by search input", async () => {
+  describe("search", () => {
+    it("debounces and renders backend search results", async () => {
       when("list_entries", sampleEntries);
+      when("search_entries", [
+        { path: "github.com/token.age", name: "github-token" },
+      ]);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find('input[type="search"]').setValue("git");
+      await flushPromises(); // watch schedules the debounce timer
+      expect(invoke).not.toHaveBeenCalledWith("search_entries", {
+        query: "git",
+      });
+
+      vi.advanceTimersByTime(150);
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("search_entries", { query: "git" });
+      expect(wrapper.text()).toContain("github-token");
+      expect(wrapper.text()).not.toContain("work-email");
+    });
+
+    it("shows no matches when the backend returns empty", async () => {
+      when("list_entries", sampleEntries);
+      when("search_entries", []);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find('input[type="search"]').setValue("zzz");
+      await flushPromises();
+      vi.advanceTimersByTime(150);
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("No matches");
+    });
+
+    it("clearing the search falls back to the full list without a refetch", async () => {
+      when("list_entries", sampleEntries);
+      when("search_entries", []);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find('input[type="search"]').setValue("zzz");
+      await flushPromises();
+      vi.advanceTimersByTime(150);
+      await flushPromises();
+      expect(wrapper.text()).toContain("No matches");
+
+      const searchesBefore = vi
+        .mocked(invoke)
+        .mock.calls.filter((c) => c[0] === "search_entries").length;
+      await wrapper.find('input[type="search"]').setValue("");
+      await flushPromises();
+      const searchesAfter = vi
+        .mocked(invoke)
+        .mock.calls.filter((c) => c[0] === "search_entries").length;
+
+      // Clearing issues no new backend call; the full list returns instantly.
+      expect(searchesAfter).toBe(searchesBefore);
+      expect(wrapper.text()).toContain("github-token");
+      expect(wrapper.text()).toContain("work-email");
+    });
+
+    it("falls back to the full list + toast on search failure (not 'No matches')", async () => {
+      when("list_entries", sampleEntries);
+      reject("search_entries", { code: "StoreError", message: "boom" });
       const wrapper = mountPage();
       await flushPromises();
 
       await wrapper.find('input[type="search"]').setValue("git");
       await flushPromises();
+      vi.advanceTimersByTime(150);
+      await flushPromises();
 
-      expect(wrapper.text()).toContain("github-token");
-      expect(wrapper.text()).not.toContain("work-email");
+      expect(wrapper.text()).toContain("github-token"); // full list, not blanked
+      expect(wrapper.text()).toContain("boom"); // error toast surfaced
+      expect(wrapper.text()).not.toContain("No matches"); // not a misleading empty
     });
 
-    it("shows no matches message when search has no results", async () => {
+    it("only the latest query is searched when typing fast (debounce coalescing)", async () => {
       when("list_entries", sampleEntries);
+      when("search_entries", [
+        { path: "github.com/token.age", name: "github-token" },
+      ]);
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper.find('input[type="search"]').setValue("nonexistent");
+      // Type "g", then "gi" before the 150 ms debounce fires.
+      await wrapper.find('input[type="search"]').setValue("g");
+      await flushPromises();
+      vi.advanceTimersByTime(149); // "g" debounce not yet fired
+      await wrapper.find('input[type="search"]').setValue("gi");
+      await flushPromises();
+      vi.advanceTimersByTime(150); // only the "gi" debounce fires
       await flushPromises();
 
-      expect(wrapper.text()).toContain("No matches");
+      expect(invoke).not.toHaveBeenCalledWith("search_entries", { query: "g" });
+      expect(invoke).toHaveBeenCalledWith("search_entries", { query: "gi" });
+    });
+
+    it("refreshes search results after a pull changes the store", async () => {
+      when("list_entries", sampleEntries);
+      when("search_entries", [
+        { path: "github.com/token.age", name: "github-token" },
+      ]);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find('input[type="search"]').setValue("git");
+      await flushPromises();
+      vi.advanceTimersByTime(150);
+      await flushPromises();
+      expect(wrapper.text()).toContain("github-token");
+
+      // Pull adds an entry; with an active search, results re-run against the store.
+      when("list_entries", [
+        ...sampleEntries,
+        { path: "new.age", name: "new-git" },
+      ]);
+      when("search_entries", [{ path: "new.age", name: "new-git" }]);
+      when("pull_repo", {
+        changed: true,
+        head: "def456",
+        authenticity: {
+          mode: "off",
+          new_commits: [],
+          open_issues: [],
+          blocked: false,
+        },
+      });
+      await wrapper.find('button[aria-label="Pull updates"]').trigger("click");
+      await flushPromises();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("new-git");
     });
   });
 

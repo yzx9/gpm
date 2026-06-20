@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -16,13 +16,16 @@ import type {
   SyncOutcome,
 } from "../types";
 import { formatRelativeTime } from "../utils/format";
-import { filterEntries } from "../utils/filter";
 import { statusGlyph, statusLabel } from "../utils/signature";
 
 const router = useRouter();
 
 const entries = ref<Entry[]>([]);
 const search = ref("");
+const searchResults = ref<Entry[]>([]);
+const searchError = ref(false);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let reqId = 0;
 const loading = ref(false);
 const pulling = ref(false);
 const error = ref("");
@@ -85,9 +88,42 @@ const lastSyncLabel = computed(() => {
   return formatRelativeTime(now.value, lastSyncTime.value);
 });
 
-const filteredEntries = () => {
-  return filterEntries(entries.value, search.value);
-};
+const displayedEntries = computed(() =>
+  search.value.trim() && !searchError.value
+    ? searchResults.value
+    : entries.value,
+);
+
+// Debounced fuzzy search against the backend (150 ms). A monotonic request-id
+// guard guarantees only the latest query's result wins (older in-flight
+// responses — including one that lands after the query is cleared — are
+// dropped); on error we fall back to the full list + toast instead of showing a
+// misleading "No matches". searchResults is seeded with the full list so a
+// query never blanks the list before its results arrive.
+async function runSearch(q: string) {
+  const myId = ++reqId;
+  searchError.value = false;
+  try {
+    const res = await invoke<Entry[]>("search_entries", { query: q });
+    if (myId !== reqId || !search.value.trim()) return; // superseded or cleared
+    searchResults.value = res;
+  } catch (e) {
+    if (myId !== reqId) return;
+    searchError.value = true; // displayedEntries falls back to the full list
+    showToast((e as AppError)?.message || "Search failed");
+  }
+}
+
+watch(search, (q) => {
+  if (searchTimer) clearTimeout(searchTimer);
+  if (!q.trim()) {
+    reqId++; // invalidate any in-flight response
+    searchResults.value = entries.value; // seed so a re-query never blanks
+    searchError.value = false;
+    return;
+  }
+  searchTimer = setTimeout(() => runSearch(q), 150);
+});
 
 async function loadAuthState() {
   try {
@@ -103,6 +139,8 @@ async function loadEntries() {
   try {
     entries.value = await invoke<Entry[]>("list_entries");
     lastSyncTime.value = Date.now();
+    searchResults.value = entries.value; // seed so the first query never blanks
+    if (search.value.trim()) runSearch(search.value); // refresh after pull/adopt/retry
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load entries";
@@ -309,6 +347,11 @@ onBeforeUnmount(() => {
     clearInterval(tickTimer);
     tickTimer = null;
   }
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+  reqId++; // drop any in-flight search response landing after unmount
 });
 </script>
 
@@ -412,7 +455,7 @@ onBeforeUnmount(() => {
       </p>
     </div>
     <div
-      v-else-if="filteredEntries().length === 0"
+      v-else-if="search.trim() && !searchError && searchResults.length === 0"
       class="text-center text-muted py-8"
     >
       <span class="text-4xl block mb-2">🔍</span>
@@ -421,7 +464,7 @@ onBeforeUnmount(() => {
 
     <ul v-else class="list-none flex flex-col gap-0.5" role="list">
       <li
-        v-for="entry in filteredEntries()"
+        v-for="entry in displayedEntries"
         :key="entry.path"
         class="flex items-center justify-between p-[0.6rem_0.75rem] md:p-[0.8rem_1rem] bg-surface rounded-md transition-colors duration-150 min-h-12 hover:bg-hover"
       >

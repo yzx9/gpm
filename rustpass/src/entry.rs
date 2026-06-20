@@ -8,7 +8,7 @@ use serde::Serialize;
 ///
 /// Aligned with gopass's listed entries. Each entry corresponds to a `.age`
 /// file discovered in the store directory.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Entry {
     /// Relative path from repo root (e.g., `"cloud/aws/root.age"`).
     pub path: String,

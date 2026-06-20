@@ -113,6 +113,7 @@ pub fn run() {
             identity::export_ssh_private_key,
             // read
             read::list_entries,
+            read::search_entries,
             read::copy_password,
             read::show_password,
             // write / sync

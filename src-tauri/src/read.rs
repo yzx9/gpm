@@ -46,6 +46,18 @@ pub(crate) async fn list_entries(state: State<'_, AppState>) -> Result<Vec<Entry
     state.store.list().await
 }
 
+/// Fuzzy-search `.age` entries by `query`, ranked by relevance (best score
+/// first; ties broken by `path`). An empty query returns every entry, like
+/// [`list_entries`]. Ranking is computed server-side via [`Store::search`].
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn search_entries(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<Entry>, Error> {
+    state.store.search(&query).await
+}
+
 /// Primary operation: decrypt and copy password to clipboard.
 /// Password never reaches the `WebView`.
 #[tauri::command]
