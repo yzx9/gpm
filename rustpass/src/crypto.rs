@@ -7,11 +7,41 @@ use std::path::Path;
 use std::str::{self, FromStr};
 
 use age::armor::{ArmoredReader, ArmoredWriter, Format};
-use age::secrecy::SecretString;
+use age::secrecy::{ExposeSecret, SecretString};
 use age::{Decryptor, Encryptor, IdentityFile, scrypt, ssh};
 use tokio::fs;
+use zeroize::Zeroizing;
 
 use crate::error::{Error, ErrorCode};
+
+/// A freshly generated native x25519 age identity plus its public recipient.
+///
+/// `identity` is wrapped in [`Zeroizing`] so the secret is wiped when the value
+/// is dropped. The recipient is a public key, safe to store in plaintext.
+#[derive(Debug)]
+pub struct AgeIdentity {
+    /// The native x25519 secret identity (`AGE-SECRET-KEY-...`).
+    pub identity: Zeroizing<String>,
+    /// The matching public recipient (`age1...`).
+    pub recipient: String,
+}
+
+/// Generate a new native x25519 age identity and derive its public recipient.
+///
+/// This is gpm's in-app `age-keygen` equivalent — used by the create-store flow
+/// to mint a brand-new identity on device. The identity is never written to disk
+/// by this function; the caller persists it through the existing identity
+/// storage (at-rest encryption; biometric-keystore gating on Android).
+#[must_use]
+pub fn generate_age_identity() -> AgeIdentity {
+    let sk = age::x25519::Identity::generate();
+    let recipient = sk.to_public().to_string();
+    let identity = Zeroizing::new(sk.to_string().expose_secret().to_string());
+    AgeIdentity {
+        identity,
+        recipient,
+    }
+}
 
 /// Decrypt an `.age` file using the given identity bytes.
 ///
@@ -431,17 +461,12 @@ pub fn validate_ssh_key_passphrase(identity_bytes: &[u8], passphrase: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use age::secrecy::ExposeSecret;
-    use age::x25519::Identity;
     use std::io::Write;
 
     /// Generate a random x25519 keypair, returning `(identity, recipient)` strings.
     fn generate_keypair() -> (String, String) {
-        let sk = Identity::generate();
-        let pk = sk.to_public();
-        let identity = sk.to_string().expose_secret().to_string();
-        let recipient = pk.to_string();
-        (identity, recipient)
+        let generated = generate_age_identity();
+        (generated.identity.as_str().to_owned(), generated.recipient)
     }
 
     /// Encrypt `plaintext` to the given recipient string, returning ciphertext.
@@ -468,6 +493,32 @@ mod tests {
         writer.write_all(plaintext).unwrap();
         writer.finish().unwrap();
         encrypted
+    }
+
+    #[test]
+    fn generate_age_identity_produces_valid_self_round_trip_key() {
+        let generated = generate_age_identity();
+
+        // Identity is a native x25519 secret; recipient its public key.
+        assert!(
+            generated.identity.starts_with("AGE-SECRET-KEY-1"),
+            "identity must be a native age secret key"
+        );
+        assert!(
+            generated.recipient.starts_with("age1"),
+            "recipient must be an age public key"
+        );
+        assert!(
+            !generated.recipient.starts_with("age1pq1"),
+            "recipient must not be post-quantum"
+        );
+
+        // Round-trip: encrypt to the recipient, decrypt with the identity.
+        let plaintext = b"generated-identity-round-trip";
+        let ciphertext = encrypt(plaintext, &generated.recipient);
+        let decrypted =
+            decrypt_bytes(&ciphertext, generated.identity.as_bytes(), None).expect("self decrypt");
+        assert_eq!(decrypted, plaintext);
     }
 
     #[tokio::test]

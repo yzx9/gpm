@@ -227,6 +227,16 @@ pub(crate) async fn pull_repo(state: State<'_, AppState>) -> Result<SyncOutcome,
     state.store.sync().await
 }
 
+/// Push the current branch to `origin`. Used by the create flow's deferred first
+/// push — called after `create_store` + `complete_setup` so the remote only
+/// receives the store once its identity is durable. A missing `origin` is a
+/// no-op (local-only store), mirroring `pull_repo`.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
+    state.store.push().await
+}
+
 /// Resolve a pull/sync divergence by adopting the remote tip the user reviewed
 /// (`expected_remote_oid`). "Cancel" is client-side — the frontend just doesn't
 /// call this. Returns the post-adopt result so the badge can refresh.

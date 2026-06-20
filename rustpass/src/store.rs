@@ -419,6 +419,106 @@ impl Store {
         Ok(())
     }
 
+    /// Create a brand-new gopass-compatible age store on device (RFC 0018).
+    ///
+    /// Mirrors gopass `setup`/`init`: `git init`, seed `.age-recipients` with the
+    /// single `recipient`, make the no-parent "Initialized Store" commit, and —
+    /// when `repo_url` is given — record an `origin` remote. This is
+    /// identity-agnostic: it takes only the public `recipient`, never identity
+    /// bytes, so the generated identity is persisted separately via
+    /// [`save_identity`](Store::save_identity) (the create flow calls
+    /// `complete_setup` afterwards).
+    ///
+    /// **No push.** The first push is a separate step (`Store::push`), performed
+    /// only after both the repo config and the identity are durable — so the
+    /// remote can never receive a store whose recipient's identity has been lost
+    /// locally (the orphan-recipient hole). If no `repo_url` is given the store
+    /// is local-only and never pushed.
+    ///
+    /// Auth (`pat`/`ssh_key`) is ignored when no `repo_url` is given, so a stray
+    /// credential can never be persisted against an empty URL.
+    ///
+    /// On any failure after `git init`, the partial repo directory and any
+    /// config are removed so the next attempt starts clean.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidIdentity` if `recipient` is empty, or a git/IO error if
+    /// initialization, the recipients write, the commit, the remote add, or
+    /// config persistence fails.
+    pub async fn create_store(
+        &self,
+        repo_url: Option<&str>,
+        pat: Option<&str>,
+        ssh_key: Option<&str>,
+        ssh_passphrase: Option<&str>,
+        recipient: &str,
+    ) -> Result<(), Error> {
+        if recipient.trim().is_empty() {
+            return Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                "Recipient must not be empty",
+            ));
+        }
+
+        // No URL → local-only store: ignore any stray auth (defensive; the
+        // frontend also validates). Persisting url="" + pat would silently
+        // discard the credential on every future no-op sync.
+        let has_url = repo_url.is_some_and(|u| !u.trim().is_empty());
+        let url = repo_url.unwrap_or("");
+        let (pat, ssh_key, ssh_passphrase) = if has_url {
+            (pat, ssh_key, ssh_passphrase)
+        } else {
+            (None, None, None)
+        };
+
+        let repo_dir = self.config.config_dir().join("repo");
+        // Remove the repo dir first, then clear the config — mirroring the
+        // failure-cleanup order below. If remove_dir_all fails we leave the
+        // prior identity + config intact, rather than deleting the identity
+        // while the old repo still sits on disk.
+        if repo_dir.exists() {
+            fs::remove_dir_all(&repo_dir).await?;
+        }
+        self.config.clear_all().await?;
+
+        let bootstrap = async {
+            let repo_dir_init = repo_dir.clone();
+            spawn_blocking(move || git::init_repo(&repo_dir_init)).await??;
+
+            recipient::write_recipients(&repo_dir, &[recipient.to_string()]).await?;
+
+            let message = format!("Initialized Store for {recipient}");
+            let repo_dir_commit = repo_dir.clone();
+            let rel_paths = vec![".age-recipients".to_string()];
+            spawn_blocking(move || git::commit_initial(&repo_dir_commit, &rel_paths, &message))
+                .await??;
+
+            if has_url {
+                let repo_dir_remote = repo_dir.clone();
+                let url_owned = url.to_string();
+                spawn_blocking(move || git::remote_add(&repo_dir_remote, "origin", &url_owned))
+                    .await??;
+            }
+
+            let local_path = repo_dir.to_string_lossy().to_string();
+            self.config
+                .save_repo_config(url, pat, ssh_key, ssh_passphrase, &local_path)
+                .await?;
+            // TODO(0016-recipients-pinning): TOFU-pin the seeded recipient on first write.
+            Ok::<(), Error>(())
+        };
+
+        if let Err(e) = bootstrap.await {
+            // Best-effort cleanup: a partial repo dir or half-written config must
+            // not leave the store looking initialized.
+            let _ = fs::remove_dir_all(&repo_dir).await;
+            let _ = self.config.clear_all().await;
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// Read recipients from the cloned repository.
     ///
     /// # Errors
@@ -1144,6 +1244,24 @@ impl Store {
         let auth = repo_config.to_git_auth();
         let policy = repo_config.authenticity;
         spawn_blocking(move || git::pull_repo(&repo_path, &auth, &policy)).await?
+    }
+
+    /// Push the current branch to `origin`.
+    ///
+    /// Used by the create flow's deferred first push — performed after the
+    /// identity is durable (via `complete_setup`) so the remote only receives the
+    /// store once it can be decrypted locally. A missing `origin` is a no-op
+    /// (local-only store), mirroring [`sync`](Store::sync)'s pull no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo cannot be opened or the push fails for a
+    /// reason other than a missing origin (which is treated as a no-op).
+    pub async fn push(&self) -> Result<(), Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let auth = repo_config.to_git_auth();
+        spawn_blocking(move || git::push(&repo_path, &auth)).await?
     }
 
     // ── Repository authenticity ───────────────────────────────────────────

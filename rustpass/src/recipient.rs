@@ -81,6 +81,42 @@ pub async fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> 
     Ok(parse_recipients(&content))
 }
 
+/// Write `recipients` to `<repo_path>/.age-recipients`, one recipient per line.
+///
+/// This is the gopass-canonical init marker: a store counts as initialized iff
+/// this file exists at its root. The format is one recipient per line with a
+/// trailing newline — exactly what gopass and the bare `age` CLI expect.
+///
+/// For SSH recipients the string is the OpenSSH public key (`ssh-ed25519 …` /
+/// `ssh-rsa …`); [`parse_recipients`] discards any trailing inline comment, so a
+/// written SSH recipient round-trips through [`list_recipients`].
+///
+/// Written atomically (temp file + rename) so a failed write can never leave a
+/// half-written recipients file behind — which would corrupt the store's init
+/// marker.
+///
+/// # Errors
+///
+/// Returns an error if the repo directory cannot be created or the file cannot
+/// be written.
+pub async fn write_recipients(repo_path: &Path, recipients: &[String]) -> Result<(), Error> {
+    let mut content = String::new();
+    for recipient in recipients {
+        content.push_str(recipient.trim());
+        content.push('\n');
+    }
+
+    let target = repo_path.join(".age-recipients");
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+
+    let temp = repo_path.join(".age-recipients.tmp");
+    fs::write(&temp, content.as_bytes()).await?;
+    fs::rename(&temp, &target).await?;
+    Ok(())
+}
+
 /// Parse recipients from file content.
 ///
 /// Each line can be:
@@ -473,6 +509,48 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
         let dir = tempfile::tempdir().unwrap();
         let recipients = list_recipients(dir.path()).await.unwrap();
         assert!(recipients.is_empty());
+    }
+
+    #[tokio::test]
+    #[allow(clippy::indexing_slicing)]
+    async fn write_recipients_round_trips_through_list_recipients() {
+        let dir = tempfile::tempdir().unwrap();
+        let recipients = vec![
+            "age1abcdefghijklmnopqrstuvwxyz".to_string(),
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsKLqeplhpW+uObz5dvMgjz1OxfM/XXUB+VHtZ6isGN alice@host"
+                .to_string(),
+        ];
+
+        write_recipients(dir.path(), &recipients).await.unwrap();
+
+        let read_back = list_recipients(dir.path()).await.unwrap();
+        assert_eq!(
+            read_back.len(),
+            2,
+            "both recipients must be written + parsed"
+        );
+        assert_eq!(read_back[0].public_key, "age1abcdefghijklmnopqrstuvwxyz");
+        assert_eq!(read_back[0].key_type, KeyType::X25519);
+        assert_eq!(read_back[0].comment, None);
+        assert_eq!(read_back[1].key_type, KeyType::SshEd25519);
+        assert!(read_back[1].public_key.starts_with("ssh-ed25519 "));
+        // The trailing inline comment is parsed back as the recipient's comment.
+        assert_eq!(read_back[1].comment.as_deref(), Some("alice@host"));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::indexing_slicing)]
+    async fn write_recipients_overwrites_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".age-recipients"), "age1stale\n").unwrap();
+
+        write_recipients(dir.path(), &["age1fresh".to_string()])
+            .await
+            .unwrap();
+
+        let read_back = list_recipients(dir.path()).await.unwrap();
+        assert_eq!(read_back.len(), 1);
+        assert_eq!(read_back[0].public_key, "age1fresh");
     }
 
     #[test]

@@ -69,6 +69,16 @@ pub(crate) struct VerifiedIdentityResult {
     recipient: String,
 }
 
+/// Returned by `generate_age_identity` — a freshly minted native x25519 age
+/// identity (secret) plus its public recipient. The identity is held in a
+/// frontend memory ref and saved via `complete_setup`; this command never
+/// persists it.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AgeIdentityResult {
+    identity: String,
+    recipient: String,
+}
+
 impl From<Recipient> for RecipientInfo {
     fn from(r: Recipient) -> Self {
         Self {
@@ -147,6 +157,52 @@ pub(crate) async fn clone_repo(
             pat.as_deref(),
             ssh_key.as_deref(),
             ssh_passphrase.as_deref(),
+        )
+        .await
+}
+
+/// Generate a new native x25519 age identity + its public recipient (gpm's
+/// in-app `age-keygen`). The identity is never persisted here — the create flow
+/// holds it in a frontend memory ref, then saves it via `complete_setup`.
+///
+/// Infallible (`age` key generation uses the OS RNG and cannot fail), so the
+/// value is returned directly — the same shape as `list_create_presets`.
+#[tauri::command]
+pub(crate) fn generate_age_identity() -> AgeIdentityResult {
+    let generated = rustpass::crypto::generate_age_identity();
+    AgeIdentityResult {
+        identity: generated.identity.as_str().to_owned(),
+        recipient: generated.recipient,
+    }
+}
+
+/// Create a brand-new local gopass store (RFC 0018), the create alternative to
+/// [`clone_repo`]. Seeds `.age-recipients` with `recipient` and makes the
+/// gopass "Initialized Store" commit. When `repo_url` is given it records an
+/// `origin` remote (local only).
+///
+/// Does **not** push — the first push is a separate `push_repo` step performed
+/// after [`complete_setup`], so the remote only receives the store once its
+/// identity is durable (closes the orphan-recipient hole). Auth fields are
+/// ignored when no `repo_url` is given.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn create_store(
+    state: State<'_, AppState>,
+    repo_url: Option<String>,
+    pat: Option<String>,
+    ssh_key: Option<String>,
+    ssh_passphrase: Option<String>,
+    recipient: String,
+) -> Result<(), Error> {
+    state
+        .store
+        .create_store(
+            repo_url.as_deref(),
+            pat.as_deref(),
+            ssh_key.as_deref(),
+            ssh_passphrase.as_deref(),
+            &recipient,
         )
         .await
 }

@@ -152,6 +152,8 @@ pub fn run() {
             setup::is_configured,
             setup::is_repo_ready,
             setup::clone_repo,
+            setup::generate_age_identity,
+            setup::create_store,
             setup::list_recipients,
             setup::validate_identity,
             setup::complete_setup,
@@ -175,6 +177,7 @@ pub fn run() {
             read::show_password,
             // write / sync
             write::pull_repo,
+            write::push_repo,
             write::resolve_sync_divergence,
             write::list_create_presets,
             write::lookup_template,

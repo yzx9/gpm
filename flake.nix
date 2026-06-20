@@ -95,6 +95,10 @@
             jq
             nixfmt
             prettier
+
+            # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
+            # `age` CLI (independent of rustpass's own decrypt path).
+            age
           ];
 
           ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";

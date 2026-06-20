@@ -93,6 +93,21 @@ pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
     Ok(())
 }
 
+/// Initialize a new git repository at `dest` (gopass's `gitInit`).
+///
+/// Creates the repo on the system default branch (main/master per
+/// `init.defaultBranch`). Makes no commits and adds no remote — the create-store
+/// flow writes `.age-recipients`, makes the initial commit, and (optionally)
+/// adds a remote afterwards.
+///
+/// # Errors
+///
+/// Returns an error if `Repository::init` fails.
+pub fn init_repo(dest: &Path) -> Result<(), Error> {
+    Repository::init(dest)?;
+    Ok(())
+}
+
 /// Pull (fetch + fast-forward only merge) from origin.
 ///
 /// Applies repository-authenticity verification according to `policy`:
@@ -120,12 +135,22 @@ pub fn pull_repo(
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
 
-    let mut remote = repo.find_remote("origin").map_err(|e| {
-        Error::new(
-            ErrorCode::NetworkError,
-            format!("Cannot find origin remote: {}", e.message()),
-        )
-    })?;
+    // No `origin` → a local-only store (e.g. created with no remote). Pull is a
+    // no-op: there is nothing to fetch. This mirrors the push no-op so the
+    // gopass-style pre-write sync (`Store::set` → `sync`) never errors on a
+    // local-only store. See `push_current_branch` for the matching case.
+    let Ok(mut remote) = repo.find_remote("origin") else {
+        let head = repo
+            .head()
+            .ok()
+            .and_then(|r| r.target())
+            .map_or_else(String::new, |oid| short_hash(&oid));
+        return Ok(SyncOutcome::FastForwarded(SyncResult {
+            changed: false,
+            head,
+            authenticity: empty_authenticity(policy.mode),
+        }));
+    };
 
     let callbacks = build_remote_callbacks(auth);
 
@@ -187,23 +212,57 @@ fn add_and_commit(
     Ok(repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?)
 }
 
+/// Like [`add_and_commit`] but with **no parent commit** — the first commit on a
+/// freshly initialized repo. [`add_and_commit`] looks up HEAD as the parent,
+/// which fails before the first commit exists (gopass's "Initialized Store"
+/// commit has no ancestors).
+fn commit_initial_inner(
+    repo: &Repository,
+    rel_paths: &[String],
+    message: &str,
+) -> Result<git2::Oid, Error> {
+    let mut index = repo.index()?;
+    for p in rel_paths {
+        index
+            .add_path(Path::new(p))
+            .map_err(|e| Error::new(ErrorCode::StoreError, format!("Failed to stage {p}: {e}")))?;
+    }
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+
+    // The "Initialized Store" commit is authored under the app default
+    // identity: the create flow runs at first run, before any commit identity
+    // is configured, so there is no `name`/`email` to thread yet.
+    let sig = gpm_signature(None, None)?;
+    let parents: &[&git2::Commit<'_>] = &[];
+    Ok(repo.commit(Some("HEAD"), &sig, &sig, message, &tree, parents)?)
+}
+
 /// Push the current branch to `origin` using `auth`.
 ///
 /// `Err` here means the push was rejected — most commonly a non-fast-forward
 /// because the remote advanced (the write-path conflict case).
 fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(), Error> {
+    // No `origin` → a local-only store (created with no remote). Push is a no-op:
+    // there is nothing to push to. Mirrors the `pull_repo` no-op.
+    //
+    // LOAD-BEARING INVARIANT: this returns `Ok(())`, so `Store::write_commit_push`
+    // returns `Ok(Some(head))` (not `Ok(None)`) for a local-only write. That is
+    // what keeps `Store::set`'s conflict branch — `fetch_remote_blob` /
+    // `fast_forward_to_remote`, both of which also call `find_remote("origin")`
+    // — unreachable by construction for a local-only store: the happy path is
+    // taken, so the conflict/replay branch never runs. Do not change this to
+    // surface "no origin" as a rejection without reworking that branch.
+    let Ok(mut remote) = repo.find_remote("origin") else {
+        return Ok(());
+    };
+
     let branch = repo
         .head()?
         .shorthand()
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot push"))?
         .to_string();
-
-    let mut remote = repo.find_remote("origin").map_err(|e| {
-        Error::new(
-            ErrorCode::NetworkError,
-            format!("Cannot find origin remote: {}", e.message()),
-        )
-    })?;
 
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     let mut opts = git2::PushOptions::new();
@@ -234,6 +293,26 @@ pub fn commit(
         .target()
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD after commit"))?;
     Ok(short_hash(&head))
+}
+
+/// Stage `rel_paths` and create the **initial** commit (no parent) — gopass's
+/// "Initialized Store" commit on a freshly `git init`ed repo. [`commit`] (and
+/// [`add_and_commit`]) build on an existing HEAD; this commits with no parents,
+/// the only valid first commit. Returns the short hash of the new HEAD commit.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened, staging fails, or the commit
+/// cannot be created.
+pub fn commit_initial(
+    repo_path: &Path,
+    rel_paths: &[String],
+    message: &str,
+) -> Result<String, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    let oid = commit_initial_inner(&repo, rel_paths, message)?;
+    Ok(short_hash(&oid))
 }
 
 /// Push the current branch to `origin`. (Push half of gopass's
@@ -267,6 +346,22 @@ pub fn commit_and_push(
     let head = commit(repo_path, rel_paths, message, name, email)?;
     push(repo_path, auth)?;
     Ok(head)
+}
+
+/// Add a remote named `name` pointing at `url` (gopass's `addRemote`). This is
+/// **local only** — it records the remote config without contacting it. The
+/// first push to the remote happens later, after the store's identity is durable
+/// (the deferred-push step of the create flow).
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened, or the remote cannot be added
+/// (e.g. a remote of that name already exists).
+pub fn remote_add(repo_path: &Path, name: &str, url: &str) -> Result<(), Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    repo.remote(name, url)?;
+    Ok(())
 }
 
 /// Hard-reset the current branch and worktree to `oid_str` (a full commit
@@ -1012,5 +1107,82 @@ mod tests {
             full
         };
         assert_eq!(result, "abc");
+    }
+
+    // ── create-store primitives ──────────────────────────────────────────
+
+    #[test]
+    fn init_repo_and_commit_initial_create_first_commit_no_parent() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        init_repo(dir.path()).expect("init_repo");
+
+        // Write a recipients file, then make the no-parent initial commit.
+        std::fs::write(dir.path().join(".age-recipients"), "age1abc\n").unwrap();
+        let message = "Initialized Store for age1abc";
+        let head = commit_initial(dir.path(), &[".age-recipients".to_string()], message)
+            .expect("commit_initial");
+        assert!(!head.is_empty());
+
+        let repo = Repository::open(dir.path()).unwrap();
+        let oid = repo.head().unwrap().target().unwrap();
+        let head_commit = repo.find_commit(oid).unwrap();
+        assert_eq!(head_commit.message(), Some(message));
+        assert_eq!(
+            head_commit.parent_count(),
+            0,
+            "initial commit must have no parents"
+        );
+        // .age-recipients is recorded in the commit tree.
+        let tree = head_commit.tree().unwrap();
+        assert!(tree.get_path(Path::new(".age-recipients")).is_ok());
+
+        // A follow-up commit (which needs a parent HEAD) works after the initial.
+        std::fs::write(dir.path().join("foo.age"), b"x").unwrap();
+        let second = commit(dir.path(), &["foo.age".to_string()], "second", None, None).unwrap();
+        assert_ne!(second, head);
+    }
+
+    #[test]
+    fn push_current_branch_noops_without_origin() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let repo = Repository::init(dir.path()).unwrap();
+        let _oid = create_empty_commit(&repo, &test_signature());
+
+        // No `origin` configured → push is a no-op (Ok), not an error.
+        push_current_branch(&repo, &GitAuth::None).expect("push no-ops without origin");
+    }
+
+    #[test]
+    fn pull_repo_noops_without_origin() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        init_repo(dir.path()).unwrap();
+        let repo = Repository::open(dir.path()).unwrap();
+        let oid = create_empty_commit(&repo, &test_signature());
+
+        let policy = AuthenticityConfig::default();
+        let outcome = pull_repo(dir.path(), &GitAuth::None, &policy)
+            .expect("pull must no-op, not error, without origin");
+        match outcome {
+            SyncOutcome::FastForwarded(r) => {
+                assert!(!r.changed, "no-op pull reports no change");
+                assert_eq!(r.head, short_hash(&oid));
+            }
+            SyncOutcome::Diverged(d) => panic!("expected FastForwarded no-op, got Diverged: {d:?}"),
+        }
+    }
+
+    #[test]
+    fn remote_add_records_origin_locally() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let repo = Repository::init(dir.path()).unwrap();
+        drop(repo);
+
+        // remote_add is local only — a bogus URL never touches the network.
+        remote_add(dir.path(), "origin", "https://example.invalid/repo.git").unwrap();
+
+        let repo = Repository::open(dir.path()).unwrap();
+        let remote = repo.find_remote("origin").expect("origin should exist");
+        assert_eq!(remote.name(), Some("origin"));
+        assert_eq!(remote.url(), Some("https://example.invalid/repo.git"));
     }
 }

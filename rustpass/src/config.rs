@@ -155,7 +155,6 @@ impl Config {
         ssh_passphrase: Option<&str>,
         local_path: &str,
     ) -> Result<(), Error> {
-        fs::create_dir_all(&self.config_dir).await?;
         let config = RepoConfig {
             url: url.to_string(),
             pat: pat.map(String::from),
@@ -168,10 +167,10 @@ impl Config {
             commit_user_email: None,
             authenticity: AuthenticityConfig::default(),
         };
-        let json = serde_json::to_string_pretty(&config)?;
-        let sealed = self.atrest.seal("repo_config", json.as_bytes())?;
-        save_atomic(&self.repo_config_path(), &sealed).await?;
-        Ok(())
+        // Delegate to the atomic variant so `repo.json` is never observed
+        // half-written (temp file + rename), matching `save_identity`. Matters
+        // for `create_store`'s bootstrap, which saves config after git init.
+        self.save_repo_config_full(&config).await
     }
 
     /// Persist a full [`RepoConfig`] atomically (used by the

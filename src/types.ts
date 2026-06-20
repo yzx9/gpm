@@ -84,6 +84,12 @@ export interface SshKeyPairResult {
   private_key: string;
 }
 
+/** A freshly generated age x25519 identity + its public recipient. */
+export interface AgeIdentityResult {
+  identity: string;
+  recipient: string;
+}
+
 export interface SshPublicKeyResult {
   public_key: string;
 }
