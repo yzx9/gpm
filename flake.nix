@@ -80,6 +80,7 @@
             cargo-audit
             cargo-release
             cargo-outdated
+            sccache # shared compile cache across worktrees (RUSTC_WRAPPER below)
 
             # Frontend
             nodejs
@@ -112,6 +113,12 @@
           CC_armv7_linux_androideabi = "${ndkBin}/armv7a-linux-androideabi28-clang";
           CC_x86_64_linux_android = "${ndkBin}/x86_64-linux-android28-clang";
           CC_i686_linux_android = "${ndkBin}/i686-linux-android28-clang";
+
+          # sccache wraps rustc; its cache is machine-global, so a fresh worktree reuses
+          # compiles from other worktrees instead of rebuilding target/ from scratch.
+          # For max cold-build hits, run that build with CARGO_INCREMENTAL=0 (don't set it
+          # here — it would slow `just dev` warm rebuilds). rust-analyzer ignores this.
+          RUSTC_WRAPPER = "sccache";
 
           # Use shellHook for PATH and AR/RANLIB — plain attr may be overridden by shell profile.
           # Both TARGET_AR and plain AR are set so openssl-sys's build script picks them up
