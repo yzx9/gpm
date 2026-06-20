@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-06-20
+
 ### Added
 
 - On Android, gpm now encrypts your local configuration and identity at rest with a key sealed in the device's hardware-backed Keystore, so someone who copies the app's private files (a stolen backup, a forensic dump) gets ciphertext rather than your git credentials or decryption key. Existing data is wrapped automatically on the next launch, and tampering with these files is detected and rejected. Desktop is unchanged
@@ -96,7 +98,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.6.0...HEAD
+[v0.6.0]: https://github.com/yzx9/gpm/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/yzx9/gpm/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/yzx9/gpm/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/yzx9/gpm/compare/v0.2.0...v0.3.0
