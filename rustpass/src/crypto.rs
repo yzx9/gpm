@@ -423,8 +423,7 @@ pub fn decrypt_identity(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, E
 ///
 /// Parses the key and, if it is passphrase-encrypted, attempts to decrypt it
 /// with `passphrase`. Used by the biometric enable flow to reject a wrong SSH
-/// passphrase before sealing it (plan D4). Unencrypted keys succeed with any
-/// passphrase.
+/// passphrase before sealing it. Unencrypted keys succeed with any passphrase.
 ///
 /// # Errors
 ///

@@ -86,8 +86,8 @@ fn require_encrypted_identity(is_encrypted: bool) -> Result<(), Error> {
     }
 }
 
-/// Enable biometric unlock: validate the passphrase (D4), then seal it behind
-/// a biometric prompt (D2 — encrypt also needs auth for a
+/// Enable biometric unlock: validate the passphrase, then seal it behind a
+/// biometric prompt (encrypt also needs auth for a
 /// `setUserAuthenticationRequired` key).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -101,9 +101,9 @@ pub(crate) async fn enable_biometric_unlock(
     // this control for plaintext identities — this is the backend backstop so a
     // UI regression (or a direct IPC call) can't reach the Keystore.
     require_encrypted_identity(state.store.is_identity_encrypted().await)?;
-    // D4: reject a wrong passphrase before sealing it (age or SSH).
+    // Reject a wrong passphrase before sealing it (age or SSH).
     state.store.validate_passphrase(&passphrase).await?;
-    // D2: the Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
+    // The Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
     app.keystore().store(&passphrase).await?;
     Ok(())
 }

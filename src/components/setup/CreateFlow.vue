@@ -3,26 +3,26 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  AgeIdentityResult,
-  AppError,
-  SshKeyPairResult,
-} from "../../types";
+import type { AppError, CreateIdentityKind } from "../../types";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
 import "./forms.css";
 
-// The generated identity (age secret or SSH private key). Held ONLY in memory —
-// never persisted by the frontend; it is saved through `complete_setup` below.
-const generatedIdentity = ref("");
-// The public recipient derived from the identity; this is what seeds the
-// store's `.age-recipients`.
+// The public recipient of the generated identity — the only part the frontend
+// ever holds. The secret identity itself lives in backend state (staged by
+// `generate_identity`, consumed by `complete_setup_from_file`); it never enters
+// the WebView.
 const recipient = ref("");
 
-const identityKind = ref<"age" | "ssh">("age");
+const identityKind = ref<CreateIdentityKind>("age");
 const passphrase = ref("");
+// The passphrase that minted the SSH key (snapshot at generate time). SSH
+// derives its recipient from the passphrase-encrypted PEM, so complete must
+// reuse exactly this value — not the live field, which is locked after generate
+// but could still diverge during the in-flight generate window.
+const mintedSshPassphrase = ref<string | null>(null);
 
 // Optional remote (local-first: a remote is not required to create).
 const repoUrl = ref("");
@@ -38,28 +38,43 @@ const emit = defineEmits<{ done: [] }>();
 
 const isSshUrl = computed(() => isSshRepoUrl(repoUrl.value));
 
-function selectKind(kind: "age" | "ssh") {
+function selectKind(kind: CreateIdentityKind) {
   if (identityKind.value === kind) return;
   identityKind.value = kind;
-  // The generated key must match the selected type — force a re-generate.
-  generatedIdentity.value = "";
+  // The staged identity + the SSH mint passphrase must match the selected type
+  // — drop both so stale values can't be saved, and force a re-generate.
   recipient.value = "";
+  mintedSshPassphrase.value = null;
+  invoke("clear_pending_identity").catch(() => {});
 }
+
+// Drop any staged identity if the user leaves without completing (no-op after a
+// successful complete_setup_from_file, which consumes it).
+onUnmounted(() => {
+  invoke("clear_pending_identity").catch(() => {});
+});
 
 async function generate() {
   generating.value = true;
   error.value = "";
   try {
-    if (identityKind.value === "age") {
-      const result = await invoke<AgeIdentityResult>("generate_age_identity");
-      generatedIdentity.value = result.identity;
-      recipient.value = result.recipient;
-    } else {
-      const result = await invoke<SshKeyPairResult>("generate_ssh_key", {
-        passphrase: passphrase.value || null,
+    // The backend mints + stages the secret; only the recipient comes back.
+    if (identityKind.value === "ssh") {
+      // SSH derives its recipient from the passphrase-encrypted PEM, so the
+      // passphrase used at complete must be the one that minted the key.
+      // Snapshot it now (the field is also locked after generate) so a later
+      // edit — or a mid-generate keystroke before the lock takes effect — can't
+      // desync the two.
+      mintedSshPassphrase.value = passphrase.value || null;
+      recipient.value = await invoke<string>("generate_identity", {
+        kind: "ssh",
+        passphrase: mintedSshPassphrase.value,
       });
-      generatedIdentity.value = result.private_key;
-      recipient.value = result.public_key;
+    } else {
+      recipient.value = await invoke<string>("generate_identity", {
+        kind: "age",
+        passphrase: null,
+      });
     }
   } catch (e) {
     const appError = e as AppError;
@@ -101,28 +116,40 @@ async function onCreate() {
   loading.value = true;
   try {
     const hasRemote = repoUrl.value.trim().length > 0;
-    // create_store bootstraps the local repo + seeds .age-recipients + (if a
-    // remote is given) records origin. It does NOT push — the first push is
-    // deferred until after the identity is durable (orphan-recipient guard).
-    await invoke("create_store", {
-      recipient: recipient.value,
-      repoUrl: hasRemote ? repoUrl.value.trim() : null,
-      pat: hasRemote && !isSshUrl.value ? pat.value || null : null,
-      sshKey: hasRemote && isSshUrl.value ? sshKey.value : null,
-      sshPassphrase:
-        hasRemote && isSshUrl.value ? sshPassphrase.value || null : null,
-    });
+    // A store that's already configured (e.g. retrying after a non-fatal push
+    // failure) must NOT be re-bootstrapped: create_store clears config +
+    // rm -rf's the repo, and the staged identity is already consumed, so a
+    // re-run would destroy the saved identity and strand the store. When the
+    // store is complete, skip straight to the (retry) push.
+    const configured = await invoke<boolean>("is_configured");
+    if (!configured) {
+      // create_store bootstraps the local repo + seeds .age-recipients + (if a
+      // remote is given) records origin. It does NOT push — the first push is
+      // deferred until after the identity is durable (orphan-recipient guard).
+      await invoke("create_store", {
+        recipient: recipient.value,
+        repoUrl: hasRemote ? repoUrl.value.trim() : null,
+        pat: hasRemote && !isSshUrl.value ? pat.value || null : null,
+        sshKey: hasRemote && isSshUrl.value ? sshKey.value : null,
+        sshPassphrase:
+          hasRemote && isSshUrl.value ? sshPassphrase.value || null : null,
+      });
 
-    // Now the identity is durable — the remote may safely receive the store.
-    await invoke("complete_setup", {
-      identity: generatedIdentity.value,
-      passphrase: passphrase.value || null,
-    });
+      // The identity was staged in backend state at generate time; this consumes
+      // it (no secret crosses IPC). For SSH, reuse the passphrase that minted the
+      // key (snapshot); for age, the live field (at-rest encryption).
+      await invoke("complete_setup_from_file", {
+        passphrase:
+          identityKind.value === "ssh"
+            ? mintedSshPassphrase.value
+            : passphrase.value || null,
+      });
+    }
 
     if (hasRemote) {
-      // First push. The store is fully created + configured locally; a failed
-      // push (bad remote / auth) blocks navigation so the user sees it rather
-      // than silently believing the store synced. Re-submitting retries the push.
+      // First push — or, after a prior push failure, the retry. The store is
+      // fully created + configured locally; a failed push blocks navigation so
+      // the user sees it rather than silently believing the store synced.
       try {
         await invoke("push_repo");
       } catch (e) {
@@ -160,6 +187,7 @@ async function onCreate() {
       >
         <button
           type="button"
+          :disabled="generating || loading"
           :class="[
             'flex-1 py-2 text-sm font-medium transition-colors',
             identityKind === 'age' ? 'bg-accent text-white' : 'bg-surface',
@@ -170,6 +198,7 @@ async function onCreate() {
         </button>
         <button
           type="button"
+          :disabled="generating || loading"
           :class="[
             'flex-1 py-2 text-sm font-medium transition-colors',
             identityKind === 'ssh' ? 'bg-accent text-white' : 'bg-surface',
@@ -192,7 +221,7 @@ async function onCreate() {
         type="password"
         placeholder="Leave empty for plaintext storage"
         autocomplete="new-password"
-        :disabled="loading"
+        :disabled="loading || (identityKind === 'ssh' && !!recipient)"
         class="input-base"
       />
       <small class="text-xs text-muted">{{

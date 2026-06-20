@@ -21,6 +21,27 @@ function mockInvoke(
   });
 }
 
+/// The whole point of the backend-held refactor: the generated secret identity
+/// must never appear in any IPC payload. Scans every recorded `invoke` call —
+/// both for a secret-looking string AND for any command receiving an `identity`
+/// field (the structural regression this refactor removed).
+function expectNoSecretCrossedIPC() {
+  for (const [cmd, args] of vi.mocked(invoke).mock.calls) {
+    if (
+      args &&
+      typeof args === "object" &&
+      "identity" in (args as Record<string, unknown>)
+    ) {
+      throw new Error(
+        `${cmd} was invoked with an \`identity\` field — the secret must stay backend-side`,
+      );
+    }
+  }
+  const dump = JSON.stringify(vi.mocked(invoke).mock.calls);
+  expect(dump).not.toContain("AGE-SECRET-KEY");
+  expect(dump).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+}
+
 describe("CreateFlow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -40,12 +61,12 @@ describe("CreateFlow", () => {
 
   // ── age identity path ──────────────────────────────────────────────────
 
-  it("generates an age identity and creates a local-only store", async () => {
+  it("generates an age identity (recipient only) and creates a local-only store", async () => {
     mockInvoke({
-      generate_age_identity: () => ({
-        identity: "AGE-SECRET-KEY-1ABCDEF",
-        recipient: "age1recipientkey",
-      }),
+      generate_identity: (args) => {
+        expect(args).toEqual({ kind: "age", passphrase: null });
+        return "age1recipientkey";
+      },
       create_store: (args) => {
         expect(args).toEqual({
           recipient: "age1recipientkey",
@@ -56,12 +77,9 @@ describe("CreateFlow", () => {
         });
         return undefined;
       },
-      complete_setup: (args) => {
-        // The generated identity crosses IPC here; never rendered in the UI.
-        expect(args).toEqual({
-          identity: "AGE-SECRET-KEY-1ABCDEF",
-          passphrase: null,
-        });
+      complete_setup_from_file: (args) => {
+        // No `identity` field — the secret is consumed from backend state.
+        expect(args).toEqual({ passphrase: null });
         return undefined;
       },
     });
@@ -69,44 +87,53 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
 
-    // No identity yet — the recipient panel is absent.
+    // No recipient yet — the panel is absent.
     expect(wrapper.text()).not.toContain("Recipient");
 
     await clickButton(wrapper, "Generate identity");
-    expect(invoke).toHaveBeenCalledWith("generate_age_identity");
+    expect(invoke).toHaveBeenCalledWith("generate_identity", {
+      kind: "age",
+      passphrase: null,
+    });
     expect(wrapper.text()).toContain("age1recipientkey");
 
     await submit(wrapper);
 
     expect(invoke).toHaveBeenCalledWith("create_store", expect.anything());
-    expect(invoke).toHaveBeenCalledWith("complete_setup", expect.anything());
+    expect(invoke).toHaveBeenCalledWith(
+      "complete_setup_from_file",
+      expect.anything(),
+    );
     // No remote → no first push.
     expect(invoke).not.toHaveBeenCalledWith("push_repo");
     expect(wrapper.emitted("done")).toHaveLength(1);
+
+    // The invariant: the generated secret never crosses IPC.
+    expectNoSecretCrossedIPC();
   });
 
-  it("does not render the secret identity, only the public recipient", async () => {
+  it("renders the public recipient but never holds a secret", async () => {
     mockInvoke({
-      generate_age_identity: () => ({
-        identity: "AGE-SECRET-KEY-1NEVERRENDERED",
-        recipient: "age1pub",
-      }),
+      generate_identity: () => "age1pub",
     });
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
 
-    expect(wrapper.text()).not.toContain("AGE-SECRET-KEY-1NEVERRENDERED");
+    expect(wrapper.text()).toContain("age1pub");
+    // No secret identity string exists anywhere in the rendered output.
+    expect(wrapper.text()).not.toContain("AGE-SECRET-KEY");
+    expectNoSecretCrossedIPC();
   });
 
   // ── SSH identity path ──────────────────────────────────────────────────
 
-  it("generates an SSH keypair and uses the public key as recipient", async () => {
+  it("generates an SSH identity (recipient only) and seeds it as the recipient", async () => {
     mockInvoke({
-      generate_ssh_key: () => ({
-        public_key: "ssh-ed25519 AAAApub",
-        private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\npriv\n-----END-----",
-      }),
+      generate_identity: (args) => {
+        expect(args).toEqual({ kind: "ssh", passphrase: null });
+        return "ssh-ed25519 AAAApub";
+      },
       create_store: (args) => {
         expect(args).toMatchObject({
           recipient: "ssh-ed25519 AAAApub",
@@ -114,11 +141,8 @@ describe("CreateFlow", () => {
         });
         return undefined;
       },
-      complete_setup: (args) => {
-        expect(args).toEqual({
-          identity: "-----BEGIN OPENSSH PRIVATE KEY-----\npriv\n-----END-----",
-          passphrase: null,
-        });
+      complete_setup_from_file: (args) => {
+        expect(args).toEqual({ passphrase: null });
         return undefined;
       },
     });
@@ -134,10 +158,9 @@ describe("CreateFlow", () => {
 
     await submit(wrapper);
 
-    expect(invoke).toHaveBeenCalledWith("generate_ssh_key", {
-      passphrase: null,
-    });
     expect(wrapper.emitted("done")).toHaveLength(1);
+    // The SSH private key never crosses IPC.
+    expectNoSecretCrossedIPC();
   });
 
   // ── remote paths ───────────────────────────────────────────────────────
@@ -145,13 +168,13 @@ describe("CreateFlow", () => {
   it("creates + pushes when an HTTPS remote is given", async () => {
     const calls: string[] = [];
     mockInvoke({
-      generate_age_identity: () => ({ identity: "sk", recipient: "age1r" }),
+      generate_identity: () => "age1r",
       create_store: () => {
         calls.push("create_store");
         return undefined;
       },
-      complete_setup: () => {
-        calls.push("complete_setup");
+      complete_setup_from_file: () => {
+        calls.push("complete_setup_from_file");
         return undefined;
       },
       push_repo: () => {
@@ -169,8 +192,12 @@ describe("CreateFlow", () => {
     await wrapper.find('input[id="pat"]').setValue("my-pat");
     await submit(wrapper);
 
-    // create → complete_setup → push_repo, in that order (deferred push).
-    expect(calls).toEqual(["create_store", "complete_setup", "push_repo"]);
+    // create → complete_setup_from_file → push_repo, in that order (deferred push).
+    expect(calls).toEqual([
+      "create_store",
+      "complete_setup_from_file",
+      "push_repo",
+    ]);
     expect(invoke).toHaveBeenCalledWith("create_store", {
       recipient: "age1r",
       repoUrl: "https://example.com/r.git",
@@ -179,11 +206,12 @@ describe("CreateFlow", () => {
       sshPassphrase: null,
     });
     expect(wrapper.emitted("done")).toHaveLength(1);
+    expectNoSecretCrossedIPC();
   });
 
   it("sends SSH auth for an SSH remote URL", async () => {
     mockInvoke({
-      generate_age_identity: () => ({ identity: "sk", recipient: "age1r" }),
+      generate_identity: () => "age1r",
       create_store: (args) => {
         expect(args).toEqual({
           recipient: "age1r",
@@ -194,7 +222,7 @@ describe("CreateFlow", () => {
         });
         return undefined;
       },
-      complete_setup: () => undefined,
+      complete_setup_from_file: () => undefined,
       push_repo: () => undefined,
     });
 
@@ -226,7 +254,7 @@ describe("CreateFlow", () => {
 
   it("rejects authentication fields without a repository URL", async () => {
     mockInvoke({
-      generate_age_identity: () => ({ identity: "sk", recipient: "age1r" }),
+      generate_identity: () => "age1r",
     });
     const wrapper = mount(CreateFlow);
     await flushPromises();
@@ -244,7 +272,7 @@ describe("CreateFlow", () => {
 
   it("rejects an SSH remote URL without a push-auth key", async () => {
     mockInvoke({
-      generate_age_identity: () => ({ identity: "sk", recipient: "age1r" }),
+      generate_identity: () => "age1r",
     });
     const wrapper = mount(CreateFlow);
     await flushPromises();
@@ -261,7 +289,7 @@ describe("CreateFlow", () => {
 
   it("surfaces a create_store failure without emitting done", async () => {
     mockInvoke({
-      generate_age_identity: () => ({ identity: "sk", recipient: "age1r" }),
+      generate_identity: () => "age1r",
       create_store: () => {
         throw { code: "STORE_ERROR", message: "disk full" };
       },
@@ -273,20 +301,20 @@ describe("CreateFlow", () => {
 
     expect(wrapper.find("[role='alert']").text()).toBe("disk full");
     expect(invoke).not.toHaveBeenCalledWith(
-      "complete_setup",
+      "complete_setup_from_file",
       expect.anything(),
     );
     expect(wrapper.emitted("done")).toBeUndefined();
   });
 
-  it("surfaces a complete_setup failure without pushing or emitting done", async () => {
-    // The store was created but the identity didn't persist — the frontend half
-    // of the orphan-recipient concern. The first push must be skipped (identity
-    // not durable) and the user must not be navigated to entries.
+  it("surfaces a complete_setup_from_file failure without pushing or emitting done", async () => {
+    // The store was created but the identity didn't persist — the orphan-
+    // recipient concern. The first push must be skipped (identity not durable)
+    // and the user must not be navigated to entries.
     mockInvoke({
-      generate_age_identity: () => ({ identity: "sk", recipient: "age1r" }),
+      generate_identity: () => "age1r",
       create_store: () => undefined,
-      complete_setup: () => {
+      complete_setup_from_file: () => {
         throw { code: "STORE_ERROR", message: "identity save failed" };
       },
     });
@@ -299,7 +327,10 @@ describe("CreateFlow", () => {
     await submit(wrapper);
 
     expect(wrapper.find("[role='alert']").text()).toBe("identity save failed");
-    expect(invoke).toHaveBeenCalledWith("complete_setup", expect.anything());
+    expect(invoke).toHaveBeenCalledWith(
+      "complete_setup_from_file",
+      expect.anything(),
+    );
     expect(invoke).not.toHaveBeenCalledWith("push_repo", expect.anything());
     expect(wrapper.emitted("done")).toBeUndefined();
   });
@@ -308,9 +339,9 @@ describe("CreateFlow", () => {
 
   it("blocks navigation when the first push fails (store is created locally)", async () => {
     mockInvoke({
-      generate_age_identity: () => ({ identity: "sk", recipient: "age1r" }),
+      generate_identity: () => "age1r",
       create_store: () => undefined,
-      complete_setup: () => undefined,
+      complete_setup_from_file: () => undefined,
       push_repo: () => {
         throw { code: "NETWORK_ERROR", message: "remote unreachable" };
       },
@@ -324,13 +355,132 @@ describe("CreateFlow", () => {
       .setValue("https://example.com/r.git");
     await submit(wrapper);
 
-    // create + complete_setup succeeded; the push failed → stay on the page
-    // with a visible error so the user knows the store didn't sync.
+    // create + complete_setup_from_file succeeded; the push failed → stay on
+    // the page with a visible error so the user knows the store didn't sync.
     expect(invoke).toHaveBeenCalledWith("push_repo");
     expect(wrapper.find("[role='alert']").text()).toContain(
       "remote unreachable",
     );
     expect(wrapper.find("[role='alert']").text()).toContain("saved locally");
     expect(wrapper.emitted("done")).toBeUndefined();
+  });
+
+  // ── clearing the staged identity ───────────────────────────────────────
+
+  it("drops the staged identity when switching kind", async () => {
+    mockInvoke({ generate_identity: () => "age1r" });
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "Generate identity");
+    expect(wrapper.text()).toContain("age1r");
+
+    // Switching to SSH must drop the staged age identity so it can't be saved
+    // stale — the backend is told to forget it, and the recipient panel clears.
+    await clickButton(wrapper, "SSH (ed25519)");
+    expect(invoke).toHaveBeenCalledWith("clear_pending_identity");
+    expect(wrapper.text()).not.toContain("age1r");
+  });
+
+  // ── SSH passphrase is fixed at mint time ───────────────────────────────
+
+  it("locks the SSH passphrase field after generation and reuses the minted value", async () => {
+    let completeArgs: Record<string, unknown> | undefined;
+    mockInvoke({
+      generate_identity: (args) => {
+        expect(args).toEqual({ kind: "ssh", passphrase: "original-pass" });
+        return "ssh-ed25519 AAAApub";
+      },
+      is_configured: () => false,
+      create_store: () => undefined,
+      complete_setup_from_file: (args) => {
+        completeArgs = args;
+        return undefined;
+      },
+    });
+
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "SSH (ed25519)");
+    const passInput = wrapper.find('input[id="create-passphrase"]');
+    // Editable before generation.
+    expect(passInput.attributes("disabled")).toBeUndefined();
+    await passInput.setValue("original-pass");
+    await clickButton(wrapper, "Generate SSH key");
+
+    // Locked after generation — for SSH the passphrase is fixed at mint time.
+    expect(passInput.attributes("disabled")).toBeDefined();
+
+    // Even if the live field diverges (a mid-generate keystroke before the lock
+    // took effect, or a programmatic change), complete must reuse the value that
+    // actually minted the key — SSH derives its recipient from the PEM it encrypted.
+    await passInput.setValue("changed-pass");
+    await submit(wrapper);
+
+    expect(completeArgs).toEqual({ passphrase: "original-pass" });
+  });
+
+  // ── retry after a non-fatal push failure ───────────────────────────────
+
+  it("on re-submit after a push failure, retries only the push (no re-bootstrap)", async () => {
+    const seq: string[] = [];
+    let configuredCalls = 0;
+    let pushCalls = 0;
+    mockInvoke({
+      generate_identity: () => "age1r",
+      is_configured: () => {
+        configuredCalls += 1;
+        // 1st submit: store not yet configured; 2nd: configured (identity saved).
+        return configuredCalls >= 2;
+      },
+      create_store: () => {
+        seq.push("create_store");
+        return undefined;
+      },
+      complete_setup_from_file: () => {
+        seq.push("complete_setup_from_file");
+        return undefined;
+      },
+      push_repo: () => {
+        pushCalls += 1;
+        seq.push("push_repo");
+        // First push fails; the retry succeeds.
+        if (pushCalls === 1) {
+          throw { code: "NETWORK_ERROR", message: "remote unreachable" };
+        }
+        return undefined;
+      },
+    });
+
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "Generate identity");
+    await wrapper
+      .find('input[id="repo-url"]')
+      .setValue("https://example.com/r.git");
+    await submit(wrapper);
+
+    // 1st submit: full bootstrap, then a failed push. No done emitted.
+    expect(seq).toEqual([
+      "create_store",
+      "complete_setup_from_file",
+      "push_repo",
+    ]);
+    expect(wrapper.find("[role='alert']").text()).toContain(
+      "remote unreachable",
+    );
+    expect(wrapper.emitted("done")).toBeUndefined();
+
+    // Retry: the store is configured now → must NOT re-bootstrap (create_store
+    // clears config + rm -rf's the repo, and the staged identity is consumed,
+    // so a re-run would strand the store). Only the push is retried.
+    await submit(wrapper);
+
+    expect(seq).toEqual([
+      "create_store",
+      "complete_setup_from_file",
+      "push_repo",
+      "push_repo",
+    ]);
+    expect(wrapper.emitted("done")).toHaveLength(1);
   });
 });

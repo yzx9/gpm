@@ -207,7 +207,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     /**
      * Seal the supplied passphrase behind biometric auth.
      *
-     * Shows a CryptoObject ENCRYPT prompt (D2): a key with
+     * Shows a CryptoObject ENCRYPT prompt: a key with
      * `setUserAuthenticationRequired` needs auth for encrypt too. Resolves
      * ONLY from a terminal biometric callback — never synchronously — so the
      * `Invoke` stays open across the prompt.

@@ -84,11 +84,9 @@ export interface SshKeyPairResult {
   private_key: string;
 }
 
-/** A freshly generated age x25519 identity + its public recipient. */
-export interface AgeIdentityResult {
-  identity: string;
-  recipient: string;
-}
+/** Kind of identity to mint for the create flow (mirrors the Rust
+ * `CreateIdentityKind` enum, serde `lowercase`). */
+export type CreateIdentityKind = "age" | "ssh";
 
 export interface SshPublicKeyResult {
   public_key: string;

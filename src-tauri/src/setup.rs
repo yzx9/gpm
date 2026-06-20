@@ -7,8 +7,9 @@
 
 use rustpass::error::ErrorCode;
 use rustpass::identity::{IdentityType, classify_identity};
+use rustpass::ssh;
 use rustpass::{Error, IdentityInfo, KeyType, Recipient};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_file_picker::FilePickerExt;
 use zeroize::Zeroizing;
@@ -69,14 +70,14 @@ pub(crate) struct VerifiedIdentityResult {
     recipient: String,
 }
 
-/// Returned by `generate_age_identity` — a freshly minted native x25519 age
-/// identity (secret) plus its public recipient. The identity is held in a
-/// frontend memory ref and saved via `complete_setup`; this command never
-/// persists it.
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AgeIdentityResult {
-    identity: String,
-    recipient: String,
+/// Which kind of identity [`generate_identity`] should mint for the create flow.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CreateIdentityKind {
+    /// Native x25519 age identity.
+    Age,
+    /// ed25519 SSH keypair.
+    Ssh,
 }
 
 impl From<Recipient> for RecipientInfo {
@@ -161,22 +162,72 @@ pub(crate) async fn clone_repo(
         .await
 }
 
-/// Generate a new native x25519 age identity + its public recipient (gpm's
-/// in-app `age-keygen`). The identity is never persisted here — the create flow
-/// holds it in a frontend memory ref, then saves it via `complete_setup`.
+/// Mint a fresh identity for the create flow and stage it in backend
+/// state — the create-side analogue of [`pick_identity_file`]. Returns **only the
+/// public recipient**; the secret identity never reaches the `WebView`. It is
+/// saved later by [`complete_setup_from_file`], which consumes the staged copy.
 ///
-/// Infallible (`age` key generation uses the OS RNG and cannot fail), so the
-/// value is returned directly — the same shape as `list_create_presets`.
+/// `Age` mints a native x25519 key; `Ssh` mints an ed25519 keypair, optionally
+/// encrypted with `passphrase`. For `Age` the `passphrase` is ignored at mint
+/// time (it is applied as at-rest encryption by `complete_setup_from_file`).
 #[tauri::command]
-pub(crate) fn generate_age_identity() -> AgeIdentityResult {
-    let generated = rustpass::crypto::generate_age_identity();
-    AgeIdentityResult {
-        identity: generated.identity.as_str().to_owned(),
-        recipient: generated.recipient,
-    }
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn generate_identity(
+    state: State<'_, AppState>,
+    kind: CreateIdentityKind,
+    passphrase: Option<String>,
+) -> Result<String, Error> {
+    generate_identity_core(&state, kind, passphrase.as_deref())
 }
 
-/// Create a brand-new local gopass store (RFC 0018), the create alternative to
+/// Testable core of [`generate_identity`]: mint the identity, stage it in
+/// `pending_identity`, return only the recipient. Factored out because the
+/// command touches nothing but `pending_identity` (no `AppHandle`, no git), so
+/// it can be exercised directly with a minimal [`AppState`] and no Tauri runtime.
+pub(crate) fn generate_identity_core(
+    state: &AppState,
+    kind: CreateIdentityKind,
+    passphrase: Option<&str>,
+) -> Result<String, Error> {
+    let (identity, recipient, info) = match kind {
+        CreateIdentityKind::Age => {
+            let generated = rustpass::crypto::generate_age_identity();
+            (
+                generated.identity,
+                generated.recipient,
+                IdentityInfo {
+                    key_type: KeyType::X25519,
+                    encrypted: false,
+                },
+            )
+        }
+        CreateIdentityKind::Ssh => {
+            let pair = ssh::generate_keypair(passphrase)?;
+            let encrypted = passphrase.is_some_and(|p| !p.is_empty());
+            (
+                pair.private_key,
+                pair.public_key,
+                IdentityInfo {
+                    key_type: KeyType::SshEd25519,
+                    encrypted,
+                },
+            )
+        }
+    };
+
+    // Stage the secret in backend state; the frontend only ever sees the
+    // recipient. Overwrites any prior staged identity (matches pick_identity_file).
+    {
+        let mut guard = state
+            .pending_identity
+            .lock()
+            .expect("pending_identity lock poisoned");
+        *guard = Some(PendingIdentity { identity, info });
+    }
+    Ok(recipient)
+}
+
+/// Create a brand-new local gopass store, the create alternative to
 /// [`clone_repo`]. Seeds `.age-recipients` with `recipient` and makes the
 /// gopass "Initialized Store" commit. When `repo_url` is given it records an
 /// `origin` remote (local only).
@@ -520,4 +571,107 @@ fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError) -> Error 
         _ => ErrorCode::InvalidIdentity,
     };
     Error::new(code, e.message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_identity_core, CreateIdentityKind};
+    use crate::AppState;
+    use rustpass::{KeyType, Store};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::{Arc, Mutex};
+
+    /// Minimal [`AppState`]. `generate_identity_core` only touches
+    /// `pending_identity`, so the store / timer / pending-write are inert
+    /// placeholders — no git repo or Tauri runtime needed.
+    fn pending_state() -> (AppState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = AppState {
+            store: Arc::new(Store::new(dir.path().to_path_buf(), None)),
+            lock_timer: Mutex::new(None),
+            lock_generation: Arc::new(AtomicU64::new(0)),
+            pending_identity: Mutex::new(None),
+            pending_write: Arc::new(Mutex::new(None)),
+        };
+        (state, dir)
+    }
+
+    #[test]
+    fn age_mints_and_stages_the_matching_secret() {
+        let (state, _dir) = pending_state();
+        let recipient =
+            generate_identity_core(&state, CreateIdentityKind::Age, None).expect("age mint");
+        assert!(recipient.starts_with("age1"), "recipient: {recipient}");
+
+        let pending = state
+            .pending_identity
+            .lock()
+            .expect("lock")
+            .take()
+            .expect("identity staged");
+        assert_eq!(pending.info.key_type, KeyType::X25519);
+        assert!(!pending.info.encrypted);
+        // The staged secret is the matching private key — never the recipient.
+        assert!(
+            pending.identity.as_str().starts_with("AGE-SECRET-KEY-1"),
+            "staged identity: {}",
+            pending.identity.as_str()
+        );
+    }
+
+    #[test]
+    fn ssh_encryption_flag_tracks_the_passphrase() {
+        let (state, _dir) = pending_state();
+
+        let recipient = generate_identity_core(
+            &state,
+            CreateIdentityKind::Ssh,
+            Some("create-pass"),
+        )
+        .expect("ssh mint");
+        assert!(
+            recipient.starts_with("ssh-ed25519 "),
+            "recipient: {recipient}"
+        );
+        let pending = state
+            .pending_identity
+            .lock()
+            .expect("lock")
+            .take()
+            .expect("identity staged");
+        assert_eq!(pending.info.key_type, KeyType::SshEd25519);
+        assert!(
+            pending.info.encrypted,
+            "a passphrase-protected SSH key must be flagged encrypted"
+        );
+        assert!(
+            pending.identity.as_str().contains("BEGIN OPENSSH PRIVATE KEY"),
+            "staged identity should be a PEM"
+        );
+
+        // Without a passphrase → not encrypted.
+        generate_identity_core(&state, CreateIdentityKind::Ssh, None).unwrap();
+        let pending = state
+            .pending_identity
+            .lock()
+            .expect("lock")
+            .take()
+            .expect("identity staged");
+        assert!(!pending.info.encrypted);
+    }
+
+    #[test]
+    fn a_second_mint_overwrites_the_prior_staged_identity() {
+        let (state, _dir) = pending_state();
+        generate_identity_core(&state, CreateIdentityKind::Age, None).unwrap();
+        generate_identity_core(&state, CreateIdentityKind::Ssh, None).unwrap();
+        let pending = state
+            .pending_identity
+            .lock()
+            .expect("lock")
+            .take()
+            .expect("identity staged");
+        // The most recent mint wins (matches pick_identity_file's overwrite).
+        assert_eq!(pending.info.key_type, KeyType::SshEd25519);
+    }
 }

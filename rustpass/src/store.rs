@@ -339,8 +339,8 @@ impl Store {
     /// Validate a passphrase against the stored identity WITHOUT caching it.
     ///
     /// Used by the biometric enable flow to reject a wrong passphrase before
-    /// sealing it (plan D4). For age-encrypted identities this runs the scrypt
-    /// decrypt; for encrypted SSH keys it decrypts the key; for plaintext or
+    /// sealing it. For age-encrypted identities this runs the scrypt decrypt;
+    /// for encrypted SSH keys it decrypts the key; for plaintext or
     /// unencrypted identities it is a no-op success.
     ///
     /// # Errors
@@ -419,7 +419,7 @@ impl Store {
         Ok(())
     }
 
-    /// Create a brand-new gopass-compatible age store on device (RFC 0018).
+    /// Create a brand-new gopass-compatible age store on device.
     ///
     /// Mirrors gopass `setup`/`init`: `git init`, seed `.age-recipients` with the
     /// single `recipient`, make the no-parent "Initialized Store" commit, and —
@@ -2448,7 +2448,7 @@ mod tests {
         );
     }
 
-    // ── validate_passphrase (biometric enable D4) ───────────────────────
+    // ── validate_passphrase (biometric enable) ───────────────────────
 
     #[tokio::test]
     async fn validate_passphrase_accepts_correct_ssh_passphrase() {
@@ -2466,7 +2466,7 @@ mod tests {
 
     #[tokio::test]
     async fn validate_passphrase_rejects_wrong_ssh_passphrase() {
-        // D4: enabling biometric with a wrong SSH passphrase must fail before
+        // Enabling biometric with a wrong SSH passphrase must fail before
         // the passphrase is sealed into the Keystore.
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();

@@ -127,8 +127,8 @@ impl<R: Runtime> Keystore<R> {
 
     /// Seal `passphrase` into the Keystore. **Shows a biometric prompt**
     /// (CryptoObject ENCRYPT) — the key is `setUserAuthenticationRequired`,
-    /// so encrypt needs user auth too (D2). Holds the `Invoke` across the
-    /// prompt, so it uses the async variant (Finding 7).
+    /// so encrypt needs user auth too. Holds the `Invoke` across the prompt,
+    /// so it uses the async variant (Finding 7).
     pub async fn store(&self, passphrase: &str) -> Result<(), KeystoreError> {
         #[derive(Serialize)]
         struct Payload<'a> {

@@ -152,7 +152,7 @@ pub fn run() {
             setup::is_configured,
             setup::is_repo_ready,
             setup::clone_repo,
-            setup::generate_age_identity,
+            setup::generate_identity,
             setup::create_store,
             setup::list_recipients,
             setup::validate_identity,

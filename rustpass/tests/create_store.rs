@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for the create-store-from-scratch flow (RFC 0018):
+//! Integration tests for the create-store-from-scratch flow:
 //! `Store::create_store` + the deferred first push. Covers the local-only happy
 //! path, the bare-remote first push, the orphan-recipient atomicity guarantee,
 //! the SSH recipient path, cleanup on a pre-init error, and a cross-binary
