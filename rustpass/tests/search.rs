@@ -59,9 +59,11 @@ mod tests {
         let (_identity, recipient) = generate_test_keypair();
         let dir = create_test_store(vec![("cloud/aws/root.age", b"x")], &recipient);
 
-        assert!(store::search_entries_in(dir.path(), "zzznomatch")
-            .unwrap()
-            .is_empty());
+        assert!(
+            store::search_entries_in(dir.path(), "zzznomatch")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

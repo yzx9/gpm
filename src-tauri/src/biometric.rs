@@ -5,8 +5,8 @@
 //! Biometric unlock commands — seal/retrieve the identity passphrase behind the
 //! Android Keystore's biometric-gated `BiometricPrompt`.
 
-use rustpass::error::ErrorCode;
 use rustpass::Error;
+use rustpass::error::ErrorCode;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_biometric_keystore::KeystoreExt;

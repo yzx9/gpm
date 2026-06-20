@@ -1537,8 +1537,11 @@ pub fn rank_entries(entries: Vec<Entry>, query: &str) -> Vec<Entry> {
     let mut scored: Vec<(u32, Entry)> = entries
         .into_iter()
         .filter_map(|e| {
-            let best = fuzzy_score(&mut matcher, &pattern, &e.name)
-                .max(fuzzy_score(&mut matcher, &pattern, &e.path))?;
+            let best = fuzzy_score(&mut matcher, &pattern, &e.name).max(fuzzy_score(
+                &mut matcher,
+                &pattern,
+                &e.path,
+            ))?;
             Some((best, e))
         })
         .collect();
@@ -1836,9 +1839,7 @@ mod tests {
 
     #[test]
     fn rank_entries_query_longer_than_any_target_excluded() {
-        assert!(
-            rank_entries(rank_sample_entries(), "abcdefghijklmnopqrstuvwxyz").is_empty()
-        );
+        assert!(rank_entries(rank_sample_entries(), "abcdefghijklmnopqrstuvwxyz").is_empty());
     }
 
     #[test]
