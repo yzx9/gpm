@@ -61,6 +61,33 @@ pub(crate) fn clear_pending(pending: &Arc<Mutex<Option<PendingWrite>>>) {
     }
 }
 
+/// Stash the `(name, plaintext)` of a write that collided, so
+/// [`resolve_pending`] can replay it without the frontend re-sending the secret
+/// across IPC a second time. Pure (no `AppHandle`), so the stash lifecycle is
+/// directly unit-testable.
+pub(crate) fn stash_pending(pending: &Arc<Mutex<Option<PendingWrite>>>, name: &str, body: Vec<u8>) {
+    let mut pw = pending.lock().expect("pending_write mutex poisoned");
+    *pw = Some(PendingWrite {
+        name: name.to_string(),
+        plaintext: Zeroizing::new(body),
+    });
+}
+
+/// Create a secret (applying a matching `.pass-template`) and stash the
+/// plaintext on conflict. The app/timer side effect lives in [`do_create`];
+/// this core is the directly-testable create + stash path.
+pub(crate) async fn create_and_stash(
+    state: &AppState,
+    name: &str,
+    body: Vec<u8>,
+) -> Result<WriteOutcome, Error> {
+    let outcome = state.store.create(name, &body).await?;
+    if matches!(outcome, WriteOutcome::Conflict(_)) {
+        stash_pending(&state.pending_write, name, body);
+    }
+    Ok(outcome)
+}
+
 /// Create a secret (applying a matching `.pass-template`), stash the plaintext
 /// on conflict, and reset the auto-lock timer. Shared by the two create entry
 /// points so both stash identically.
@@ -70,21 +97,7 @@ async fn do_create(
     name: &str,
     body: Vec<u8>,
 ) -> Result<WriteOutcome, Error> {
-    let outcome = state.store.create(name, &body).await?;
-
-    if matches!(outcome, WriteOutcome::Conflict(_)) {
-        // Stash the plaintext so resolve_write_conflict can replay it without
-        // the frontend re-sending the secret across IPC.
-        let mut pw = state
-            .pending_write
-            .lock()
-            .expect("pending_write mutex poisoned");
-        *pw = Some(PendingWrite {
-            name: name.to_string(),
-            plaintext: Zeroizing::new(body),
-        });
-    }
-
+    let outcome = create_and_stash(state, name, body).await?;
     reset_lock_timer(state, app);
     Ok(outcome)
 }
@@ -173,6 +186,19 @@ pub(crate) async fn resolve_write_conflict(
     app: AppHandle,
     choice: ConflictChoice,
 ) -> Result<Option<WriteResult>, Error> {
+    let result = resolve_pending(&state, choice).await;
+    reset_lock_timer(&state, &app);
+    result
+}
+
+/// Consume the stashed pending write and resolve the conflict per `choice`. The
+/// stash is always taken (cleared) — even on error — so a plaintext never lingers
+/// awaiting a retry that re-stashes fresh. The app/timer side effect lives in
+/// [`resolve_write_conflict`]; this core is the directly-testable consume path.
+pub(crate) async fn resolve_pending(
+    state: &AppState,
+    choice: ConflictChoice,
+) -> Result<Option<WriteResult>, Error> {
     let pending = {
         let mut pw = state
             .pending_write
@@ -186,12 +212,10 @@ pub(crate) async fn resolve_write_conflict(
             "no pending write to resolve",
         ));
     };
-    let result = state
+    state
         .store
         .resolve_write_conflict(&pending.name, &pending.plaintext, choice)
-        .await;
-    reset_lock_timer(&state, &app);
-    result
+        .await
 }
 
 /// Pull latest changes from the remote. Returns a `SyncOutcome`: a normal

@@ -15,7 +15,7 @@ use std::time::Duration;
 use rustpass::ssh;
 use rustpass::{Error, ErrorCode, Store};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_biometric_keystore::KeystoreExt;
 
 use crate::{AppState, write};
@@ -59,7 +59,10 @@ struct LockState {
 
 /// Compute the current lock state from the store and emit it as
 /// `identity-lock-state`, so the frontend mirrors the backend.
-pub(crate) async fn emit_lock_state(app: &AppHandle, store: &Store) {
+///
+/// Runtime-generic so tests can drive it with the mock runtime; production
+/// always calls with the default (`Wry`) runtime.
+pub(crate) async fn emit_lock_state<R: Runtime>(app: &AppHandle<R>, store: &Store) {
     let locked = store.is_identity_encrypted().await && !store.is_unlocked();
     let _ = app.emit("identity-lock-state", LockState { locked });
 }
@@ -83,6 +86,17 @@ pub(crate) async fn unlock(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn lock(state: State<'_, AppState>, app: AppHandle) -> Result<(), Error> {
+    do_lock(&state, &app).await;
+    Ok(())
+}
+
+/// Core lock logic, shared by the [`lock`] command and the auto-lock timer's
+/// fire path. Runtime-generic so tests can drive it with the mock runtime.
+///
+/// Cancels the auto-lock timer, disarms any racing in-flight timer task, wipes
+/// the cached identity, drops any stashed conflict plaintext (it would be
+/// undecryptable behind the wiped identity), and emits the new lock state.
+pub(crate) async fn do_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
     // Cancel timer
     if let Ok(mut timer) = state.lock_timer.lock()
         && let Some(handle) = timer.take()
@@ -95,8 +109,7 @@ pub(crate) async fn lock(state: State<'_, AppState>, app: AppHandle) -> Result<(
     // A conflict left pending would be undecryptable behind the wiped identity.
     write::clear_pending(&state.pending_write);
     // Emit the current lock state — same path the auto-lock timer takes.
-    emit_lock_state(&app, &state.store).await;
-    Ok(())
+    emit_lock_state(app, &state.store).await;
 }
 
 /// Set a passphrase on an existing plaintext identity.
@@ -186,9 +199,9 @@ pub(crate) async fn export_ssh_private_key(
 /// Shared by the password UI ([`unlock`]) and the biometric path
 /// (`biometric::biometric_unlock`) so both honor the same "unlock + arm timer"
 /// contract — whatever the password flow does, biometric mirrors (plan D5).
-pub(crate) async fn unlock_and_arm(
+pub(crate) async fn unlock_and_arm<R: Runtime>(
     state: &State<'_, AppState>,
-    app: &AppHandle,
+    app: &AppHandle<R>,
     passphrase: &str,
 ) -> Result<(), Error> {
     state.store.unlock(passphrase).await?;
@@ -199,7 +212,21 @@ pub(crate) async fn unlock_and_arm(
 }
 
 /// Reset the auto-lock timer (cancel-and-respawn pattern).
-pub(crate) fn reset_lock_timer(state: &State<'_, AppState>, app: &AppHandle) {
+///
+/// Thin wrapper over [`arm_lock`] using the production timeout; tests call
+/// [`arm_lock`] directly with a sub-second timeout.
+pub(crate) fn reset_lock_timer<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+    arm_lock(state, app, rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS);
+}
+
+/// (Re)arm the auto-lock timer to fire after `secs`, replacing any in-flight
+/// timer. Runtime-generic + duration-injected so tests can drive it with the
+/// mock runtime and a sub-second timeout.
+///
+/// The spawned task captures its `generation` and self-disarms if a newer arm
+/// happened while it slept — `abort` alone is not a generation check, so without
+/// this a task already past its sleep could fire right after a fresh unlock.
+pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>, secs: u64) {
     let Ok(mut timer) = state.lock_timer.lock() else {
         return;
     };
@@ -219,10 +246,7 @@ pub(crate) fn reset_lock_timer(state: &State<'_, AppState>, app: &AppHandle) {
     let generation_cell = state.lock_generation.clone();
 
     let handle = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(
-            rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS,
-        ))
-        .await;
+        tokio::time::sleep(Duration::from_secs(secs)).await;
 
         // Stale-task guard: if a newer (re)arm happened while we slept, a fresher
         // unlock is in effect — do not lock/emit. `abort` is not a generation check,

@@ -160,3 +160,78 @@ pub(crate) async fn show_password(
         notes: secret.body().to_string(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    //! Pagination envelope logic — the Tauri-layer bits `rustpass` can't test:
+    //! [`clamp_limit`] bounds a client-requested page size, and [`page_from`]
+    //! derives `has_more` from the offset/total (the classic off-by-one). Pure
+    //! fns, no Store needed.
+
+    use super::*;
+
+    fn entry(name: &str) -> Entry {
+        Entry {
+            path: format!("{name}.age"),
+            name: name.to_string(),
+        }
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    fn ok_page(entries: Vec<Entry>, total: usize) -> Result<RankedPage, Error> {
+        Ok(RankedPage { entries, total })
+    }
+
+    #[test]
+    fn clamp_limit_bounds_request_size() {
+        assert_eq!(clamp_limit(0), 1);
+        assert_eq!(clamp_limit(1), 1);
+        assert_eq!(clamp_limit(50), 50);
+        assert_eq!(clamp_limit(MAX_PAGE_SIZE), MAX_PAGE_SIZE);
+        assert_eq!(clamp_limit(MAX_PAGE_SIZE + 1), MAX_PAGE_SIZE);
+        assert_eq!(clamp_limit(usize::MAX), MAX_PAGE_SIZE);
+    }
+
+    #[test]
+    fn page_from_empty_has_no_more() {
+        let p = page_from(ok_page(vec![], 0), 0).unwrap();
+        assert_eq!(p.total, 0);
+        assert!(!p.has_more);
+    }
+
+    #[test]
+    fn page_from_full_page_with_remaining_has_more() {
+        // 5 of 12 at offset 0 → 0 + 5 < 12.
+        let p = page_from(ok_page(vec![entry("a"); 5], 12), 0).unwrap();
+        assert_eq!(p.entries.len(), 5);
+        assert_eq!(p.total, 12);
+        assert!(p.has_more);
+    }
+
+    #[test]
+    fn page_from_exact_fill_has_no_more() {
+        // Page fills exactly to total → no more (the off-by-one: `<`, not `<=`).
+        let p = page_from(ok_page(vec![entry("a"); 5], 5), 0).unwrap();
+        assert!(!p.has_more);
+    }
+
+    #[test]
+    fn page_from_partial_last_page_has_no_more() {
+        // Offset 5, 3 returned, total 8 → 5 + 3 == 8 → last page.
+        let p = page_from(ok_page(vec![entry("a"); 3], 8), 5).unwrap();
+        assert!(!p.has_more);
+    }
+
+    #[test]
+    fn page_from_mid_offset_with_remaining_has_more() {
+        // Offset 5, 3 returned, total 12 → 5 + 3 < 12 → more remain.
+        let p = page_from(ok_page(vec![entry("a"); 3], 12), 5).unwrap();
+        assert!(p.has_more);
+    }
+
+    #[test]
+    fn page_from_propagates_store_error() {
+        let err = Error::new(ErrorCode::StoreError, "boom");
+        assert!(page_from(Err(err), 0).is_err());
+    }
+}

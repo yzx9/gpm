@@ -26,3 +26,14 @@ serde_json = { workspace = true }
 zeroize = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 base64 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+age = { workspace = true }
+git2 = { workspace = true }
+# `macros` + `rt-multi-thread` for `#[tokio::test]`; `time` comes from the workspace dep.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# Enables `tauri::test` (the mock-runtime harness) during `cargo test`. Cargo
+# unifies this with the [dependencies] tauri, so it adds the feature only for
+# test builds.
+tauri = { version = "2", features = ["test"] }

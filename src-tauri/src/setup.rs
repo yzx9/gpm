@@ -288,6 +288,16 @@ pub(crate) async fn verify_picked_identity(
     state: State<'_, AppState>,
     passphrase: String,
 ) -> Result<VerifiedIdentityResult, Error> {
+    verify_picked(&state, passphrase).await
+}
+
+/// Core of [`verify_picked_identity`], taking `&AppState` directly so the
+/// pending-identity state machine (success re-stores, any failure abandons the
+/// file) is testable without a Tauri `State` extractor.
+pub(crate) async fn verify_picked(
+    state: &AppState,
+    passphrase: String,
+) -> Result<VerifiedIdentityResult, Error> {
     // Take the pending identity; it is only re-stored on success, so any error
     // (incl. a wrong passphrase) abandons the file.
     let pending = {
