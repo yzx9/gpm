@@ -11,14 +11,47 @@ physical access to an unlocked device, or a malicious app that somehow injects
 script into the WebView. It does **not** defend against a fully compromised OS
 or a determined attacker with root access.
 
-A foundational assumption is that **no local attacker has write access to the
-app's private storage**. gpm's private files — the age/SSH `identity` and
-`repo.json` (which carries the git credentials and the `authenticity` trust
-set) — are not integrity-protected; a process able to modify them could swap
-the decryption identity, redirect the repository, or replace the trusted
-signing keys, defeating both confidentiality and the commit-signature
-authenticity feature. On Android this rests on the app sandbox; on desktop it
-rests on the user account not being compromised.
+### Local private files
+
+gpm's private files — the age/SSH `identity` and `repo.json` (which carries the
+git credentials and the `authenticity` trust set) — are sensitive. What is
+protected, and against whom, differs by threat:
+
+**Defended on Android (at-rest encryption).** `identity` and `repo.json` are
+encrypted at rest with a master key sealed in the Android Keystore
+(hardware-backed, auth-free AES-GCM). An attacker who can _read_ the app's
+private storage — a stolen backup, a forensic dump, a non-root malicious app
+with storage access — gets ciphertext, not the git credentials or the trust
+set. The same authenticated encryption also gives these files **integrity**: a
+modified `repo.json` (flipping the verification mode, injecting an attacker
+signing key) or a swapped `identity` fails the authentication tag and is
+rejected rather than silently accepted.
+
+**Still assumed, not solved by at-rest encryption.** gpm continues to assume
+that **no local attacker has write access** to the app's private storage. In
+particular:
+
+- A write attacker can still tamper with the cloned `repo/` (the working tree,
+  `.git` objects, the recipients file) between operations. The repository
+  authenticity feature verifies commit signatures on `pull` (remote→local), not
+  local working-tree tampering; defending that would require a sealed snapshot
+  over the working tree, which is not implemented.
+- A write attacker with an older, pre-encryption backup could roll a file back
+  to plaintext; authenticated encryption prevents _forging_ a new ciphertext
+  but not a rollback.
+
+On Android the no-write assumption rests on the app sandbox; on desktop there
+is no Keystore equivalent, so the files stay plaintext and the assumption rests
+on the user account not being compromised.
+
+The at-rest master key lives in app memory for the session. This is no more
+sensitive than the git credentials gpm already holds in memory while cloning or
+syncing, and is consistent with the non-goal of not defending against a fully
+compromised OS or a process running as the app (which could ask the Keystore to
+unseal the key regardless). If the Keystore key is lost (app data cleared,
+Keystore wiped, factory reset) the encrypted files become unreadable and
+re-setup is required; there is no escrow, since any escrow key stored on disk
+would defeat the purpose.
 
 ## Two Password Operation Paths
 

@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Auth-free Android Keystore storage for the at-rest master key. Backend-only; no frontend capability is granted."
+permissions = []

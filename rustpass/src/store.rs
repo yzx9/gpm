@@ -193,11 +193,22 @@ impl fmt::Debug for Store {
 impl Store {
     /// Create a new `Store` backed by the given config directory.
     #[must_use]
-    pub fn new(config_dir: PathBuf) -> Self {
+    pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
         Self {
-            config: Config::new(config_dir),
+            config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
         }
+    }
+
+    /// One-time migration: wrap any plaintext config files in the at-rest
+    /// envelope. No-op on desktop (no master key) and for already-wrapped
+    /// files. Safe to call on every startup.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a file cannot be read, sealed/unsealed, or written.
+    pub async fn migrate_at_rest(&self) -> Result<(), Error> {
+        self.config.migrate_at_rest().await
     }
 
     /// Check if the store has been configured (identity + repo exist).
@@ -1907,7 +1918,7 @@ mod tests {
     #[test]
     fn lock_clears_cache() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         assert!(!store.is_unlocked());
         store.lock();
         assert!(!store.is_unlocked());
@@ -1921,13 +1932,13 @@ mod tests {
         // /unlock on is_identity_encrypted().) Plaintext identities decrypt
         // straight from disk via get() without unlocking.
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", None)
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         store.unlock("passphrase").await.unwrap();
         assert!(
             store.cached_identity.read().is_ok_and(|g| g.is_none()),
@@ -1947,11 +1958,14 @@ mod tests {
         // an unencrypted OpenSSH PEM so per-entry decrypts skip the bcrypt KDF.
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
-        assert!(!store.is_unlocked(), "store must start locked");
+        let store = Store::new(dir.path().to_path_buf(), None);
+        assert!(
+            !store.is_unlocked(),
+            "store must start locked for an encrypted SSH identity"
+        );
 
         store.unlock("test-passphrase").await.unwrap();
 
@@ -1984,10 +1998,10 @@ mod tests {
     async fn unlock_wrong_ssh_passphrase_returns_wrong_passphrase() {
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         let err = store.unlock("wrong-passphrase").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
         assert!(
@@ -2007,9 +2021,9 @@ mod tests {
     async fn is_identity_encrypted_false_for_legacy_rsa_pem() {
         let rsa_key = b"-----BEGIN RSA PRIVATE KEY-----\nMIIEogIBAAKCAQEAxO5yF0xjbmkQTfbaCP8DQC7kHnPJr5bdIie6Nzmg9lL6Chye\n0vK5iJ+BYkA1Hnf1WnNzoVIm3otZPkwZptertkY95JYFmTiA4IvHeL1yiOTd2AYc\na947EPpM9XPomeM/7U7c99OvuCuOl1YlTFsMsoPY/NiZ+NZjgMvb3XgyH0OXy3mh\nqp+SsJU+tRjZGfqM1iv2TZUCJTQnKF8YSVCyLPV67XM1slQQHmtZ5Q6NFhzg3j8a\nCY5rDR66UF5+Zn/TvN8bNdKn01I50VLePI0ZnnRcuLXK2t0Bpkk0NymZ3vsF10m9\nHCKVyxr2Y0Ejx4BtYXOK97gaYks73rBi7+/VywIDAQABAoIBADGsf8TWtOH9yGoS\nES9hu90ttsbjqAUNhdv+r18Mv0hC5+UzEPDe3uPScB1rWrrDwXS+WHVhtoI+HhWz\ntmi6UArbLvOA0Aq1EPUS7Q7Mop5bNIYwDG09EiMXL+BeC1b91nsygFRW5iULf502\n0pOvB8XjshEdRcFZuqGbSmtTzTjLLxYS/aboBtZLHrH4cRlFMpHWCSuJng8Psahp\nSnJbkjL7fHG81dlH+M3qm5EwdDJ1UmNkBfoSfGRs2pupk2cSJaL+SPkvNX+6Xyoy\nyvfnbJzKUTcV6rf+0S0P0yrWK3zRK9maPJ1N60lFui9LvFsunCLkSAluGKiMwEjb\nfm40F4kCgYEA+QzIeIGMwnaOQdAW4oc7hX5MgRPXJ836iALy56BCkZpZMjZ+VKpk\n8P4E1HrEywpgqHMox08hfCTGX3Ph6fFIlS1/mkLojcgkrqmg1IrRvh8vvaZqzaAf\nGKEhxxRta9Pvm44E2nUY97iCKzE3Vfh+FIyQLRuc+0COu49Me4HPtBUCgYEAym1T\nvNZKPfC/eTMh+MbWMsQArOePdoHQyRC38zeWrLaDFOUVzwzEvCQ0IzSs0PnLWkZ4\nxx60wBg5ZdU4iH4cnOYgjavQrbRFrCmZ1KDUm2+NAMw3avcLQqu41jqzyAlkktUL\nfZzyqHIBmKYLqut5GslkGnQVg6hB4psutHhiel8CgYA3yy9WH9/C6QBxqgaWdSlW\nfLby69j1p+WKdu6oCXUgXW3CHActPIckniPC3kYcHpUM58+o5wdfYnW2iKWB3XYf\nRXQiwP6MVNwy7PmE5Byc9Sui1xdyPX75648/pEnnMDGrraNUtYsEZCd1Oa9l6SeF\nvv/Fuzvt5caUKkQ+HxTDCQKBgFhqUiXr7zeIvQkiFVeE+a/ovmbHKXlYkCoSPFZm\nVFCR00VAHjt2V0PaCE/MRSNtx61hlIVcWxSAQCnDbNLpSnQZa+SVRCtqzve4n/Eo\nYlSV75+GkzoMN4XiXXRs5XOc7qnXlhJCiBac3Segdv4rpZTWm/uV8oOz7TseDtNS\ntai/AoGAC0CiIJAzmmXscXNS/stLrL9bb3Yb+VZi9zN7Cb/w7B0IJ35N5UOFmKWA\nQIGpMU4gh6p52S1eLttpIf2+39rEDzo8pY6BVmEp3fKN3jWmGS4mJQ31tWefupC+\nfGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=\n-----END RSA PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(rsa_key, None).await.unwrap();
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         assert!(
             !store.is_identity_encrypted().await,
             "legacy RSA PEM must not be treated as encrypted"
@@ -2019,26 +2033,26 @@ mod tests {
     #[tokio::test]
     async fn is_identity_encrypted_false_for_plaintext() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", None)
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         assert!(!store.is_identity_encrypted().await);
     }
 
     #[tokio::test]
     async fn is_identity_encrypted_true_after_encrypted_save() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", Some("pass123"))
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         assert!(store.is_identity_encrypted().await);
     }
 
@@ -2046,10 +2060,10 @@ mod tests {
     async fn is_identity_encrypted_true_for_encrypted_ssh_key() {
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         assert!(store.is_identity_encrypted().await);
     }
 
@@ -2057,13 +2071,13 @@ mod tests {
     async fn is_identity_encrypted_false_for_unencrypted_ssh_key() {
         let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(unencrypted_ssh_key, None)
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         assert!(!store.is_identity_encrypted().await);
     }
 
@@ -2071,7 +2085,7 @@ mod tests {
     async fn save_identity_stores_ssh_key_as_plaintext_even_with_passphrase() {
         let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
 
         // Even when a passphrase is supplied, SSH keys are stored as-is — gpm
         // never re-encrypts them (they rely on their own native protection),
@@ -2098,13 +2112,13 @@ mod tests {
     #[tokio::test]
     async fn set_passphrase_rejects_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", None)
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         let err = store.set_passphrase("").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
     }
@@ -2112,13 +2126,13 @@ mod tests {
     #[tokio::test]
     async fn set_passphrase_rejects_already_encrypted() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", Some("old"))
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         let err = store.set_passphrase("new").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_ENCRYPTED");
     }
@@ -2127,13 +2141,13 @@ mod tests {
     async fn set_passphrase_rejects_ssh_key() {
         let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(unencrypted_ssh_key, None)
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         let err = store.set_passphrase("new").await.unwrap_err();
         assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
     }
@@ -2141,13 +2155,13 @@ mod tests {
     #[tokio::test]
     async fn change_passphrase_rejects_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", Some("old"))
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         assert_eq!(
             store.change_passphrase("", "new").await.unwrap_err().code,
             "IDENTITY_NOT_ENCRYPTED"
@@ -2164,10 +2178,10 @@ mod tests {
     async fn validate_passphrase_accepts_correct_ssh_passphrase() {
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         store
             .validate_passphrase("test-passphrase")
             .await
@@ -2180,10 +2194,10 @@ mod tests {
         // the passphrase is sealed into the Keystore.
         let encrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\nc7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\nlcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\nAAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\nIJjptSbFpDh+zfEg==\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         let err = store
             .validate_passphrase("wrong-passphrase")
             .await
@@ -2197,14 +2211,14 @@ mod tests {
     #[tokio::test]
     async fn validate_passphrase_age_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         // Save an age-encrypted identity (uses a fixed test recipient).
         config
             .save_identity(b"AGE-SECRET-KEY-1TEST", Some("correct-pw"))
             .await
             .unwrap();
 
-        let store = Store::new(dir.path().to_path_buf());
+        let store = Store::new(dir.path().to_path_buf(), None);
         let err = store.validate_passphrase("nope").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
     }

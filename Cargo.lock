@@ -1657,6 +1657,7 @@ dependencies = [
 name = "gpm"
 version = "0.5.0"
 dependencies = [
+ "base64 0.22.1",
  "rustpass",
  "serde",
  "serde_json",
@@ -1666,6 +1667,7 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-file-picker",
  "tauri-plugin-safe-area",
+ "tauri-plugin-secure-keystore",
  "tokio",
  "zeroize",
 ]
@@ -3676,7 +3678,9 @@ dependencies = [
 name = "rustpass"
 version = "0.5.0"
 dependencies = [
+ "aes-gcm",
  "age",
+ "getrandom 0.2.17",
  "git2",
  "nucleo-matcher",
  "serde",
@@ -4555,6 +4559,15 @@ dependencies = [
 name = "tauri-plugin-safe-area"
 version = "0.5.0"
 dependencies = [
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "tauri-plugin-secure-keystore"
+version = "0.5.0"
+dependencies = [
+ "serde",
  "tauri",
  "tauri-plugin",
 ]

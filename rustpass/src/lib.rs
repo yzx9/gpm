@@ -15,7 +15,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), rustpass::Error> {
-//! let store = Store::new(PathBuf::from("/path/to/config"));
+//! let store = Store::new(PathBuf::from("/path/to/config"), None);
 //! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...", None).await?;
 //!
 //! for entry in store.list().await? {
@@ -43,6 +43,8 @@
     clippy::pedantic
 )]
 
+/// At-rest AEAD encryption for local private files (`repo.json`, `identity`).
+pub mod atrest;
 /// Configuration and identity persistence.
 pub mod config;
 /// Age decryption backend.

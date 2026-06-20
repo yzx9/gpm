@@ -5,6 +5,7 @@ members = [
   "src-tauri",
   "tauri-plugin-safe-area",
   "tauri-plugin-biometric-keystore",
+  "tauri-plugin-secure-keystore",
   "tauri-plugin-file-picker",
 ]
 
@@ -30,3 +31,10 @@ ssh-key = { version = "0.6", features = [
   "rand_core",
   "std",
 ] }
+# At-rest AEAD for local private files (repo.json, identity). AES-256-GCM gives
+# confidentiality + integrity in one op with a random symmetric master key.
+aes-gcm = "0.10"
+# OS RNG for the master key + per-seal GCM nonces.
+getrandom = "0.2"
+# Base64 for the master key crossing the Rust ↔ Android-plugin IPC boundary.
+base64 = "0.22"

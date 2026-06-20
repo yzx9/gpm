@@ -16,6 +16,8 @@ walkdir = { workspace = true }
 nucleo-matcher = { workspace = true }
 ssh-key = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt"] }
+aes-gcm = { workspace = true }
+getrandom = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

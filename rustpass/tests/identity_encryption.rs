@@ -19,7 +19,7 @@ async fn encrypted_identity_full_lifecycle() {
     );
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     // Configure with encrypted identity
     store
@@ -95,7 +95,7 @@ async fn two_step_setup_with_passphrase() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("test.age", b"hello")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     // Step 1: clone
     store
@@ -135,7 +135,7 @@ async fn change_passphrase_flow() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("data.age", b"s3cret")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     store
         .configure(
@@ -185,7 +185,7 @@ async fn reset_clears_cache() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("x.age", b"pw")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     store
         .configure(
@@ -217,7 +217,7 @@ async fn unlock_is_idempotent() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("a.age", b"x")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     store
         .configure(
@@ -252,7 +252,7 @@ async fn lock_is_idempotent() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("b.age", b"y")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     store
         .configure(
@@ -282,7 +282,7 @@ async fn set_passphrase_rejects_already_encrypted() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("c.age", b"z")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     store
         .configure(
@@ -309,7 +309,7 @@ async fn change_passphrase_rejects_not_encrypted() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("d.age", b"w")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     store
         .configure(
@@ -336,7 +336,7 @@ async fn plaintext_identity_no_unlock_needed() {
         create_test_git_repo(vec![("plain.age", b"plaintext-secret")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     // Configure without passphrase
     store

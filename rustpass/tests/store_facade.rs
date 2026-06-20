@@ -21,7 +21,7 @@ async fn store_facade_full_lifecycle() {
     );
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     // 1. Not configured initially
     assert!(!store.is_configured(), "should not be configured initially");
@@ -78,7 +78,7 @@ async fn set_commit_identity_persists_trims_and_clears() {
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
@@ -129,7 +129,7 @@ async fn set_commit_identity_rejects_invalid_characters() {
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
@@ -169,7 +169,7 @@ async fn store_facade_get_same_entry_twice() {
         create_test_git_repo(vec![("test.age", b"my-password\nnotes")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
@@ -201,7 +201,7 @@ async fn store_facade_reconfigure() {
         create_test_git_repo(vec![("second.age", b"second-password")], &recipient2);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     // Initial configuration
     store
@@ -255,7 +255,7 @@ async fn store_facade_reconfigure() {
 #[tokio::test]
 async fn store_facade_invalid_identity() {
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     let result = store
         .configure(
@@ -283,7 +283,7 @@ async fn store_facade_get_nonexistent_entry() {
         create_test_git_repo(vec![("exists.age", b"password")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
@@ -308,7 +308,7 @@ async fn store_facade_get_path_traversal() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("real.age", b"password")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
@@ -334,7 +334,7 @@ async fn store_facade_list_empty_store() {
         create_test_git_repo(vec![("readme.txt", b"not a password")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
@@ -358,7 +358,7 @@ async fn store_facade_sync_no_changes() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("only.age", b"pw")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
@@ -385,7 +385,7 @@ async fn store_facade_sync_then_list_updated() {
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("initial.age", b"first")], &recipient);
 
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),

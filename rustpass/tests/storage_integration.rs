@@ -6,7 +6,7 @@ use rustpass::Config;
 
 fn create_config() -> (Config, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("failed to create temp dir");
-    let config = Config::new(dir.path().to_path_buf());
+    let config = Config::new(dir.path().to_path_buf(), None);
     (config, dir)
 }
 
@@ -128,14 +128,14 @@ async fn corrupted_repo_config_errors() {
 async fn identity_persistence_across_instances() {
     let dir = tempfile::tempdir().expect("failed to create temp dir");
 
-    let config_a = Config::new(dir.path().to_path_buf());
+    let config_a = Config::new(dir.path().to_path_buf(), None);
     let identity = b"AGE-SECRET-KEY-1PERSIST123";
     config_a
         .save_identity(identity, None)
         .await
         .expect("save_identity on first instance failed");
 
-    let config_b = Config::new(dir.path().to_path_buf());
+    let config_b = Config::new(dir.path().to_path_buf(), None);
     let loaded = config_b
         .load_identity()
         .await

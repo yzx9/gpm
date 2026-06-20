@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-gpm is an Android-first, age-only gopass password client built with Tauri v2 + Rust + Vue 3. It provides a read-only GUI for age-encrypted gopass repositories (clone, list, search, decrypt, copy). No GPG, no editing, no cloud sync.
+gpm is an Android-first, age-only gopass password client built with Tauri v2 + Rust + Vue 3. It works against age-encrypted gopass repositories — clone, list, search, decrypt/copy, create secrets (with templates), and sync over git. No GPG, no cloud-hosted sync (sync is git pull/push to your own repo).
 
 ## Commands
 
@@ -41,6 +41,7 @@ Local Tauri plugin crates (not published). Each follows the standard Tauri mobil
 
 - `tauri-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
 - `tauri-plugin-biometric-keystore` — stores the identity passphrase in the Android Keystore (AES/GCM, hardware-backed) and retrieves it through a biometric-gated `BiometricPrompt`
+- `tauri-plugin-secure-keystore` — seals the at-rest master key with an auth-free, hardware-backed Android Keystore AES/GCM key (the biometric-keystore sibling, minus the prompt; survives fingerprint changes) and returns it to Rust so `repo.json`/`identity` can be AEAD-encrypted at rest
 - `tauri-plugin-file-picker` — opens the Android Storage Access Framework picker and reads the picked file's bytes into Rust (backend-only; desktop falls back to `tauri-plugin-dialog`)
 
 ## Security Model
@@ -48,6 +49,7 @@ Local Tauri plugin crates (not published). Each follows the standard Tauri mobil
 - `copy_password` is the primary operation — password never reaches WebView
 - `show_password` is secondary — 30s auto-clear with lifecycle cleanup
 - Biometric (keystore) unlock is called from Rust app commands, with the passphrase passed from Kotlin to Rust and never exposed to the WebView.
+- `repo.json` and `identity` are encrypted at rest on Android (AES-256-GCM; master key sealed in the auth-free Keystore, injected into `rustpass` as bytes). A read attacker / forensic dump gets ciphertext, and a tampered config fails the AEAD tag. Desktop has no Keystore equivalent, so files stay plaintext there (documented asymmetry). The store assumes no local write attacker; a missing/unsealable key degrades to re-setup.
 - All decrypted content uses `Zeroizing<String>` and is wiped after use
 - Error messages are sanitized to never contain secrets
 - CSP restricts script/connect sources to `self` + IPC only

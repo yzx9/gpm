@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json;
 use tokio::fs;
 
+use crate::atrest::AtRest;
 use crate::crypto;
 use crate::error::{Error, ErrorCode};
 use crate::git::GitAuth;
@@ -38,13 +39,21 @@ async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
 #[derive(Debug)]
 pub struct Config {
     config_dir: PathBuf,
+    /// At-rest AEAD layer; `None` master key ⇒ plaintext passthrough.
+    atrest: AtRest,
 }
 
 impl Config {
     /// Create a new config instance rooted at the given directory.
+    ///
+    /// `master_key` seals `repo.json`/`identity` at rest (AES-256-GCM); pass
+    /// `None` for plaintext passthrough (desktop / tests).
     #[must_use]
-    pub fn new(config_dir: PathBuf) -> Self {
-        Self { config_dir }
+    pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
+        Self {
+            config_dir,
+            atrest: AtRest::new(master_key),
+        }
     }
 
     /// Get the config directory used by this instance.
@@ -80,12 +89,13 @@ impl Config {
     ) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
 
-        let data = match passphrase {
+        let inner = match passphrase {
             Some(pw) if !pw.is_empty() => crypto::encrypt_identity(pw, identity)?,
             _ => identity.to_vec(),
         };
+        let sealed = self.atrest.seal("identity", &inner)?;
 
-        save_atomic(&self.identity_path(), &data).await
+        save_atomic(&self.identity_path(), &sealed).await
     }
 
     /// Check if the stored identity file is passphrase-encrypted.
@@ -114,7 +124,8 @@ impl Config {
                 "No identity configured. Run setup first.",
             ));
         }
-        Ok(fs::read(&path).await?)
+        let raw = fs::read(&path).await?;
+        self.atrest.unseal("identity", &raw)
     }
 
     /// Delete the stored identity.
@@ -158,7 +169,8 @@ impl Config {
             authenticity: AuthenticityConfig::default(),
         };
         let json = serde_json::to_string_pretty(&config)?;
-        fs::write(self.repo_config_path(), json).await?;
+        let sealed = self.atrest.seal("repo_config", json.as_bytes())?;
+        save_atomic(&self.repo_config_path(), &sealed).await?;
         Ok(())
     }
 
@@ -172,7 +184,8 @@ impl Config {
     pub async fn save_repo_config_full(&self, config: &RepoConfig) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
         let json = serde_json::to_string_pretty(config)?;
-        save_atomic(&self.repo_config_path(), json.as_bytes()).await
+        let sealed = self.atrest.seal("repo_config", json.as_bytes())?;
+        save_atomic(&self.repo_config_path(), &sealed).await
     }
 
     /// Load repository configuration.
@@ -189,8 +202,9 @@ impl Config {
                 "No repository configured. Run setup first.",
             ));
         }
-        let json = fs::read_to_string(&path).await?;
-        let config: RepoConfig = serde_json::from_str(&json)?;
+        let raw = fs::read(&path).await?;
+        let json = self.atrest.unseal("repo_config", &raw)?;
+        let config: RepoConfig = serde_json::from_slice(&json)?;
         Ok(config)
     }
 
@@ -219,6 +233,46 @@ impl Config {
             fs::remove_file(self.repo_config_path()).await?;
         }
         Ok(())
+    }
+
+    /// Migrate any plaintext config files to the at-rest envelope.
+    ///
+    /// No-op when no master key is configured (desktop / tests) and for files
+    /// already wrapped. For each existing plaintext file: seal it, verify the
+    /// roundtrip, then commit atomically — a crash mid-migration leaves the
+    /// plaintext intact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a file cannot be read, sealed/unsealed, or written.
+    pub async fn migrate_at_rest(&self) -> Result<(), Error> {
+        self.wrap_if_plain(&self.repo_config_path(), "repo_config")
+            .await?;
+        self.wrap_if_plain(&self.identity_path(), "identity")
+            .await?;
+        Ok(())
+    }
+
+    /// If `path` holds plaintext (not an envelope), re-wrap it through the
+    /// at-rest layer. No-op for envelopes and for missing files.
+    async fn wrap_if_plain(&self, path: &Path, name: &str) -> Result<(), Error> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let raw = fs::read(path).await?;
+        if crate::atrest::is_envelope(&raw) {
+            return Ok(());
+        }
+        let sealed = self.atrest.seal(name, &raw)?;
+        // Verify the roundtrip before committing, so a broken seal never
+        // overwrites readable plaintext.
+        if self.atrest.unseal(name, &sealed)? != raw {
+            return Err(Error::new(
+                ErrorCode::StoreError,
+                "at-rest migration roundtrip check failed",
+            ));
+        }
+        save_atomic(path, &sealed).await
     }
 }
 
@@ -277,7 +331,7 @@ mod tests {
 
     fn create_config() -> (Config, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf());
+        let config = Config::new(dir.path().to_path_buf(), None);
         (config, dir)
     }
 
@@ -751,13 +805,59 @@ mod tests {
     async fn creates_config_dir_when_missing() {
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("a/b/c");
-        let config = Config::new(nested.clone());
+        let config = Config::new(nested.clone(), None);
 
         assert!(!nested.exists(), "precondition: dir does not exist");
         config.save_identity(b"test", None).await.unwrap();
         assert!(
             nested.exists(),
             "save_identity should create the config dir"
+        );
+    }
+
+    #[tokio::test]
+    async fn migrate_at_rest_wraps_plaintext_and_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::atrest::generate_master_key().unwrap();
+
+        // Simulate a pre-migration plaintext repo.json on disk.
+        std::fs::create_dir_all(dir.path()).unwrap();
+        let plaintext = r#"{"url":"https://x/repo","pat":"secret","local_path":"/p"}"#;
+        std::fs::write(dir.path().join("repo.json"), plaintext).unwrap();
+        assert!(
+            !crate::atrest::is_envelope(&std::fs::read(dir.path().join("repo.json")).unwrap()),
+            "precondition: plaintext file"
+        );
+
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        cfg.migrate_at_rest().await.unwrap();
+
+        // The file is now an at-rest envelope, and still loads correctly.
+        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        assert!(
+            crate::atrest::is_envelope(&raw),
+            "repo.json should be wrapped"
+        );
+        let rc = cfg.load_repo_config().await.unwrap();
+        assert_eq!(rc.url, "https://x/repo");
+        assert_eq!(rc.pat.as_deref(), Some("secret"));
+
+        // Idempotent: a second migration is a no-op (already wrapped).
+        cfg.migrate_at_rest().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn passthrough_migrate_is_noop_on_plaintext() {
+        // No master key ⇒ migration must leave plaintext files untouched.
+        let (cfg, dir) = create_config();
+        cfg.save_repo_config("https://x/repo", Some("pat"), None, None, "/p")
+            .await
+            .unwrap();
+        cfg.migrate_at_rest().await.unwrap();
+        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        assert!(
+            !crate::atrest::is_envelope(&raw),
+            "passthrough must not wrap files"
         );
     }
 }

@@ -28,7 +28,7 @@ async fn templated_store(
     let (bare_dir, _clone_dir) = create_test_git_repo_with(vec![], plaintext, &recipient);
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
@@ -105,7 +105,7 @@ async fn lookup_template_nearest_wins() {
     let (bare_dir, _clone_dir) = create_test_git_repo_with(vec![], plaintext, &recipient);
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),

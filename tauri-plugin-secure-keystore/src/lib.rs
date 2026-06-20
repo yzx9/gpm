@@ -1,0 +1,223 @@
+// SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
+//
+// SPDX-License-Identifier: Apache-2.0
+
+//! Tauri plugin that stores the gpm at-rest **master key** in the Android
+//! Keystore — sealed with a hardware-backed, **auth-free** AES/GCM key — and
+//! hands it back to Rust so `rustpass` can AEAD-encrypt local private files
+//! (`repo.json`, `identity`).
+//!
+//! This is the auth-free sibling of `tauri-plugin-biometric-keystore` (which
+//! seals the identity *passphrase* behind a biometric-gated key). Same Keystore
+//! AES/GCM mechanism, different key policy:
+//! - `biometric-keystore`: `setUserAuthenticationRequired(true)`, per-use
+//!   biometric prompt, invalidated on fingerprint-enrollment change.
+//! - `secure-keystore` (here): `setUserAuthenticationRequired(false)`, no
+//!   prompt, **survives** fingerprint changes — so the at-rest store never
+//!   bricks on a fingerprint change.
+//!
+//! The master key is a random 32-byte secret; the plugin seals it (iv +
+//! ciphertext in SharedPreferences) and returns the **plaintext** bytes
+//! (Base64 over IPC) to Rust, exactly as `biometric-keystore` returns the
+//! passphrase. The non-extractable Keystore key never leaves the secure
+//! element; the master key it wraps is no more sensitive than the PAT `rustpass`
+//! already holds in memory.
+//!
+//! This is a **backend-only** plugin: the app layer calls
+//! [`SecureKeystoreExt::secure_keystore`] to obtain the handle and retrieve /
+//! store the master key — it never reaches the WebView.
+//!
+//! On non-Android targets the plugin is registered but inert:
+//! `is_available` reads `false`, `retrieve` returns `None`, so the app falls
+//! back to plaintext at-rest storage (documented asymmetry).
+
+use serde::{Deserialize, Serialize};
+use tauri::plugin::{Builder, TauriPlugin};
+use tauri::{Manager, Runtime};
+
+/// Android package hosting the `SecureKeystorePlugin` Kotlin class.
+#[cfg(target_os = "android")]
+const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.securekeystore";
+
+// ---------------------------------------------------------------------------
+// Error type (unified across mobile/desktop)
+// ---------------------------------------------------------------------------
+
+/// Error returned by secure-keystore operations.
+///
+/// Carries the Kotlin `SECURE_KEYSTORE_*` codes through to the app layer.
+/// Serializes to `{ code, message }` and **never** contains secret content —
+/// messages are derived only from exception class names or system strings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecureKeystoreError {
+    /// Machine-readable code, e.g. `SECURE_KEYSTORE_UNAVAILABLE`,
+    /// `SECURE_KEYSTORE_NOT_SET`, `SECURE_KEYSTORE_FAILED`.
+    pub code: String,
+    /// Safe (no-secret) human-readable message.
+    pub message: String,
+}
+
+impl SecureKeystoreError {
+    /// "Secure keystore not available on this platform/device" sentinel.
+    #[must_use]
+    pub fn unavailable() -> Self {
+        Self {
+            code: "SECURE_KEYSTORE_UNAVAILABLE".to_string(),
+            message: "Secure keystore is not available on this device".to_string(),
+        }
+    }
+}
+
+/// Map a Tauri mobile-plugin invoke error into a [`SecureKeystoreError`],
+/// preserving the Kotlin-supplied code when present.
+#[cfg(target_os = "android")]
+fn map_invoke_err(err: tauri::plugin::mobile::PluginInvokeError) -> SecureKeystoreError {
+    use tauri::plugin::mobile::PluginInvokeError;
+    match err {
+        PluginInvokeError::InvokeRejected(resp) => SecureKeystoreError {
+            code: resp
+                .code
+                .unwrap_or_else(|| "SECURE_KEYSTORE_FAILED".to_string()),
+            message: resp
+                .message
+                .unwrap_or_else(|| "Secure keystore operation failed".to_string()),
+        },
+        other => SecureKeystoreError {
+            code: "SECURE_KEYSTORE_FAILED".to_string(),
+            message: other.to_string(),
+        },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Handle (cfg-gated: real on Android, stub elsewhere)
+// ---------------------------------------------------------------------------
+
+/// Handle to the secure keystore. On Android it wraps the mobile plugin handle;
+/// on other targets it is an inert stub whose operations report unavailable.
+#[cfg(target_os = "android")]
+pub struct SecureKeystore<R: Runtime>(tauri::plugin::PluginHandle<R>);
+
+/// Handle to the secure keystore — inert stub on non-Android targets.
+///
+/// `PhantomData<fn() -> R>` keeps the stub `Send + Sync` unconditionally (the
+/// `fn() -> R` variance does not inherit R's auto-trait bounds), so it can be
+/// managed as app state on every target.
+#[cfg(not(target_os = "android"))]
+pub struct SecureKeystore<R: Runtime>(std::marker::PhantomData<fn() -> R>);
+
+#[cfg(target_os = "android")]
+impl<R: Runtime> SecureKeystore<R> {
+    /// Whether the secure keystore is usable on this device. Fast / non-prompting.
+    pub fn is_available(&self) -> Result<bool, SecureKeystoreError> {
+        #[derive(Deserialize)]
+        struct Resp {
+            available: bool,
+        }
+        self.0
+            .run_mobile_plugin::<Resp>("is_available", ())
+            .map(|r| r.available)
+            .map_err(map_invoke_err)
+    }
+
+    /// Retrieve the sealed master key (Base64), or `None` if nothing is sealed.
+    /// Non-prompting (the key is auth-free).
+    pub fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
+        #[derive(Deserialize)]
+        struct Resp {
+            stored: bool,
+            key: Option<String>,
+        }
+        let r = self
+            .0
+            .run_mobile_plugin::<Resp>("retrieve", ())
+            .map_err(map_invoke_err)?;
+        Ok(if r.stored { r.key } else { None })
+    }
+
+    /// Seal the supplied master key (Base64) into the Keystore.
+    pub fn store(&self, key_b64: &str) -> Result<(), SecureKeystoreError> {
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            key: &'a str,
+        }
+        self.0
+            .run_mobile_plugin::<()>("store", Payload { key: key_b64 })
+            .map_err(map_invoke_err)
+    }
+
+    /// Delete the Keystore key and the stored ciphertext (best-effort).
+    pub fn delete(&self) -> Result<(), SecureKeystoreError> {
+        self.0
+            .run_mobile_plugin::<()>("delete", ())
+            .map_err(map_invoke_err)
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl<R: Runtime> SecureKeystore<R> {
+    /// Inert: the secure keystore is never available on non-Android targets.
+    pub fn is_available(&self) -> Result<bool, SecureKeystoreError> {
+        Ok(false)
+    }
+
+    /// Inert: nothing is ever stored.
+    pub fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
+        Ok(None)
+    }
+
+    /// Inert: never succeeds — the secure keystore is unavailable.
+    pub fn store(&self, _key_b64: &str) -> Result<(), SecureKeystoreError> {
+        Err(SecureKeystoreError::unavailable())
+    }
+
+    /// Inert: nothing to delete.
+    pub fn delete(&self) -> Result<(), SecureKeystoreError> {
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Extension trait
+// ---------------------------------------------------------------------------
+
+/// Extensions to access the secure-keystore handle from any [`Manager`]
+/// (e.g. `AppHandle`).
+pub trait SecureKeystoreExt<R: Runtime> {
+    /// Obtain the secure-keystore handle. Always present (the plugin is
+    /// registered on every target); on non-Android targets the handle is inert.
+    fn secure_keystore(&self) -> &SecureKeystore<R>;
+}
+
+impl<R: Runtime, T: Manager<R>> SecureKeystoreExt<R> for T {
+    fn secure_keystore(&self) -> &SecureKeystore<R> {
+        self.state::<SecureKeystore<R>>().inner()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Plugin initialization
+// ---------------------------------------------------------------------------
+
+/// Initializes the secure-keystore plugin.
+///
+/// On Android, registers the Kotlin `SecureKeystorePlugin` class and manages
+/// the handle. On desktop, manages an inert stub so
+/// [`SecureKeystoreExt::secure_keystore`] is always callable.
+pub fn init<R: Runtime>() -> TauriPlugin<R> {
+    Builder::new("secure-keystore")
+        .setup(|app, #[allow(unused_variables)] api| {
+            #[cfg(target_os = "android")]
+            {
+                let handle =
+                    api.register_android_plugin(PLUGIN_IDENTIFIER, "SecureKeystorePlugin")?;
+                app.manage(SecureKeystore(handle));
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                app.manage(SecureKeystore::<R>(std::marker::PhantomData));
+            }
+            Ok(())
+        })
+        .build()
+}

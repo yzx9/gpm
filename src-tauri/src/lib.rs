@@ -22,8 +22,10 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
+use base64::Engine;
 use rustpass::Store;
 use tauri::Manager;
+use tauri_plugin_secure_keystore::SecureKeystoreExt;
 use tokio::task::JoinHandle;
 
 mod authenticity;
@@ -59,6 +61,44 @@ pub(crate) struct AppState {
 }
 
 // ---------------------------------------------------------------------------
+// At-rest master key (Android Keystore)
+// ---------------------------------------------------------------------------
+
+/// Base64 engine for the master key crossing the Rust ↔ Android-plugin IPC.
+const B64: base64::engine::general_purpose::GeneralPurpose =
+    base64::engine::general_purpose::STANDARD;
+
+/// Decode a Base64 master key to 32 bytes, or `None` if malformed/wrong length.
+fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
+    let bytes: Vec<u8> = B64.decode(b64).ok()?;
+    bytes.try_into().ok()
+}
+
+/// Fetch the sealed at-rest master key, generating + sealing one on first run.
+///
+/// Returns `None` on desktop (no Keystore) or if the Keystore is unavailable /
+/// errors — in which case at-rest encryption degrades to plaintext passthrough
+/// (logged, non-fatal). A freshly generated key that cannot be sealed is
+/// discarded (`None`) rather than used unpersisted, so it can never orphan
+/// later envelopes behind a key the next run won't have.
+fn master_key_from<R: tauri::Runtime>(
+    ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
+) -> Option<[u8; 32]> {
+    if !ks.is_available().unwrap_or(false) {
+        return None;
+    }
+    if let Some(b64) = ks.retrieve().unwrap_or(None) {
+        return decode_master_key(&b64);
+    }
+    // No sealed key yet: generate + seal a fresh master key.
+    let key = rustpass::atrest::generate_master_key().ok()?;
+    // Seal before adopting — an unpersisted key would orphan future envelopes
+    // on the next run.
+    ks.store(&B64.encode(key)).ok()?;
+    Some(key)
+}
+
+// ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
 
@@ -74,14 +114,28 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_safe_area::init())
         .plugin(tauri_plugin_biometric_keystore::init())
+        .plugin(tauri_plugin_secure_keystore::init())
         .plugin(tauri_plugin_file_picker::init())
         .setup(|app| {
             let config_dir = app
                 .path()
                 .app_config_dir()
                 .expect("Cannot determine app config directory");
+
+            // At-rest master key: from the Android Keystore on Android; `None`
+            // (plaintext passthrough) on desktop.
+            let master_key = master_key_from(app.secure_keystore());
+            let store = Arc::new(Store::new(config_dir, master_key));
+            // One-time migration of any pre-existing plaintext files into the
+            // at-rest envelope (no-op on desktop / already-wrapped). Each file
+            // is wrapped atomically with a roundtrip check, so a failure leaves
+            // plaintext intact — logged, non-fatal.
+            if let Err(e) = tauri::async_runtime::block_on(store.migrate_at_rest()) {
+                eprintln!("[gpm] at-rest migration failed: {e}");
+            }
+
             app.manage(AppState {
-                store: Arc::new(Store::new(config_dir)),
+                store,
                 lock_timer: Mutex::new(None),
                 lock_generation: Arc::new(AtomicU64::new(0)),
                 pending_identity: Mutex::new(None),

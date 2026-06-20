@@ -55,7 +55,7 @@ async fn store_with_base(
         &recipient,
     );
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),

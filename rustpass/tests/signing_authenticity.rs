@@ -115,7 +115,7 @@ fn add_signed_commit_to_bare(
 /// Set up a Store cloned from `bare`, with the initial commit as HEAD.
 fn store_cloned_from_bare(bare_path: &Path) -> (tempfile::TempDir, Store) {
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     let bare_url = bare_path.to_str().expect("utf8").to_string();
     block_on(store.clone_only(&bare_url, None, None, None)).expect("clone_only");
     (config_dir, store)
@@ -143,7 +143,7 @@ where
 #[test]
 fn authenticity_defaults_when_no_repo() {
     let dir = tempfile::tempdir().expect("dir");
-    let store = Store::new(dir.path().to_path_buf());
+    let store = Store::new(dir.path().to_path_buf(), None);
     let cfg = block_on(store.authenticity_config()).expect("config");
     assert_eq!(cfg.mode, VerifyMode::Off);
     assert!(cfg.trusted_keys.is_empty());
@@ -205,7 +205,7 @@ fn authenticity_persists_across_reload() {
     block_on(store.set_verification_mode(VerifyMode::Audit)).expect("mode");
 
     // A brand-new Store over the same config dir sees the persisted state.
-    let store2 = Store::new(dir.path().to_path_buf());
+    let store2 = Store::new(dir.path().to_path_buf(), None);
     let cfg = block_on(store2.authenticity_config()).expect("config");
     assert_eq!(cfg.mode, VerifyMode::Audit);
     assert_eq!(cfg.trusted_keys.len(), 1);

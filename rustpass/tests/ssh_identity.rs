@@ -33,7 +33,7 @@ async fn ssh_identity_unlock_get_set_round_trip() {
     );
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
 
     // configure validates the SSH identity can derive a recipient — for an
     // encrypted key that needs the passphrase — and saves the key as-is.

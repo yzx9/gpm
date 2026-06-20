@@ -66,7 +66,7 @@ async fn writable_store() -> (tempfile::TempDir, tempfile::TempDir, Store, Vec<u
     );
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
@@ -95,7 +95,7 @@ async fn set_writes_encrypts_commits_and_pushes() {
     let commits_before = head_commit_count(bare_dir.path());
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
@@ -190,7 +190,7 @@ async fn set_creates_nested_directories() {
     );
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
@@ -231,7 +231,7 @@ async fn set_encrypts_to_all_recipients_and_stays_readable_by_us() {
     );
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
@@ -298,7 +298,7 @@ async fn set_overwrites_existing_entry() {
     );
 
     let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf());
+    let store = Store::new(config_dir.path().to_path_buf(), None);
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
