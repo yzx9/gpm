@@ -5,6 +5,7 @@
 //! Biometric unlock commands — seal/retrieve the identity passphrase behind the
 //! Android Keystore's biometric-gated `BiometricPrompt`.
 
+use rustpass::error::ErrorCode;
 use rustpass::Error;
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -70,6 +71,21 @@ pub(crate) async fn is_biometric_unlock_enabled(app: AppHandle) -> Result<bool, 
     Ok(app.keystore().has_stored()?)
 }
 
+/// Defense-in-depth backstop for the Settings UI gate: refuse biometric
+/// enablement when the identity is not passphrase-encrypted. Biometric seals a
+/// passphrase, which a plaintext identity has none of, so enabling it there is
+/// meaningless — the UI already hides the control, this is the backend guard.
+fn require_encrypted_identity(is_encrypted: bool) -> Result<(), Error> {
+    if is_encrypted {
+        Ok(())
+    } else {
+        Err(Error::new(
+            ErrorCode::IdentityNotEncrypted,
+            "Biometric unlock requires a passphrase-encrypted identity",
+        ))
+    }
+}
+
 /// Enable biometric unlock: validate the passphrase (D4), then seal it behind
 /// a biometric prompt (D2 — encrypt also needs auth for a
 /// `setUserAuthenticationRequired` key).
@@ -80,6 +96,11 @@ pub(crate) async fn enable_biometric_unlock(
     app: AppHandle,
     passphrase: String,
 ) -> Result<(), BiometricError> {
+    // Refuse a plaintext identity before sealing anything: biometric seals a
+    // passphrase, which a plaintext identity has none of. The Settings UI hides
+    // this control for plaintext identities — this is the backend backstop so a
+    // UI regression (or a direct IPC call) can't reach the Keystore.
+    require_encrypted_identity(state.store.is_identity_encrypted().await)?;
     // D4: reject a wrong passphrase before sealing it (age or SSH).
     state.store.validate_passphrase(&passphrase).await?;
     // D2: the Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
@@ -116,4 +137,16 @@ pub(crate) async fn biometric_unlock(
 pub(crate) async fn disable_biometric_unlock(app: AppHandle) -> Result<(), BiometricError> {
     app.keystore().delete()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn require_encrypted_identity_refuses_plaintext() {
+        let err = require_encrypted_identity(false).unwrap_err();
+        assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
+        assert!(require_encrypted_identity(true).is_ok());
+    }
 }

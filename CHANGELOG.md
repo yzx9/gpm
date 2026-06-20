@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The instant the identity locks, every currently-revealed secret across the app is cleared — a shown password, an exported SSH key, a half-typed new secret. Previously the old unlock redirect gave this for free by unmounting the page; the new overlay keeps pages mounted, so clear-on-lock is now explicit
 - A stale auto-lock timer could re-lock the app moments after a fresh unlock; the timer now carries a monotonic generation tag and disarms itself if a newer unlock happened while it slept
 
+### Security
+
+- Enabling biometric unlock is now refused in the backend for identities that have no passphrase, instead of relying on the settings screen to hide the option — a defense-in-depth backstop in case that UI gate ever regresses
+
 ## [v0.5.0] - 2026-06-15
 
 ### Added
