@@ -577,6 +577,45 @@ impl Store {
         spawn_blocking(move || search_entries_in(&repo_path, &q)).await?
     }
 
+    /// One page of [`search`](Store::search) results: up to `limit` entries
+    /// starting at `offset`, plus the **total** match count (independent of the
+    /// slice). Ranking is the same stable strict total order as
+    /// [`search`](Store::search), so paging a fixed entry set by offset is
+    /// stable across requests — no tie is split, no entry reorders between
+    /// pages. [`list_page`](Store::list_page) is this with an empty query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store is not configured or the repo path
+    /// does not exist.
+    pub async fn search_page(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<RankedPage, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let q = query.to_string();
+        spawn_blocking(move || {
+            let ranked = search_entries_in(&repo_path, &q)?;
+            Ok(slice_page(ranked, offset, limit))
+        })
+        .await?
+    }
+
+    /// One page of [`list`](Store::list) results —
+    /// [`search_page`](Store::search_page) with an empty query, since an empty
+    /// query ranks to the alpha-sorted full set (identical to [`list`](Store::list)).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store is not configured or the repo path
+    /// does not exist.
+    pub async fn list_page(&self, offset: usize, limit: usize) -> Result<RankedPage, Error> {
+        self.search_page("", offset, limit).await
+    }
+
     /// Decrypt and return a secret by entry name.
     ///
     /// If the identity is encrypted, uses the cached (unlocked) identity.
@@ -1573,6 +1612,28 @@ pub fn search_entries_in(repo_path: &Path, query: &str) -> Result<Vec<Entry>, Er
     Ok(rank_entries(list_entries(repo_path)?, query))
 }
 
+/// One page of a ranked entry set: a slice of up to `limit` entries starting at
+/// `offset`, together with the **total** count of the full ranked set the slice
+/// was taken from (independent of the slice). The caller derives `has_more` as
+/// `offset + entries.len() < total`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RankedPage {
+    /// The page's entries (up to `limit`, starting at `offset`).
+    pub entries: Vec<Entry>,
+    /// Total entries in the full ranked set the page was sliced from.
+    pub total: usize,
+}
+
+/// Slice a ranked `Vec<Entry>` to one page of up to `limit` entries starting at
+/// `offset`. An `offset` past the end yields an empty page carrying the real
+/// `total`. Pure over the input order — the caller ranks first.
+#[must_use]
+pub fn slice_page(ranked: Vec<Entry>, offset: usize, limit: usize) -> RankedPage {
+    let total = ranked.len();
+    let entries = ranked.into_iter().skip(offset).take(limit).collect();
+    RankedPage { entries, total }
+}
+
 /// Score `haystack` against the parsed `pattern` (`None` when it does not
 /// fuzzy-match). ASCII haystacks take the fast [`Utf32Str::Ascii`] path;
 /// non-ASCII names fall back to a `Vec<char>` buffer.
@@ -1911,6 +1972,103 @@ mod tests {
             "rank_entries 5k took too long: {elapsed:?}"
         );
         assert!(r.iter().any(|e| e.name == "dir/entry-42"));
+    }
+
+    // ── slice_page (pagination) ───────────────────────────────────────
+
+    fn page_sample() -> Vec<Entry> {
+        vec![
+            Entry {
+                path: "a.age".to_string(),
+                name: "a".to_string(),
+            },
+            Entry {
+                path: "b.age".to_string(),
+                name: "b".to_string(),
+            },
+            Entry {
+                path: "c.age".to_string(),
+                name: "c".to_string(),
+            },
+            Entry {
+                path: "d.age".to_string(),
+                name: "d".to_string(),
+            },
+            Entry {
+                path: "e.age".to_string(),
+                name: "e".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn slice_page_basic_offset_limit() {
+        let p = slice_page(page_sample(), 0, 2);
+        assert_eq!(p.total, 5);
+        assert_eq!(p.entries.len(), 2);
+        let paths: Vec<&str> = p.entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["a.age", "b.age"]);
+    }
+
+    #[test]
+    fn slice_page_second_page() {
+        let p = slice_page(page_sample(), 2, 2);
+        assert_eq!(p.total, 5);
+        let paths: Vec<&str> = p.entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["c.age", "d.age"]);
+    }
+
+    #[test]
+    fn slice_page_last_partial_page() {
+        // 5 entries, pages of 2 → the last page has 1.
+        let p = slice_page(page_sample(), 4, 2);
+        assert_eq!(p.entries.len(), 1);
+        let paths: Vec<&str> = p.entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["e.age"]);
+        assert_eq!(p.total, 5);
+    }
+
+    #[test]
+    fn slice_page_offset_beyond_total_is_empty() {
+        let p = slice_page(page_sample(), 10, 2);
+        assert!(p.entries.is_empty());
+        assert_eq!(p.total, 5, "total stays the real full count");
+    }
+
+    #[test]
+    fn slice_page_offset_at_boundary() {
+        // offset exactly == len → empty page, total preserved.
+        let p = slice_page(page_sample(), 5, 2);
+        assert!(p.entries.is_empty());
+        assert_eq!(p.total, 5);
+    }
+
+    #[test]
+    fn slice_page_limit_zero_is_empty() {
+        let p = slice_page(page_sample(), 0, 0);
+        assert!(p.entries.is_empty());
+        assert_eq!(p.total, 5);
+    }
+
+    #[test]
+    fn slice_page_preserves_strict_order_across_pages() {
+        // The load-bearing pagination-correctness test: concatenating pages
+        // reproduces the full order, including a final partial page. Empty
+        // query keeps the input order, so this is deterministic.
+        let ranked = rank_entries(page_sample(), "");
+        let full: Vec<String> = ranked.iter().map(|e| e.path.clone()).collect();
+        let mut paged: Vec<String> = Vec::new();
+        let mut offset = 0;
+        loop {
+            let p = slice_page(ranked.clone(), offset, 2);
+            paged.extend(p.entries.iter().map(|e| e.path.clone()));
+            offset += 2;
+            if p.entries.len() < 2 {
+                break;
+            }
+        }
+        assert_eq!(paged, full);
+        assert_eq!(full.len(), 5, "sanity: spans 2 full pages + 1 partial");
     }
 
     // ── unlock/lock tests ──────────────────────────────────────────────

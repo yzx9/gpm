@@ -3,7 +3,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+} from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -11,6 +18,7 @@ import type {
   AuthenticityState,
   CommitSigInfo,
   Entry,
+  EntryPage,
   PullResult,
   SyncDivergence,
   SyncOutcome,
@@ -20,12 +28,19 @@ import { statusGlyph, statusLabel } from "../utils/signature";
 
 const router = useRouter();
 
-const entries = ref<Entry[]>([]);
+// Entries are paginated: the WebView holds only the pages the user has loaded,
+// not the whole store. `displayedEntries` accumulates appended pages; `total`
+// and `hasMore` drive the "Load more" affordance. `search` decides whether a
+// fetch hits the search or list command (empty query == browse).
+const PAGE_SIZE = 50;
+const displayedEntries = ref<Entry[]>([]);
+const total = ref(0);
+const hasMore = ref(false);
+const activeQuery = ref(""); // the query the currently-displayed pages belong to
 const search = ref("");
-const searchResults = ref<Entry[]>([]);
 const searchError = ref(false);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
-let reqId = 0;
+let reqId = 0; // monotonic; bumped per fetch so stale page responses are dropped
 const loading = ref(false);
 const pulling = ref(false);
 const error = ref("");
@@ -36,6 +51,10 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null;
 const lastSyncTime = ref<number | null>(null);
 const now = ref(Date.now());
 let tickTimer: ReturnType<typeof setInterval> | null = null;
+
+// ── Infinite-scroll sentinel ────────────────────────────────────────────
+const sentinel = ref<HTMLElement | null>(null);
+let io: IntersectionObserver | null = null;
 
 // ── Authenticity (badge + pull modals) ───────────────────────────────────
 const authState = ref<AuthenticityState | null>(null);
@@ -88,41 +107,77 @@ const lastSyncLabel = computed(() => {
   return formatRelativeTime(now.value, lastSyncTime.value);
 });
 
-const displayedEntries = computed(() =>
-  search.value.trim() && !searchError.value
-    ? searchResults.value
-    : entries.value,
+const remaining = computed(() =>
+  Math.max(0, total.value - displayedEntries.value.length),
 );
 
-// Debounced fuzzy search against the backend (150 ms). A monotonic request-id
-// guard guarantees only the latest query's result wins (older in-flight
-// responses — including one that lands after the query is cleared — are
-// dropped); on error we fall back to the full list + toast instead of showing a
-// misleading "No matches". searchResults is seeded with the full list so a
-// query never blanks the list before its results arrive.
-async function runSearch(q: string) {
+// Fetch one page from the backend. `replace` swaps page 0 in; otherwise the
+// page is appended (load-more). A monotonic request-id guard drops any page
+// response that lands after a newer fetch (a newer keystroke, a pull, a retry).
+// On a search page-0 failure we fall back to browse page 0 + toast (never a
+// misleading "No matches"); on a browse page-0 failure we surface the retry
+// box; a load-more failure just toasts and keeps what's already loaded.
+async function fetchPage(q: string, offset: number, replace: boolean) {
   const myId = ++reqId;
-  searchError.value = false;
+  loading.value = true;
   try {
-    const res = await invoke<Entry[]>("search_entries", { query: q });
-    if (myId !== reqId || !search.value.trim()) return; // superseded or cleared
-    searchResults.value = res;
+    const searching = q.trim().length > 0;
+    const page = await invoke<EntryPage>(
+      searching ? "search_entries" : "list_entries",
+      searching
+        ? { query: q, offset, limit: PAGE_SIZE }
+        : { offset, limit: PAGE_SIZE },
+    );
+    if (myId !== reqId) return; // superseded by a newer query/reset/pull
+    displayedEntries.value = replace
+      ? page.entries
+      : displayedEntries.value.concat(page.entries);
+    total.value = page.total;
+    hasMore.value = page.has_more;
+    activeQuery.value = q; // load-more continues whatever is displayed
+    error.value = "";
+    searchError.value = false;
   } catch (e) {
     if (myId !== reqId) return;
-    searchError.value = true; // displayedEntries falls back to the full list
-    showToast((e as AppError)?.message || "Search failed");
+    const msg = (e as AppError)?.message || "Failed to load entries";
+    if (replace && q.trim()) {
+      searchError.value = true;
+      showToast(msg);
+      void fetchPage("", 0, true); // fall back to browse page 0
+    } else if (replace) {
+      displayedEntries.value = [];
+      total.value = 0;
+      hasMore.value = false;
+      error.value = msg;
+    } else {
+      showToast(msg); // load-more: keep the already-loaded pages
+    }
+  } finally {
+    if (myId === reqId) loading.value = false;
   }
 }
 
+function loadMore() {
+  if (!hasMore.value || loading.value) return;
+  void fetchPage(activeQuery.value, displayedEntries.value.length, false);
+}
+
+function retry() {
+  void fetchPage("", 0, true);
+}
+
+// Debounced fuzzy search (150 ms). Clearing the query drops straight back to
+// browse page 0; typing re-fetches page 0 of the new query once the user pauses.
 watch(search, (q) => {
-  if (searchTimer) clearTimeout(searchTimer);
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
   if (!q.trim()) {
-    reqId++; // invalidate any in-flight response
-    searchResults.value = entries.value; // seed so a re-query never blanks
-    searchError.value = false;
+    void fetchPage("", 0, true);
     return;
   }
-  searchTimer = setTimeout(() => runSearch(q), 150);
+  searchTimer = setTimeout(() => void fetchPage(q.trim(), 0, true), 150);
 });
 
 async function loadAuthState() {
@@ -130,22 +185,6 @@ async function loadAuthState() {
     authState.value = await invoke<AuthenticityState>("get_authenticity_state");
   } catch {
     // Verification unavailable (e.g. repo mid-clone) — leave the badge as-is.
-  }
-}
-
-async function loadEntries() {
-  loading.value = true;
-  error.value = "";
-  try {
-    entries.value = await invoke<Entry[]>("list_entries");
-    lastSyncTime.value = Date.now();
-    searchResults.value = entries.value; // seed so the first query never blanks
-    if (search.value.trim()) runSearch(search.value); // refresh after pull/adopt/retry
-  } catch (e) {
-    const appError = e as AppError;
-    error.value = appError?.message || "Failed to load entries";
-  } finally {
-    loading.value = false;
   }
 }
 
@@ -166,7 +205,7 @@ async function pullRepo() {
     }
     if (result.changed) {
       pullResult.value = `Updated to ${result.head}`;
-      await loadEntries();
+      await fetchPage(search.value.trim(), 0, true);
       lastSyncTime.value = Date.now();
     } else {
       pullResult.value = "Already up to date";
@@ -209,7 +248,7 @@ async function adoptRemote() {
     divergence.value = null;
     adoptConfirmed.value = false;
     pullResult.value = `Updated to ${result.head}`;
-    await loadEntries();
+    await fetchPage(search.value.trim(), 0, true);
     lastSyncTime.value = Date.now();
     await loadAuthState();
     // Enforce may refuse the adopt (unverified remote commits) — surface it.
@@ -335,14 +374,30 @@ function openHistory() {
 }
 
 onMounted(() => {
-  loadEntries();
+  void fetchPage("", 0, true); // initial browse page 0
   loadAuthState();
   tickTimer = setInterval(() => {
     now.value = Date.now();
   }, 60_000);
+  // Infinite scroll: when the sentinel nears the viewport, load the next page.
+  // Feature-detected — some WebViews lack IntersectionObserver, so the explicit
+  // "Load more" button remains the always-available fallback.
+  if (typeof IntersectionObserver !== "undefined") {
+    io = new IntersectionObserver(
+      (changes) => {
+        if (changes.some((c) => c.isIntersecting)) loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    nextTick(() => {
+      if (sentinel.value && io) io.observe(sentinel.value);
+    });
+  }
 });
 
 onBeforeUnmount(() => {
+  io?.disconnect();
+  io = null;
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = null;
@@ -351,7 +406,7 @@ onBeforeUnmount(() => {
     clearTimeout(searchTimer);
     searchTimer = null;
   }
-  reqId++; // drop any in-flight search response landing after unmount
+  reqId++; // drop any in-flight page response landing after unmount
 });
 </script>
 
@@ -421,7 +476,7 @@ onBeforeUnmount(() => {
       role="alert"
     >
       {{ error }}
-      <button @click="loadEntries" class="btn-retry">Retry</button>
+      <button @click="retry" class="btn-retry">Retry</button>
     </div>
     <div
       v-if="pullResult"
@@ -440,26 +495,28 @@ onBeforeUnmount(() => {
       {{ toast }}
     </div>
 
-    <div v-if="loading" class="text-center text-muted py-8">
+    <div
+      v-if="loading && displayedEntries.length === 0"
+      class="text-center text-muted py-8"
+    >
       <span class="spinner"></span>
       <span>Loading entries...</span>
     </div>
     <div
-      v-else-if="entries.length === 0 && !error"
+      v-else-if="displayedEntries.length === 0 && !error"
       class="text-center text-muted py-8"
     >
-      <span class="text-4xl block mb-2">🔒</span>
-      <p>No passwords yet</p>
-      <p class="text-xs text-subtle mt-1">
-        Pull updates or check your repository
-      </p>
-    </div>
-    <div
-      v-else-if="search.trim() && !searchError && searchResults.length === 0"
-      class="text-center text-muted py-8"
-    >
-      <span class="text-4xl block mb-2">🔍</span>
-      <p>No matches for "{{ search }}"</p>
+      <template v-if="search.trim() && !searchError">
+        <span class="text-4xl block mb-2">🔍</span>
+        <p>No matches for "{{ search }}"</p>
+      </template>
+      <template v-else>
+        <span class="text-4xl block mb-2">🔒</span>
+        <p>No passwords yet</p>
+        <p class="text-xs text-subtle mt-1">
+          Pull updates or check your repository
+        </p>
+      </template>
     </div>
 
     <ul v-else class="list-none flex flex-col gap-0.5" role="list">
@@ -494,6 +551,21 @@ onBeforeUnmount(() => {
         </button>
       </li>
     </ul>
+
+    <!-- Load more (explicit infinite-scroll fallback) -->
+    <div v-if="hasMore" class="flex justify-center py-3">
+      <button
+        class="btn-sm"
+        :disabled="loading"
+        aria-label="Load more entries"
+        @click="loadMore"
+      >
+        <span v-if="loading" class="spinner" aria-hidden="true"></span>
+        {{ loading ? "Loading…" : `Load more (${remaining} more)` }}
+      </button>
+    </div>
+    <!-- Sentinel the IntersectionObserver watches to auto-load the next page -->
+    <div ref="sentinel" class="h-1" aria-hidden="true"></div>
 
     <!-- Audit-mode mismatch modal (pull succeeded; informational) -->
     <div

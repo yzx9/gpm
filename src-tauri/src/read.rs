@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use rustpass::error::ErrorCode;
-use rustpass::{Entry, Error};
+use rustpass::{Entry, Error, RankedPage};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -35,27 +35,78 @@ pub(crate) struct SensitiveContent {
     notes: String,
 }
 
+/// One page of entries delivered to the `WebView` — a slice of the ranked set
+/// plus the total match count and a `has_more` flag the UI gates "load more"
+/// on. Presentation metadata only; like `CopyResult`/`SensitiveContent` it
+/// lives here, not in `rustpass`.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct EntryPage {
+    entries: Vec<Entry>,
+    /// Total entries matching the query, independent of this page's offset/limit.
+    total: usize,
+    /// `true` when more pages remain past this slice.
+    has_more: bool,
+}
+
+/// Upper bound on a client-requested page size, so a buggy/malicious caller
+/// can't ask for `usize::MAX`. The frontend requests 50 by default.
+const MAX_PAGE_SIZE: usize = 200;
+
+/// Clamp a client-requested page size to a sane, non-zero bound.
+fn clamp_limit(limit: usize) -> usize {
+    limit.clamp(1, MAX_PAGE_SIZE)
+}
+
+/// Build the IPC page envelope from a backend [`RankedPage`], deriving
+/// `has_more` from the offset the page was requested at.
+fn page_from(r: Result<RankedPage, Error>, offset: usize) -> Result<EntryPage, Error> {
+    let p = r?;
+    let has_more = offset + p.entries.len() < p.total;
+    Ok(EntryPage {
+        entries: p.entries,
+        total: p.total,
+        has_more,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// List all .age entries in the configured repository.
+/// One page of `.age` entries in the configured repository, starting at
+/// `offset` and up to `limit` long. An empty query (browse) path.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn list_entries(state: State<'_, AppState>) -> Result<Vec<Entry>, Error> {
-    state.store.list().await
+pub(crate) async fn list_entries(
+    state: State<'_, AppState>,
+    offset: usize,
+    limit: usize,
+) -> Result<EntryPage, Error> {
+    page_from(
+        state.store.list_page(offset, clamp_limit(limit)).await,
+        offset,
+    )
 }
 
 /// Fuzzy-search `.age` entries by `query`, ranked by relevance (best score
-/// first; ties broken by `path`). An empty query returns every entry, like
-/// [`list_entries`]. Ranking is computed server-side via [`Store::search`].
+/// first; ties broken by `path`), and return one page starting at `offset` of
+/// up to `limit` entries. An empty query behaves like [`list_entries`].
+/// Ranking is computed server-side via [`Store::search_page`](rustpass::Store::search_page).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn search_entries(
     state: State<'_, AppState>,
     query: String,
-) -> Result<Vec<Entry>, Error> {
-    state.store.search(&query).await
+    offset: usize,
+    limit: usize,
+) -> Result<EntryPage, Error> {
+    page_from(
+        state
+            .store
+            .search_page(&query, offset, clamp_limit(limit))
+            .await,
+        offset,
+    )
 }
 
 /// Primary operation: decrypt and copy password to clipboard.

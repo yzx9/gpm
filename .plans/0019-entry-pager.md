@@ -1,8 +1,18 @@
 # Entry list pagination (pager)
 
 **Priority:** P2
-**Status:** Draft
-**Phase:** Future
+**Status:** Implemented
+**Phase:** Done
+
+## Resolution
+
+Landed as offset pagination with a load-more / infinite-scroll UI, covering both
+browse (empty query) and search through one backend page call. The offset-vs-cursor
+question resolved to **offset**: the entry set only mutates on an explicit pull, which
+the frontend already treats as a reset-to-page-0, so the drift window is nil and
+cursor/snapshot complexity was not warranted. Cursor paging (drift-robust against
+duplicates) and a server-side ranked snapshot keyed on `(query, git HEAD)` remain the
+fallbacks if stores ever grow past ~10k entries.
 
 ## What
 

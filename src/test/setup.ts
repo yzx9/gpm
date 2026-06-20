@@ -36,3 +36,18 @@ vi.mock("vue-router", () => ({
 
 // jsdom lacks window.confirm
 globalThis.confirm = vi.fn(() => true);
+
+// jsdom lacks IntersectionObserver — provide a stub so components that wire up
+// infinite scroll can mount. The explicit "Load more" button is the
+// always-available path; the observer is only a progressive enhancement.
+class IntersectionObserverStub {
+  constructor(_cb: IntersectionObserverCallback) {}
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+globalThis.IntersectionObserver =
+  IntersectionObserverStub as unknown as typeof IntersectionObserver;

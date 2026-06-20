@@ -81,6 +81,6 @@ pub use signing::{
     fingerprint_of_public_key,
 };
 pub use store::{
-    CommitIdentity, ConflictChoice, Store, SyncDivergence, SyncOutcome, SyncResult, WriteConflict,
-    WriteOutcome, WriteResult,
+    CommitIdentity, ConflictChoice, RankedPage, Store, SyncDivergence, SyncOutcome, SyncResult,
+    WriteConflict, WriteOutcome, WriteResult,
 };

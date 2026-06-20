@@ -3,11 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mount } from "@vue/test-utils";
-import { flushPromises } from "@vue/test-utils";
+import { mount, flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import EntryListPage from "./EntryListPage.vue";
-import type { Entry } from "../types";
+import type { Entry, EntryPage } from "../types";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -37,9 +36,22 @@ const sampleEntries: Entry[] = [
   { path: "servers/prod.age", name: "prod-server" },
 ];
 
+/** Wrap entries as a paginated EntryPage response. */
+function page(
+  entries: Entry[],
+  opts: { hasMore?: boolean; total?: number } = {},
+): EntryPage {
+  return {
+    entries,
+    total: opts.total ?? entries.length,
+    has_more: opts.hasMore ?? false,
+  };
+}
+
 /** Default successful return values per command (order-independent). */
 const defaults: Record<string, unknown> = {
-  list_entries: sampleEntries,
+  list_entries: page(sampleEntries),
+  search_entries: page(sampleEntries),
   get_authenticity_state: { mode: "off", head_status: { kind: "unsigned" } },
   pull_repo: {
     changed: false,
@@ -87,16 +99,24 @@ describe("EntryListPage", () => {
     return mount(EntryListPage);
   }
 
+  /** Find the "Load more" button by its stable aria-label, if present. */
+  function findLoadMore(wrapper: ReturnType<typeof mountPage>) {
+    return wrapper.find('button[aria-label="Load more entries"]');
+  }
+
   describe("entry loading", () => {
     it("calls list_entries on mount", async () => {
       mountPage();
       await flushPromises();
 
-      expect(invoke).toHaveBeenCalledWith("list_entries");
+      expect(invoke).toHaveBeenCalledWith("list_entries", {
+        offset: 0,
+        limit: 50,
+      });
     });
 
     it("displays entries after loading", async () => {
-      when("list_entries", sampleEntries);
+      when("list_entries", page(sampleEntries));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -126,7 +146,7 @@ describe("EntryListPage", () => {
           listCall += 1;
           return listCall === 1
             ? Promise.reject({ code: "Err", message: "fail" })
-            : Promise.resolve(sampleEntries);
+            : Promise.resolve(page(sampleEntries));
         }
         if (cmd in overrides) {
           const o = overrides[cmd];
@@ -146,7 +166,7 @@ describe("EntryListPage", () => {
     });
 
     it("shows empty state when no entries", async () => {
-      when("list_entries", []);
+      when("list_entries", page([]));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -165,10 +185,11 @@ describe("EntryListPage", () => {
 
   describe("search", () => {
     it("debounces and renders backend search results", async () => {
-      when("list_entries", sampleEntries);
-      when("search_entries", [
-        { path: "github.com/token.age", name: "github-token" },
-      ]);
+      when("list_entries", page(sampleEntries));
+      when(
+        "search_entries",
+        page([{ path: "github.com/token.age", name: "github-token" }]),
+      );
       const wrapper = mountPage();
       await flushPromises();
 
@@ -176,19 +197,25 @@ describe("EntryListPage", () => {
       await flushPromises(); // watch schedules the debounce timer
       expect(invoke).not.toHaveBeenCalledWith("search_entries", {
         query: "git",
+        offset: 0,
+        limit: 50,
       });
 
       vi.advanceTimersByTime(150);
       await flushPromises();
 
-      expect(invoke).toHaveBeenCalledWith("search_entries", { query: "git" });
+      expect(invoke).toHaveBeenCalledWith("search_entries", {
+        query: "git",
+        offset: 0,
+        limit: 50,
+      });
       expect(wrapper.text()).toContain("github-token");
       expect(wrapper.text()).not.toContain("work-email");
     });
 
     it("shows no matches when the backend returns empty", async () => {
-      when("list_entries", sampleEntries);
-      when("search_entries", []);
+      when("list_entries", page(sampleEntries));
+      when("search_entries", page([]));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -200,9 +227,11 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).toContain("No matches");
     });
 
-    it("clearing the search falls back to the full list without a refetch", async () => {
-      when("list_entries", sampleEntries);
-      when("search_entries", []);
+    it("clearing the search refetches browse page 0", async () => {
+      // With pagination the WebView no longer holds the full list, so clearing
+      // the query issues a fresh browse page-0 fetch (it does not reuse a seed).
+      when("list_entries", page(sampleEntries));
+      when("search_entries", page([]));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -212,23 +241,21 @@ describe("EntryListPage", () => {
       await flushPromises();
       expect(wrapper.text()).toContain("No matches");
 
-      const searchesBefore = vi
+      const listBefore = vi
         .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "search_entries").length;
+        .mock.calls.filter((c) => c[0] === "list_entries").length;
       await wrapper.find('input[type="search"]').setValue("");
       await flushPromises();
-      const searchesAfter = vi
+      const listAfter = vi
         .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "search_entries").length;
+        .mock.calls.filter((c) => c[0] === "list_entries").length;
 
-      // Clearing issues no new backend call; the full list returns instantly.
-      expect(searchesAfter).toBe(searchesBefore);
+      expect(listAfter).toBeGreaterThan(listBefore); // a fresh browse fetch fired
       expect(wrapper.text()).toContain("github-token");
-      expect(wrapper.text()).toContain("work-email");
     });
 
-    it("falls back to the full list + toast on search failure (not 'No matches')", async () => {
-      when("list_entries", sampleEntries);
+    it("falls back to browse page 0 + toast on search failure (not 'No matches')", async () => {
+      when("list_entries", page(sampleEntries));
       reject("search_entries", { code: "StoreError", message: "boom" });
       const wrapper = mountPage();
       await flushPromises();
@@ -238,16 +265,17 @@ describe("EntryListPage", () => {
       vi.advanceTimersByTime(150);
       await flushPromises();
 
-      expect(wrapper.text()).toContain("github-token"); // full list, not blanked
+      expect(wrapper.text()).toContain("github-token"); // browse fallback, not blanked
       expect(wrapper.text()).toContain("boom"); // error toast surfaced
       expect(wrapper.text()).not.toContain("No matches"); // not a misleading empty
     });
 
     it("only the latest query is searched when typing fast (debounce coalescing)", async () => {
-      when("list_entries", sampleEntries);
-      when("search_entries", [
-        { path: "github.com/token.age", name: "github-token" },
-      ]);
+      when("list_entries", page(sampleEntries));
+      when(
+        "search_entries",
+        page([{ path: "github.com/token.age", name: "github-token" }]),
+      );
       const wrapper = mountPage();
       await flushPromises();
 
@@ -260,15 +288,24 @@ describe("EntryListPage", () => {
       vi.advanceTimersByTime(150); // only the "gi" debounce fires
       await flushPromises();
 
-      expect(invoke).not.toHaveBeenCalledWith("search_entries", { query: "g" });
-      expect(invoke).toHaveBeenCalledWith("search_entries", { query: "gi" });
+      expect(invoke).not.toHaveBeenCalledWith("search_entries", {
+        query: "g",
+        offset: 0,
+        limit: 50,
+      });
+      expect(invoke).toHaveBeenCalledWith("search_entries", {
+        query: "gi",
+        offset: 0,
+        limit: 50,
+      });
     });
 
     it("refreshes search results after a pull changes the store", async () => {
-      when("list_entries", sampleEntries);
-      when("search_entries", [
-        { path: "github.com/token.age", name: "github-token" },
-      ]);
+      when("list_entries", page(sampleEntries));
+      when(
+        "search_entries",
+        page([{ path: "github.com/token.age", name: "github-token" }]),
+      );
       const wrapper = mountPage();
       await flushPromises();
 
@@ -279,11 +316,11 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).toContain("github-token");
 
       // Pull adds an entry; with an active search, results re-run against the store.
-      when("list_entries", [
-        ...sampleEntries,
-        { path: "new.age", name: "new-git" },
-      ]);
-      when("search_entries", [{ path: "new.age", name: "new-git" }]);
+      when(
+        "list_entries",
+        page([...sampleEntries, { path: "new.age", name: "new" }]),
+      );
+      when("search_entries", page([{ path: "new.age", name: "new-git" }]));
       when("pull_repo", {
         changed: true,
         head: "def456",
@@ -302,9 +339,117 @@ describe("EntryListPage", () => {
     });
   });
 
+  describe("pagination", () => {
+    it("appends the next page on load-more", async () => {
+      const page0: Entry[] = Array.from({ length: 50 }, (_, i) => ({
+        path: `e${i}.age`,
+        name: `e${i}`,
+      }));
+      const page1: Entry[] = [{ path: "e50.age", name: "e50" }];
+      vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+        if (cmd === "list_entries") {
+          const offset =
+            ((args as Record<string, unknown> | undefined)?.offset as number) ??
+            0;
+          return Promise.resolve(
+            offset === 0
+              ? page(page0, { hasMore: true, total: 51 })
+              : page(page1, { total: 51 }),
+          );
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("e0");
+      const more = findLoadMore(wrapper);
+      expect(more.exists()).toBe(true);
+      expect(more.text()).toContain("(1 more)"); // 51 total − 50 loaded
+
+      await more.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("e0"); // page 0 retained (appended, not replaced)
+      expect(wrapper.text()).toContain("e50"); // page 1 appended
+      expect(invoke).toHaveBeenCalledWith("list_entries", {
+        offset: 50,
+        limit: 50,
+      });
+      expect(findLoadMore(wrapper).exists()).toBe(false); // exhausted → button gone
+    });
+
+    it("resets to page 0 when the query changes (replaces, does not append)", async () => {
+      vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+        if (cmd === "list_entries") return Promise.resolve(page(sampleEntries));
+        if (cmd === "search_entries") {
+          const q =
+            ((args as Record<string, unknown> | undefined)?.query as string) ??
+            "";
+          if (q === "foo")
+            return Promise.resolve(page([{ path: "foo.age", name: "foo-x" }]));
+          if (q === "foobar")
+            return Promise.resolve(
+              page([{ path: "foobar.age", name: "foobar-y" }]),
+            );
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find('input[type="search"]').setValue("foo");
+      await flushPromises();
+      vi.advanceTimersByTime(150);
+      await flushPromises();
+      expect(wrapper.text()).toContain("foo-x");
+
+      await wrapper.find('input[type="search"]').setValue("foobar");
+      await flushPromises();
+      vi.advanceTimersByTime(150);
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("foobar-y");
+      expect(wrapper.text()).not.toContain("foo-x"); // replaced, not appended
+    });
+
+    it("renders no load-more button when the first page is exhaustive", async () => {
+      when("list_entries", page(sampleEntries)); // has_more false
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(findLoadMore(wrapper).exists()).toBe(false);
+    });
+
+    it("disables the load-more button while a page is loading", async () => {
+      const page0: Entry[] = Array.from({ length: 50 }, (_, i) => ({
+        path: `e${i}.age`,
+        name: `e${i}`,
+      }));
+      vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+        if (cmd === "list_entries") {
+          const offset =
+            ((args as Record<string, unknown> | undefined)?.offset as number) ??
+            0;
+          if (offset === 0)
+            return Promise.resolve(page(page0, { hasMore: true, total: 100 }));
+          return new Promise(() => {}); // page 1 never resolves → stays loading
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await findLoadMore(wrapper).trigger("click");
+      await flushPromises();
+
+      expect(findLoadMore(wrapper).attributes("disabled")).toBeDefined();
+    });
+  });
+
   describe("copyPassword", () => {
     it("calls copy_password and shows success toast", async () => {
-      when("list_entries", sampleEntries);
+      when("list_entries", page(sampleEntries));
       when("copy_password", {
         entry_name: "github-token",
         cleared_after_secs: 45,
@@ -322,7 +467,7 @@ describe("EntryListPage", () => {
     });
 
     it("auto-clears toast after 3 seconds", async () => {
-      when("list_entries", sampleEntries);
+      when("list_entries", page(sampleEntries));
       when("copy_password", {
         entry_name: "github-token",
         cleared_after_secs: 45,
@@ -342,7 +487,7 @@ describe("EntryListPage", () => {
     });
 
     it("shows error toast on copy failure", async () => {
-      when("list_entries", sampleEntries);
+      when("list_entries", page(sampleEntries));
       reject("copy_password", { code: "Err", message: "Copy failed" });
       const wrapper = mountPage();
       await flushPromises();
@@ -385,7 +530,7 @@ describe("EntryListPage", () => {
         if (cmd === "list_entries") {
           listCall += 1;
           return Promise.resolve(
-            listCall === 1 ? sampleEntries : updatedEntries,
+            listCall === 1 ? page(sampleEntries) : page(updatedEntries),
           );
         }
         if (cmd === "pull_repo") {

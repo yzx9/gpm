@@ -9,6 +9,15 @@ export interface Entry {
   name: string;
 }
 
+/** One page of entries from the paginated list/search commands. */
+export interface EntryPage {
+  entries: Entry[];
+  /** Total entries matching the query, independent of this page's slice. */
+  total: number;
+  /** `true` when more pages remain past this slice. */
+  has_more: boolean;
+}
+
 export interface CopyResult {
   success: boolean;
   entry_name: string;
