@@ -575,7 +575,7 @@ fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError) -> Error 
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_identity_core, CreateIdentityKind};
+    use super::{CreateIdentityKind, generate_identity_core};
     use crate::AppState;
     use rustpass::{KeyType, Store};
     use std::sync::atomic::AtomicU64;
@@ -623,12 +623,9 @@ mod tests {
     fn ssh_encryption_flag_tracks_the_passphrase() {
         let (state, _dir) = pending_state();
 
-        let recipient = generate_identity_core(
-            &state,
-            CreateIdentityKind::Ssh,
-            Some("create-pass"),
-        )
-        .expect("ssh mint");
+        let recipient =
+            generate_identity_core(&state, CreateIdentityKind::Ssh, Some("create-pass"))
+                .expect("ssh mint");
         assert!(
             recipient.starts_with("ssh-ed25519 "),
             "recipient: {recipient}"
@@ -645,7 +642,10 @@ mod tests {
             "a passphrase-protected SSH key must be flagged encrypted"
         );
         assert!(
-            pending.identity.as_str().contains("BEGIN OPENSSH PRIVATE KEY"),
+            pending
+                .identity
+                .as_str()
+                .contains("BEGIN OPENSSH PRIVATE KEY"),
             "staged identity should be a PEM"
         );
 

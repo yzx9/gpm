@@ -13,10 +13,10 @@ mod common;
 mod tests {
     use std::path::Path;
 
+    use rustpass::WriteOutcome;
     use rustpass::recipient;
     use rustpass::ssh;
     use rustpass::store::Store;
-    use rustpass::WriteOutcome;
 
     use super::common::*;
 
@@ -276,8 +276,7 @@ mod tests {
             let derived = recipient::identity_to_recipient(pair.private_key.as_str(), passphrase)
                 .expect("derive recipient from generated key");
             assert_eq!(
-                derived,
-                pair.public_key,
+                derived, pair.public_key,
                 "generate_ssh_key().public_key must equal the age-derived recipient \
                  (passphrase = {passphrase:?}); otherwise SSH-create strands the store"
             );

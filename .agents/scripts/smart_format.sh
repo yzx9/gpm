@@ -23,7 +23,7 @@ case "$filepath" in
   prettier --write "$filepath" 2>/dev/null || true
   ;;
 *.rs)
-  rustfmt "$filepath" 2>/dev/null || true
+  rustfmt --edition 2024 "$filepath" 2>/dev/null || true
   ;;
 *.nix)
   nixfmt "$filepath" 2>/dev/null || true
