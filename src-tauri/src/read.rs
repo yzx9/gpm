@@ -128,11 +128,9 @@ pub(crate) async fn copy_password(
 
     // Spawn clipboard auto-clear after 30 seconds
     let clear_handle = app.clone();
-    let pw = secret.password().to_string();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(30)).await;
         let _ = clear_handle.clipboard().write_text(String::new());
-        drop(pw);
     });
 
     // Reset auto-lock timer
