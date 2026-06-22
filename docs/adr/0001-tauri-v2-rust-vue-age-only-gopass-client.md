@@ -12,7 +12,17 @@ There is no Android GUI client that can read age-encrypted gopass/password-store
 
 Build gpm as an Android-first, age-only, read-only gopass password client using **Tauri v2 + Rust + Vue 3**, with a "core-first, mobile later" build sequence.
 
-This ADR records the foundational architectural choices. Detailed design lives in `.plans/0001-gpm-design.md`.
+This ADR records the foundational architectural choices.
+
+## Foundational Premises
+
+The decision rests on five assumptions, recorded so any of them can be revisited if it turns out wrong:
+
+1. **Tauri v2 mobile is mature enough for a read-only password viewer** — no Autofill, no complex native UI, no editing, which avoids the areas where Tauri mobile is roughest.
+2. **The Rust `age` crate (str4d/rage) is the right crypto choice** — one reference implementation shared across desktop and Android, no Kotlin crypto to audit.
+3. **The gopass age-store format is stable enough to build against** (`.age` files in git; first line is the password). The single configured identity is tried against every `.age` file — multi-identity and recipient-aware decryption remain deferred.
+4. **Local config + zeroize-per-decrypt for MVP identity storage, with Android Keystore deferred** — zeroize is ~20 lines of pure Rust with no Android dependency, whereas Keystore adds ~1 day of platform debugging on top of an already ambitious build. Keystore later arrived via the biometric-keystore and secure-keystore plugins.
+5. **Read-only is the right MVP scope** — ship clone/list/search/decrypt/copy, get feedback, then expand. (Secret creation/write has since shipped; edit/delete remain in progress.)
 
 ## Technology Stack
 
