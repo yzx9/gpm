@@ -5,6 +5,7 @@
 //! Secret-read commands — list, decrypt-and-copy, and decrypt-and-show. The
 //! read side of the store, mirroring [`crate::write`] on the write side.
 
+use std::fmt;
 use std::time::Duration;
 
 use rustpass::error::ErrorCode;
@@ -12,6 +13,7 @@ use rustpass::{Entry, Error, RankedPage};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::identity::reset_lock_timer;
@@ -29,10 +31,20 @@ pub(crate) struct CopyResult {
 }
 
 /// Returned by `show_password` — contains secrets, strict Vue lifecycle required.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub(crate) struct SensitiveContent {
-    password: String,
-    notes: String,
+    password: Zeroizing<String>,
+    notes: Zeroizing<String>,
+}
+
+/// Redacts secrets — mirrors `rustpass::Secret` so `Debug` never leaks plaintext.
+impl fmt::Debug for SensitiveContent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SensitiveContent")
+            .field("password", &"[REDACTED]")
+            .field("notes", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// One page of entries delivered to the `WebView` — a slice of the ranked set
@@ -154,8 +166,8 @@ pub(crate) async fn show_password(
     let secret = state.store.get(&entry_path).await?;
 
     Ok(SensitiveContent {
-        password: secret.password().to_string(),
-        notes: secret.body().to_string(),
+        password: Zeroizing::new(secret.password().to_string()),
+        notes: Zeroizing::new(secret.body().to_string()),
     })
 }
 
@@ -231,5 +243,21 @@ mod tests {
     fn page_from_propagates_store_error() {
         let err = Error::new(ErrorCode::StoreError, "boom");
         assert!(page_from(Err(err), 0).is_err());
+    }
+
+    #[test]
+    fn sensitive_content_serializes_transparently() {
+        // `Zeroizing<String>` must serialize as a plain JSON string so the
+        // Vue frontend's `SensitiveContent` shape stays unchanged, and `Debug`
+        // must never leak the plaintext.
+        let content = SensitiveContent {
+            password: Zeroizing::new("hunter2".to_string()),
+            notes: Zeroizing::new("username: alice".to_string()),
+        };
+        assert_eq!(
+            serde_json::to_string(&content).expect("serialize"),
+            r#"{"password":"hunter2","notes":"username: alice"}"#
+        );
+        assert!(!format!("{content:?}").contains("hunter2"));
     }
 }
