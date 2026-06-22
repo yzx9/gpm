@@ -244,4 +244,92 @@ describe("EntryDetailPage", () => {
       expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
     });
   });
+
+  describe("deleteSecret", () => {
+    // The native confirm() dialog defaults to "proceed" for these tests; the
+    // cancel case overrides it explicitly.
+    const deleteBtn = () => 'button[aria-label="Delete servers/prod"]';
+
+    beforeEach(() => {
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+    });
+
+    it("on confirm, invokes delete_secret with the entry name", async () => {
+      vi.mocked(invoke).mockResolvedValue({ commit: "abc1234" });
+      const wrapper = mountPage();
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("delete_secret", {
+        name: "servers/prod",
+      });
+    });
+
+    it("on success, toasts and navigates to the list", async () => {
+      vi.mocked(invoke).mockResolvedValue({ commit: "abc1234" });
+      const wrapper = mountPage();
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("✓ Deleted (commit abc1234)");
+      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    });
+
+    it("on PUSH_REJECTED, toasts a sync hint and stays put", async () => {
+      vi.mocked(invoke).mockRejectedValue({
+        code: "PUSH_REJECTED",
+        message: "Remote moved",
+      });
+      const wrapper = mountPage();
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("Remote moved — sync to review");
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it("on a non-PUSH_REJECTED error, shows the error and stays put", async () => {
+      vi.mocked(invoke).mockRejectedValue({
+        code: "STORE_ERROR",
+        message: "Disk full",
+      });
+      const wrapper = mountPage();
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain("Disk full");
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it("disables the button while the delete is inflight", async () => {
+      let resolveDelete!: (v: { commit: string }) => void;
+      vi.mocked(invoke).mockReturnValue(
+        new Promise<{ commit: string }>((r) => {
+          resolveDelete = r;
+        }),
+      );
+      const wrapper = mountPage();
+      const btn = wrapper.find(deleteBtn());
+      expect(btn.attributes("disabled")).toBeUndefined();
+
+      await btn.trigger("click");
+      await flushPromises();
+      expect(btn.attributes("disabled")).toBeDefined();
+
+      resolveDelete({ commit: "abc1234" });
+      await flushPromises();
+      expect(btn.attributes("disabled")).toBeUndefined();
+    });
+
+    it("does not invoke when confirm is cancelled", async () => {
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      vi.mocked(invoke).mockResolvedValue({ commit: "abc1234" });
+      const wrapper = mountPage();
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+  });
 });

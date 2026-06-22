@@ -184,6 +184,7 @@ pub fn run() {
             write::preview_create,
             write::create_secret,
             write::create_from_preset_secret,
+            write::delete_secret,
             write::resolve_write_conflict,
             // config
             config::get_config,

@@ -1,8 +1,29 @@
 # Delete secrets
 
 **Priority:** P1
-**Status:** Draft
+**Status:** Implemented
 **Phase:** Next
+
+## Revision — implemented approach
+
+The sections below describe the _originally drafted_ design (a delete-specific
+three-way conflict model mirroring create's). On implementation the design was
+**simplified** at the user's direction: delete does not resolve conflicts inline
+at all. It mirrors the write path's happy path (best-effort sync → existence gate
+→ remove → commit → push) and **defers all conflict handling to the existing
+sync/divergence flow**: if the push is rejected (remote diverged), the local is
+rolled back to the pre-delete state and the caller is told to sync; there is no
+"force delete." A non-rejection push failure (offline / auth) propagates with the
+local delete commit retained, so it syncs later — mirroring how create handles an
+offline write.
+
+Rationale: a deletion has no "our version" to keep, so the four-way
+decrypt-aware resolution vocabulary adds surface without clear payoff. The safe
+default "if in doubt, don't destroy" holds by rolling back on rejection. The
+remote-inspect step and the conflict modal were dropped; `remote_decryptable`
+plays no role in delete. Deleted entries remain in git history (no
+graveyard/tombstone), but gpm exposes no in-app restore — recovery is an
+out-of-band git operation.
 
 ## What
 

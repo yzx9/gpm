@@ -190,6 +190,11 @@ impl fmt::Debug for Store {
     }
 }
 
+/// The signature shared by [`git::commit`] (write) and [`git::commit_removal`]
+/// (delete). Used by [`Store::commit_push`] to shell the shared commit→push path
+/// for both write kinds.
+type CommitFn = fn(&Path, &[String], &str, Option<&str>, Option<&str>) -> Result<String, Error>;
+
 impl Store {
     /// Create a new `Store` backed by the given config directory.
     #[must_use]
@@ -812,6 +817,57 @@ impl Store {
         }))
     }
 
+    /// Delete a secret: remove `<name>.age`, commit the removal, and push. The
+    /// delete sibling of [`set`] — same best-effort pre-sync and push-rejection
+    /// handling, but a removal staged instead of an encrypted write.
+    ///
+    /// Unlike [`set`], delete has **no inline conflict resolution**: if the push
+    /// is rejected (remote diverged), the local is rolled back to the pre-delete
+    /// state and [`ErrorCode::PushRejected`] is returned so the caller defers to
+    /// the sync/divergence flow — the user syncs to pick up the remote's version,
+    /// then re-deletes if still desired (see `.plans/0021-delete-secrets.md`).
+    /// There is no "force delete"; a conflicting delete is abandoned, not forced.
+    ///
+    /// A push **network/auth failure** (not a rejection) propagates as `Err`
+    /// with the local delete commit left in place, so it syncs later — mirroring
+    /// how [`set`] handles an offline write. A removal/commit failure (rare:
+    /// stale `index.lock`, disk full) likewise propagates as `Err`; this is an
+    /// accepted edge, symmetric to [`set`]'s commit-failure exposure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::InvalidEntryName`] for a malformed name,
+    /// [`ErrorCode::EntryNotFound`] if the entry doesn't exist (after the
+    /// best-effort sync), [`ErrorCode::PushRejected`] if the remote diverged, or
+    /// a git/network error from the underlying remove/commit/push.
+    pub async fn delete(&self, name: &str) -> Result<WriteResult, Error> {
+        validate_secret_name(name)?;
+        let passfile = passfile_rel(name);
+
+        // Best-effort pre-sync (gopass PushPull). Divergence is NOT resolved here
+        // — it surfaces as a push rejection below, which rolls back and defers to
+        // the sync flow. So a `Diverged`/`blocked` sync outcome is harmless.
+        self.sync().await?;
+
+        // Existence gate on the (best-effort) synced state.
+        let repo_path = self.repo_path().await?;
+        resolve_entry_path(&repo_path, &passfile)?;
+
+        let pre_delete_head = self.current_head_hash().await?;
+
+        if let Some(hash) = self.remove_commit_push(name, &passfile).await? {
+            Ok(WriteResult { commit: hash })
+        } else {
+            // Push rejected (remote diverged): roll back to the synced state so
+            // the entry is restored locally, and defer resolution to sync.
+            self.reset_hard_to(&pre_delete_head).await?;
+            Err(Error::new(
+                ErrorCode::PushRejected,
+                "Remote moved — sync to review and re-delete.",
+            ))
+        }
+    }
+
     /// Apply the user's choice for a [`WriteConflict`] returned by [`set`].
     ///
     /// - [`ConflictChoice::KeepMine`] replays our write on the remote tip and
@@ -1017,26 +1073,102 @@ impl Store {
 
         let passfile = self.encrypt_and_write(name, plaintext, &repo_path).await?;
 
-        // Commit, then push separately so we can detect a rejection.
-        let message = format!("Save secret: {name}");
+        self.commit_push(
+            repo_path,
+            auth,
+            passfile,
+            format!("Save secret: {name}"),
+            (
+                repo_config.commit_user_name.clone(),
+                repo_config.commit_user_email.clone(),
+            ),
+            git::commit,
+        )
+        .await
+    }
+
+    /// Remove `<name>.age` from the worktree, commit the removal, and push. The
+    /// delete-path sibling of [`write_commit_push`]: same commit→push→map shell
+    /// via [`commit_push`], but `fs::remove_file` + [`git::commit_removal`]
+    /// instead of [`encrypt_and_write`] + [`git::commit`]. Assumes a clean,
+    /// synced HEAD. Returns `Ok(Some(hash))` on success, `Ok(None)` on a push
+    /// rejection (non-fast-forward) — the caller rolls back. Other push failures
+    /// (network/auth) and the removal/commit are left in place and propagate as
+    /// `Err`, mirroring [`write_commit_push`] (an offline delete keeps its local
+    /// commit and syncs later).
+    async fn remove_commit_push(
+        &self,
+        name: &str,
+        passfile: &str,
+    ) -> Result<Option<String>, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let auth = repo_config.to_git_auth();
+
+        // Defense-in-depth: the passfile stays inside the repo.
+        let file_path = repo_path.join(passfile);
+        assert_within_repo(&repo_path, file_path.parent().unwrap_or(Path::new("")))?;
+
+        // Remove the worktree file; the index removal is staged in `commit_removal`.
+        match fs::remove_file(&file_path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Error::new(
+                    ErrorCode::EntryNotFound,
+                    format!("Entry not found: {name}"),
+                ));
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        self.commit_push(
+            repo_path,
+            auth,
+            passfile.to_string(),
+            format!("Delete secret: {name}"),
+            (
+                repo_config.commit_user_name.clone(),
+                repo_config.commit_user_email.clone(),
+            ),
+            git::commit_removal,
+        )
+        .await
+    }
+
+    /// Commit `passfile` (the caller has already mutated the worktree — written
+    /// the file for a save, or removed it for a delete) and push. `commit_fn` is
+    /// [`git::commit`] for a save or [`git::commit_removal`] for a delete; they
+    /// share a signature, so this shells the shared commit→push→map logic for
+    /// both write paths (DRY — the only thing that differs is the mutation and
+    /// the commit function, both supplied by the caller).
+    ///
+    /// Returns `Ok(Some(head))` on success, `Ok(None)` on a push rejection
+    /// (non-fast-forward). The commit/file are left in place on rejection; the
+    /// caller is expected to reset.
+    async fn commit_push(
+        &self,
+        repo_path: PathBuf,
+        auth: git::GitAuth,
+        passfile: String,
+        message: String,
+        commit_identity: (Option<String>, Option<String>),
+        commit_fn: CommitFn,
+    ) -> Result<Option<String>, Error> {
         let repo_path_for_commit = repo_path.clone();
-        let passfile_for_commit = passfile.clone();
-        let commit_name = repo_config.commit_user_name.clone();
-        let commit_email = repo_config.commit_user_email.clone();
+        let passfile_for_commit = passfile;
         let head = spawn_blocking(move || {
             let paths = vec![passfile_for_commit];
-            git::commit(
+            commit_fn(
                 &repo_path_for_commit,
                 &paths,
                 &message,
-                commit_name.as_deref(),
-                commit_email.as_deref(),
+                commit_identity.0.as_deref(),
+                commit_identity.1.as_deref(),
             )
         })
         .await??;
 
-        let repo_path_for_push = repo_path.clone();
-        let push_result = spawn_blocking(move || git::push(&repo_path_for_push, &auth)).await?;
+        let push_result = spawn_blocking(move || git::push(&repo_path, &auth)).await?;
         match push_result {
             Ok(()) => Ok(Some(head)),
             Err(e) if e.code == "PUSH_REJECTED" => Ok(None),

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Start a brand-new password store right on this device — no existing repo and no second tool required. Setup now offers "Create a new store" alongside "Clone": generate an age or SSH identity in-app, seed the store, and optionally add a git remote to sync later. A store gpm creates is indistinguishable from one gopass creates, so you can mix tools or migrate freely
+- Delete a secret right from its detail page — gpm removes it, commits, and syncs the change like any other edit. If the remote has moved, the delete is safely rolled back and you're asked to sync first. gpm has no in-app undo, so a deleted entry is gone from the app and recoverable only via git history with external tooling
 
 ## [v0.6.0] - 2026-06-20
 

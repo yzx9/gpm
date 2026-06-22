@@ -174,6 +174,28 @@ pub(crate) async fn create_from_preset_secret(
     do_create(&state, &app, &name, body).await
 }
 
+/// Delete a secret at an explicit path. The entry is removed, the removal is
+/// committed, and the change is pushed — the delete sibling of
+/// [`create_secret`]. If the remote has diverged the push is rejected: the local
+/// is rolled back to the pre-delete state and [`ErrorCode::PushRejected`] is
+/// returned so the frontend asks the user to sync first (delete defers all
+/// conflict handling to the sync flow — see `.plans/0021-delete-secrets.md`).
+/// Unlike create there is no stash and no `resolve` step: delete carries no
+/// plaintext.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn delete_secret(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    name: String,
+) -> Result<WriteResult, Error> {
+    let result = state.store.delete(&name).await;
+    // Reset the auto-lock timer on the user's activity whether or not the delete
+    // succeeded (mirrors `do_create`).
+    reset_lock_timer(&state, &app);
+    result
+}
+
 /// Resolve a write conflict ([`WriteOutcome::Conflict`]) per the user's
 /// `choice`. Replays the stashed plaintext for `keep_mine` / `keep_mine_force`;
 /// `keep_remote` fast-forwards to the remote, `cancel` leaves the pre-write

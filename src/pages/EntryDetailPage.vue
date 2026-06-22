@@ -25,7 +25,17 @@ const { password, notes, revealed, reveal, clear } = useSecretReveal();
 const loading = ref(false);
 const error = ref("");
 const toast = ref("");
+const deleting = ref(false);
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showToast(message: string) {
+  toast.value = message;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.value = "";
+    toastTimer = null;
+  }, 3000);
+}
 
 async function showPassword() {
   loading.value = true;
@@ -53,15 +63,43 @@ async function copyPassword() {
       },
     );
     clear();
-    toast.value = `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`;
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      toast.value = "";
-      toastTimer = null;
-    }, 3000);
+    showToast(
+      `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
+    );
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Copy failed";
+  }
+}
+
+async function deleteSecret() {
+  if (deleting.value) return;
+  if (
+    !confirm(
+      `Delete ${entryName}? This removes it everywhere on the next sync. gpm has no in-app undo — recovery is only possible via git history with external tooling.`,
+    )
+  ) {
+    return;
+  }
+  deleting.value = true;
+  error.value = "";
+  try {
+    const result = await invoke<{ commit: string }>("delete_secret", {
+      name: entryName,
+    });
+    clear();
+    showToast(`✓ Deleted (commit ${result.commit})`);
+    router.push({ name: "entries" });
+  } catch (e) {
+    const appError = e as AppError;
+    if (appError?.code === "PUSH_REJECTED") {
+      // Remote diverged — delete was rolled back. Defer to the sync flow.
+      showToast("Remote moved — sync to review and re-delete.");
+    } else {
+      error.value = appError?.message || "Delete failed";
+    }
+  } finally {
+    deleting.value = false;
   }
 }
 
@@ -135,6 +173,15 @@ function handleKeydown(e: KeyboardEvent) {
         {{ revealed ? "Showing..." : "Show Password" }}
       </button>
     </div>
+
+    <button
+      @click="deleteSecret"
+      class="btn-danger w-full mb-6"
+      :disabled="deleting || loading"
+      :aria-label="`Delete ${entryName}`"
+    >
+      {{ deleting ? "Deleting…" : "Delete" }}
+    </button>
 
     <div v-if="loading" class="text-center text-muted py-4">
       <span class="spinner"></span>
@@ -216,6 +263,28 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 .btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  padding: 0.75rem;
+  background: var(--color-surface);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  min-height: 48px;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+}
+
+.btn-danger:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

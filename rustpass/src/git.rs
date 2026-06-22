@@ -212,6 +212,40 @@ fn add_and_commit(
     Ok(repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?)
 }
 
+/// Like [`add_and_commit`] but stages **removals**: the worktree file is already
+/// gone (the caller removes it), and this drops the index entry via
+/// `index.remove_path` so the commit records the deletion. The delete-path
+/// sibling of [`add_and_commit`] (`git rm` vs `git add`).
+fn remove_and_commit(
+    repo: &Repository,
+    rel_paths: &[String],
+    message: &str,
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<git2::Oid, Error> {
+    let mut index = repo.index()?;
+    for p in rel_paths {
+        index.remove_path(Path::new(p)).map_err(|e| {
+            Error::new(
+                ErrorCode::StoreError,
+                format!("Failed to stage removal of {p}: {e}"),
+            )
+        })?;
+    }
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+
+    let head_oid = repo
+        .head()?
+        .target()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit to build on"))?;
+    let parent = repo.find_commit(head_oid)?;
+
+    let sig = gpm_signature(name, email)?;
+    Ok(repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?)
+}
+
 /// Like [`add_and_commit`] but with **no parent commit** — the first commit on a
 /// freshly initialized repo. [`add_and_commit`] looks up HEAD as the parent,
 /// which fails before the first commit exists (gopass's "Initialized Store"
@@ -288,6 +322,32 @@ pub fn commit(
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
     add_and_commit(&repo, rel_paths, message, name, email)?;
+    let head = repo
+        .head()?
+        .target()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD after commit"))?;
+    Ok(short_hash(&head))
+}
+
+/// Stage the **removal** of `rel_paths` (the worktree files are already gone) and
+/// commit on the current branch. The delete-path sibling of [`commit`]: identical
+/// signature, but [`remove_and_commit`] (index `remove_path`) instead of
+/// [`add_and_commit`] (index `add_path`). Returns the short hash of the new HEAD.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened or staging/committing fails
+/// (e.g. a path that isn't tracked, or a stale `index.lock`).
+pub fn commit_removal(
+    repo_path: &Path,
+    rel_paths: &[String],
+    message: &str,
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<String, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    remove_and_commit(&repo, rel_paths, message, name, email)?;
     let head = repo
         .head()?
         .target()
