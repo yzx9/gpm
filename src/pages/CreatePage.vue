@@ -13,7 +13,7 @@ import type {
   WriteConflict,
   WriteOutcome,
 } from "../types";
-import { onLock } from "../utils/useLockState";
+import { onLock, runWithAuth } from "../utils/useLockState";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
 
 const router = useRouter();
@@ -153,16 +153,17 @@ async function submit() {
   submitting.value = true;
   error.value = "";
   try {
-    const outcome: WriteOutcome =
+    const outcome: WriteOutcome = await runWithAuth(() =>
       mode.value === "preset" && activePreset.value
-        ? await invoke<WriteOutcome>("create_from_preset_secret", {
+        ? invoke<WriteOutcome>("create_from_preset_secret", {
             presetId: activePreset.value.id,
             fields: fields.value,
           })
-        : await invoke<WriteOutcome>("create_secret", {
+        : invoke<WriteOutcome>("create_secret", {
             name: customName.value.trim(),
             content: customContent.value,
-          });
+          }),
+    );
 
     if (outcome.kind === "written") {
       showToast(`✓ Saved (commit ${outcome.commit})`);
@@ -187,9 +188,8 @@ async function submit() {
 async function resolve(choice: ConflictChoice) {
   resolving.value = true;
   try {
-    const result = await invoke<{ commit: string } | null>(
-      "resolve_write_conflict",
-      { choice },
+    const result = await runWithAuth(() =>
+      invoke<{ commit: string } | null>("resolve_write_conflict", { choice }),
     );
     conflict.value = null;
     if (choice === "keep_remote") {

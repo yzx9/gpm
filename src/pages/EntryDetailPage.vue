@@ -14,7 +14,8 @@ import type {
   WriteOutcome,
 } from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
-import { onLock } from "../utils/useLockState";
+import { onLock, runWithAuth } from "../utils/useLockState";
+import { useSecuritySettings } from "../utils/useSecuritySettings";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
 
 const route = useRoute();
@@ -27,9 +28,11 @@ const entryPath = decodeURIComponent(
 );
 const entryName = entryPath.replace(/\.age$/, "");
 
-// Read-path reveal lives in the shared secure-reveal composable: 30s auto-clear,
-// wipe on unmount, wipe on browser back, wipe on lock. `copyPassword` clears it.
+// Sensitive state lives in the shared secure-reveal composable: configurable
+// auto-clear, wipe on unmount, wipe on browser back. `copyPassword` calls
+// `clear()` itself.
 const { password, notes, revealed, reveal, clear } = useSecretReveal();
+const { viewClearSecs } = useSecuritySettings();
 const loading = ref(false);
 const error = ref("");
 const toast = ref("");
@@ -72,9 +75,9 @@ async function showPassword() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await invoke<SensitiveContent>("show_password", {
-      entryPath,
-    });
+    const result = await runWithAuth(() =>
+      invoke<SensitiveContent>("show_password", { entryPath }),
+    );
     reveal(result);
   } catch (e) {
     const appError = e as AppError;
@@ -87,11 +90,8 @@ async function showPassword() {
 async function copyPassword() {
   error.value = "";
   try {
-    const result = await invoke<import("../types").CopyResult>(
-      "copy_password",
-      {
-        entryPath,
-      },
+    const result = await runWithAuth(() =>
+      invoke<import("../types").CopyResult>("copy_password", { entryPath }),
     );
     clear();
     showToast(
@@ -397,7 +397,11 @@ function handleKeydown(e: KeyboardEvent) {
         </div>
 
         <p class="text-center text-xs text-muted mt-3">
-          Auto-clears in 30 seconds
+          {{
+            viewClearSecs > 0
+              ? `Auto-clears in ${viewClearSecs}s`
+              : "Stays visible until hidden or locked"
+          }}
         </p>
       </div>
     </div>

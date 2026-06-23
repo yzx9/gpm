@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises, type DOMWrapper } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import CreatePage from "./CreatePage.vue";
+import { __unlockForTests } from "../utils/useLockState";
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
 
@@ -66,6 +67,7 @@ async function fillWebsiteForm(wrapper: ReturnType<typeof mount>) {
 describe("CreatePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __unlockForTests();
   });
 
   it("loads presets on mount", async () => {

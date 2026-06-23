@@ -299,7 +299,7 @@ pub(crate) async fn complete_setup(
         .await?;
     // Setup may leave an encrypted identity locked (the passphrase isn't cached);
     // emit the real state so the frontend shows the unlock overlay if needed.
-    emit_lock_state(&app, &state.store).await;
+    emit_lock_state(&app, &state.store, false).await;
     Ok(())
 }
 
@@ -492,7 +492,7 @@ pub(crate) async fn complete_setup_from_file(
         .save_identity(&pending.identity, passphrase.as_deref())
         .await?;
     // See [`complete_setup`]: emit the real post-setup lock state.
-    emit_lock_state(&app, &state.store).await;
+    emit_lock_state(&app, &state.store, false).await;
     Ok(())
 }
 
@@ -592,6 +592,8 @@ mod tests {
             lock_generation: Arc::new(AtomicU64::new(0)),
             pending_identity: Mutex::new(None),
             pending_write: Arc::new(Mutex::new(None)),
+            lock_mode: Mutex::new(rustpass::LockMode::default()),
+            clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
         };
         (state, dir)
     }

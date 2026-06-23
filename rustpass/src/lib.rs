@@ -71,7 +71,7 @@ pub mod store;
 pub mod template;
 
 // Re-export core types at crate root (gopass-aligned)
-pub use config::{Config, RepoConfig};
+pub use config::{Config, LockMode, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
 pub use recipient::{IdentityInfo, KeyType, Recipient};

@@ -16,6 +16,7 @@
 //! (`tauri::test::mock_builder`) rather than a real webview.
 
 mod lock_state;
+mod read_commands;
 mod setup_flow;
 mod write_conflict;
 
@@ -143,6 +144,8 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         lock_generation: Arc::new(AtomicU64::new(0)),
         pending_identity: Mutex::new(None),
         pending_write: Arc::new(Mutex::new(None)),
+        lock_mode: Mutex::new(rustpass::LockMode::default()),
+        clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
     };
     (
         state,

@@ -20,6 +20,46 @@ pub(crate) const DEFAULT_COMMIT_NAME: &str = "gpm";
 /// Default commit author email used when none is configured.
 pub(crate) const DEFAULT_COMMIT_EMAIL: &str = "gpm@local";
 
+/// Default seconds a revealed password stays in the DOM before auto-clear.
+/// Used when `view_clear_secs` is `None` (the field is absent, e.g. an older
+/// config predating the setting).
+pub const DEFAULT_VIEW_CLEAR_SECS: u64 = 45;
+/// Default seconds the clipboard holds a copied password before auto-clear.
+/// Used when `clipboard_clear_secs` is `None`.
+pub const DEFAULT_CLIPBOARD_CLEAR_SECS: u64 = 45;
+
+/// How the app auto-locks the identity cache.
+///
+/// `Immediate` (the default) is the no-cache, per-operation mode: the identity
+/// is wiped right after each secret access rather than held for a session. The
+/// UI splits this from the hard "lock overlay" transition so a just-revealed
+/// password can stay on screen until its own view-clear timer. `Idle(n)` is the
+/// classic session model (wipe after `n` seconds of inactivity); `Never` keeps
+/// the identity cached until a manual lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LockMode {
+    /// Per-operation: wipe the identity immediately after each secret access.
+    /// No idle timer is armed.
+    #[default]
+    Immediate,
+    /// Session: keep the identity cached, wipe after `n` seconds of inactivity.
+    Idle(u64),
+    /// Never auto-lock; the identity stays cached until a manual lock.
+    Never,
+}
+
+impl LockMode {
+    /// Whether this is the default variant ([`LockMode::Immediate`]). Used to
+    /// skip the field from `repo.json` when unset, so a config that never
+    /// touched the setting is byte-identical to one written before the field
+    /// existed.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Immediate)
+    }
+}
+
 /// Atomic write: write data to a temp file then rename over the target.
 ///
 /// Prevents file corruption if the write fails mid-operation. Used for both
@@ -165,6 +205,11 @@ impl Config {
             // identity auto-tracks the shipped default across versions.
             commit_user_name: None,
             commit_user_email: None,
+            // Auto-lock defaults to Immediate (no-cache); the clear timers default
+            // to their `None`-implies-45s resolution. None are pinned here.
+            lock_mode: LockMode::default(),
+            view_clear_secs: None,
+            clipboard_clear_secs: None,
             authenticity: AuthenticityConfig::default(),
         };
         // Delegate to the atomic variant so `repo.json` is never observed
@@ -296,6 +341,19 @@ pub struct RepoConfig {
     /// Optional git commit author email; `None` uses the app default.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub commit_user_email: Option<String>,
+    /// How the app auto-locks the identity cache. Skipped from serialization
+    /// when default ([`LockMode::Immediate`]) so an uncustomized config — and a
+    /// config written before this field existed — both resolve to the default.
+    #[serde(default, skip_serializing_if = "LockMode::is_default")]
+    pub lock_mode: LockMode,
+    /// Seconds a revealed password stays in the DOM before auto-clear.
+    /// `None` ⇒ [`DEFAULT_VIEW_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub view_clear_secs: Option<u64>,
+    /// Seconds the clipboard holds a copied password before auto-clear.
+    /// `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub clipboard_clear_secs: Option<u64>,
     /// Repository authenticity config (verification mode + trusted signing
     /// keys + ignored issues). Skipped from serialization when default so
     /// users who never enable authenticity see no change to `repo.json`'s
@@ -321,6 +379,24 @@ impl RepoConfig {
         } else {
             GitAuth::None
         }
+    }
+
+    /// Effective password-view auto-clear seconds: `None` resolves to
+    /// [`DEFAULT_VIEW_CLEAR_SECS`], `Some(0)` means never (0 — the UI skips the
+    /// timer), otherwise the configured value. A single resolution point so the
+    /// backend and the UI agree.
+    #[must_use]
+    pub fn view_clear_secs_effective(&self) -> u64 {
+        self.view_clear_secs.unwrap_or(DEFAULT_VIEW_CLEAR_SECS)
+    }
+
+    /// Effective clipboard auto-clear seconds (same rule as
+    /// [`view_clear_secs_effective`](RepoConfig::view_clear_secs_effective)).
+    /// `Some(0)` (Never) tells the backend not to spawn a clear task at all.
+    #[must_use]
+    pub fn clipboard_clear_secs_effective(&self) -> u64 {
+        self.clipboard_clear_secs
+            .unwrap_or(DEFAULT_CLIPBOARD_CLEAR_SECS)
     }
 }
 
@@ -857,6 +933,92 @@ mod tests {
         assert!(
             !crate::atrest::is_envelope(&raw),
             "passthrough must not wrap files"
+        );
+    }
+
+    #[tokio::test]
+    async fn repo_config_lock_mode_roundtrip() {
+        let (config, _dir) = create_config();
+
+        for mode in [LockMode::Immediate, LockMode::Idle(300), LockMode::Never] {
+            std::fs::create_dir_all(&config.config_dir).unwrap();
+            let rc = RepoConfig {
+                url: "https://example.com/repo.git".to_string(),
+                pat: None,
+                ssh_key: None,
+                ssh_passphrase: None,
+                local_path: "/local/path".to_string(),
+                lock_mode: mode,
+                ..Default::default()
+            };
+            config.save_repo_config_full(&rc).await.unwrap();
+            let loaded = config.load_repo_config().await.unwrap();
+            assert_eq!(loaded.lock_mode, mode, "roundtrip for {mode:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn repo_config_lock_mode_immediate_omitted_when_default() {
+        let (config, _dir) = create_config();
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let rc = RepoConfig {
+            url: "https://example.com/repo.git".to_string(),
+            local_path: "/local/path".to_string(),
+            lock_mode: LockMode::Immediate,
+            ..Default::default()
+        };
+        config.save_repo_config_full(&rc).await.unwrap();
+
+        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        assert!(
+            !json.contains("lock_mode"),
+            "Immediate (default) must not be serialized"
+        );
+    }
+
+    #[tokio::test]
+    async fn repo_config_lock_mode_defaults_to_immediate_for_old_config() {
+        let (config, _dir) = create_config();
+        // A config written before lock_mode existed.
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let old_json = r#"{"url":"https://example.com/repo.git","pat":"t","local_path":"/p"}"#;
+        std::fs::write(config.repo_config_path(), old_json).unwrap();
+
+        let cfg = config.load_repo_config().await.unwrap();
+        assert_eq!(cfg.lock_mode, LockMode::Immediate);
+        assert_eq!(cfg.view_clear_secs, None);
+        assert_eq!(cfg.clipboard_clear_secs, None);
+    }
+
+    #[tokio::test]
+    async fn repo_config_clear_secs_roundtrip_and_effective() {
+        let (config, _dir) = create_config();
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let rc = RepoConfig {
+            url: "https://example.com/repo.git".to_string(),
+            local_path: "/local/path".to_string(),
+            view_clear_secs: Some(0), // Never
+            clipboard_clear_secs: Some(180),
+            ..Default::default()
+        };
+        config.save_repo_config_full(&rc).await.unwrap();
+
+        let cfg = config.load_repo_config().await.unwrap();
+        assert_eq!(cfg.view_clear_secs, Some(0));
+        assert_eq!(cfg.clipboard_clear_secs, Some(180));
+        assert_eq!(cfg.view_clear_secs_effective(), 0);
+        assert_eq!(cfg.clipboard_clear_secs_effective(), 180);
+
+        // None ⇒ default resolution.
+        let cfg2 = RepoConfig {
+            url: "u".to_string(),
+            local_path: "/p".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(cfg2.view_clear_secs_effective(), DEFAULT_VIEW_CLEAR_SECS);
+        assert_eq!(
+            cfg2.clipboard_clear_secs_effective(),
+            DEFAULT_CLIPBOARD_CLEAR_SECS
         );
     }
 }

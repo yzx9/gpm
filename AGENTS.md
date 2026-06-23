@@ -47,12 +47,13 @@ Local Tauri plugin crates (not published). Each follows the standard Tauri mobil
 ## Security Model
 
 - `copy_password` is the primary operation — password never reaches WebView
-- `show_password` is secondary — 30s auto-clear with lifecycle cleanup
+- `show_password` is secondary — configurable auto-clear (default 45s) with lifecycle cleanup
 - Biometric (keystore) unlock is called from Rust app commands, with the passphrase passed from Kotlin to Rust and never exposed to the WebView.
 - `repo.json` and `identity` are encrypted at rest on Android (AES-256-GCM; master key sealed in the auth-free Keystore, injected into `rustpass` as bytes). A read attacker / forensic dump gets ciphertext, and a tampered config fails the AEAD tag. Desktop has no Keystore equivalent, so files stay plaintext there (documented asymmetry). The store assumes no local write attacker; a missing/unsealable key degrades to re-setup.
 - All decrypted content uses `Zeroizing<String>` and is wiped after use
 - Error messages are sanitized to never contain secrets
 - CSP restricts script/connect sources to `self` + IPC only
+- Auto-lock defaults to "Immediate" (no-cache): the identity is decrypted per copy/show/create and wiped right after, so the master key sits in memory only for the operation, not the whole session. Browsing the list needs no identity. The identity cache is also wiped on a failed op (a decode error under Immediate still clears the cache). Known limitation: an unresolved write conflict suppresses the wipe for its whole window — the stashed conflict plaintext is replayed by resolve, which needs the identity, so the cache can't be dropped until the conflict is resolved or cancelled (or the store is hard-locked). Idle-timeout and Never modes keep the session cached as before.
 
 See [SECURITY.md](SECURITY.md) for the full threat model and known limitations.
 

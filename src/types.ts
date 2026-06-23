@@ -64,9 +64,19 @@ export interface RepoConfig {
   commit_user_name?: string | null;
   /** Git commit author email; null/absent uses the app default. */
   commit_user_email?: string | null;
+  /** App auto-lock mode. Absent ⇒ Immediate (the default). Mirrors the Rust
+   * `LockMode` (serde externally-tagged, lowercase). */
+  lock_mode?: LockMode;
+  /** Password-view auto-clear seconds. Absent/null ⇒ default (45); 0 ⇒ never. */
+  view_clear_secs?: number | null;
+  /** Clipboard auto-clear seconds. Absent/null ⇒ default (45); 0 ⇒ never. */
+  clipboard_clear_secs?: number | null;
   /** Repository authenticity config. Absent when Off/empty. */
   authenticity?: AuthenticityConfig;
 }
+
+/** How the app auto-locks the identity cache (mirrors Rust `LockMode`). */
+export type LockMode = "immediate" | { idle: number } | "never";
 
 /** Default commit author identity (from `get_commit_identity_default`). */
 export interface CommitIdentity {

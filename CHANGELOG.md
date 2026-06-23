@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Start a brand-new password store right on this device — no existing repo and no second tool required. Setup now offers "Create a new store" alongside "Clone": generate an age or SSH identity in-app, seed the store, and optionally add a git remote to sync later. A store gpm creates is indistinguishable from one gopass creates, so you can mix tools or migrate freely
 - Delete a secret right from its detail page — gpm removes it, commits, and syncs the change like any other edit. If the remote has moved, the delete is safely rolled back and you're asked to sync first. gpm has no in-app undo, so a deleted entry is gone from the app and recoverable only via git history with external tooling
 - Edit a secret's password and notes in place from its detail page — gpm saves, commits, and syncs the change like any other edit, without re-applying a creation template. If another device changed the same entry and your save can't fast-forward, gpm asks how to resolve it (keep yours, keep theirs, or cancel) instead of failing. Caveat: if another device's newer edit to the same entry is fast-forwarded over by your save, that newer change is overwritten on the tip — recoverable via git history — until a follow-up makes edit base-version-aware
+- Control how and when gpm locks, all from the new "Auto-Lock & Auto-Clear" section in Settings. Pick when the app locks (immediately after each action, after a few minutes idle, or never), how long a shown password stays on screen, and how long the clipboard holds a copy — each with sensible presets and a "Never" option
+
+### Changed
+
+- gpm now defaults to re-checking your fingerprint or passphrase each time you copy, view, or create a secret, rather than staying unlocked for minutes at a time. This keeps your decryption key in memory only for the instant it's needed. Browsing the list is unaffected (it never needs unlocking). If you prefer the old "stay unlocked for a while" behavior, switch Auto-Lock to an idle timeout in Settings
+- A shown password now auto-clears after 45 seconds by default (was 30), and a copied password clears from the clipboard after 45 seconds by default (was 30) — both are now adjustable in Settings
 
 ### Fixed
 

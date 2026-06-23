@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use rustpass::LockMode;
 use tauri::{Listener, Manager};
 
 use crate::AppState;
@@ -116,5 +117,119 @@ async fn stale_timer_self_disarms_after_rearm() {
     assert!(
         app_state.pending_write.lock().unwrap().is_some(),
         "a stale timer must not clear a stashed plaintext"
+    );
+}
+
+// ── no-cache (Immediate) mode: soft wipe ─────────────────────────────────
+
+/// Helper: set the cached lock mode on a managed `AppState`.
+fn set_lock_mode(app: &tauri::App<tauri::test::MockRuntime>, mode: LockMode) {
+    let app_state = app.state::<AppState>();
+    *app_state.lock_mode.lock().unwrap() = mode;
+}
+
+/// `soft_wipe` empties the identity cache but, unlike a hard lock, leaves a
+/// stashed conflict plaintext in place (it must stay behind a live identity for
+/// resolve — only the hard lock / timer clear it).
+#[tokio::test]
+async fn soft_wipe_empties_cache_but_keeps_pending() {
+    let (state, _guard) = make_unlocked_state(&[("foo.age", b"x\n")]).await;
+    let app = mock_app(state);
+    let app_state = app.state::<AppState>();
+
+    write::stash_pending(&app_state.pending_write, "foo", b"secret".to_vec());
+
+    identity::soft_wipe(&app_state, app.handle()).await;
+
+    assert!(
+        !app_state.store.is_unlocked(),
+        "soft wipe must empty the identity cache"
+    );
+    assert!(
+        app_state.pending_write.lock().unwrap().is_some(),
+        "soft wipe must NOT clear a stashed plaintext (only a hard lock does)"
+    );
+}
+
+/// `maybe_soft_wipe` under Immediate wipes the identity after an op.
+#[tokio::test]
+async fn maybe_soft_wipe_wipes_under_immediate() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    set_lock_mode(&app, LockMode::Immediate);
+    let app_state = app.state::<AppState>();
+
+    assert!(app_state.store.is_unlocked(), "precondition: unlocked");
+    identity::maybe_soft_wipe(&app_state, app.handle()).await;
+    assert!(
+        !app_state.store.is_unlocked(),
+        "Immediate + no pending conflict must wipe the identity"
+    );
+}
+
+/// While a write conflict is pending, `maybe_soft_wipe` must NOT wipe the
+/// identity — the stashed plaintext is replayed by `resolve_write_conflict`,
+/// which needs the identity. A regression here leaves an undecryptable stash
+/// behind a wiped cache (or breaks resolve). This is the security-critical
+/// invariant of the conflict-stash design.
+#[tokio::test]
+async fn maybe_soft_wipe_skips_while_conflict_pending() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    set_lock_mode(&app, LockMode::Immediate);
+    let app_state = app.state::<AppState>();
+
+    write::stash_pending(&app_state.pending_write, "foo", b"secret".to_vec());
+    assert!(app_state.store.is_unlocked(), "precondition: unlocked");
+
+    identity::maybe_soft_wipe(&app_state, app.handle()).await;
+
+    assert!(
+        app_state.store.is_unlocked(),
+        "must NOT wipe the identity while a conflict is pending"
+    );
+    assert!(
+        app_state.pending_write.lock().unwrap().is_some(),
+        "stash must remain for resolve"
+    );
+}
+
+/// `maybe_soft_wipe` is a no-op under Idle (the session stays cached).
+#[tokio::test]
+async fn maybe_soft_wipe_noop_under_idle() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    set_lock_mode(&app, LockMode::Idle(300));
+    let app_state = app.state::<AppState>();
+
+    identity::maybe_soft_wipe(&app_state, app.handle()).await;
+    assert!(
+        app_state.store.is_unlocked(),
+        "Idle mode must keep the identity cached"
+    );
+}
+
+/// `reset_lock_timer` reads the cached mode: Immediate and Never disarm (no idle
+/// timer armed); Idle arms one.
+#[tokio::test]
+async fn reset_lock_timer_branches_on_mode() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    let app_state = app.state::<AppState>();
+
+    for mode in [LockMode::Immediate, LockMode::Never] {
+        set_lock_mode(&app, mode);
+        identity::reset_lock_timer(&app_state, app.handle());
+        assert!(
+            app_state.lock_timer.lock().unwrap().is_none(),
+            "{mode:?} must not arm an idle timer"
+        );
+    }
+
+    set_lock_mode(&app, LockMode::Idle(60));
+    identity::reset_lock_timer(&app_state, app.handle());
+    assert!(
+        app_state.lock_timer.lock().unwrap().is_some(),
+        "Idle must arm an idle timer"
     );
 }

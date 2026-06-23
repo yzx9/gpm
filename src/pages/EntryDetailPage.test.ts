@@ -7,7 +7,11 @@ import { mount } from "@vue/test-utils";
 import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import EntryDetailPage from "./EntryDetailPage.vue";
-import { useLockState, __resetLockStateForTests } from "../utils/useLockState";
+import {
+  useLockState,
+  __resetLockStateForTests,
+  __unlockForTests,
+} from "../utils/useLockState";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -40,6 +44,9 @@ describe("EntryDetailPage", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     __resetLockStateForTests();
+    // Page tests exercise copy/show without mounting App.vue (which calls
+    // init()), so establish the "identity cached" precondition runWithAuth gates on.
+    __unlockForTests();
   });
 
   afterEach(() => {
@@ -78,7 +85,7 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("some notes");
     });
 
-    it("auto-clears sensitive data after 30 seconds", async () => {
+    it("auto-clears sensitive data after the default view-clear window", async () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "notes",
@@ -90,8 +97,8 @@ describe("EntryDetailPage", () => {
       // Password is visible
       expect(wrapper.text()).toContain("s3cret");
 
-      // Advance past 30s auto-clear
-      vi.advanceTimersByTime(30_000);
+      // Advance past the default view-clear window (45s; configurable via Settings).
+      vi.advanceTimersByTime(45_000);
       await flushPromises();
 
       // Password is gone

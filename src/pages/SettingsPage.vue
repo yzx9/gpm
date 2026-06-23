@@ -13,12 +13,14 @@ import {
   isBiometricUnlockEnabled,
 } from "../biometric";
 import { onLock } from "../utils/useLockState";
+import { useSecuritySettings } from "../utils/useSecuritySettings";
 import type {
   AppError,
   AuthState,
   AuthenticityConfig,
   BiometricError,
   CommitIdentity,
+  LockMode,
   RepoConfig,
   SshPublicKeyResult,
   SshPrivateKeyResult,
@@ -67,6 +69,51 @@ const commitEmail = ref("");
 const commitLoading = ref(false);
 const commitDefault = ref<CommitIdentity | null>(null);
 
+// ── Auto-lock & auto-clear state ────────────────────────────────────────
+const { applySecurityConfig } = useSecuritySettings();
+const lockLoading = ref(false);
+
+// App auto-lock presets. "Immediate" (no-cache, per-op) is the default.
+const LOCK_PRESETS: { label: string; value: LockMode }[] = [
+  { label: "Immediate", value: "immediate" },
+  { label: "1 min", value: { idle: 60 } },
+  { label: "5 min", value: { idle: 300 } },
+  { label: "15 min", value: { idle: 900 } },
+  { label: "30 min", value: { idle: 1800 } },
+  { label: "Never", value: "never" },
+];
+// View-clear presets. A `null` value clears the override (tracks the default).
+const VIEW_CLEAR_PRESETS: { label: string; value: number | null }[] = [
+  { label: "10s", value: 10 },
+  { label: "45s · default", value: null },
+  { label: "3 min", value: 180 },
+  { label: "Never", value: 0 },
+];
+// Clipboard-clear presets. Same `null` ⇒ default convention.
+const CLIPBOARD_CLEAR_PRESETS: { label: string; value: number | null }[] = [
+  { label: "45s · default", value: null },
+  { label: "3 min", value: 180 },
+  { label: "Never", value: 0 },
+];
+
+const rawLockMode = computed<LockMode>(
+  () => config.value?.lock_mode ?? "immediate",
+);
+const rawViewClear = computed<number | null>(
+  () => config.value?.view_clear_secs ?? null,
+);
+const rawClipboardClear = computed<number | null>(
+  () => config.value?.clipboard_clear_secs ?? null,
+);
+
+function lockModeActive(p: LockMode): boolean {
+  const cur = rawLockMode.value;
+  if (cur === p) return true;
+  if (typeof cur === "object" && typeof p === "object")
+    return cur.idle === p.idle;
+  return false;
+}
+
 // Whether the stored identity is an SSH key. SSH keys are never
 // passphrase-encrypted by gpm (they rely on their own native protection),
 // so the at-rest encryption UI is hidden for them.
@@ -104,6 +151,7 @@ async function loadConfig() {
   error.value = "";
   try {
     config.value = await invoke<RepoConfig>("get_config");
+    applySecurityConfig(config.value);
     isSsh.value = config.value.ssh_key !== null;
     const auth = await invoke<AuthState>("get_auth_state");
     isIdentityEncrypted.value = auth.encrypted;
@@ -140,6 +188,54 @@ async function onSaveCommitIdentity() {
     error.value = appError?.message || "Failed to save commit identity";
   } finally {
     commitLoading.value = false;
+  }
+}
+
+async function onLockModeChange(mode: LockMode) {
+  if (!config.value) return;
+  lockLoading.value = true;
+  error.value = "";
+  try {
+    const updated = await invoke<RepoConfig>("set_lock_mode", { mode });
+    config.value = updated;
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to set auto-lock mode";
+  } finally {
+    lockLoading.value = false;
+  }
+}
+
+async function onViewClearChange(secs: number | null) {
+  if (!config.value) return;
+  lockLoading.value = true;
+  error.value = "";
+  try {
+    const updated = await invoke<RepoConfig>("set_view_clear_secs", { secs });
+    config.value = updated;
+    applySecurityConfig(updated);
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to set view auto-clear";
+  } finally {
+    lockLoading.value = false;
+  }
+}
+
+async function onClipboardClearChange(secs: number | null) {
+  if (!config.value) return;
+  lockLoading.value = true;
+  error.value = "";
+  try {
+    const updated = await invoke<RepoConfig>("set_clipboard_clear_secs", {
+      secs,
+    });
+    config.value = updated;
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to set clipboard auto-clear";
+  } finally {
+    lockLoading.value = false;
   }
 }
 
@@ -666,6 +762,96 @@ onMounted(() => {
             Disable Biometric
           </button>
         </template>
+      </section>
+
+      <!-- Auto-lock & auto-clear -->
+      <section v-if="config" class="settings-card">
+        <h2 class="text-sm font-medium mb-3">Auto-Lock &amp; Auto-Clear</h2>
+        <p class="text-xs text-muted mb-3">
+          Control when the identity locks and how long secrets stay in the
+          clipboard / on screen.
+        </p>
+
+        <!-- App auto-lock mode -->
+        <fieldset class="border-0 p-0 m-0 mb-3" :disabled="lockLoading">
+          <legend class="text-xs text-muted mb-1">Auto-lock</legend>
+          <div class="flex flex-wrap gap-2">
+            <label
+              v-for="p in LOCK_PRESETS"
+              :key="p.label"
+              class="mode-pill"
+              :class="{ 'mode-active': lockModeActive(p.value) }"
+            >
+              <input
+                type="radio"
+                name="lock-mode"
+                class="sr-only"
+                :checked="lockModeActive(p.value)"
+                @change="onLockModeChange(p.value)"
+              />
+              <span>{{ p.label }}</span>
+            </label>
+          </div>
+          <p class="text-xs text-subtle mt-1">
+            <template v-if="lockModeActive('immediate')"
+              >Per-operation: re-authenticate each copy/show/create. Strongest
+              default.</template
+            >
+            <template v-else-if="lockModeActive('never')"
+              >Never auto-lock; the identity stays cached until you lock
+              manually.</template
+            >
+            <template v-else
+              >Session: stay unlocked, lock after the idle period.</template
+            >
+          </p>
+        </fieldset>
+
+        <!-- View auto-clear -->
+        <fieldset class="border-0 p-0 m-0 mb-3" :disabled="lockLoading">
+          <legend class="text-xs text-muted mb-1">
+            Password view auto-clear
+          </legend>
+          <div class="flex flex-wrap gap-2">
+            <label
+              v-for="p in VIEW_CLEAR_PRESETS"
+              :key="p.label"
+              class="mode-pill"
+              :class="{ 'mode-active': rawViewClear === p.value }"
+            >
+              <input
+                type="radio"
+                name="view-clear"
+                class="sr-only"
+                :checked="rawViewClear === p.value"
+                @change="onViewClearChange(p.value)"
+              />
+              <span>{{ p.label }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- Clipboard auto-clear -->
+        <fieldset class="border-0 p-0 m-0" :disabled="lockLoading">
+          <legend class="text-xs text-muted mb-1">Clipboard auto-clear</legend>
+          <div class="flex flex-wrap gap-2">
+            <label
+              v-for="p in CLIPBOARD_CLEAR_PRESETS"
+              :key="p.label"
+              class="mode-pill"
+              :class="{ 'mode-active': rawClipboardClear === p.value }"
+            >
+              <input
+                type="radio"
+                name="clipboard-clear"
+                class="sr-only"
+                :checked="rawClipboardClear === p.value"
+                @change="onClipboardClearChange(p.value)"
+              />
+              <span>{{ p.label }}</span>
+            </label>
+          </div>
+        </fieldset>
       </section>
 
       <!-- Repository authenticity -->
