@@ -6,11 +6,11 @@
 //! author identity, and a full reset. When this grows further (import/export,
 //! per-repo settings), it can graduate to a `config/` directory of submodules.
 
-use rustpass::{CommitIdentity, Error, RepoConfig, Store};
+use rustpass::{CommitIdentity, Error, LockMode, RepoConfig, Store};
 use tauri::{AppHandle, State};
 
 use crate::AppState;
-use crate::identity::emit_lock_state;
+use crate::identity::{emit_lock_state, refresh_security_cache, reset_lock_timer};
 
 /// Get the current repo config (for display in settings).
 #[tauri::command]
@@ -32,7 +32,7 @@ pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> 
     state.store.reset().await?;
     // After a reset there is no identity, so the app is no longer locked — emit
     // the real state so any open unlock overlay closes.
-    emit_lock_state(&app, &state.store).await;
+    emit_lock_state(&app, &state.store, false).await;
     Ok(())
 }
 
@@ -46,6 +46,49 @@ pub(crate) async fn set_commit_identity(
     email: Option<String>,
 ) -> Result<RepoConfig, Error> {
     state.store.set_commit_identity(name, email).await
+}
+
+/// Set the app auto-lock mode (`immediate` / `{ idle: secs }` / `never`).
+/// Refreshes the `AppState` cache and re-applies the timer so the new mode takes
+/// effect immediately (Immediate/Never disarm; Idle re-arms). Returns the
+/// updated repo config.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_lock_mode(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    mode: LockMode,
+) -> Result<RepoConfig, Error> {
+    let rc = state.store.set_lock_mode(mode).await?;
+    refresh_security_cache(&state).await;
+    // Apply the new mode to the live timer (reads the just-refreshed cache).
+    reset_lock_timer(&state, &app);
+    Ok(rc)
+}
+
+/// Set the password-view auto-clear override (`null` = default, `0` = never).
+/// Returns the updated repo config; the UI reads the new value via `get_config`.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_view_clear_secs(
+    state: State<'_, AppState>,
+    secs: Option<u64>,
+) -> Result<RepoConfig, Error> {
+    state.store.set_view_clear_secs(secs).await
+}
+
+/// Set the clipboard auto-clear override (`null` = default, `0` = never).
+/// Refreshes the `AppState` cache so the next copy honors it. Returns the updated
+/// repo config.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_clipboard_clear_secs(
+    state: State<'_, AppState>,
+    secs: Option<u64>,
+) -> Result<RepoConfig, Error> {
+    let rc = state.store.set_clipboard_clear_secs(secs).await?;
+    refresh_security_cache(&state).await;
+    Ok(rc)
 }
 
 /// The default commit author identity (for UI display).

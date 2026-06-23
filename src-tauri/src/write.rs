@@ -33,11 +33,11 @@ use rustpass::template::{self, CreatePreset};
 use rustpass::{
     ConflictChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Runtime, State};
 use zeroize::Zeroizing;
 
 use crate::AppState;
-use crate::identity::reset_lock_timer;
+use crate::identity::{maybe_soft_wipe, reset_lock_timer};
 
 /// A write that collided with a newer remote copy and is awaiting the user's
 /// resolution. Held only in memory; `plaintext` is [`Zeroizing`] and the struct
@@ -52,7 +52,7 @@ pub(crate) struct PendingWrite {
 
 /// Drop any stashed pending write.
 ///
-/// Called on lock so a conflict modal left open across the 5-minute auto-lock
+/// Called on lock so a conflict modal left open across an auto-lock
 /// can't leave a plaintext behind a wiped identity cache (which would also make
 /// a later resolve fail confusingly).
 pub(crate) fn clear_pending(pending: &Arc<Mutex<Option<PendingWrite>>>) {
@@ -90,16 +90,24 @@ pub(crate) async fn create_and_stash(
 
 /// Create a secret (applying a matching `.pass-template`), stash the plaintext
 /// on conflict, and reset the auto-lock timer. Shared by the two create entry
-/// points so both stash identically.
-async fn do_create(
+/// points so both stash identically. Runtime-generic so the in-crate tests can
+/// drive it against the mock runtime.
+async fn do_create<R: Runtime>(
     state: &State<'_, AppState>,
-    app: &AppHandle,
+    app: &AppHandle<R>,
     name: &str,
     body: Vec<u8>,
 ) -> Result<WriteOutcome, Error> {
-    let outcome = create_and_stash(state, name, body).await?;
+    // Create first so a FAILED write still counts as a secret access: under
+    // Immediate we reset the timer + wipe on both paths (an errored create must
+    // not leave the identity cached with no idle timer to eventually clear it).
+    let outcome = create_and_stash(state, name, body).await;
     reset_lock_timer(state, app);
-    Ok(outcome)
+    // maybe_soft_wipe no-ops while a conflict is pending: the stashed plaintext
+    // is replayed by resolve_write_conflict, which needs the identity, so a
+    // Conflict correctly leaves the identity cached until resolve/cancel.
+    maybe_soft_wipe(state, app).await;
+    outcome
 }
 
 /// List the built-in secret-creation presets (Website login, PIN code) — the
@@ -188,6 +196,9 @@ pub(crate) async fn resolve_write_conflict(
 ) -> Result<Option<WriteResult>, Error> {
     let result = resolve_pending(&state, choice).await;
     reset_lock_timer(&state, &app);
+    // `resolve_pending` consumes the stash, so the pending-write guard now passes
+    // — under Immediate, wipe the identity after resolving (re-auth on next op).
+    maybe_soft_wipe(&state, &app).await;
     result
 }
 

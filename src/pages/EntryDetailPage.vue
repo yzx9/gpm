@@ -8,6 +8,8 @@ import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type { SensitiveContent, AppError } from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
+import { runWithAuth } from "../utils/useLockState";
+import { useSecuritySettings } from "../utils/useSecuritySettings";
 
 const route = useRoute();
 const router = useRouter();
@@ -19,9 +21,11 @@ const entryPath = decodeURIComponent(
 );
 const entryName = entryPath.replace(/\.age$/, "");
 
-// Sensitive state lives in the shared secure-reveal composable: 30s auto-clear,
-// wipe on unmount, wipe on browser back. `copyPassword` calls `clear()` itself.
+// Sensitive state lives in the shared secure-reveal composable: configurable
+// auto-clear, wipe on unmount, wipe on browser back. `copyPassword` calls
+// `clear()` itself.
 const { password, notes, revealed, reveal, clear } = useSecretReveal();
+const { viewClearSecs } = useSecuritySettings();
 const loading = ref(false);
 const error = ref("");
 const toast = ref("");
@@ -31,9 +35,9 @@ async function showPassword() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await invoke<SensitiveContent>("show_password", {
-      entryPath,
-    });
+    const result = await runWithAuth(() =>
+      invoke<SensitiveContent>("show_password", { entryPath }),
+    );
     reveal(result);
   } catch (e) {
     const appError = e as AppError;
@@ -46,11 +50,8 @@ async function showPassword() {
 async function copyPassword() {
   error.value = "";
   try {
-    const result = await invoke<import("../types").CopyResult>(
-      "copy_password",
-      {
-        entryPath,
-      },
+    const result = await runWithAuth(() =>
+      invoke<import("../types").CopyResult>("copy_password", { entryPath }),
     );
     clear();
     toast.value = `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`;
@@ -169,7 +170,11 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
 
       <p class="text-center text-xs text-muted mt-3">
-        Auto-clears in 30 seconds
+        {{
+          viewClearSecs > 0
+            ? `Auto-clears in ${viewClearSecs}s`
+            : "Stays visible until hidden or locked"
+        }}
       </p>
     </div>
   </main>

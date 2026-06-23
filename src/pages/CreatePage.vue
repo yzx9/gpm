@@ -15,7 +15,8 @@ import type {
   WriteOutcome,
 } from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
-import { onLock } from "../utils/useLockState";
+import { useSecuritySettings } from "../utils/useSecuritySettings";
+import { onLock, runWithAuth } from "../utils/useLockState";
 
 const router = useRouter();
 
@@ -46,7 +47,7 @@ const conflict = ref<WriteConflict | null>(null);
 const resolving = ref(false);
 const confirmForce = ref(false);
 // "View existing" reveals the remote copy under the same secure-reveal contract
-// as the entry detail view (30s auto-clear, wipe on unmount / back).
+// as the entry detail view (configurable auto-clear, wipe on unmount / back).
 const {
   password: remotePw,
   notes: remoteNotes,
@@ -54,6 +55,7 @@ const {
   reveal: revealRemote,
   clear: clearRemote,
 } = useSecretReveal();
+const { viewClearSecs } = useSecuritySettings();
 
 // The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
 // secret the moment the identity locks (the remote reveal above is wiped via the
@@ -163,16 +165,17 @@ async function submit() {
   submitting.value = true;
   error.value = "";
   try {
-    const outcome: WriteOutcome =
+    const outcome: WriteOutcome = await runWithAuth(() =>
       mode.value === "preset" && activePreset.value
-        ? await invoke<WriteOutcome>("create_from_preset_secret", {
+        ? invoke<WriteOutcome>("create_from_preset_secret", {
             presetId: activePreset.value.id,
             fields: fields.value,
           })
-        : await invoke<WriteOutcome>("create_secret", {
+        : invoke<WriteOutcome>("create_secret", {
             name: customName.value.trim(),
             content: customContent.value,
-          });
+          }),
+    );
 
     if (outcome.kind === "written") {
       showToast(`✓ Saved (commit ${outcome.commit})`);
@@ -197,10 +200,13 @@ async function submit() {
 /** Reveal the existing remote version (decryptable branch only). */
 async function viewExisting() {
   if (!conflict.value) return;
+  const name = conflict.value.name;
   try {
-    const content = await invoke<SensitiveContent>("show_password", {
-      entryPath: conflict.value.name,
-    });
+    const content = await runWithAuth(() =>
+      invoke<SensitiveContent>("show_password", {
+        entryPath: name,
+      }),
+    );
     revealRemote(content);
   } catch (e) {
     const appError = e as AppError;
@@ -212,9 +218,8 @@ async function viewExisting() {
 async function resolve(choice: ConflictChoice) {
   resolving.value = true;
   try {
-    const result = await invoke<{ commit: string } | null>(
-      "resolve_write_conflict",
-      { choice },
+    const result = await runWithAuth(() =>
+      invoke<{ commit: string } | null>("resolve_write_conflict", { choice }),
     );
     conflict.value = null;
     clearRemote();
@@ -398,7 +403,13 @@ onBeforeUnmount(() => {
                 remoteNotes
               }}</pre>
             </div>
-            <p class="text-xs text-muted mt-2">Auto-clears in 30 seconds</p>
+            <p class="text-xs text-muted mt-2">
+              {{
+                viewClearSecs > 0
+                  ? `Auto-clears in ${viewClearSecs}s`
+                  : "Stays visible until hidden or locked"
+              }}
+            </p>
           </div>
           <button v-else class="btn-sm w-full mb-3" @click="viewExisting">
             View existing

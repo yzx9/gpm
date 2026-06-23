@@ -10,11 +10,11 @@ use std::time::Duration;
 use rustpass::error::ErrorCode;
 use rustpass::{Entry, Error, RankedPage};
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::AppState;
-use crate::identity::reset_lock_timer;
+use crate::identity::{maybe_soft_wipe, reset_lock_timer};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -31,8 +31,8 @@ pub(crate) struct CopyResult {
 /// Returned by `show_password` — contains secrets, strict Vue lifecycle required.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SensitiveContent {
-    password: String,
-    notes: String,
+    pub(crate) password: String,
+    pub(crate) notes: String,
 }
 
 /// One page of entries delivered to the `WebView` — a slice of the ranked set
@@ -109,6 +109,19 @@ pub(crate) async fn search_entries(
     )
 }
 
+/// Resolve configured clipboard-clear seconds into (whether to spawn a clear
+/// task, the value to report to the UI). `0` (Never) spawns nothing and reports
+/// `0`; a nonzero value spawns and reports itself, clamped into `u32`. Pure so
+/// the Never/nonzero contract is unit-testable without a clipboard.
+#[must_use]
+fn clipboard_clear_plan(clear_secs: u64) -> (bool, u32) {
+    if clear_secs == 0 {
+        (false, 0)
+    } else {
+        (true, u32::try_from(clear_secs).unwrap_or(u32::MAX))
+    }
+}
+
 /// Primary operation: decrypt and copy password to clipboard.
 /// Password never reaches the `WebView`.
 #[tauri::command]
@@ -118,30 +131,63 @@ pub(crate) async fn copy_password(
     app: AppHandle,
     entry_path: String,
 ) -> Result<CopyResult, Error> {
-    let secret = state.store.get(&entry_path).await?;
-
     let entry_name = entry_path.trim_end_matches(".age").to_string();
+
+    // Decrypt first so a FAILED read still counts as a secret access: under
+    // Immediate we reset the timer + wipe on both paths (an errored op must not
+    // leave the identity cached with no idle timer to eventually clear it).
+    let secret = state.store.get(&entry_path).await;
+    reset_lock_timer(&state, &app);
+    maybe_soft_wipe(&state, &app).await;
+    let secret = secret?;
 
     app.clipboard()
         .write_text(secret.password().to_string())
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("Clipboard error: {e}")))?;
 
-    // Spawn clipboard auto-clear after 30 seconds
-    let clear_handle = app.clone();
-    let pw = secret.password().to_string();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        let _ = clear_handle.clipboard().write_text(String::new());
-        drop(pw);
-    });
-
-    // Reset auto-lock timer
-    reset_lock_timer(&state, &app);
+    // Clipboard auto-clear: configured seconds, or never when the user set it to
+    // 0. Read from the AppState cache (not repo.json) — copy is the hot path.
+    let clear_secs = state
+        .clipboard_clear_secs
+        .lock()
+        .map_or_else(|_| rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS, |s| *s);
+    let (spawn_clear, cleared_after_secs) = clipboard_clear_plan(clear_secs);
+    if spawn_clear {
+        // The OS clipboard already holds the password; the spawned task just
+        // blanks it after the configured window. No need to keep a heap copy of
+        // the plaintext alive for the sleep (the decoded `secret` is zeroized on
+        // drop at end of scope).
+        let clear_handle = app.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(clear_secs)).await;
+            let _ = clear_handle.clipboard().write_text(String::new());
+        });
+    }
 
     Ok(CopyResult {
         success: true,
         entry_name,
-        cleared_after_secs: 30,
+        cleared_after_secs,
+    })
+}
+
+/// Decrypt-and-show core, runtime-generic so the in-crate tests can drive it
+/// against the mock runtime. Reads the entry, then — under Immediate — resets
+/// the timer and soft-wipes the identity on BOTH paths (a failed read must not
+/// leave it cached). The decoded secret lives in the returned `SensitiveContent`
+/// independently of the identity cache, so wiping after the read is safe.
+pub(crate) async fn show_password_core<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    entry_path: &str,
+) -> Result<SensitiveContent, Error> {
+    let secret = state.store.get(entry_path).await;
+    reset_lock_timer(state, app);
+    maybe_soft_wipe(state, app).await;
+    let secret = secret?;
+    Ok(SensitiveContent {
+        password: secret.password().to_string(),
+        notes: secret.body().to_string(),
     })
 }
 
@@ -151,14 +197,10 @@ pub(crate) async fn copy_password(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn show_password(
     state: State<'_, AppState>,
+    app: AppHandle,
     entry_path: String,
 ) -> Result<SensitiveContent, Error> {
-    let secret = state.store.get(&entry_path).await?;
-
-    Ok(SensitiveContent {
-        password: secret.password().to_string(),
-        notes: secret.body().to_string(),
-    })
+    show_password_core(&state, &app, &entry_path).await
 }
 
 #[cfg(test)]
@@ -233,5 +275,27 @@ mod tests {
     fn page_from_propagates_store_error() {
         let err = Error::new(ErrorCode::StoreError, "boom");
         assert!(page_from(Err(err), 0).is_err());
+    }
+
+    #[test]
+    fn clipboard_clear_plan_never_skips_spawn_and_reports_zero() {
+        // 0 (Never): no clear task, UI shows 0.
+        assert_eq!(clipboard_clear_plan(0), (false, 0));
+    }
+
+    #[test]
+    fn clipboard_clear_plan_nonzero_spawns_and_reports_itself() {
+        assert_eq!(clipboard_clear_plan(45), (true, 45));
+        assert_eq!(clipboard_clear_plan(180), (true, 180));
+    }
+
+    #[test]
+    fn clipboard_clear_plan_clamps_huge_values_into_u32() {
+        // A hand-edited config could carry a value beyond u32; the UI must not
+        // panic on the cast.
+        assert_eq!(
+            clipboard_clear_plan(u64::from(u32::MAX) + 1),
+            (true, u32::MAX)
+        );
     }
 }

@@ -7,6 +7,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import EntryListPage from "./EntryListPage.vue";
 import type { Entry, EntryPage } from "../types";
+import { __unlockForTests } from "../utils/useLockState";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -80,6 +81,7 @@ describe("EntryListPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     for (const k of Object.keys(overrides)) delete overrides[k];
+    __unlockForTests();
     vi.useFakeTimers();
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd in overrides) {

@@ -5,10 +5,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { __resetLockStateForTests, onLock, useLockState } from "./useLockState";
+import {
+  __resetLockStateForTests,
+  __unlockForTests,
+  onLock,
+  runWithAuth,
+  useLockState,
+} from "./useLockState";
 
 describe("useLockState", () => {
-  const { locked, ready, init, setLocked } = useLockState();
+  const { locked, overlayUp, identityCached, ready, init, setLocked } =
+    useLockState();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -151,5 +158,67 @@ describe("useLockState", () => {
     setLocked(true);
 
     expect(cb).not.toHaveBeenCalled();
+  });
+
+  // ── no-cache (Immediate) split: identityCached vs overlay ───────────────
+
+  it("a soft wipe empties the cache without raising the overlay or firing onLock", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: true,
+      identity_type: "x25519",
+    });
+    await init();
+    expect(identityCached.value).toBe(true);
+    expect(locked.value).toBe(false);
+
+    const clearer = vi.fn();
+    onLock(clearer);
+
+    const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
+      payload: { locked: boolean; soft?: boolean };
+    }) => void;
+    // Soft wipe: the identity leaves the cache, but the overlay stays down and
+    // onLock must NOT fire (a revealed secret / draft survives it).
+    handler({ payload: { locked: true, soft: true } });
+    expect(identityCached.value).toBe(false);
+    expect(locked.value).toBe(false);
+    expect(overlayUp.value).toBe(false);
+    expect(clearer).not.toHaveBeenCalled();
+  });
+
+  it("runWithAuth runs the op immediately when the identity is cached", async () => {
+    __unlockForTests();
+    const op = vi.fn().mockResolvedValue("done");
+    await expect(runWithAuth(op)).resolves.toBe("done");
+    expect(op).toHaveBeenCalledTimes(1);
+    expect(overlayUp.value).toBe(false);
+  });
+
+  it("runWithAuth prompts, then resumes after an unlock when not cached", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: false,
+      identity_type: "x25519",
+    });
+    await init();
+    expect(identityCached.value).toBe(false);
+
+    const op = vi.fn().mockResolvedValue("done");
+    const p = runWithAuth(op);
+    // Blocked: the per-op overlay is raised and the op has not run.
+    expect(overlayUp.value).toBe(true);
+    expect(op).not.toHaveBeenCalled();
+
+    const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
+      payload: { locked: boolean; soft?: boolean };
+    }) => void;
+    handler({ payload: { locked: false } }); // backend reports unlock
+    await expect(p).resolves.toBe("done");
+    expect(op).toHaveBeenCalledTimes(1);
+    expect(identityCached.value).toBe(true);
+    expect(overlayUp.value).toBe(false);
   });
 });

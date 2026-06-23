@@ -19,7 +19,7 @@ use tokio::task::spawn_blocking;
 use walkdir::WalkDir;
 use zeroize::Zeroizing;
 
-use crate::config::{Config, RepoConfig};
+use crate::config::{Config, LockMode, RepoConfig};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity, validate_identity_format};
@@ -30,8 +30,23 @@ use crate::signing::{
 };
 use crate::{crypto, git, template};
 
-/// Default auto-lock timeout in seconds (5 minutes).
+/// Default `Idle` auto-lock timeout in seconds (5 minutes). Used as the
+/// `Idle` preset's fallback and the fail-safe when the lock-mode cache can't be
+/// read; not the app default (that's `LockMode::Immediate`).
 pub const DEFAULT_LOCK_TIMEOUT_SECS: u64 = 300;
+
+/// Minimum [`LockMode::Idle`] auto-lock timeout, in seconds. Below this the
+/// idle timer races the user (fires before they can act).
+pub const LOCK_IDLE_SECS_MIN: u64 = 30;
+/// Maximum [`LockMode::Idle`] auto-lock timeout, in seconds. Above this is
+/// almost certainly a unit mistake.
+pub const LOCK_IDLE_SECS_MAX: u64 = 3600;
+
+/// Minimum view/clipboard auto-clear override, in seconds. `Some(0)` (Never)
+/// bypasses the range; any other override is clamped into it.
+pub const CLEAR_SECS_MIN: u64 = 5;
+/// Maximum view/clipboard auto-clear override, in seconds.
+pub const CLEAR_SECS_MAX: u64 = 600;
 
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.
 #[derive(Debug, Clone, Serialize)]
@@ -132,7 +147,7 @@ pub enum WriteOutcome {
     ///
     /// Note: this carries **no plaintext**. If `remote_decryptable` is true the
     /// caller can show the remote version through the existing secure `get`
-    /// path (30s auto-clear), never by embedding it here.
+    /// path (view auto-clear), never by embedding it here.
     Conflict(WriteConflict),
 }
 
@@ -1356,6 +1371,55 @@ impl Store {
         Ok(rc)
     }
 
+    /// Set the auto-lock mode. `Idle(n)` seconds are clamped to
+    /// `[LOCK_IDLE_SECS_MIN, LOCK_IDLE_SECS_MAX]`; `Immediate` and `Never` take
+    /// no duration. Returns the persisted [`RepoConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or persisted.
+    pub async fn set_lock_mode(&self, mode: LockMode) -> Result<RepoConfig, Error> {
+        let mode = match mode {
+            LockMode::Idle(secs) => {
+                LockMode::Idle(secs.clamp(LOCK_IDLE_SECS_MIN, LOCK_IDLE_SECS_MAX))
+            }
+            other => other,
+        };
+        let mut rc = self.config.load_repo_config().await?;
+        rc.lock_mode = mode;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
+    /// Set the password-view auto-clear override. `None` clears it (resolves to
+    /// the default); `Some(0)` means never auto-clear; any other value is clamped
+    /// to `[CLEAR_SECS_MIN, CLEAR_SECS_MAX]`. Returns the persisted [`RepoConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or persisted.
+    pub async fn set_view_clear_secs(&self, secs: Option<u64>) -> Result<RepoConfig, Error> {
+        let secs = normalize_clear_secs(secs);
+        let mut rc = self.config.load_repo_config().await?;
+        rc.view_clear_secs = secs;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
+    /// Set the clipboard auto-clear override. Same resolution rule as
+    /// [`set_view_clear_secs`](Store::set_view_clear_secs).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or persisted.
+    pub async fn set_clipboard_clear_secs(&self, secs: Option<u64>) -> Result<RepoConfig, Error> {
+        let secs = normalize_clear_secs(secs);
+        let mut rc = self.config.load_repo_config().await?;
+        rc.clipboard_clear_secs = secs;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
     /// The default commit author identity, for UI display. Reads the shipped
     /// default so the frontend never hardcodes it.
     #[must_use]
@@ -1890,6 +1954,18 @@ async fn write_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
 /// Build an `InvalidEntryName` error (keeps call sites terse).
 fn invalid_name(message: &str) -> Error {
     Error::new(ErrorCode::InvalidEntryName, message)
+}
+
+/// Normalize a view/clipboard auto-clear override: `None` stays (default),
+/// `Some(0)` stays (Never), any other `Some(n)` is clamped to
+/// `[CLEAR_SECS_MIN, CLEAR_SECS_MAX]`. Infallible — out-of-range clamps rather
+/// than erroring, since the UI sends only preset values.
+fn normalize_clear_secs(secs: Option<u64>) -> Option<u64> {
+    match secs {
+        None => None,
+        Some(0) => Some(0),
+        Some(n) => Some(n.clamp(CLEAR_SECS_MIN, CLEAR_SECS_MAX)),
+    }
 }
 
 #[cfg(test)]
@@ -2497,5 +2573,62 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf(), None);
         let err = store.validate_passphrase("nope").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
+    }
+
+    // ── auto-lock / clear-secs setters ──────────────────────────────────
+
+    /// A store with a repo config on disk (the setters load + save repo.json).
+    async fn store_with_repo_config() -> (Store, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf(), None);
+        config
+            .save_identity(b"AGE-SECRET-KEY-1TEST", None)
+            .await
+            .unwrap();
+        config
+            .save_repo_config("https://x/repo", None, None, None, "/p")
+            .await
+            .unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        (store, dir)
+    }
+
+    #[tokio::test]
+    async fn set_lock_mode_roundtrip_and_clamps_idle() {
+        let (store, _d) = store_with_repo_config().await;
+
+        // Idle secs below the minimum clamp up.
+        let rc = store.set_lock_mode(LockMode::Idle(1)).await.unwrap();
+        assert_eq!(rc.lock_mode, LockMode::Idle(LOCK_IDLE_SECS_MIN));
+        // Idle secs above the maximum clamp down.
+        let rc = store.set_lock_mode(LockMode::Idle(99_999)).await.unwrap();
+        assert_eq!(rc.lock_mode, LockMode::Idle(LOCK_IDLE_SECS_MAX));
+        // Never + Immediate pass through unchanged.
+        let rc = store.set_lock_mode(LockMode::Never).await.unwrap();
+        assert_eq!(rc.lock_mode, LockMode::Never);
+        let rc = store.set_lock_mode(LockMode::Immediate).await.unwrap();
+        assert_eq!(rc.lock_mode, LockMode::Immediate);
+        // Persisted to disk.
+        assert_eq!(store.config().await.unwrap().lock_mode, LockMode::Immediate);
+    }
+
+    #[tokio::test]
+    async fn set_clear_secs_clamp_keep_never_and_default() {
+        let (store, _d) = store_with_repo_config().await;
+
+        // A nonzero value below the minimum clamps up; Never (0) is preserved.
+        let rc = store.set_view_clear_secs(Some(1)).await.unwrap();
+        assert_eq!(rc.view_clear_secs, Some(CLEAR_SECS_MIN));
+        let rc = store.set_view_clear_secs(Some(0)).await.unwrap();
+        assert_eq!(rc.view_clear_secs, Some(0), "Some(0) (Never) must be kept");
+        // None clears the override (resolves to the default).
+        let rc = store.set_view_clear_secs(None).await.unwrap();
+        assert_eq!(rc.view_clear_secs, None);
+
+        // Clipboard secs behave identically.
+        let rc = store.set_clipboard_clear_secs(Some(999_999)).await.unwrap();
+        assert_eq!(rc.clipboard_clear_secs, Some(CLEAR_SECS_MAX));
+        let rc = store.set_clipboard_clear_secs(Some(0)).await.unwrap();
+        assert_eq!(rc.clipboard_clear_secs, Some(0));
     }
 }

@@ -61,6 +61,13 @@ pub(crate) struct AppState {
     /// resolution. Wrapped in `Arc` so the auto-lock timer closure can clear it.
     /// See `write::PendingWrite` / `write::clear_pending`.
     pub(crate) pending_write: Arc<Mutex<Option<write::PendingWrite>>>,
+    /// Cached effective auto-lock mode (refreshed on unlock + the `set_*`
+    /// config commands via `identity::refresh_security_cache`) so the read/write
+    /// hot paths branch on a cheap mutex read instead of decrypting `repo.json`
+    /// per operation.
+    pub(crate) lock_mode: Mutex<rustpass::LockMode>,
+    /// Cached effective clipboard auto-clear seconds (same refresh contract).
+    pub(crate) clipboard_clear_secs: Mutex<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +150,10 @@ pub fn run() {
                 lock_generation: Arc::new(AtomicU64::new(0)),
                 pending_identity: Mutex::new(None),
                 pending_write: Arc::new(Mutex::new(None)),
+                // Defaults until the first unlock/set refreshes them from config;
+                // pre-setup no op reads them.
+                lock_mode: Mutex::new(rustpass::LockMode::default()),
+                clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
             });
             Ok(())
         })
@@ -188,6 +199,9 @@ pub fn run() {
             // config
             config::get_config,
             config::set_commit_identity,
+            config::set_lock_mode,
+            config::set_view_clear_secs,
+            config::set_clipboard_clear_secs,
             config::get_commit_identity_default,
             config::reset_config,
             // biometric

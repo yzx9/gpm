@@ -25,6 +25,7 @@ import type {
 } from "../types";
 import { formatRelativeTime } from "../utils/format";
 import { statusGlyph, statusLabel } from "../utils/signature";
+import { runWithAuth } from "../utils/useLockState";
 
 const router = useRouter();
 
@@ -342,11 +343,10 @@ async function switchToAudit() {
 
 async function copyPassword(entry: Entry) {
   try {
-    const result = await invoke<import("../types").CopyResult>(
-      "copy_password",
-      {
+    const result = await runWithAuth(() =>
+      invoke<import("../types").CopyResult>("copy_password", {
         entryPath: entry.path,
-      },
+      }),
     );
     showToast(
       `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
