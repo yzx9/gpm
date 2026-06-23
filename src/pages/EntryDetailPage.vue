@@ -3,11 +3,19 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import type { SensitiveContent, AppError } from "../types";
+import type {
+  AppError,
+  ConflictChoice,
+  SensitiveContent,
+  WriteConflict,
+  WriteOutcome,
+} from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
+import { onLock } from "../utils/useLockState";
+import WriteConflictModal from "../components/WriteConflictModal.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -19,14 +27,37 @@ const entryPath = decodeURIComponent(
 );
 const entryName = entryPath.replace(/\.age$/, "");
 
-// Sensitive state lives in the shared secure-reveal composable: 30s auto-clear,
-// wipe on unmount, wipe on browser back. `copyPassword` calls `clear()` itself.
+// Read-path reveal lives in the shared secure-reveal composable: 30s auto-clear,
+// wipe on unmount, wipe on browser back, wipe on lock. `copyPassword` clears it.
 const { password, notes, revealed, reveal, clear } = useSecretReveal();
 const loading = ref(false);
 const error = ref("");
 const toast = ref("");
 const deleting = ref(false);
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ── Edit mode ──────────────────────────────────────────────────────────────
+// Edit holds the working plaintext in plain refs (not the reveal composable) so
+// it can stay armed while editing without a 30s auto-clear firing mid-edit. To
+// keep a single plaintext copy, entering edit drops the reveal buffer; the refs
+// are wiped on save/cancel and on lock.
+const editing = ref(false);
+const saving = ref(false);
+const editPassword = ref("");
+const editNotes = ref("");
+// The reassembled body captured at edit-entry, for the no-op-save dirty-check.
+const loadedBody = ref("");
+
+// ── Conflict (edit collides with a newer remote) ────────────────────────────
+const conflict = ref<WriteConflict | null>(null);
+const resolving = ref(false);
+
+// Wipe edit plaintext on lock so it doesn't survive the 5-min auto-lock behind a
+// wiped identity (mirrors CreatePage's onLock wipe of the compose buffer).
+onLock(() => {
+  exitEdit();
+  conflict.value = null;
+});
 
 function showToast(message: string) {
   toast.value = message;
@@ -103,7 +134,146 @@ async function deleteSecret() {
   }
 }
 
+/** Reassemble the edit body to match Secret::parse: first line is the password,
+ *  the rest is notes. NO trim — Secret::parse doesn't trim the password, so
+ *  trimming would silently change a secret with whitespace. Lossless inverse. */
+function reassemble(pw: string, body: string): string {
+  return body ? `${pw}\n${body}` : pw;
+}
+
+/** The body assembled from the current edit fields (drives the dirty-check). */
+const editBody = computed(() =>
+  reassemble(editPassword.value, editNotes.value),
+);
+
+/** Save is enabled only when the body has non-whitespace content and actually
+ *  changed. age ciphertext is non-deterministic, so an unchanged Save would
+ *  still make a spurious commit (block it); and an all-whitespace body would be
+ *  rejected by `Secret::parse` on the next read, bricking the secret (block it).
+ *  The trim is on the GATE only — the saved body stays untrimmed (lossless). */
+const canSave = computed(
+  () =>
+    !saving.value &&
+    editBody.value.trim() !== "" &&
+    editBody.value !== loadedBody.value,
+);
+
+/** Enter edit mode. Cold-edit safe: if the user never clicked Show, fetch the
+ *  content first so the fields can prefill. Drops the reveal buffer so only one
+ *  plaintext copy is live. */
+async function enterEdit() {
+  if (editing.value) return;
+  error.value = "";
+  let pw = password.value;
+  let nt = notes.value;
+  if (pw === null) {
+    // Cold edit — the page never revealed; fetch so the form can prefill.
+    loading.value = true;
+    try {
+      const result = await invoke<SensitiveContent>("show_password", {
+        entryPath,
+      });
+      pw = result.password;
+      nt = result.notes;
+    } catch (e) {
+      const appError = e as AppError;
+      error.value = appError?.message || "Decryption failed";
+      loading.value = false;
+      return;
+    }
+    loading.value = false;
+  }
+  editPassword.value = pw ?? "";
+  editNotes.value = nt ?? "";
+  loadedBody.value = reassemble(editPassword.value, editNotes.value);
+  // Single plaintext copy: drop the read-path reveal buffer.
+  clear();
+  editing.value = true;
+}
+
+function exitEdit() {
+  editPassword.value = "";
+  editNotes.value = "";
+  loadedBody.value = "";
+  editing.value = false;
+}
+
+function cancelEdit() {
+  exitEdit();
+}
+
+async function saveEdit() {
+  if (!canSave.value) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    const outcome = await invoke<WriteOutcome>("edit_secret", {
+      name: entryName,
+      content: editBody.value,
+    });
+    if (outcome.kind === "written") {
+      showToast(`✓ Saved (commit ${outcome.commit})`);
+      // Exit to the read-only view; the user can Show to verify. Don't
+      // auto-reveal the password post-save.
+      exitEdit();
+    } else {
+      // Conflict — the edited plaintext is stashed backend-side; the modal
+      // resets its own state. Stay in edit mode with the draft intact.
+      conflict.value = {
+        name: outcome.name,
+        remote_decryptable: outcome.remote_decryptable,
+      };
+    }
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Save failed";
+  } finally {
+    saving.value = false;
+  }
+}
+
+/** Resolve an edit conflict per the user's choice; the backend consumes the
+ *  stash. The modal is closed on every outcome; cancel keeps the draft. */
+async function resolveEdit(choice: ConflictChoice) {
+  resolving.value = true;
+  try {
+    const result = await invoke<{ commit: string } | null>(
+      "resolve_write_conflict",
+      { choice },
+    );
+    conflict.value = null;
+    if (choice === "keep_remote") {
+      showToast("Kept the existing entry");
+      exitEdit();
+    } else if (choice === "cancel") {
+      // Stash cleared; stay in the edit form so the user can adjust and retry.
+      showToast("Cancelled — nothing saved");
+    } else if (result) {
+      showToast(`✓ Saved (commit ${result.commit})`);
+      exitEdit();
+    }
+  } catch (e) {
+    const appError = e as AppError;
+    if (appError?.code === "PUSH_REJECTED") {
+      // Remote moved again mid-resolution — close the modal, retry from the form.
+      conflict.value = null;
+      showToast("Remote changed again — review and Save again");
+    } else {
+      conflict.value = null;
+      showToast(appError?.message || "Could not resolve the conflict");
+    }
+  } finally {
+    resolving.value = false;
+  }
+}
+
 function goBack() {
+  // In edit mode, Back/Escape exits edit (keeps the user on the page) instead of
+  // navigating away and silently dropping the draft.
+  if (editing.value) {
+    cancelEdit();
+    return;
+  }
   clear();
   router.push({ name: "entries" });
 }
@@ -154,71 +324,137 @@ function handleKeydown(e: KeyboardEvent) {
       {{ toast }}
     </div>
 
-    <div class="flex gap-3 mb-6">
-      <button
-        @click="copyPassword"
-        class="btn-primary flex-1"
-        :disabled="loading"
-        aria-label="Copy password to clipboard"
-      >
-        <span aria-hidden="true">📋</span> Copy Password
-      </button>
-      <button
-        @click="showPassword"
-        class="btn-secondary flex-1"
-        :disabled="loading"
-        :aria-label="revealed ? 'Password is showing' : 'Show password'"
-      >
-        <span aria-hidden="true">{{ revealed ? "👁" : "👁" }}</span>
-        {{ revealed ? "Showing..." : "Show Password" }}
-      </button>
-    </div>
-
-    <button
-      @click="deleteSecret"
-      class="btn-danger w-full mb-6"
-      :disabled="deleting || loading"
-      :aria-label="`Delete ${entryName}`"
-    >
-      {{ deleting ? "Deleting…" : "Delete" }}
-    </button>
-
-    <div v-if="loading" class="text-center text-muted py-4">
-      <span class="spinner"></span>
-      <span>Decrypting...</span>
-    </div>
-
-    <div
-      v-if="revealed && password !== null"
-      class="bg-surface rounded-lg p-4 shadow-[0_1px_6px_rgba(0,0,0,0.06)]"
-    >
-      <div class="mb-4">
-        <label
-          class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
-          >Password</label
+    <!-- Read-only view -->
+    <div v-if="!editing">
+      <div class="flex gap-3 mb-6">
+        <button
+          @click="copyPassword"
+          class="btn-primary flex-1"
+          :disabled="loading || deleting"
+          aria-label="Copy password to clipboard"
         >
-        <div
-          class="font-mono text-lg p-2 bg-accent-ring rounded-sm break-all select-all"
+          <span aria-hidden="true">📋</span> Copy Password
+        </button>
+        <button
+          @click="showPassword"
+          class="btn-secondary flex-1"
+          :disabled="loading || deleting"
+          :aria-label="revealed ? 'Password is showing' : 'Show password'"
         >
-          {{ password }}
+          <span aria-hidden="true">👁</span>
+          {{ revealed ? "Showing..." : "Show Password" }}
+        </button>
+      </div>
+
+      <button
+        @click="enterEdit"
+        class="btn-secondary w-full mb-3"
+        :disabled="loading || deleting"
+        :aria-label="`Edit ${entryName}`"
+      >
+        ✎ Edit
+      </button>
+
+      <button
+        @click="deleteSecret"
+        class="btn-danger w-full mb-6"
+        :disabled="deleting || loading"
+        :aria-label="`Delete ${entryName}`"
+      >
+        {{ deleting ? "Deleting…" : "Delete" }}
+      </button>
+
+      <div v-if="loading" class="text-center text-muted py-4">
+        <span class="spinner"></span>
+        <span>Decrypting...</span>
+      </div>
+
+      <div
+        v-if="revealed && password !== null"
+        class="bg-surface rounded-lg p-4 shadow-[0_1px_6px_rgba(0,0,0,0.06)]"
+      >
+        <div class="mb-4">
+          <label
+            class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
+            >Password</label
+          >
+          <div
+            class="font-mono text-lg p-2 bg-accent-ring rounded-sm break-all select-all"
+          >
+            {{ password }}
+          </div>
         </div>
-      </div>
 
-      <div v-if="notes" class="mb-2">
-        <label
-          class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
-          >Notes</label
-        >
-        <pre
-          class="text-sm p-2 bg-input rounded-sm whitespace-pre-wrap break-all font-[inherit] select-text max-h-[200px] overflow-y-auto"
-          >{{ notes }}</pre
-        >
-      </div>
+        <div v-if="notes" class="mb-2">
+          <label
+            class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
+            >Notes</label
+          >
+          <pre
+            class="text-sm p-2 bg-input rounded-sm whitespace-pre-wrap break-all font-[inherit] select-text max-h-[200px] overflow-y-auto"
+            >{{ notes }}</pre
+          >
+        </div>
 
-      <p class="text-center text-xs text-muted mt-3">
-        Auto-clears in 30 seconds
-      </p>
+        <p class="text-center text-xs text-muted mt-3">
+          Auto-clears in 30 seconds
+        </p>
+      </div>
     </div>
+
+    <!-- Edit form -->
+    <form v-else class="flex flex-col gap-4 mb-6" @submit.prevent="saveEdit">
+      <div class="flex flex-col gap-1">
+        <label for="e-password" class="text-sm font-medium">Password</label>
+        <input
+          id="e-password"
+          v-model="editPassword"
+          type="text"
+          class="input-base font-mono"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div class="flex flex-col gap-1">
+        <label for="e-notes" class="text-sm font-medium">Notes</label>
+        <textarea
+          id="e-notes"
+          v-model="editNotes"
+          class="input-base"
+          rows="6"
+          autocomplete="off"
+        />
+        <small class="text-xs text-muted"
+          >First line is the password; the rest is notes.</small
+        >
+      </div>
+      <div class="flex gap-3">
+        <button
+          type="submit"
+          class="btn-primary flex-1"
+          :disabled="!canSave"
+          aria-label="Save changes"
+        >
+          {{ saving ? "Saving…" : "Save" }}
+        </button>
+        <button
+          type="button"
+          class="btn-secondary flex-1"
+          @click="cancelEdit"
+          :disabled="saving"
+          aria-label="Cancel edit"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+
+    <!-- Conflict modal (shared with the create page) -->
+    <WriteConflictModal
+      :conflict="conflict"
+      :resolving="resolving"
+      @resolve="resolveEdit"
+    />
   </main>
 </template>
 
@@ -287,6 +523,22 @@ function handleKeydown(e: KeyboardEvent) {
 .btn-danger:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.input-base {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  background: var(--color-input, var(--color-surface));
+  color: inherit;
+  min-height: 48px;
+  width: 100%;
+}
+.input-base:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .spinner {

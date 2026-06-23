@@ -10,12 +10,11 @@ import type {
   AppError,
   ConflictChoice,
   CreatePreset,
-  SensitiveContent,
   WriteConflict,
   WriteOutcome,
 } from "../types";
-import { useSecretReveal } from "../utils/useSecretReveal";
 import { onLock } from "../utils/useLockState";
+import WriteConflictModal from "../components/WriteConflictModal.vue";
 
 const router = useRouter();
 
@@ -42,22 +41,13 @@ const toast = ref("");
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Conflict modal ────────────────────────────────────────────────────────
+// The modal owns its own reveal/confirm state; this page tracks the conflict
+// payload, the resolving flag, and the resolve() outcome handling.
 const conflict = ref<WriteConflict | null>(null);
 const resolving = ref(false);
-const confirmForce = ref(false);
-// "View existing" reveals the remote copy under the same secure-reveal contract
-// as the entry detail view (30s auto-clear, wipe on unmount / back).
-const {
-  password: remotePw,
-  notes: remoteNotes,
-  revealed: remoteRevealed,
-  reveal: revealRemote,
-  clear: clearRemote,
-} = useSecretReveal();
 
 // The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
-// secret the moment the identity locks (the remote reveal above is wiped via the
-// shared composable's own onLock).
+// secret the moment the identity locks.
 onLock(() => {
   fields.value = {};
   customContent.value = "";
@@ -179,32 +169,17 @@ async function submit() {
       router.push({ name: "entries" });
     } else {
       // Conflict — the secret is stashed backend-side; the result has no plaintext.
+      // The modal resets its own reveal/confirm state when this becomes non-null.
       conflict.value = {
         name: outcome.name,
         remote_decryptable: outcome.remote_decryptable,
       };
-      confirmForce.value = false;
-      clearRemote();
     }
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to create secret";
   } finally {
     submitting.value = false;
-  }
-}
-
-/** Reveal the existing remote version (decryptable branch only). */
-async function viewExisting() {
-  if (!conflict.value) return;
-  try {
-    const content = await invoke<SensitiveContent>("show_password", {
-      entryPath: conflict.value.name,
-    });
-    revealRemote(content);
-  } catch (e) {
-    const appError = e as AppError;
-    showToast(appError?.message || "Could not read the existing entry");
   }
 }
 
@@ -217,7 +192,6 @@ async function resolve(choice: ConflictChoice) {
       { choice },
     );
     conflict.value = null;
-    clearRemote();
     if (choice === "keep_remote") {
       showToast("Kept the existing entry");
       router.push({ name: "entries" });
@@ -362,110 +336,12 @@ onBeforeUnmount(() => {
       </form>
     </section>
 
-    <!-- Conflict modal -->
-    <div
-      v-if="conflict"
-      class="overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Remote copy exists"
-    >
-      <div class="modal-card w-full max-w-[480px]">
-        <h2 class="text-base font-medium mb-1">Remote copy exists</h2>
-        <p class="text-xs text-muted mb-3">
-          <code>{{ conflict.name }}</code> already exists on the remote with a
-          different version. Your new entry was not saved.
-        </p>
-
-        <!-- Decryptable: the user can inspect the remote and choose freely. -->
-        <template v-if="conflict.remote_decryptable">
-          <p class="text-sm mb-3">
-            You can read the existing version (it's encrypted to you too).
-          </p>
-          <div
-            v-if="remoteRevealed && remotePw !== null"
-            class="reveal-box mb-3"
-          >
-            <div class="mb-2">
-              <span class="block text-xs text-muted mb-1"
-                >Existing password</span
-              >
-              <span class="font-mono break-all">{{ remotePw }}</span>
-            </div>
-            <div v-if="remoteNotes">
-              <span class="block text-xs text-muted mb-1">Existing notes</span>
-              <pre class="text-sm whitespace-pre-wrap break-all">{{
-                remoteNotes
-              }}</pre>
-            </div>
-            <p class="text-xs text-muted mt-2">Auto-clears in 30 seconds</p>
-          </div>
-          <button v-else class="btn-sm w-full mb-3" @click="viewExisting">
-            View existing
-          </button>
-          <div class="flex flex-col gap-2">
-            <button
-              class="btn-sm"
-              :disabled="resolving"
-              @click="resolve('keep_mine')"
-            >
-              Keep mine (overwrite remote)
-            </button>
-            <button
-              class="btn-sm"
-              :disabled="resolving"
-              @click="resolve('keep_remote')"
-            >
-              Keep existing
-            </button>
-            <button
-              class="btn-sm"
-              :disabled="resolving"
-              @click="resolve('cancel')"
-            >
-              Cancel
-            </button>
-          </div>
-        </template>
-
-        <!-- Undecryptable: we can't read it; overwriting destroys unreadable data. -->
-        <template v-else>
-          <p class="alert-warn mb-3">
-            The existing entry is encrypted for someone else — you can't read
-            it. Keeping yours overwrites and destroys that unreadable version.
-          </p>
-          <label class="confirm-row mb-3">
-            <input v-model="confirmForce" type="checkbox" />
-            <span class="text-sm"
-              >I understand this destroys the version I can't read.</span
-            >
-          </label>
-          <div class="flex flex-col gap-2">
-            <button
-              class="btn-danger"
-              :disabled="!confirmForce || resolving"
-              @click="resolve('keep_mine_force')"
-            >
-              Keep mine anyway
-            </button>
-            <button
-              class="btn-sm"
-              :disabled="resolving"
-              @click="resolve('keep_remote')"
-            >
-              Keep existing
-            </button>
-            <button
-              class="btn-sm"
-              :disabled="resolving"
-              @click="resolve('cancel')"
-            >
-              Cancel
-            </button>
-          </div>
-        </template>
-      </div>
-    </div>
+    <!-- Conflict modal (shared with the edit page) -->
+    <WriteConflictModal
+      :conflict="conflict"
+      :resolving="resolving"
+      @resolve="resolve"
+    />
   </main>
 </template>
 
@@ -530,42 +406,6 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-.btn-sm {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: inherit;
-  cursor: pointer;
-  min-height: 48px;
-}
-.btn-sm:hover:not(:disabled) {
-  background: var(--color-hover);
-}
-.btn-sm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-danger {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 48px;
-}
-.btn-danger:hover:not(:disabled) {
-  background: var(--color-danger-soft);
-}
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .alert-error {
   background: var(--color-danger-soft);
   color: var(--color-danger);
@@ -589,13 +429,6 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
 }
-.alert-warn {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-}
 
 .preview {
   padding: 0.5rem 0.75rem;
@@ -604,41 +437,6 @@ onBeforeUnmount(() => {
   font-size: var(--text-sm);
   white-space: pre-wrap;
   break-all: word-break;
-}
-
-.reveal-box {
-  padding: 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-
-.confirm-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-}
-
-.modal-card {
-  padding: 1rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 40;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 1rem;
-}
-@media (min-width: 640px) {
-  .overlay {
-    align-items: center;
-  }
 }
 
 .loading {

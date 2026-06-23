@@ -171,6 +171,27 @@ pub(crate) async fn show_password(
     })
 }
 
+/// The REMOTE (`origin` tip) version of an entry — for the write-conflict modal's
+/// "View existing", so the user inspects the teammate's version that collided,
+/// not the local (rolled-back) copy. `None` if there's no remote entry or it
+/// isn't decryptable by us. Carries secret content across IPC — same strict Vue
+/// lifecycle as [`show_password`].
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn show_remote_secret(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Option<SensitiveContent>, Error> {
+    Ok(state
+        .store
+        .remote_secret(&name)
+        .await?
+        .map(|s| SensitiveContent {
+            password: s.password().to_string(),
+            notes: s.body().to_string(),
+        }))
+}
+
 #[cfg(test)]
 mod tests {
     //! Pagination envelope logic — the Tauri-layer bits `rustpass` can't test:

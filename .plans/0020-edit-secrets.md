@@ -1,7 +1,7 @@
 # Edit existing secrets
 
 **Priority:** P1
-**Status:** Draft
+**Status:** Implemented
 **Phase:** Next
 
 ## What
@@ -53,3 +53,38 @@ over an existing write primitive.
 None. Composes with the existing write/conflict path and with
 `0016-recipients-pinning.md` (edit encrypts to the pinned recipients set via the
 shared write primitive).
+
+## Revision — implemented approach
+
+Implemented as an existence-gated raw write: `Store::update` checks the entry
+exists (so a typo'd name can't create a stray entry) then delegates to the raw
+write primitive, which syncs, encrypts, commits, and pushes with no template
+re-applied (templates shape new secrets, not mutations). Edit reuses the existing
+write-conflict machinery and stash unchanged — on a same-name divergence it
+surfaces the same conflict outcome the create flow already resolves.
+
+The conflict UI that lived inline in the create page was extracted into a shared
+modal component (the create page and the entry detail page both render it now),
+since the conflict resolution UX — including the security-critical
+"force-overwrite only after explicit confirmation" gate — is identical for create
+and edit.
+
+### Known limitations: fast-forward clobber + resurrection
+
+The write primitive's conflict detection fires only on push rejection, which
+requires local divergence. An edit is built on a prior read with no intervening
+local commit, so when another device changes the same entry and pushes before the
+user saves, the pre-write sync fast-forwards over the newer version, the edit
+commits on top, and the push fast-forwards — returning success and silently
+overwriting the teammate's change (recoverable via git history).
+
+The same root cause also resurrects a deleted entry: if another device deletes
+the entry and the local (without syncing) edits it, the existence gate passes on
+the local copy, `set`'s sync fast-forwards to the deletion, and the write
+re-creates the file — so the edit silently brings back what the teammate removed.
+
+Both are facets of the base-version-unaware write (the gate checks local state,
+then `set` syncs). They are the ways this RFC's "compose with the conflict model
+rather than silently clobber" promise is not yet met; the base-version-aware fix
+is captured in `0022-edit-base-version-aware.md`, and both behaviors are pinned
+by regression tests so they can't drift silently.

@@ -102,6 +102,35 @@ async fn do_create(
     Ok(outcome)
 }
 
+/// Edit a secret (overwriting the existing entry's raw body, no template) and
+/// stash the plaintext on conflict. The edit sibling of [`create_and_stash`] —
+/// swapped `store.create` → `store.update`. Pure (no `AppHandle`), so the stash
+/// lifecycle is directly unit-testable.
+pub(crate) async fn update_and_stash(
+    state: &AppState,
+    name: &str,
+    body: Vec<u8>,
+) -> Result<WriteOutcome, Error> {
+    let outcome = state.store.update(name, &body).await?;
+    if matches!(outcome, WriteOutcome::Conflict(_)) {
+        stash_pending(&state.pending_write, name, body);
+    }
+    Ok(outcome)
+}
+
+/// Edit a secret, stash the plaintext on conflict, and reset the auto-lock
+/// timer. Shared shape with [`do_create`].
+async fn do_update(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+    name: &str,
+    body: Vec<u8>,
+) -> Result<WriteOutcome, Error> {
+    let outcome = update_and_stash(state, name, body).await?;
+    reset_lock_timer(state, app);
+    Ok(outcome)
+}
+
 /// List the built-in secret-creation presets (Website login, PIN code) — the
 /// "create from a few options" set the wizard offers.
 #[tauri::command]
@@ -194,6 +223,24 @@ pub(crate) async fn delete_secret(
     // succeeded (mirrors `do_create`).
     reset_lock_timer(&state, &app);
     result
+}
+
+/// Edit a secret at an explicit path from its raw content (first line is the
+/// password). The existing entry is overwritten in place — no `.pass-template`
+/// is re-applied (templates shape new secrets, not mutations). On a same-name
+/// conflict the plaintext is stashed backend-side exactly like
+/// [`create_secret`], so [`resolve_write_conflict`] resolves it unchanged. If the
+/// entry doesn't exist, [`ErrorCode::EntryNotFound`] is returned (edit can't
+/// create a stray entry).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn edit_secret(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    name: String,
+    content: String,
+) -> Result<WriteOutcome, Error> {
+    do_update(&state, &app, &name, content.into_bytes()).await
 }
 
 /// Resolve a write conflict ([`WriteOutcome::Conflict`]) per the user's

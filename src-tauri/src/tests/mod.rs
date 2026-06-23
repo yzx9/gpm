@@ -96,6 +96,10 @@ fn create_bare_repo(entries: &[(&str, &[u8])], recipient_str: &str) -> tempfile:
 pub(super) struct TestStore {
     #[allow(dead_code)]
     pub(super) config_dir: tempfile::TempDir,
+    /// Kept alive so the store's `origin` remote stays valid for tests that drive
+    /// real sync/push (e.g. a divergence conflict). Harmless for tests that don't.
+    #[allow(dead_code)]
+    pub(super) bare_dir: tempfile::TempDir,
 }
 
 /// Configure + unlock an **encrypted-identity** store backed by a temp repo
@@ -130,9 +134,9 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         .await
         .expect("unlock should succeed");
 
-    // bare_dir's job is done — `configure` already cloned it into config/repo.
-    drop(bare_dir);
-
+    // Keep bare_dir alive (returned in TestStore) so the store's `origin` remote
+    // stays valid for tests that drive real sync/push; `configure` already cloned
+    // it into the config dir's repo.
     let state = AppState {
         store,
         lock_timer: Mutex::new(None),
@@ -140,7 +144,13 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         pending_identity: Mutex::new(None),
         pending_write: Arc::new(Mutex::new(None)),
     };
-    (state, TestStore { config_dir })
+    (
+        state,
+        TestStore {
+            config_dir,
+            bare_dir,
+        },
+    )
 }
 
 /// Build a headless [`MockRuntime`] app managing `state`, returning it for the

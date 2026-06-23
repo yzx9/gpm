@@ -175,6 +175,7 @@ pub fn run() {
             read::search_entries,
             read::copy_password,
             read::show_password,
+            read::show_remote_secret,
             // write / sync
             write::pull_repo,
             write::push_repo,
@@ -185,6 +186,7 @@ pub fn run() {
             write::create_secret,
             write::create_from_preset_secret,
             write::delete_secret,
+            write::edit_secret,
             write::resolve_write_conflict,
             // config
             config::get_config,

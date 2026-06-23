@@ -749,6 +749,36 @@ impl Store {
         Secret::parse(&decrypted)
     }
 
+    /// Decrypt the **remote** (`origin` tip) version of `name`, if any — the
+    /// teammate's version a write collided with, not the local (rolled-back)
+    /// copy. Used by the write-conflict modal's "View existing" so the user
+    /// inspects the version they'd actually overwrite (the local copy after a
+    /// conflict is the pre-edit version, which is misleading to preview).
+    ///
+    /// Returns `Ok(None)` when there is no remote entry or it isn't decryptable
+    /// by us (e.g. encrypted to a recipient set we've since been removed from).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::InvalidEntryName`] for a malformed name, or a git
+    /// error from the remote fetch.
+    pub async fn remote_secret(&self, name: &str) -> Result<Option<Secret>, Error> {
+        validate_secret_name(name)?;
+        let Some(blob) = self.fetch_remote_blob(&passfile_rel(name)).await? else {
+            return Ok(None);
+        };
+        if !self.can_decrypt(&blob).await {
+            return Ok(None);
+        }
+        let identity = self.get_identity_bytes().await?;
+        let secret = spawn_blocking(move || {
+            let plaintext = crypto::decrypt_bytes(&blob, &identity, None)?;
+            Secret::parse(&plaintext)
+        })
+        .await??;
+        Ok(Some(secret))
+    }
+
     /// Encrypt and write a secret to the store, then commit and push.
     ///
     /// This is gopass's `set` (write) command. The plaintext is encrypted to
@@ -758,13 +788,24 @@ impl Store {
     /// written to `<name>.age`, committed, and pushed to `origin`.
     ///
     /// Following gopass's `PushPull`, the store is synced (pulled) immediately
-    /// before writing and the result is pushed immediately after. If the remote
-    /// advanced in between:
-    /// - when it did **not** create a same-name entry, the write is transparently
-    ///   replayed on the remote tip (the divergence was on other files);
-    /// - when it **did** create a same-name entry, this returns
+    /// before writing and the result is pushed immediately after. If the push is
+    /// **rejected** (the remote advanced in a way that can't fast-forward — i.e.
+    /// the local had an unpushed commit):
+    /// - when the remote did **not** add a same-name entry, the write is
+    ///   transparently replayed on the remote tip (the divergence was on other
+    ///   files);
+    /// - when the remote **did** add a same-name entry, this returns
     ///   [`WriteOutcome::Conflict`] for the caller to resolve via
     ///   [`Store::resolve_write_conflict`].
+    ///
+    /// **Limitation:** conflict detection fires only on push rejection, which
+    /// needs local divergence. If the local had **no** unpushed commit, the
+    /// pre-write `sync` fast-forwards over a remote same-name change, the write
+    /// commits on top, and the push fast-forwards — returning
+    /// [`WriteOutcome::Written`] and silently overwriting the remote's newer
+    /// version. Any write built on a prior read with no intervening local commit
+    /// (notably edit-after-read) is exposed; a base-version-aware check (capture
+    /// the entry's version at read, refuse on save if it changed) is the fix.
     ///
     /// # Errors
     ///
@@ -866,6 +907,36 @@ impl Store {
                 "Remote moved — sync to review and re-delete.",
             ))
         }
+    }
+
+    /// Edit a secret in place: overwrite an **existing** entry's body, then sync,
+    /// commit, and push via [`Store::set`]. The edit sibling of [`create`] — but
+    /// gated on existence and with no template applied, so a typo'd name can't
+    /// silently create a stray entry and the user's raw edited body is stored
+    /// verbatim (templates shape new secrets, not mutations).
+    ///
+    /// The existence gate is a **local typo guard** checked before [`set`]'s own
+    /// sync; it is not a remote-state invariant. Like [`set`], edit surfaces a
+    /// [`WriteOutcome::Conflict`] for the caller to resolve when the push is
+    /// rejected (local divergence + a same-name remote entry). Edit also inherits
+    /// [`set`]'s fast-forward limitation (see its docs): a newer same-name remote
+    /// change with no local divergence is overwritten silently.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::InvalidEntryName`] for a malformed name,
+    /// [`ErrorCode::EntryNotFound`] if the entry doesn't exist, or whatever
+    /// [`Store::set`] returns (including [`WriteOutcome::Conflict`]).
+    pub async fn update(&self, name: &str, plaintext: &[u8]) -> Result<WriteOutcome, Error> {
+        validate_secret_name(name)?;
+        let repo_path = self.repo_path().await?;
+        // Existence gate: a local typo guard so edit can't create a stray entry.
+        // resolve_entry_path also guards path traversal (used identically by `get`
+        // and `delete`). NOT a remote-state check — set's sync runs after this.
+        resolve_entry_path(&repo_path, &passfile_rel(name))?;
+        // Raw write primitive (no template): sync → encrypt+write → commit → push,
+        // with set's full conflict path.
+        self.set(name, plaintext).await
     }
 
     /// Apply the user's choice for a [`WriteConflict`] returned by [`set`].
