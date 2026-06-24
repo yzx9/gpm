@@ -337,7 +337,7 @@ async fn update_resolve_cancel_and_keep_remote() {
 /// same-name version but the local had NO unpushed commit, edit fast-forwards
 /// over it and returns `Written` — silently clobbering the teammate's change.
 /// This test PINS that behavior so it can't regress silently and so the deferred
-/// base-version-aware fix has a failing-to-pass target. See RFC 0022.
+/// base-version-aware fix has a failing-to-pass target.
 #[tokio::test]
 async fn update_fast_forward_clobber_is_documented_behavior() {
     let (bare_dir, _config_dir, store, identity, recipient) = store_with_recipients().await;
@@ -506,7 +506,7 @@ fn delete_from_bare(bare_path: &Path, rel_path: &str) {
 /// clobber): if a teammate deletes the entry on the remote and the local (without
 /// syncing) edits it, the edit silently RESURRECTS it — the existence gate passes
 /// locally, then `set`'s sync fast-forwards to the deletion and write_commit_push
-/// re-creates the file. The base-version-aware fix (RFC 0022) covers both this
+/// re-creates the file. The base-version-aware fix covers both this
 /// and the clobber. This test PINS the resurrection so it can't drift silently.
 #[tokio::test]
 async fn update_resurrects_teammate_deleted_entry_is_documented_behavior() {
