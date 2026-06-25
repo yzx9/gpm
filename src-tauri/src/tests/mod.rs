@@ -22,7 +22,7 @@ mod write_conflict;
 
 use std::io::Write;
 use std::str::FromStr;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use age::secrecy::ExposeSecret;
@@ -146,6 +146,8 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         pending_write: Arc::new(Mutex::new(None)),
         lock_mode: Mutex::new(rustpass::LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+        app_lock_enabled: AtomicBool::new(false),
+        app_locked: AtomicBool::new(false),
     };
     (
         state,

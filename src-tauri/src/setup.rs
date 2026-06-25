@@ -594,6 +594,8 @@ mod tests {
             pending_write: Arc::new(Mutex::new(None)),
             lock_mode: Mutex::new(rustpass::LockMode::default()),
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+            app_lock_enabled: std::sync::atomic::AtomicBool::new(false),
+            app_locked: std::sync::atomic::AtomicBool::new(false),
         };
         (state, dir)
     }
