@@ -187,8 +187,8 @@ pub(crate) async fn show_remote_secret(
         .remote_secret(&name)
         .await?
         .map(|s| SensitiveContent {
-            password: s.password().to_string(),
-            notes: s.body().to_string(),
+            password: Zeroizing::new(s.password().to_string()),
+            notes: Zeroizing::new(s.body().to_string()),
         }))
 }
 
