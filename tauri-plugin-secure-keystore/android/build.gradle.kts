@@ -33,5 +33,7 @@ android {
 
 dependencies {
     implementation(project(":tauri-android"))
-    // No androidx.biometric — this plugin is auth-free (no BiometricPrompt).
+    // BiometricPrompt + BiometricManager for the biometric-gated master key
+    // (app-lock); also brings androidx.core/fragment/appcompat transitively.
+    implementation("androidx.biometric:biometric:1.1.0")
 }

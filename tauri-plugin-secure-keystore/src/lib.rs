@@ -152,6 +152,77 @@ impl<R: Runtime> SecureKeystore<R> {
             .run_mobile_plugin::<()>("delete", ())
             .map_err(map_invoke_err)
     }
+
+    /// Whether STRONG biometric auth is usable on this device (API 30+ with a
+    /// fingerprint/face enrolled). Fast / non-prompting. Gates the app-lock:
+    /// the toggle is only offered when this is `true`.
+    pub fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
+        #[derive(Deserialize)]
+        struct Resp {
+            available: bool,
+        }
+        self.0
+            .run_mobile_plugin::<Resp>("is_biometric_available", ())
+            .map(|r| r.available)
+            .map_err(map_invoke_err)
+    }
+
+    /// Whether a biometric-gated master key exists AND its key still inits
+    /// cleanly (non-prompting liveness probe). This is the authoritative
+    /// "app-lock is enabled" signal at startup — readable before `repo.json`,
+    /// since the master key's location (auth-free vs biometric-gated) is itself
+    /// the toggle state. `false` if biometrics were removed and the key is dead.
+    pub fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
+        #[derive(Deserialize)]
+        struct Resp {
+            stored: bool,
+        }
+        self.0
+            .run_mobile_plugin::<Resp>("has_stored_biometric", ())
+            .map(|r| r.stored)
+            .map_err(map_invoke_err)
+    }
+
+    /// Seal the supplied master key (Base64) behind a biometric-gated key.
+    /// **Shows a BiometricPrompt** (CryptoObject ENCRYPT). Used when enabling the
+    /// app-lock to migrate the master key from the auth-free store.
+    pub async fn store_biometric(&self, key_b64: &str) -> Result<(), SecureKeystoreError> {
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            key: &'a str,
+        }
+        self.0
+            .run_mobile_plugin_async::<()>("store_biometric", Payload { key: key_b64 })
+            .await
+            .map_err(map_invoke_err)
+    }
+
+    /// Retrieve the biometric-gated master key (Base64), or `None` if nothing is
+    /// sealed. **Shows a BiometricPrompt** (CryptoObject DECRYPT). The key is
+    /// returned here (Rust side only). Rejects with `BIOMETRIC_KEY_INVALIDATED`
+    /// if the key died (all biometrics removed).
+    pub async fn retrieve_biometric(&self) -> Result<Option<String>, SecureKeystoreError> {
+        #[derive(Deserialize)]
+        struct Resp {
+            stored: bool,
+            key: Option<String>,
+        }
+        let r = self
+            .0
+            .run_mobile_plugin_async::<Resp>("retrieve_biometric", ())
+            .await
+            .map_err(map_invoke_err)?;
+        Ok(if r.stored { r.key } else { None })
+    }
+
+    /// Delete the biometric-gated Keystore key and ciphertext (best-effort).
+    /// Used when disabling the app-lock (after the master key is migrated back
+    /// to the auth-free store).
+    pub fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
+        self.0
+            .run_mobile_plugin::<()>("delete_biometric", ())
+            .map_err(map_invoke_err)
+    }
 }
 
 #[cfg(not(target_os = "android"))]
@@ -173,6 +244,31 @@ impl<R: Runtime> SecureKeystore<R> {
 
     /// Inert: nothing to delete.
     pub fn delete(&self) -> Result<(), SecureKeystoreError> {
+        Ok(())
+    }
+
+    /// Inert: biometric is never available on non-Android targets.
+    pub fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
+        Ok(false)
+    }
+
+    /// Inert: no biometric-gated key is ever stored.
+    pub fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
+        Ok(false)
+    }
+
+    /// Inert: never succeeds — biometric is unavailable.
+    pub async fn store_biometric(&self, _key_b64: &str) -> Result<(), SecureKeystoreError> {
+        Err(SecureKeystoreError::unavailable())
+    }
+
+    /// Inert: nothing is ever stored.
+    pub async fn retrieve_biometric(&self) -> Result<Option<String>, SecureKeystoreError> {
+        Ok(None)
+    }
+
+    /// Inert: nothing to delete.
+    pub fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
         Ok(())
     }
 }
