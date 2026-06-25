@@ -28,6 +28,20 @@ pub const DEFAULT_VIEW_CLEAR_SECS: u64 = 45;
 /// Used when `clipboard_clear_secs` is `None`.
 pub const DEFAULT_CLIPBOARD_CLEAR_SECS: u64 = 45;
 
+/// Serde default for [`RepoConfig::autosync`] — `true`, so an existing
+/// `repo.json` written before the field existed deserializes with autosync ON
+/// (the pre-toggle behavior is preserved across the upgrade).
+fn default_autosync_true() -> bool {
+    true
+}
+
+/// `true` (the default) so `autosync` is omitted from `repo.json` while on —
+/// users who never toggle it see no change to the file's shape.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
+fn is_autosync_default(autosync: &bool) -> bool {
+    *autosync
+}
+
 /// How the app auto-locks the identity cache.
 ///
 /// `Immediate` (the default) is the no-cache, per-operation mode: the identity
@@ -284,6 +298,9 @@ impl Config {
             // are off at setup; the user enables them from Settings.
             biometric_app_lock: false,
             unlock_identity_with_app: false,
+            // Autosync defaults ON (gopass-style per-save pull→write→push); the
+            // user can turn it off per-device in Settings.
+            autosync: true,
             authenticity: AuthenticityConfig::default(),
         };
         // Delegate to the atomic variant so `repo.json` is never observed
@@ -457,6 +474,14 @@ pub struct RepoConfig {
     /// [`biometric_app_lock`]: RepoConfig::biometric_app_lock
     #[serde(default, skip_serializing_if = "is_false")]
     pub unlock_identity_with_app: bool,
+    /// Whether each save wraps in a pull→write→push (gopass-style per-command
+    /// sync). Default `true`; when `false`, saves stay local until a manual Sync.
+    /// Per-device (in `repo.json`); omitted from serialization while `true`.
+    #[serde(
+        default = "default_autosync_true",
+        skip_serializing_if = "is_autosync_default"
+    )]
+    pub autosync: bool,
     /// Repository authenticity config (verification mode + trusted signing
     /// keys + ignored issues). Skipped from serialization when default so
     /// users who never enable authenticity see no change to `repo.json`'s

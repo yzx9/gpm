@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - On Android, if you enrolled a new fingerprint or face after enabling biometric unlock, gpm no longer pops a biometric prompt that can only fail on every launch — it goes straight to the passphrase form so you can re-enable biometric
+- Pulling no longer shows a false divergence warning when your device has an unpushed change but the remote hasn't moved — it's a no-op pull, and your change syncs on the next push
 
 ## [v0.6.0] - 2026-06-20
 

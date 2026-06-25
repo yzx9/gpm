@@ -5,80 +5,16 @@
 //! Pull/sync divergence detection + resolution (plan 0012). `Store::sync`
 //! returns `SyncOutcome::Diverged` instead of a hard `PullFfFailed`, carrying
 //! the full local-side change preview; `Store::resolve_sync_divergence` adopts
-//! the exact remote tip the user reviewed.
-//!
-//! The setup helpers overlap with `write_conflict.rs`; if a third test file
-//! needs them, lift `local_commit_files` / `store_with_base` into `common`.
+//! the exact remote tip the user reviewed. Shared setup helpers live in
+//! `common` (also used by the keep-mine tests in `sync_resolve.rs`).
 
 mod common;
 
 use std::path::Path;
 
 use common::*;
-use rustpass::store::Store;
+use rustpass::store::DivergenceChoice;
 use rustpass::{SyncDivergence, SyncOutcome};
-
-/// Commit `files` (rel path → bytes) in the store's working repo WITHOUT
-/// pushing — the unpushed local commit that creates divergence.
-fn local_commit_files(repo_path: &Path, files: &[(&str, &[u8])], message: &str) {
-    let repo = git2::Repository::open(repo_path).expect("open store repo");
-    for (rel, content) in files {
-        let file_path = repo_path.join(rel);
-        if let Some(p) = file_path.parent() {
-            std::fs::create_dir_all(p).unwrap();
-        }
-        std::fs::write(&file_path, content).unwrap();
-    }
-    let mut index = repo.index().expect("index");
-    for (rel, _) in files {
-        index.add_path(Path::new(rel)).expect("add_path");
-    }
-    index.write().expect("write index");
-    let tree_id = index.write_tree().expect("write_tree");
-    let tree = repo.find_tree(tree_id).expect("find_tree");
-    let head = repo.head().expect("head").target().expect("oid");
-    let parent = repo.find_commit(head).expect("parent");
-    let sig = git2::Signature::now("local", "local@local").expect("sig");
-    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
-        .expect("commit");
-}
-
-/// Configure a store against a fresh bare repo carrying a recipients file
-/// plus `base_entries` (encrypted). Returns `(bare_dir, store, recipient)`.
-async fn store_with_base(
-    base_entries: Vec<(&str, &[u8])>,
-) -> (tempfile::TempDir, tempfile::TempDir, Store, String) {
-    let (identity, recipient) = generate_test_keypair();
-    let (bare_dir, _clone_dir) = create_test_git_repo_with(
-        base_entries,
-        vec![(".gopass-recipients", recipient.as_bytes())],
-        &recipient,
-    );
-    let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf(), None);
-    store
-        .configure(
-            bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
-            &identity,
-            None,
-        )
-        .await
-        .expect("configure");
-    (bare_dir, config_dir, store, recipient)
-}
-
-/// Full HEAD oid of the bare repo's current branch tip.
-fn bare_head_oid(bare_path: &Path) -> String {
-    let repo = git2::Repository::open(bare_path).expect("open bare");
-    repo.head()
-        .expect("head")
-        .target()
-        .expect("oid")
-        .to_string()
-}
 
 /// `sync()` surfaces `Diverged` (not "already up to date", not an error) with
 /// correct ahead-counts and a full local-side change preview (ARCH1 + codex ③).
@@ -155,7 +91,7 @@ async fn resolve_adopts_reviewed_remote_tip() {
     assert_eq!(local_only_entries, vec!["local-only".to_string()]);
 
     let result = store
-        .resolve_sync_divergence(&remote_tip)
+        .resolve_sync_divergence(&remote_tip, DivergenceChoice::AdoptRemote)
         .await
         .expect("adopt");
     assert!(result.changed, "HEAD should advance to the remote tip");
@@ -207,7 +143,7 @@ async fn resolve_refused_when_remote_moved() {
     );
 
     let err = store
-        .resolve_sync_divergence(&remote_tip)
+        .resolve_sync_divergence(&remote_tip, DivergenceChoice::AdoptRemote)
         .await
         .unwrap_err();
     assert_eq!(

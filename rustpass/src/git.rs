@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
 #[cfg(target_os = "android")]
 use std::ffi::c_int;
 use std::path::Path;
@@ -854,6 +855,41 @@ fn empty_authenticity(mode: VerifyMode) -> AuthenticityResult {
     }
 }
 
+/// How the fetched remote tip relates to the local HEAD. Used by the pull paths
+/// (and the sync-divergence preview) to tell the three benign cases apart from a
+/// true split, so a strictly-local-ahead repo (unpushed commit, remote unchanged)
+/// is a no-op pull rather than a spurious divergence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FetchClass {
+    /// `fetched == local HEAD` — nothing changed either way.
+    Equal,
+    /// Remote is strictly ahead of local — a fast-forward pull applies it.
+    RemoteAhead,
+    /// Local is strictly ahead of remote — a pull is a no-op; a push publishes.
+    LocalAhead,
+    /// Neither is an ancestor of the other — true divergence, needs resolution.
+    Diverged,
+}
+
+/// Classify the local-HEAD vs fetched-tip relationship via `graph_descendant_of`
+/// in both directions. `Equal` is checked first (it is not a descendant relation).
+fn classify_relation(
+    repo: &Repository,
+    pre: git2::Oid,
+    fetched: git2::Oid,
+) -> Result<FetchClass, Error> {
+    if pre == fetched {
+        return Ok(FetchClass::Equal);
+    }
+    if repo.graph_descendant_of(fetched, pre)? {
+        return Ok(FetchClass::RemoteAhead);
+    }
+    if repo.graph_descendant_of(pre, fetched)? {
+        return Ok(FetchClass::LocalAhead);
+    }
+    Ok(FetchClass::Diverged)
+}
+
 /// Off-mode pull: fetch the current branch into a temp ref, then fast-forward
 /// (or report divergence). gpm operates on a single default branch, so fetching
 /// one branch is correct; using a temp ref (like the verified path) means
@@ -897,29 +933,90 @@ fn pull_off(
         }));
     };
 
-    if fetched_oid == pre_oid {
-        cleanup();
-        return Ok(SyncOutcome::FastForwarded(SyncResult {
+    // Classify the local-vs-remote relationship so a strictly-local-ahead repo
+    // (an unpushed commit, remote unchanged) is a no-op pull — not a spurious
+    // divergence. Only a true both-sides split surfaces for resolution.
+    match classify_relation(repo, pre_oid, fetched_oid)? {
+        FetchClass::Equal => {
+            cleanup();
+            Ok(SyncOutcome::FastForwarded(SyncResult {
+                changed: false,
+                head: short_hash(&fetched_oid),
+                authenticity: empty_authenticity(VerifyMode::Off),
+            }))
+        }
+        // Remote is behind us: nothing to fetch. The caller pushes to publish.
+        FetchClass::LocalAhead => {
+            cleanup();
+            Ok(SyncOutcome::FastForwarded(SyncResult {
+                changed: false,
+                head: short_hash(&pre_oid),
+                authenticity: empty_authenticity(VerifyMode::Off),
+            }))
+        }
+        FetchClass::Diverged => {
+            let div = divergence_info(repo, pre_oid, fetched_oid)?;
+            cleanup();
+            Ok(SyncOutcome::Diverged(div))
+        }
+        FetchClass::RemoteAhead => {
+            advance_branch(repo, &branch_name, fetched_oid)?;
+            cleanup();
+            Ok(SyncOutcome::FastForwarded(SyncResult {
+                changed: true,
+                head: short_hash(&fetched_oid),
+                authenticity: empty_authenticity(VerifyMode::Off),
+            }))
+        }
+    }
+}
+
+/// Verify the `(pre_oid, fetched_oid]` range under `policy`, then — unless
+/// Enforce blocks — fast-forward to `fetched_oid`. Returns the [`SyncResult`].
+/// The caller owns temp-ref cleanup. (The `RemoteAhead` arm of [`pull_verified`].)
+fn verify_and_advance(
+    repo: &Repository,
+    branch_name: &str,
+    pre_oid: git2::Oid,
+    fetched_oid: git2::Oid,
+    policy: &AuthenticityConfig,
+) -> Result<SyncResult, Error> {
+    let mode = policy.mode;
+    let trusted = signing::trusted_fingerprints(policy);
+    let new_commits = signing::verify_range(repo, pre_oid, fetched_oid, &trusted, &policy.ignored)?;
+    let open_issues: Vec<_> = new_commits
+        .iter()
+        .filter(|c| !c.ignored && c.status.is_issue())
+        .cloned()
+        .collect();
+
+    // Enforce: refuse to advance when a non-ignored blocking issue remains —
+    // HEAD and the working tree stay put.
+    if mode == VerifyMode::Enforce && !open_issues.is_empty() {
+        return Ok(SyncResult {
             changed: false,
-            head: short_hash(&fetched_oid),
-            authenticity: empty_authenticity(VerifyMode::Off),
-        }));
+            head: short_hash(&pre_oid),
+            authenticity: AuthenticityResult {
+                mode,
+                new_commits,
+                open_issues,
+                blocked: true,
+            },
+        });
     }
 
-    // Fetched tip is not a descendant of HEAD → diverged; surface for resolution.
-    if !repo.graph_descendant_of(fetched_oid, pre_oid)? {
-        let div = divergence_info(repo, pre_oid, fetched_oid)?;
-        cleanup();
-        return Ok(SyncOutcome::Diverged(div));
-    }
-
-    advance_branch(repo, &branch_name, fetched_oid)?;
-    cleanup();
-    Ok(SyncOutcome::FastForwarded(SyncResult {
+    // Audit (always) or Enforce (no blocking issues): advance + check out.
+    advance_branch(repo, branch_name, fetched_oid)?;
+    Ok(SyncResult {
         changed: true,
         head: short_hash(&fetched_oid),
-        authenticity: empty_authenticity(VerifyMode::Off),
-    }))
+        authenticity: AuthenticityResult {
+            mode,
+            new_commits,
+            open_issues,
+            blocked: false,
+        },
+    })
 }
 
 /// Audit/Enforce pull: fetch the current branch into a temp ref, verify the
@@ -979,67 +1076,48 @@ fn pull_verified(
         }));
     };
 
-    if fetched_oid == pre_oid {
-        cleanup();
-        return Ok(SyncOutcome::FastForwarded(SyncResult {
-            changed: false,
-            head: short_hash(&fetched_oid),
-            authenticity: AuthenticityResult {
-                mode,
-                new_commits: Vec::new(),
-                open_issues: Vec::new(),
-                blocked: false,
-            },
-        }));
+    // Classify before verifying: only a genuine remote-ahead fetch has a range
+    // to verify. A local-ahead repo is a no-op pull (the caller pushes); a true
+    // split surfaces for resolution. This mirrors `pull_off`.
+    match classify_relation(repo, pre_oid, fetched_oid)? {
+        FetchClass::Equal => {
+            cleanup();
+            Ok(SyncOutcome::FastForwarded(SyncResult {
+                changed: false,
+                head: short_hash(&fetched_oid),
+                authenticity: AuthenticityResult {
+                    mode,
+                    new_commits: Vec::new(),
+                    open_issues: Vec::new(),
+                    blocked: false,
+                },
+            }))
+        }
+        FetchClass::LocalAhead => {
+            // Remote is behind us: nothing to fetch or verify. Caller pushes.
+            cleanup();
+            Ok(SyncOutcome::FastForwarded(SyncResult {
+                changed: false,
+                head: short_hash(&pre_oid),
+                authenticity: AuthenticityResult {
+                    mode,
+                    new_commits: Vec::new(),
+                    open_issues: Vec::new(),
+                    blocked: false,
+                },
+            }))
+        }
+        FetchClass::Diverged => {
+            let div = divergence_info(repo, pre_oid, fetched_oid)?;
+            cleanup();
+            Ok(SyncOutcome::Diverged(div))
+        }
+        FetchClass::RemoteAhead => {
+            let result = verify_and_advance(repo, &branch_name, pre_oid, fetched_oid, policy)?;
+            cleanup();
+            Ok(SyncOutcome::FastForwarded(result))
+        }
     }
-
-    // Fast-forward only: fetched tip must descend from the current HEAD,
-    // otherwise the branches have diverged — surface it for resolution.
-    if !repo.graph_descendant_of(fetched_oid, pre_oid)? {
-        let div = divergence_info(repo, pre_oid, fetched_oid)?;
-        cleanup();
-        return Ok(SyncOutcome::Diverged(div));
-    }
-
-    // Verify every commit in (pre_oid, fetched_oid].
-    let trusted = signing::trusted_fingerprints(policy);
-    let new_commits = signing::verify_range(repo, pre_oid, fetched_oid, &trusted, &policy.ignored)?;
-    let open_issues: Vec<_> = new_commits
-        .iter()
-        .filter(|c| !c.ignored && c.status.is_issue())
-        .cloned()
-        .collect();
-
-    // Enforce: refuse to advance when a non-ignored blocking issue remains.
-    let blocked = mode == VerifyMode::Enforce && !open_issues.is_empty();
-    if blocked {
-        // Do NOT move the branch; HEAD and the working tree stay put.
-        cleanup();
-        return Ok(SyncOutcome::FastForwarded(SyncResult {
-            changed: false,
-            head: short_hash(&pre_oid),
-            authenticity: AuthenticityResult {
-                mode,
-                new_commits,
-                open_issues,
-                blocked: true,
-            },
-        }));
-    }
-
-    // Audit (always) or Enforce (no blocking issues): advance + check out.
-    advance_branch(repo, &branch_name, fetched_oid)?;
-    cleanup();
-    Ok(SyncOutcome::FastForwarded(SyncResult {
-        changed: true,
-        head: short_hash(&fetched_oid),
-        authenticity: AuthenticityResult {
-            mode,
-            new_commits,
-            open_issues,
-            blocked: false,
-        },
-    }))
 }
 
 /// Move the branch ref to `target` and check out HEAD (forced), updating the
@@ -1066,12 +1144,8 @@ fn count_ahead(repo: &Repository, tip: git2::Oid, base: git2::Oid) -> Result<usi
 /// become entry names (suffix stripped) and land in `secrets`; anything else
 /// lands in `other` by path.
 fn classify_loss(path: &Path, secrets: &mut Vec<String>, other: &mut Vec<String>) {
-    let is_age = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("age"));
     let s = path.to_string_lossy().into_owned();
-    if is_age {
+    if is_age_entry(path) {
         secrets.push(s.trim_end_matches(".age").to_string());
     } else {
         other.push(s);
@@ -1222,6 +1296,400 @@ pub fn adopt_remote(
             blocked: false,
         },
     })
+}
+
+/// A local-side `.age` entry to replay onto the remote tip during a "keep mine"
+/// divergence resolution: its worktree-relative path plus its ciphertext blob at
+/// the local HEAD. The caller decrypts + re-encrypts the blob — git has no
+/// identity, so the crypto stays in `Store` (matching `encrypt_and_write`).
+#[derive(Debug, Clone)]
+pub(crate) struct KeepLocalReplay {
+    /// Worktree-relative path, e.g. `servers/db.age`.
+    pub rel_path: String,
+    /// The entry's ciphertext at the local HEAD, to decrypt + re-encrypt.
+    pub blob: Vec<u8>,
+}
+
+/// What a "keep mine" resolution must replay onto the reviewed remote tip.
+#[derive(Debug, Clone)]
+pub(crate) struct KeepLocalPlan {
+    /// Full hash of the fetched remote tip the plan was computed against. Passed
+    /// to [`keep_local_advance`] so the adopt reuses the SAME tip (no second
+    /// fetch — a second fetch could race past the reviewed tip and bypass the
+    /// authenticity check under Enforce).
+    pub fetched_oid: String,
+    /// Local-side `.age` entries to re-encrypt + write onto the tip.
+    pub replays: Vec<KeepLocalReplay>,
+    /// Local-side `.age` entries to re-delete on the tip (local deletions that
+    /// "keep mine" preserves).
+    pub deletes: Vec<String>,
+    /// Authenticity outcome for the returned [`SyncResult`] (the remote-only
+    /// range's verification). `blocked` is false here — a block is returned as
+    /// [`KeepLocalOutcome::Blocked`].
+    pub authenticity: AuthenticityResult,
+}
+
+/// Outcome of [`keep_local_plan`]: proceed with a plan, or stop because Enforce
+/// refused the remote-only range (HEAD left unchanged).
+#[derive(Debug, Clone)]
+pub(crate) enum KeepLocalOutcome {
+    /// Enforce blocked the adopt — HEAD unchanged; surface this result.
+    Blocked(SyncResult),
+    /// Proceed: replay the plan onto the reviewed remote tip.
+    Plan(KeepLocalPlan),
+}
+
+/// Whether `path` is an `.age` secret (case-insensitive suffix).
+fn is_age_entry(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("age"))
+}
+
+/// Defense-in-depth: ensure a worktree-relative path from a git tree diff resolves
+/// inside the repo — only `Normal`/`CurDir` components (rejects `..`, leading `/`,
+/// Windows drive prefixes). Git rejects `..` in tree entries and gpm validates
+/// secret names on write, so this is a backstop; [`keep_local_finalize`] replays
+/// paths sourced from a (possibly remote) tree diff, so it asserts containment
+/// before any filesystem write/delete, mirroring `Store::assert_within_repo`.
+fn rel_within_repo(rel: &str) -> Result<(), Error> {
+    use std::path::Component;
+    let outside = Path::new(rel)
+        .components()
+        .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir));
+    if outside {
+        return Err(Error::new(
+            ErrorCode::EntryNotFound,
+            "Entry path is outside repository",
+        ));
+    }
+    Ok(())
+}
+
+/// `.age`-entry changes on one side of a diff vs the base tree: paths the side
+/// added/modified (with the side's blob, for replay) and paths it deleted. A
+/// rename counts as delete(old) + add(new). Used for BOTH sides of a "keep mine"
+/// plan — the local side yields what to replay; the remote side yields the
+/// touched-path set for conflict detection (its blobs are unused).
+struct AgeDiff {
+    /// `(rel_path, blob_bytes)` the side has at `side_oid`.
+    changed: Vec<(String, Vec<u8>)>,
+    /// Worktree-relative paths the side deleted.
+    deleted: Vec<String>,
+}
+
+/// Diff `base_tree` → `side_tree` and collect the `.age` changes on the side.
+fn age_diff_side(
+    repo: &Repository,
+    base_tree: &git2::Tree<'_>,
+    side_tree: &git2::Tree<'_>,
+    side_oid: git2::Oid,
+) -> Result<AgeDiff, Error> {
+    let mut changed: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut deleted: Vec<String> = Vec::new();
+    for delta in repo
+        .diff_tree_to_tree(Some(base_tree), Some(side_tree), None)?
+        .deltas()
+    {
+        match delta.status() {
+            git2::Delta::Added | git2::Delta::Modified | git2::Delta::Copied => {
+                if let Some(p) = delta.new_file().path()
+                    && is_age_entry(p)
+                {
+                    let rel = p.to_string_lossy().into_owned();
+                    let blob = blob_at_commit(repo, side_oid, &rel).unwrap_or_default();
+                    changed.push((rel, blob));
+                }
+            }
+            git2::Delta::Deleted => {
+                if let Some(p) = delta.old_file().path()
+                    && is_age_entry(p)
+                {
+                    deleted.push(p.to_string_lossy().into_owned());
+                }
+            }
+            // A rename is delete(old) + add(new).
+            git2::Delta::Renamed => {
+                if let Some(old) = delta.old_file().path()
+                    && is_age_entry(old)
+                {
+                    deleted.push(old.to_string_lossy().into_owned());
+                }
+                if let Some(new) = delta.new_file().path()
+                    && is_age_entry(new)
+                {
+                    let rel = new.to_string_lossy().into_owned();
+                    let blob = blob_at_commit(repo, side_oid, &rel).unwrap_or_default();
+                    changed.push((rel, blob));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(AgeDiff { changed, deleted })
+}
+
+/// If a `.age` entry was changed on BOTH sides (an irreconcilable same-secret
+/// conflict), return the `PushRejected` error. A local replay collides with ANY
+/// remote touch; a local delete collides only with a non-delete remote change
+/// (both-deleted is agreement, not a conflict). The caller cleans up before
+/// propagating the error.
+fn keep_local_conflict(
+    replays: &[KeepLocalReplay],
+    deletes: &[String],
+    remote_touched: &HashMap<String, bool>,
+) -> Result<(), Error> {
+    for r in replays {
+        if remote_touched.contains_key(&r.rel_path) {
+            return Err(Error::new(
+                ErrorCode::PushRejected,
+                format!(
+                    "Can't keep mine: \"{}\" changed on both sides. Adopt the remote or cancel.",
+                    r.rel_path.trim_end_matches(".age")
+                ),
+            ));
+        }
+    }
+    for d in deletes {
+        if matches!(remote_touched.get(d), Some(false)) {
+            return Err(Error::new(
+                ErrorCode::PushRejected,
+                format!(
+                    "Can't keep mine: \"{}\" was deleted locally but changed remotely. \
+                     Adopt the remote or cancel.",
+                    d.trim_end_matches(".age")
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Compute the "keep mine" plan: fetch the remote tip, refuse if it moved past
+/// the reviewed `expected_remote_oid`, verify the remote-only range under the
+/// authenticity policy (mirroring [`adopt_remote`]), then compute which local
+/// `.age` entries to replay (re-encrypt) and which to re-delete on the tip. Does
+/// NOT move HEAD — the caller decrypts/re-encrypts, then
+/// [`keep_local_advance`] + [`keep_local_finalize`] apply it.
+///
+/// Refuses ([`ErrorCode::PushRejected`]) when a `.age` entry was changed on BOTH
+/// sides (an irreconcilable same-secret conflict) — the user must adopt the
+/// remote or cancel; gpm never merges `.age` blobs.
+///
+/// Non-secret local changes (`.gopass-recipients`, templates) are NOT replayed:
+/// "keep mine" adopts the remote's non-secret files verbatim and re-encrypts only
+/// secrets onto them. gpm is single-identity today, so local recipient edits do
+/// not arise; multi-recipient overwrite-safety is deferred (TODO).
+pub(crate) fn keep_local_plan(
+    repo_path: &Path,
+    auth: &GitAuth,
+    policy: &AuthenticityConfig,
+    expected_remote_oid: &str,
+) -> Result<KeepLocalOutcome, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+
+    let pre_oid = repo.head().ok().and_then(|r| r.target()).ok_or_else(|| {
+        Error::new(
+            ErrorCode::PullFfFailed,
+            "No HEAD to compute a keep-mine plan",
+        )
+    })?;
+
+    let (_branch, temp_ref, fetched_oid) = fetch_remote_into_temp(&repo, auth)?;
+    let cleanup = || {
+        drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
+    };
+
+    // Stale-confirmation guard: keep exactly the tip the user reviewed.
+    let expected = git2::Oid::from_str(expected_remote_oid)?;
+    if fetched_oid != expected {
+        cleanup();
+        return Err(Error::new(
+            ErrorCode::PullFfFailed,
+            "Remote changed since you reviewed the divergence; pull again.",
+        ));
+    }
+
+    let base = repo.merge_base(pre_oid, fetched_oid)?;
+    let mode = policy.mode;
+
+    // Authenticity: verify the remote-only range (base, fetched] — identical to
+    // adopt_remote. A block under Enforce stops here with HEAD untouched.
+    let (new_commits, open_issues, blocked) = if mode == VerifyMode::Off {
+        (Vec::new(), Vec::new(), false)
+    } else {
+        let trusted = signing::trusted_fingerprints(policy);
+        let nc = signing::verify_range(&repo, base, fetched_oid, &trusted, &policy.ignored)?;
+        let oi: Vec<_> = nc
+            .iter()
+            .filter(|c| !c.ignored && c.status.is_issue())
+            .cloned()
+            .collect();
+        let bl = mode == VerifyMode::Enforce && !oi.is_empty();
+        (nc, oi, bl)
+    };
+    if blocked {
+        cleanup();
+        return Ok(KeepLocalOutcome::Blocked(SyncResult {
+            changed: false,
+            head: short_hash(&pre_oid),
+            authenticity: AuthenticityResult {
+                mode,
+                new_commits,
+                open_issues,
+                blocked: true,
+            },
+        }));
+    }
+
+    let base_tree = repo.find_commit(base)?.tree()?;
+    let local_tree = repo.find_commit(pre_oid)?.tree()?;
+    let remote_tree = repo.find_commit(fetched_oid)?.tree()?;
+
+    // Local changes vs base: entries to replay (added/modified) or re-delete.
+    let local_diff = age_diff_side(&repo, &base_tree, &local_tree, pre_oid)?;
+    let replays: Vec<KeepLocalReplay> = local_diff
+        .changed
+        .into_iter()
+        .map(|(rel_path, blob)| KeepLocalReplay { rel_path, blob })
+        .collect();
+    let deletes = local_diff.deleted;
+
+    // Remote changes vs base: every `.age` path the remote touched (value = was
+    // it a deletion?), for same-secret conflict detection.
+    let remote_diff = age_diff_side(&repo, &base_tree, &remote_tree, fetched_oid)?;
+    let mut remote_touched: HashMap<String, bool> = HashMap::new();
+    for (p, _) in remote_diff.changed {
+        remote_touched.insert(p, false);
+    }
+    for p in remote_diff.deleted {
+        remote_touched.insert(p, true);
+    }
+
+    // Refuse irreconcilable same-secret conflicts (both sides touched the same
+    // `.age` entry). See [`keep_local_conflict`].
+    if let Err(e) = keep_local_conflict(&replays, &deletes, &remote_touched) {
+        cleanup();
+        return Err(e);
+    }
+
+    cleanup();
+    Ok(KeepLocalOutcome::Plan(KeepLocalPlan {
+        fetched_oid: fetched_oid.to_string(),
+        replays,
+        deletes,
+        authenticity: AuthenticityResult {
+            mode,
+            new_commits,
+            open_issues,
+            blocked: false,
+        },
+    }))
+}
+
+/// Advance the branch + worktree to the reviewed remote tip (`fetched_oid`),
+/// WITHOUT refetching. The fetched commit is still in the object DB (the plan
+/// only deleted its temp ref), so this reuses the exact tip the authenticity
+/// check ran against — no TOCTOU under Enforce.
+pub(crate) fn keep_local_advance(repo_path: &Path, fetched_oid: &str) -> Result<(), Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    let branch_name = repo
+        .head()?
+        .shorthand()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot advance"))?
+        .to_string();
+    let target = git2::Oid::from_str(fetched_oid)?;
+    advance_branch(&repo, &branch_name, target)
+}
+
+/// Apply a "keep mine" plan onto the (already-advanced) remote tip: write the
+/// re-encrypted `entries`, apply the local `deletes`, commit on HEAD, and push
+/// (now a fast-forward — our commit sits on the reviewed remote tip). Returns the
+/// new HEAD short hash. Crypto is done by the caller; this is pure git + IO.
+pub(crate) fn keep_local_finalize(
+    repo_path: &Path,
+    auth: &GitAuth,
+    entries: &[(String, Vec<u8>)],
+    deletes: &[String],
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<String, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+
+    let mut index = repo.index()?;
+    for (rel, ciphertext) in entries {
+        rel_within_repo(rel)?;
+        let file_path = repo_path.join(rel);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&file_path, ciphertext)?;
+        index.add_path(Path::new(rel)).map_err(|e| {
+            Error::new(ErrorCode::StoreError, format!("Failed to stage {rel}: {e}"))
+        })?;
+    }
+    for rel in deletes {
+        rel_within_repo(rel)?;
+        let file_path = repo_path.join(rel);
+        if file_path.exists() {
+            std::fs::remove_file(&file_path)?;
+        }
+        // Tolerate an already-gone index entry: the remote may have deleted it
+        // too (both-deleted agreement). remove_path errors on an untracked path.
+        let _ = index.remove_path(Path::new(rel));
+    }
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let head_oid = repo
+        .head()?
+        .target()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit to build on"))?;
+    let parent = repo.find_commit(head_oid)?;
+    let sig = gpm_signature(name, email)?;
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "Keep local changes (re-encrypted onto remote)",
+        &tree,
+        &[&parent],
+    )?;
+
+    push_current_branch(&repo, auth)?;
+
+    let head = repo
+        .head()?
+        .target()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD after keep-mine commit"))?;
+    Ok(short_hash(&head))
+}
+
+/// Fetch the remote tip and compute the local-vs-remote divergence preview,
+/// WITHOUT moving the working branch. Called after a push rejection (the write
+/// path knows divergence is real) so the app can surface the resolution modal on
+/// demand.
+pub(crate) fn preview_divergence(
+    repo_path: &Path,
+    auth: &GitAuth,
+) -> Result<SyncDivergence, Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    let pre_oid = repo
+        .head()
+        .ok()
+        .and_then(|r| r.target())
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD to compute divergence"))?;
+    let (_branch, temp_ref, fetched_oid) = fetch_remote_into_temp(&repo, auth)?;
+    let cleanup = || {
+        drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
+    };
+    let div = divergence_info(&repo, pre_oid, fetched_oid)?;
+    cleanup();
+    Ok(div)
 }
 
 /// Classify a git2 error message into the appropriate [`Error`].

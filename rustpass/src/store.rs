@@ -15,6 +15,7 @@ use nucleo_matcher::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::fs;
+use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use walkdir::WalkDir;
 use zeroize::Zeroizing;
@@ -182,6 +183,21 @@ pub enum ConflictChoice {
     Cancel,
 }
 
+/// How to resolve a [`SyncOutcome::Diverged`] (the user's choice). "Cancel" is
+/// client-side — the frontend simply doesn't call
+/// [`Store::resolve_sync_divergence`] — so it is absent here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DivergenceChoice {
+    /// Discard local-only changes and adopt the reviewed remote tip exactly.
+    AdoptRemote,
+    /// Keep local changes: re-encrypt the local-only `.age` entries onto the
+    /// reviewed remote tip (with the current recipient set) and push. Refused
+    /// ([`ErrorCode::PushRejected`]) for an irreconcilable same-secret conflict
+    /// or an undecryptable local entry — the user must adopt or cancel.
+    KeepMine,
+}
+
 /// Password store — aligned with `gopass.Store` interface.
 ///
 /// Provides read-only operations on a gopass-compatible password store:
@@ -191,6 +207,12 @@ pub struct Store {
     config: Config,
     /// Cached decrypted identity (populated after unlock).
     cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
+    /// Serializes all repo-mutating operations (writes, pull, push, divergence
+    /// resolution) so two in-flight mutations can't race the git index or let a
+    /// reviewed divergence go stale vs local HEAD mid-resolution. The field
+    /// exists from PR1; every mutation site acquires it from PR2 on.
+    #[allow(dead_code)]
+    write_mu: Mutex<()>,
 }
 
 impl fmt::Debug for Store {
@@ -217,6 +239,7 @@ impl Store {
         Self {
             config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
+            write_mu: Mutex::new(()),
         }
     }
 
@@ -1099,27 +1122,175 @@ impl Store {
         }
     }
 
-    /// Resolve a [`SyncOutcome::Diverged`] by adopting the remote tip exactly
-    /// as the user reviewed it (`expected_remote_oid`). Re-fetches fresh and
-    /// refuses ([`ErrorCode::PullFfFailed`]) if the remote has advanced since
-    /// the preview. "Cancel" is client-side (the frontend just doesn't call
-    /// this). Carries no plaintext, so (unlike the write path) there is no
-    /// stash and no auto-lock coupling.
+    /// Resolve a [`SyncOutcome::Diverged`] with the user's [`DivergenceChoice`].
+    ///
+    /// - [`DivergenceChoice::AdoptRemote`] adopts the reviewed remote tip exactly
+    ///   (delegating to [`git::adopt_remote`]).
+    /// - [`DivergenceChoice::KeepMine`] re-encrypts the local-only `.age` entries
+    ///   onto the reviewed remote tip (with the current recipient set) and pushes
+    ///   (see [`Self::resolve_keep_mine`]).
+    ///
+    /// "Cancel" is client-side (the frontend just doesn't call this). Carries no
+    /// plaintext across the call boundary — for "keep mine" the local blobs are
+    /// decrypted in-process, used to re-encrypt, and dropped.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorCode::PullFfFailed`] if the remote moved past the
-    /// reviewed tip, or a git/signing error from the underlying adopt.
+    /// Returns [`ErrorCode::PullFfFailed`] if the remote moved past the reviewed
+    /// tip; [`ErrorCode::PushRejected`] for an irreconcilable same-secret
+    /// conflict or an undecryptable local entry under "keep mine"; or a
+    /// git/signing error otherwise. Under Enforce, an authenticity block returns
+    /// `Ok` with [`SyncResult::authenticity`] `.blocked = true` (HEAD unchanged).
     pub async fn resolve_sync_divergence(
         &self,
         expected_remote_oid: &str,
+        choice: DivergenceChoice,
     ) -> Result<SyncResult, Error> {
+        match choice {
+            DivergenceChoice::AdoptRemote => {
+                let repo_config = self.config.load_repo_config().await?;
+                let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+                let auth = repo_config.to_git_auth();
+                let policy = repo_config.authenticity;
+                let expected = expected_remote_oid.to_string();
+                spawn_blocking(move || git::adopt_remote(&repo_path, &auth, &policy, &expected))
+                    .await?
+            }
+            DivergenceChoice::KeepMine => self.resolve_keep_mine(expected_remote_oid).await,
+        }
+    }
+
+    /// "Keep mine" divergence resolution ([`DivergenceChoice::KeepMine`]):
+    /// re-encrypt the local-only `.age` entries onto the reviewed remote tip and
+    /// push, preserving local changes with the **current** recipient set (so a
+    /// remote recipient-list change is honored — not a stale-recipient rebase).
+    ///
+    /// Five steps, with crypto kept in `Store` (git stays pure): plan (single
+    /// fetch + stale-guard + authenticity-verify + replay/conflict computation)
+    /// → decrypt local blobs → advance to the reviewed tip (no second fetch)
+    /// → re-encrypt to current recipients → write + commit + push.
+    async fn resolve_keep_mine(&self, expected_remote_oid: &str) -> Result<SyncResult, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
         let policy = repo_config.authenticity;
+        let commit_identity = (
+            repo_config.commit_user_name.clone(),
+            repo_config.commit_user_email.clone(),
+        );
         let expected = expected_remote_oid.to_string();
-        spawn_blocking(move || git::adopt_remote(&repo_path, &auth, &policy, &expected)).await?
+
+        // 1. Plan: fetch once, stale-guard, authenticity-verify, compute the
+        //    replay set + conflict detection. Does NOT move HEAD.
+        let plan = match spawn_blocking(move || {
+            git::keep_local_plan(&repo_path, &auth, &policy, &expected)
+        })
+        .await??
+        {
+            git::KeepLocalOutcome::Blocked(result) => return Ok(result),
+            git::KeepLocalOutcome::Plan(p) => p,
+        };
+        let git::KeepLocalPlan {
+            fetched_oid,
+            replays,
+            deletes,
+            authenticity,
+        } = plan;
+
+        // 2. Decrypt each local blob to plaintext (identity). An undecryptable
+        //    local entry can't be re-encrypted → refuse (adopt or cancel rather
+        //    than silently drop it). Read the identity ONCE and derive our own
+        //    recipient here — the re-encrypt step (4) reuses both. `get_identity_bytes`
+        //    returns the cached *unlocked* identity, so this works for
+        //    passphrase-protected SSH keys (the PEM is already decrypted).
+        let identity = self.get_identity_bytes().await?;
+        let identity_str = str::from_utf8(&identity)
+            .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
+        let our_recipient = recipient::identity_to_recipient(identity_str, None)?;
+        let decrypted: Vec<(String, Zeroizing<Vec<u8>>)> = spawn_blocking(move || {
+            let mut out = Vec::with_capacity(replays.len());
+            for r in replays {
+                let plaintext = crypto::decrypt_bytes(&r.blob, &identity, None).map_err(|_| {
+                    Error::new(
+                        ErrorCode::PushRejected,
+                        format!(
+                            "Can't keep mine: \"{}\" can't be decrypted to re-encrypt. \
+                             Adopt the remote or cancel.",
+                            r.rel_path.trim_end_matches(".age")
+                        ),
+                    )
+                })?;
+                out.push((r.rel_path, Zeroizing::new(plaintext)));
+            }
+            Ok::<_, Error>(out)
+        })
+        .await??;
+
+        // 3. Advance to the reviewed remote tip — reuses the plan's fetched oid
+        //    (objects still in the DB), so no second fetch can race past the
+        //    reviewed tip and bypass the authenticity check under Enforce.
+        let fetched = fetched_oid.clone();
+        let repo_path_adv = self.repo_path().await?;
+        spawn_blocking(move || git::keep_local_advance(&repo_path_adv, &fetched)).await??;
+
+        // 4. Re-encrypt to the CURRENT (remote-tip) recipients + our own key
+        //    (our_recipient derived once in step 2).
+        let repo_path_re = self.repo_path().await?;
+        let mut recipients: Vec<String> = recipient::list_recipients(&repo_path_re)
+            .await?
+            .into_iter()
+            .map(|r| r.public_key)
+            .collect();
+        if !recipients.contains(&our_recipient) {
+            recipients.push(our_recipient);
+        }
+        let ciphertexts: Vec<(String, Vec<u8>)> = spawn_blocking(move || {
+            let mut out = Vec::with_capacity(decrypted.len());
+            for (rel, plaintext) in decrypted {
+                let ct = crypto::encrypt_to_recipients(&plaintext, &recipients)?;
+                out.push((rel, ct));
+            }
+            Ok::<_, Error>(out)
+        })
+        .await??;
+
+        // 5. Write the re-encrypted entries, apply local deletes, commit, push.
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path_fin = Path::new(&repo_config.local_path).to_path_buf();
+        let auth_fin = repo_config.to_git_auth();
+        let deletes = deletes.clone();
+        let head = spawn_blocking(move || {
+            git::keep_local_finalize(
+                &repo_path_fin,
+                &auth_fin,
+                &ciphertexts,
+                &deletes,
+                commit_identity.0.as_deref(),
+                commit_identity.1.as_deref(),
+            )
+        })
+        .await??;
+
+        Ok(SyncResult {
+            changed: true,
+            head,
+            authenticity,
+        })
+    }
+
+    /// Compute the local-vs-remote divergence preview on demand, WITHOUT moving
+    /// the working branch. Called by the write path after a push rejection (where
+    /// divergence is known to be real) so the app can surface the resolution
+    /// modal without a separate sync round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store is not configured or the fetch fails.
+    pub async fn sync_divergence_preview(&self) -> Result<SyncDivergence, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let auth = repo_config.to_git_auth();
+        spawn_blocking(move || git::preview_divergence(&repo_path, &auth)).await?
     }
 
     /// Look up the content template (`.pass-template`) that applies to `name`,

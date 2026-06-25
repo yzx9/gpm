@@ -4,6 +4,11 @@
 **Status:** Deprecated
 **Phase:** Future
 
+> Superseded by `0028-decoupled-writes-autosync.md` — that design removes sync
+> from the write path entirely (writes are local-only; sync is an app-layer
+> concern), which dissolves this question rather than answering it on its own
+> terms.
+
 ## Context
 
 `Store::set` does `self.sync().await?` (pull) before writing — gopass _PushPull_

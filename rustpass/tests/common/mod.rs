@@ -225,3 +225,126 @@ pub fn add_commit_to_bare(
 fn git2_time(secs: i64) -> git2::Time {
     git2::Time::new(secs, 0)
 }
+
+/// Commit `files` (rel path → bytes) in the store's working repo WITHOUT pushing
+/// — the unpushed local commit that creates divergence. Shared by the sync
+/// divergence / keep-mine tests.
+#[allow(dead_code)]
+pub fn local_commit_files(repo_path: &std::path::Path, files: &[(&str, &[u8])], message: &str) {
+    let repo = git2::Repository::open(repo_path).expect("open store repo");
+    for (rel, content) in files {
+        let file_path = repo_path.join(rel);
+        if let Some(p) = file_path.parent() {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        std::fs::write(&file_path, content).unwrap();
+    }
+    let mut index = repo.index().expect("index");
+    for (rel, _) in files {
+        index.add_path(std::path::Path::new(rel)).expect("add_path");
+    }
+    index.write().expect("write index");
+    let tree_id = index.write_tree().expect("write_tree");
+    let tree = repo.find_tree(tree_id).expect("find_tree");
+    let head = repo.head().expect("head").target().expect("oid");
+    let parent = repo.find_commit(head).expect("parent");
+    let sig = git2::Signature::now("local", "local@local").expect("sig");
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+        .expect("commit");
+}
+
+/// Configure a store against a fresh bare repo carrying a recipients file plus
+/// `base_entries` (encrypted). Returns `(bare_dir, config_dir, store, recipient)`.
+#[allow(dead_code)]
+pub async fn store_with_base(
+    base_entries: Vec<(&str, &[u8])>,
+) -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    rustpass::Store,
+    String,
+) {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo_with(
+        base_entries,
+        vec![(".gopass-recipients", recipient.as_bytes())],
+        &recipient,
+    );
+    let config_dir = tempfile::tempdir().expect("config dir");
+    let store = rustpass::Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("utf-8"),
+            None,
+            None,
+            None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure");
+    (bare_dir, config_dir, store, recipient)
+}
+
+/// Full HEAD oid of the bare repo's current branch tip.
+#[allow(dead_code)]
+pub fn bare_head_oid(bare_path: &std::path::Path) -> String {
+    let repo = git2::Repository::open(bare_path).expect("open bare");
+    repo.head()
+        .expect("head")
+        .target()
+        .expect("oid")
+        .to_string()
+}
+
+/// Read a file's raw bytes from the bare repo's HEAD tree.
+#[allow(dead_code)]
+pub fn bare_blob(bare_path: &std::path::Path, rel: &str) -> Vec<u8> {
+    let repo = git2::Repository::open(bare_path).expect("open bare");
+    let head = repo.head().expect("head");
+    let commit = repo
+        .find_commit(head.target().expect("oid"))
+        .expect("commit");
+    let tree = commit.tree().expect("tree");
+    let entry = tree
+        .get_path(std::path::Path::new(rel))
+        .unwrap_or_else(|_| panic!("{rel} in bare HEAD"));
+    repo.find_blob(entry.id()).expect("blob").content().to_vec()
+}
+
+/// Add a commit to the bare repo writing `files` (rel path → raw bytes) VERBATIM
+/// (not encrypted) — used to change `.gopass-recipients` on the remote.
+#[allow(dead_code)]
+pub fn commit_plain_files_to_bare(
+    bare_path: &std::path::Path,
+    files: Vec<(&str, &[u8])>,
+    message: &str,
+) -> git2::Oid {
+    let work_dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::clone(bare_path.to_str().unwrap(), work_dir.path()).unwrap();
+    let sig = git2::Signature::new("Test", "test@test.com", &git2_time(0)).unwrap();
+    for (path, content) in &files {
+        let file_path = work_dir.path().join(path);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file_path, content).unwrap();
+    }
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().target().unwrap();
+    let parent = repo.find_commit(head).unwrap();
+    let commit_id = repo
+        .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+        .unwrap();
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    let mut remote = repo.find_remote("origin").unwrap();
+    remote.push(&[&refspec], None).unwrap();
+    commit_id
+}

@@ -31,7 +31,8 @@ use std::sync::{Arc, Mutex};
 
 use rustpass::template::{self, CreatePreset};
 use rustpass::{
-    ConflictChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
+    ConflictChoice, DivergenceChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome,
+    WriteResult,
 };
 use tauri::{AppHandle, Runtime, State};
 use zeroize::Zeroizing;
@@ -328,6 +329,9 @@ pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
 /// Resolve a pull/sync divergence by adopting the remote tip the user reviewed
 /// (`expected_remote_oid`). "Cancel" is client-side — the frontend just doesn't
 /// call this. Returns the post-adopt result so the badge can refresh.
+///
+/// (PR1 keeps the adopt-remote behavior; PR2 lets the frontend pass a
+/// [`DivergenceChoice`] so "keep mine" is reachable from the context-aware modal.)
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn resolve_sync_divergence(
@@ -336,7 +340,7 @@ pub(crate) async fn resolve_sync_divergence(
 ) -> Result<SyncResult, Error> {
     state
         .store
-        .resolve_sync_divergence(&expected_remote_oid)
+        .resolve_sync_divergence(&expected_remote_oid, DivergenceChoice::AdoptRemote)
         .await
 }
 
