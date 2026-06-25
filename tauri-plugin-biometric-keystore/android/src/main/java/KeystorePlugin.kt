@@ -23,6 +23,7 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -196,12 +197,44 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(ret)
     }
 
-    /** `true` if a sealed passphrase exists in prefs. Non-prompting. */
+    /** `true` iff a sealed passphrase exists AND its keystore key still inits
+     *  cleanly. Non-prompting. A stale key (invalidated by a fingerprint /
+     *  lock-screen change) → false, so the cold launch skips the doomed
+     *  auto-prompt and lands on the passphrase form. ("Can I prompt right now?"
+     *  stays with [is_available]; "is a STRONG biometric enrolled?" is answered
+     *  by the key itself — removing all biometrics invalidates it.) */
     @Command
     fun has_stored(invoke: Invoke) {
+        // keyUsable() is R-gated; the inline version guard satisfies lint's
+        // NewApi and short-circuits on API <30, where readCipherData() is null
+        // anyway (store is R-only).
+        val stored = readCipherData() != null &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            keyUsable()
         val ret = JSObject()
-        ret.put("stored", readCipherData() != null)
+        ret.put("stored", stored)
         invoke.resolve(ret)
+    }
+
+    /** Whether the sealed key still inits — i.e. is usable. Non-prompting: init
+     *  on an authentication-bound key does NOT require auth (see [store]'s
+     *  [encryptionCipher], called before the prompt); only the prompt itself
+     *  does. Mirrors [retrieve]'s [decryptionCipher] failure path on
+     *  `KeyPermanentlyInvalidatedException`. Any init failure ⇒ not usable ⇒
+     *  the app falls back to the passphrase form.
+     *
+     *  Keep this body free of API-30-only symbols: `@RequiresApi(R)` is lint-only,
+     *  not runtime-enforced, so an R-only call here could verify-error on API <30
+     *  if ever reached (today guarded out by has_stored's SDK_INT check). */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun keyUsable(): Boolean = try {
+        encryptionCipher()
+        true
+    } catch (e: Exception) {
+        // Class name only (never secrets) so a provider bug or probe regression
+        // is debuggable, not indistinguishable from "biometric is off".
+        Log.w("gpm_keystore", "has_stored probe failed: ${safeName(e)}")
+        false
     }
 
     /**

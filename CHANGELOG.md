@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Delete a secret right from its detail page — gpm removes it, commits, and syncs the change like any other edit. If the remote has moved, the delete is safely rolled back and you're asked to sync first. gpm has no in-app undo, so a deleted entry is gone from the app and recoverable only via git history with external tooling
 - Edit a secret's password and notes in place from its detail page — gpm saves, commits, and syncs the change like any other edit, without re-applying a creation template. If another device changed the same entry and your save can't fast-forward, gpm asks how to resolve it (keep yours, keep theirs, or cancel) instead of failing. Caveat: if another device's newer edit to the same entry is fast-forwarded over by your save, that newer change is overwritten on the tip — recoverable via git history — until a follow-up makes edit base-version-aware
 
+### Fixed
+
+- On Android, if you enrolled a new fingerprint or face after enabling biometric unlock, gpm no longer pops a biometric prompt that can only fail on every launch — it goes straight to the passphrase form so you can re-enable biometric
+
 ## [v0.6.0] - 2026-06-20
 
 ### Added
