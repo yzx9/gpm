@@ -365,6 +365,10 @@ function openCreate() {
   router.push({ name: "create" });
 }
 
+function openGenerate() {
+  router.push({ name: "generate" });
+}
+
 function openSettings() {
   router.push({ name: "settings" });
 }
@@ -440,6 +444,14 @@ onBeforeUnmount(() => {
           title="Pull updates"
         >
           <span aria-hidden="true">{{ pulling ? "⏳" : "↓" }}</span> Pull
+        </button>
+        <button
+          @click="openGenerate"
+          class="btn-sm"
+          aria-label="Generate passwords"
+          title="Generate passwords"
+        >
+          <span aria-hidden="true">🎲</span>
         </button>
         <button
           @click="openSettings"

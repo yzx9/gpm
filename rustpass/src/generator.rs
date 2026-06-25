@@ -73,8 +73,12 @@ pub struct GenerateOptions<'a> {
 /// Generate a password per `opts`, mirroring gopass's create-wizard semantics.
 ///
 /// With `charset` set the result is random over that alphabet (the PIN path);
-/// otherwise the selected [`GenerateMode`] drives it. The result is wrapped in
-/// [`Zeroizing<String>`] so the in-process copy is wiped on drop.
+/// otherwise the selected [`GenerateMode`] drives it. For the charset-less modes,
+/// `min_len`/`max_len` shape the length: `Random` lands at [`target_len`] (`min ==
+/// max` pins an exact length; `None` keeps [`DEFAULT_PASSWORD_LEN`]), and
+/// `Memorable` builds to at least `min_len` ([`MEMORABLE_MIN_LEN`] by default). The
+/// result is wrapped in [`Zeroizing<String>`] so the in-process copy is wiped on
+/// drop.
 ///
 /// # Errors
 ///
@@ -84,10 +88,21 @@ pub fn generate_password(opts: &GenerateOptions<'_>) -> Result<Zeroizing<String>
     match opts.charset {
         Some(cs) => generate_from_charset(cs, opts.min_len, opts.max_len, opts.strict),
         None => match opts.mode {
-            GenerateMode::Random => {
-                random_chars(default_alphabet(), DEFAULT_PASSWORD_LEN, opts.strict)
-            }
-            GenerateMode::Memorable => memorable_password(),
+            GenerateMode::Random => random_chars(
+                default_alphabet(),
+                target_len(opts.min_len, opts.max_len),
+                opts.strict,
+            ),
+            GenerateMode::Memorable => memorable_password_with(
+                // Clamp like the random path's `target_len`: memorable honors
+                // `min_len` directly, and the renderer's `max="256"` is advisory,
+                // not a trust boundary. Without this, `min_len: 0` yields an empty
+                // password and a huge `min_len` is an unbounded allocation.
+                opts.min_len
+                    .unwrap_or(MEMORABLE_MIN_LEN)
+                    .clamp(1, MAX_PASSWORD_LEN),
+                wordlist(),
+            ),
             GenerateMode::Xkcd => xkcd_password(),
         },
     }
@@ -155,12 +170,6 @@ fn sample_string(alphabet: &[u8], len: usize) -> Result<String, Error> {
         out.push(char::from(b));
     }
     Ok(out)
-}
-
-/// Memorable password over the bundled wordlist: `word + digit` repeated until
-/// at least [`MEMORABLE_MIN_LEN`] characters long (gopass `memorable.go` shape).
-fn memorable_password() -> Result<Zeroizing<String>, Error> {
-    memorable_password_with(MEMORABLE_MIN_LEN, wordlist())
 }
 
 /// Memorable password over a supplied wordlist (test seam).
@@ -386,6 +395,93 @@ mod tests {
             assert!(
                 d.is_some_and(|c| c.is_ascii_digit()),
                 "missing digit in {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn random_honors_explicit_length() {
+        // min == max pins the exact length (target_len starts at 24 and only raises).
+        let opts = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: None,
+            min_len: Some(8),
+            max_len: Some(8),
+            strict: false,
+        };
+        for _ in 0..16 {
+            let pw = generate_password(&opts).unwrap();
+            let s = &*pw;
+            assert_eq!(s.len(), 8, "wrong length: {s}");
+        }
+    }
+
+    #[test]
+    fn random_honors_explicit_long_length() {
+        let opts = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: None,
+            min_len: Some(100),
+            max_len: Some(100),
+            strict: false,
+        };
+        let pw = generate_password(&opts).unwrap();
+        let s = &*pw;
+        assert_eq!(s.len(), 100, "wrong length: {s}");
+    }
+
+    #[test]
+    fn memorable_honors_min_len() {
+        let opts = GenerateOptions {
+            mode: GenerateMode::Memorable,
+            charset: None,
+            min_len: Some(40),
+            max_len: None,
+            strict: false,
+        };
+        for _ in 0..16 {
+            let pw = generate_password(&opts).unwrap();
+            let s = &*pw;
+            assert!(s.len() >= 40, "memorable below min: {s}");
+        }
+    }
+
+    #[test]
+    fn memorable_default_when_min_len_none() {
+        // Regression: a null min_len still yields the built-in default floor.
+        let opts = GenerateOptions {
+            mode: GenerateMode::Memorable,
+            charset: None,
+            min_len: None,
+            max_len: None,
+            strict: false,
+        };
+        let pw = generate_password(&opts).unwrap();
+        let s = &*pw;
+        assert!(s.len() >= MEMORABLE_MIN_LEN, "below default min: {s}");
+    }
+
+    #[test]
+    fn memorable_clamps_an_extreme_min_len() {
+        // 0 must not yield an empty password; usize::MAX must not hang/OOM.
+        // Memorable honors `min_len` directly, so it must be capped like the
+        // random path's `target_len`.
+        for min in [0_usize, usize::MAX] {
+            let opts = GenerateOptions {
+                mode: GenerateMode::Memorable,
+                charset: None,
+                min_len: Some(min),
+                max_len: None,
+                strict: false,
+            };
+            let pw = generate_password(&opts).unwrap();
+            let s = &*pw;
+            assert!(!s.is_empty(), "memorable empty for min={min}");
+            // Capped at MAX_PASSWORD_LEN, plus at most one trailing word+digit.
+            assert!(
+                s.len() <= MAX_PASSWORD_LEN + 16,
+                "memorable unbounded for min={min}: got {}",
+                s.len()
             );
         }
     }

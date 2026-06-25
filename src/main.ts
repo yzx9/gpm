@@ -16,12 +16,14 @@ import EntryDetailPage from "./pages/EntryDetailPage.vue";
 import SettingsPage from "./pages/SettingsPage.vue";
 import HistoryPage from "./pages/HistoryPage.vue";
 import CreatePage from "./pages/CreatePage.vue";
+import GeneratePasswordPage from "./pages/GeneratePasswordPage.vue";
 
 const routes = [
   { path: "/", redirect: "/entries" },
   { path: "/setup", name: "setup", component: SetupPage },
   { path: "/entries", name: "entries", component: EntryListPage },
   { path: "/create", name: "create", component: CreatePage },
+  { path: "/generate", name: "generate", component: GeneratePasswordPage },
   {
     path: "/entry/:pathMatch(.*)",
     name: "entry",
