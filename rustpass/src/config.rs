@@ -219,6 +219,10 @@ impl Config {
             lock_mode: LockMode::default(),
             view_clear_secs: None,
             clipboard_clear_secs: None,
+            // The app-launch biometric gate and its identity-auto-unlock opt-in
+            // are off at setup; the user enables them from Settings.
+            biometric_app_lock: false,
+            unlock_identity_with_app: false,
             authenticity: AuthenticityConfig::default(),
         };
         // Delegate to the atomic variant so `repo.json` is never observed
@@ -329,6 +333,17 @@ impl Config {
     }
 }
 
+/// Skip-helper for the default-`false` bool flags on [`RepoConfig`]: keeps
+/// `repo.json` free of those keys when the flag was never toggled, so an older
+/// config (written before the field existed) is byte-identical to a fresh one.
+/// Takes `&bool` (not by value) because serde's `skip_serializing_if` requires a
+/// `fn(&T) -> bool`.
+#[must_use]
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde skip_serializing_if needs &T
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// Repository configuration persisted to disk.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RepoConfig {
@@ -363,6 +378,24 @@ pub struct RepoConfig {
     /// `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub clipboard_clear_secs: Option<u64>,
+    /// Whether the app-launch biometric gate is enabled. When `true` the at-rest
+    /// master key is sealed in the biometric-gated Keystore (injected after the
+    /// unlock prompt, wiped on background) instead of the auth-free store, so the
+    /// whole store is unreadable until the user authenticates on launch/resume.
+    /// Skipped when `false` (default) so a config that never toggled it — and one
+    /// written before the field existed — are byte-identical. The authoritative
+    /// runtime signal at startup is the Keystore probe (readable before
+    /// `repo.json`); this flag is the persisted intent for display/consistency.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub biometric_app_lock: bool,
+    /// Whether a successful app-unlock should also unlock the identity session
+    /// (no separate identity prompt on the next copy/show). Independent of the
+    /// auto-lock timing presets and only meaningful when [`biometric_app_lock`]
+    /// is `true`; defaults off. Read after the app-unlock injects the master key.
+    ///
+    /// [`biometric_app_lock`]: RepoConfig::biometric_app_lock
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unlock_identity_with_app: bool,
     /// Repository authenticity config (verification mode + trusted signing
     /// keys + ignored issues). Skipped from serialization when default so
     /// users who never enable authenticity see no change to `repo.json`'s
@@ -1029,5 +1062,59 @@ mod tests {
             cfg2.clipboard_clear_secs_effective(),
             DEFAULT_CLIPBOARD_CLEAR_SECS
         );
+    }
+
+    #[tokio::test]
+    async fn repo_config_app_lock_flags_roundtrip() {
+        let (config, _dir) = create_config();
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let rc = RepoConfig {
+            url: "https://example.com/repo.git".to_string(),
+            local_path: "/local/path".to_string(),
+            biometric_app_lock: true,
+            unlock_identity_with_app: true,
+            ..Default::default()
+        };
+        config.save_repo_config_full(&rc).await.unwrap();
+
+        let cfg = config.load_repo_config().await.unwrap();
+        assert!(cfg.biometric_app_lock);
+        assert!(cfg.unlock_identity_with_app);
+    }
+
+    #[tokio::test]
+    async fn repo_config_app_lock_flags_omitted_when_false() {
+        let (config, _dir) = create_config();
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let rc = RepoConfig {
+            url: "https://example.com/repo.git".to_string(),
+            local_path: "/local/path".to_string(),
+            // Both flags left at their default (false).
+            ..Default::default()
+        };
+        config.save_repo_config_full(&rc).await.unwrap();
+
+        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        assert!(
+            !json.contains("biometric_app_lock"),
+            "false flag must not be serialized"
+        );
+        assert!(
+            !json.contains("unlock_identity_with_app"),
+            "false flag must not be serialized"
+        );
+    }
+
+    #[tokio::test]
+    async fn repo_config_app_lock_flags_default_false_for_old_config() {
+        let (config, _dir) = create_config();
+        // A config written before the app-lock flags existed.
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let old_json = r#"{"url":"https://example.com/repo.git","pat":"t","local_path":"/p"}"#;
+        std::fs::write(config.repo_config_path(), old_json).unwrap();
+
+        let cfg = config.load_repo_config().await.unwrap();
+        assert!(!cfg.biometric_app_lock);
+        assert!(!cfg.unlock_identity_with_app);
     }
 }

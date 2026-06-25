@@ -1632,6 +1632,35 @@ impl Store {
         Ok(rc)
     }
 
+    /// Persist the app-launch biometric gate flag. This only stores the intent;
+    /// the actual master-key migration between the auth-free and biometric-gated
+    /// Keystore stores is orchestrated by the app layer (which owns the plugins),
+    /// so the flag and the key's location are kept consistent together there.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `repo.json` cannot be read or written.
+    pub async fn set_biometric_app_lock(&self, enabled: bool) -> Result<RepoConfig, Error> {
+        let mut rc = self.config.load_repo_config().await?;
+        rc.biometric_app_lock = enabled;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
+    /// Persist the "unlock the identity together with the app" opt-in. A pure
+    /// preference (no key migration), read by the app-unlock path right after the
+    /// master key is injected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `repo.json` cannot be read or written.
+    pub async fn set_unlock_identity_with_app(&self, enabled: bool) -> Result<RepoConfig, Error> {
+        let mut rc = self.config.load_repo_config().await?;
+        rc.unlock_identity_with_app = enabled;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
     /// The default commit author identity, for UI display. Reads the shipped
     /// default so the frontend never hardcodes it.
     #[must_use]
