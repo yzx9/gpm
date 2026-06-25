@@ -31,6 +31,7 @@ use tokio::task::JoinHandle;
 mod authenticity;
 mod biometric;
 mod config;
+mod generator;
 mod identity;
 mod read;
 mod setup;
@@ -187,6 +188,8 @@ pub fn run() {
             read::copy_password,
             read::show_password,
             read::show_remote_secret,
+            // generator
+            generator::generate_password,
             // write / sync
             write::pull_repo,
             write::push_repo,

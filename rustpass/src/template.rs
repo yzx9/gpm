@@ -141,7 +141,10 @@ pub fn lookup_template_in_repo(repo_path: &Path, name: &str) -> Option<String> {
 
 // ── Create presets (the "create from a few options" flow) ──────────────────
 
-/// One input field of a create preset.
+/// One input field of a create preset. Mirrors gopass's create-wizard
+/// `Attribute` (`type` / `charset` / `min` / `max` / `strict`) so the UI can
+/// render keyboard hints, mask secret fields, and drive the password generator
+/// the same way gopass does.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct PresetField {
     /// Key stored in the secret body (AKV) and matched against [`CreatePreset::name_from`].
@@ -150,6 +153,21 @@ pub struct PresetField {
     pub label: &'static str,
     /// Whether the field must be supplied.
     pub required: bool,
+    /// gopass field `type`: `"password"` (generatable + masked), `"hostname"`,
+    /// `"string"`, or `"multiline"`. Serialized as `"type"` for gopass compatibility.
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    /// gopass per-attribute `charset`. When set on a `"password"` field, the
+    /// generator produces characters only from this set (e.g. `"0123456789"`
+    /// for a PIN); `None` means the default alphabet + a mode choice.
+    pub charset: Option<&'static str>,
+    /// gopass `min` length bound for a generated value.
+    pub min: Option<usize>,
+    /// gopass `max` length bound for a generated value.
+    pub max: Option<usize>,
+    /// gopass `strict`: require every character class present in the alphabet
+    /// to be represented in a generated value.
+    pub strict: bool,
 }
 
 /// A built-in secret-creation preset (gopass `gopass create` wizard entry).
@@ -177,16 +195,31 @@ const WEBSITE_PRESET: CreatePreset = CreatePreset {
             key: "url",
             label: "Website URL",
             required: true,
+            kind: "hostname",
+            charset: None,
+            min: None,
+            max: None,
+            strict: false,
         },
         PresetField {
             key: "username",
             label: "Username",
             required: true,
+            kind: "string",
+            charset: None,
+            min: None,
+            max: None,
+            strict: false,
         },
         PresetField {
             key: "password",
             label: "Password",
             required: true,
+            kind: "password",
+            charset: None,
+            min: None,
+            max: None,
+            strict: false,
         },
     ],
 };
@@ -201,16 +234,31 @@ const PIN_PRESET: CreatePreset = CreatePreset {
             key: "authority",
             label: "Authority",
             required: true,
+            kind: "string",
+            charset: None,
+            min: None,
+            max: None,
+            strict: false,
         },
         PresetField {
             key: "application",
             label: "Entity",
             required: true,
+            kind: "string",
+            charset: None,
+            min: None,
+            max: None,
+            strict: false,
         },
         PresetField {
             key: "password",
             label: "PIN",
             required: true,
+            kind: "password",
+            charset: Some("0123456789"),
+            min: Some(1),
+            max: Some(64),
+            strict: false,
         },
     ],
 };

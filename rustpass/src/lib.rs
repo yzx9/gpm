@@ -53,12 +53,16 @@ pub mod crypto;
 pub mod entry;
 /// Error types with safe (no-secret) messages.
 pub mod error;
+/// Password generator (gopass `pkg/pwgen` analogue).
+pub mod generator;
 /// Git clone and pull operations.
 pub mod git;
 /// Identity type classification.
 pub mod identity;
 /// Recipient discovery and identity validation.
 pub mod recipient;
+/// Cryptographically-strong randomness primitives (OS CSPRNG + uniform index).
+pub mod rng;
 /// Decrypted secret type (gopass.Secret aligned).
 pub mod secret;
 /// Git commit signature extraction + SSH-sig verification (repo authenticity).
@@ -74,6 +78,7 @@ pub mod template;
 pub use config::{Config, LockMode, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
+pub use generator::{GenerateMode, GenerateOptions, generate_password};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use secret::Secret;
 pub use signing::{

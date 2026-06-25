@@ -10,6 +10,8 @@ import type {
   AppError,
   ConflictChoice,
   CreatePreset,
+  GenerateMode,
+  PresetField,
   WriteConflict,
   WriteOutcome,
 } from "../types";
@@ -28,6 +30,14 @@ const activePreset = ref<CreatePreset | null>(null);
 const fields = ref<Record<string, string>>({});
 const customName = ref("");
 const customContent = ref("");
+
+// ── Password generator ────────────────────────────────────────────────────
+const genMode = ref<GenerateMode>("random");
+const generating = ref(false);
+const revealed = ref<Record<string, boolean>>({});
+// Bumped on every generate and on lock; an in-flight generate whose token no
+// longer matches is stale and must not write its result into state.
+let generateToken = 0;
 
 // ── Template hint / live preview (custom mode) ────────────────────────────
 const hasTemplate = ref(false);
@@ -49,6 +59,11 @@ const resolving = ref(false);
 // The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
 // secret the moment the identity locks.
 onLock(() => {
+  // Cancel any in-flight generate so its resolved promise can't repopulate a
+  // secret after this wipe, and drop reveal state so fields don't reopen plain.
+  generateToken++;
+  generating.value = false;
+  revealed.value = {};
   fields.value = {};
   customContent.value = "";
 });
@@ -60,6 +75,30 @@ function showToast(message: string) {
     toast.value = "";
     toastTimer = null;
   }, 3000);
+}
+
+/** Generate a password for a generatable field via the backend (CSPRNG). */
+async function onGeneratePassword(f: PresetField) {
+  const myToken = ++generateToken;
+  generating.value = true;
+  try {
+    const pw = await invoke<string>("generate_password", {
+      mode: genMode.value,
+      charset: f.charset,
+      minLen: f.min,
+      maxLen: f.max,
+      strict: f.strict,
+    });
+    // A lock or a newer generate superseded this call — drop the result.
+    if (myToken !== generateToken) return;
+    fields.value[f.key] = pw;
+  } catch (e) {
+    if (myToken !== generateToken) return;
+    const appError = e as AppError;
+    showToast(appError?.message || "Could not generate a password");
+  } finally {
+    if (myToken === generateToken) generating.value = false;
+  }
 }
 
 async function loadPresets() {
@@ -77,6 +116,7 @@ async function loadPresets() {
 function pickPreset(p: CreatePreset) {
   activePreset.value = p;
   fields.value = Object.fromEntries(p.fields.map((f) => [f.key, ""]));
+  revealed.value = {};
   error.value = "";
   mode.value = "preset";
 }
@@ -95,6 +135,7 @@ function backToPick() {
   mode.value = "pick";
   activePreset.value = null;
   fields.value = {};
+  revealed.value = {};
   customName.value = "";
   customContent.value = "";
   hasTemplate.value = false;
@@ -109,6 +150,7 @@ function goBack() {
 
 const canSubmit = computed(() => {
   if (submitting.value) return false;
+  if (generating.value) return false;
   if (mode.value === "preset" && activePreset.value) {
     return activePreset.value.fields
       .filter((f) => f.required)
@@ -224,6 +266,7 @@ onBeforeUnmount(() => {
   if (toastTimer) clearTimeout(toastTimer);
   // Wipe any in-form secret values (e.g. an auto-lock redirect mid-create).
   fields.value = {};
+  revealed.value = {};
   customContent.value = "";
 });
 </script>
@@ -280,13 +323,52 @@ onBeforeUnmount(() => {
           <label :for="`f-${f.key}`" class="text-sm font-medium">
             {{ f.label }}<span v-if="f.required" aria-hidden="true">*</span>
           </label>
-          <input
-            :id="`f-${f.key}`"
-            v-model="fields[f.key]"
-            type="text"
-            class="input-base"
-            :autocomplete="f.key === 'password' ? 'new-password' : 'off'"
-          />
+          <div class="field-row">
+            <input
+              :id="`f-${f.key}`"
+              v-model="fields[f.key]"
+              :type="
+                f.type === 'password' && !revealed[f.key] ? 'password' : 'text'
+              "
+              class="input-base flex-1"
+              :autocomplete="f.key === 'password' ? 'new-password' : 'off'"
+              :inputmode="f.charset === '0123456789' ? 'numeric' : undefined"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+            <select
+              v-if="f.type === 'password' && f.charset == null"
+              v-model="genMode"
+              class="gen-select"
+              :disabled="generating"
+              aria-label="Password style"
+            >
+              <option value="random">Random</option>
+              <option value="memorable">Memorable</option>
+              <option value="xkcd">Passphrase</option>
+            </select>
+            <button
+              v-if="f.type === 'password'"
+              type="button"
+              class="icon-btn"
+              :disabled="generating"
+              :aria-label="revealed[f.key] ? 'Hide' : 'Show'"
+              @click="revealed[f.key] = !revealed[f.key]"
+            >
+              {{ revealed[f.key] ? "🙈" : "👁" }}
+            </button>
+            <button
+              v-if="f.type === 'password'"
+              type="button"
+              class="icon-btn"
+              :disabled="generating"
+              aria-label="Generate password"
+              @click="onGeneratePassword(f)"
+            >
+              🎲
+            </button>
+          </div>
         </div>
         <button type="submit" class="btn-primary" :disabled="!canSubmit">
           {{ submitting ? "Saving…" : "Save secret" }}
@@ -385,6 +467,44 @@ onBeforeUnmount(() => {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-ring);
+}
+
+.field-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.gen-select {
+  padding: 0 0.5rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: inherit;
+  font-size: var(--text-sm);
+  min-height: 48px;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  width: 48px;
+  min-height: 48px;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--color-hover);
+}
+
+.icon-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-primary {

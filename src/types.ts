@@ -235,7 +235,20 @@ export interface PresetField {
   key: string;
   label: string;
   required: boolean;
+  /** gopass field `type`: `"password"` (generatable + masked), `"hostname"`, `"string"`, `"multiline"`. */
+  type: string;
+  /** gopass per-attribute `charset`; locks generation when set on a `"password"` field (e.g. `"0123456789"` for a PIN). */
+  charset: string | null;
+  /** gopass `min` length bound for a generated value. */
+  min: number | null;
+  /** gopass `max` length bound for a generated value. */
+  max: number | null;
+  /** gopass `strict`: require every character class present in the alphabet. */
+  strict: boolean;
 }
+
+/** Password generator method (mirrors `rustpass::GenerateMode`, serialized lowercase). */
+export type GenerateMode = "random" | "memorable" | "xkcd";
 
 /** A built-in secret-creation preset (mirrors `rustpass::template::CreatePreset`). */
 export interface CreatePreset {

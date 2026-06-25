@@ -35,6 +35,7 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use zeroize::Zeroizing;
 
 use crate::error::{Error, ErrorCode};
+use crate::rng::fill_random;
 
 /// Envelope magic — distinguishes an at-rest blob from legacy plaintext.
 const MAGIC: &[u8; 7] = b"GPMATR1";
@@ -64,12 +65,6 @@ pub fn generate_master_key() -> Result<[u8; MASTER_KEY_LEN], Error> {
     let mut key = [0u8; MASTER_KEY_LEN];
     fill_random(&mut key)?;
     Ok(key)
-}
-
-/// Fill `out` with cryptographically-strong random bytes from the OS RNG.
-fn fill_random(out: &mut [u8]) -> Result<(), Error> {
-    getrandom::getrandom(out)
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("OS RNG failed: {e}")))
 }
 
 /// Returns `true` if `raw` begins with the at-rest envelope magic — i.e. it is
