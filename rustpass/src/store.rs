@@ -220,6 +220,15 @@ impl Store {
         }
     }
 
+    /// Replace the at-rest master key at runtime. The app-launch biometric lock
+    /// builds the store without the key (so `repo.json` is unreadable until the
+    /// unlock prompt), injects it via this call after a successful biometric
+    /// unlock, and wipes it (`None`) when the process is backgrounded. See
+    /// [`Config::set_master_key`].
+    pub fn set_master_key(&self, master_key: Option<[u8; 32]>) {
+        self.config.set_master_key(master_key);
+    }
+
     /// One-time migration: wrap any plaintext config files in the at-rest
     /// envelope. No-op on desktop (no master key) and for already-wrapped
     /// files. Safe to call on every startup.

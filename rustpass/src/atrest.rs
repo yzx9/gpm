@@ -30,6 +30,9 @@
 //! defend a local **write** attacker (notably one who tampers the cloned
 //! `repo/`).
 
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use zeroize::Zeroizing;
@@ -78,16 +81,37 @@ pub fn is_envelope(raw: &[u8]) -> bool {
 ///
 /// Construct with [`AtRest::new`]; when the key is `None` (desktop / tests)
 /// [`AtRest::seal`] and [`AtRest::unseal`] are passthroughs (no envelope), so
-/// the rest of the codebase is uniform across platforms.
+/// the rest of the codebase is uniform across platforms. The key is stored
+/// behind a [`RwLock`] so it can be replaced at runtime via [`AtRest::set_key`]
+/// — used by the app-launch biometric lock to inject the key after the unlock
+/// prompt and to wipe it (back to `None`) when the process is backgrounded, so
+/// a locked app cannot read the store even from a memory snapshot.
 pub(crate) struct AtRest {
-    /// The injected master key. `None` ⇒ passthrough (plaintext, no envelope).
-    key: Option<Zeroizing<[u8; MASTER_KEY_LEN]>>,
+    /// The injected master key. `None` ⇒ passthrough (plaintext, no envelope) on
+    /// desktop/tests; also the transient "key wiped" state while the app-launch
+    /// biometric lock is engaged — envelopes then fail `AtRestKeyUnavailable`
+    /// until the key is re-injected after the unlock prompt.
+    key: RwLock<Option<Zeroizing<[u8; MASTER_KEY_LEN]>>>,
+    /// Monotonic: latched `true` the first time a key is injected, never reset.
+    /// Lets [`AtRest::seal`] tell desktop/test passthrough (a key was never set,
+    /// so no envelope exists on disk) apart from the app-lock "key wiped
+    /// mid-session" state, and refuse to silently write plaintext where an
+    /// envelope is expected. Atomic because it is read on the seal hot path
+    /// without taking the key's [`RwLock`]; it only ever flips `false → true`,
+    /// so any read is conservative.
+    ever_keyed: AtomicBool,
 }
 
 impl std::fmt::Debug for AtRest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redacted = self
+            .key
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|_| "<redacted>"));
         f.debug_struct("AtRest")
-            .field("key", &self.key.as_ref().map(|_| "<redacted>"))
+            .field("key", &redacted)
+            .field("ever_keyed", &self.ever_keyed.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -96,21 +120,58 @@ impl AtRest {
     /// Create a new wrapper. `None` selects passthrough mode.
     pub(crate) fn new(master_key: Option<[u8; MASTER_KEY_LEN]>) -> Self {
         Self {
-            key: master_key.map(Zeroizing::new),
+            key: RwLock::new(master_key.map(Zeroizing::new)),
+            ever_keyed: AtomicBool::new(master_key.is_some()),
+        }
+    }
+
+    /// Replace the master key. `None` wipes it — passthrough on desktop/tests,
+    /// and the "locked" state (envelopes then fail `AtRestKeyUnavailable`) for
+    /// the app-launch biometric lock. Used to inject the key after the unlock
+    /// prompt and to wipe it when the process is backgrounded. Latches
+    /// `ever_keyed` on the first `Some`, so a later wipe cannot make [`seal`]
+    /// forget that envelopes exist on disk.
+    ///
+    /// [`seal`]: AtRest::seal
+    pub(crate) fn set_key(&self, master_key: Option<[u8; MASTER_KEY_LEN]>) {
+        if let Ok(mut guard) = self.key.write() {
+            *guard = master_key.map(Zeroizing::new);
+        }
+        if master_key.is_some() {
+            self.ever_keyed.store(true, Ordering::Release);
         }
     }
 
     /// Seal `plaintext` for the named slot into an at-rest envelope.
     ///
-    /// In passthrough mode (`None` key) the plaintext is returned unchanged.
+    /// In passthrough mode (`None` key, and no key was ever injected —
+    /// desktop/tests) the plaintext is returned unchanged. If a key was injected
+    /// once and is now `None` (app-lock wiped it), this refuses with
+    /// [`ErrorCode::AtRestKeyUnavailable`] rather than silently downgrading an
+    /// on-disk envelope to plaintext — the last line of defense behind the
+    /// app-lock command gating.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorCode::StoreError`] on AEAD failure (should not happen
-    /// with a valid 32-byte key and a fresh nonce).
+    /// with a valid 32-byte key and a fresh nonce) or if the key lock is
+    /// poisoned.
     pub(crate) fn seal(&self, name: &str, plaintext: &[u8]) -> Result<Vec<u8>, Error> {
-        let Some(key) = self.key.as_ref() else {
-            // Passthrough: no envelope, plaintext as-is.
+        let guard = self
+            .key
+            .read()
+            .map_err(|_| Error::new(ErrorCode::StoreError, "at-rest key lock poisoned"))?;
+        let Some(key) = guard.as_ref() else {
+            if self.ever_keyed.load(Ordering::Acquire) {
+                // A key was injected once but is wiped now (app-lock engaged) —
+                // refuse to write plaintext where an envelope is expected.
+                return Err(Error::new(
+                    ErrorCode::AtRestKeyUnavailable,
+                    "At-rest master key is wiped — unlock the app before writing",
+                ));
+            }
+            // Desktop/test passthrough: no key was ever set, so no envelope
+            // exists on disk; plaintext as-is.
             return Ok(plaintext.to_vec());
         };
 
@@ -154,7 +215,11 @@ impl AtRest {
         }
 
         // It is an envelope — we must have the key to open it.
-        let Some(key) = self.key.as_ref() else {
+        let guard = self
+            .key
+            .read()
+            .map_err(|_| Error::new(ErrorCode::StoreError, "at-rest key lock poisoned"))?;
+        let Some(key) = guard.as_ref() else {
             return Err(Error::new(
                 ErrorCode::AtRestKeyUnavailable,
                 "At-rest data is encrypted but the master key is unavailable — re-setup required",
@@ -319,5 +384,91 @@ mod tests {
         let other = AtRest::new(Some(generate_master_key().unwrap()));
         let err = other.unseal("repo_config", &sealed).unwrap_err();
         assert_eq!(err.code, "AT_REST_TAMPERED");
+    }
+
+    #[test]
+    fn set_key_inject_wipe_and_reinject_roundtrip() {
+        // The app-launch biometric lock model: the store is built without the
+        // key, the key is injected after the unlock prompt, wiped when the
+        // process is backgrounded, then re-injected on the next unlock.
+        let key = generate_master_key().unwrap();
+        let ar = AtRest::new(None);
+
+        // No key ⇒ passthrough (no envelope), mirroring desktop / pre-unlock.
+        assert!(!is_envelope(&ar.seal("repo_config", b"x").unwrap()));
+
+        // Inject after unlock ⇒ seals real envelopes that round-trip.
+        ar.set_key(Some(key));
+        let sealed = ar.seal("repo_config", b"secret").unwrap();
+        assert!(is_envelope(&sealed));
+        assert_eq!(ar.unseal("repo_config", &sealed).unwrap(), b"secret");
+
+        // Wipe on background ⇒ the store becomes unreadable (the lock state):
+        // an existing envelope can no longer be opened, the signal the app-lock
+        // overlay relies on.
+        ar.set_key(None);
+        let err = ar.unseal("repo_config", &sealed).unwrap_err();
+        assert_eq!(err.code, "AT_REST_KEY_UNAVAILABLE");
+
+        // Re-inject the SAME key on the next unlock ⇒ envelopes open again.
+        ar.set_key(Some(key));
+        assert_eq!(ar.unseal("repo_config", &sealed).unwrap(), b"secret");
+    }
+
+    #[test]
+    fn set_key_replaces_a_prior_key() {
+        // Toggling the app lock migrates the master key between the auth-free
+        // and biometric-gated Keystore stores; the same blob is re-sealed under
+        // a different key, so replacing the in-memory key must open the new
+        // envelopes and reject the old.
+        let first = generate_master_key().unwrap();
+        let second = generate_master_key().unwrap();
+        let ar = AtRest::new(Some(first));
+        let sealed_first = ar.seal("identity", b"x").unwrap();
+
+        ar.set_key(Some(second));
+        let sealed_second = ar.seal("identity", b"x").unwrap();
+        // Old envelope no longer opens under the new key.
+        assert_eq!(
+            ar.unseal("identity", &sealed_first).unwrap_err().code,
+            "AT_REST_TAMPERED"
+        );
+        // New envelope opens.
+        assert_eq!(ar.unseal("identity", &sealed_second).unwrap(), b"x");
+    }
+
+    #[test]
+    fn seal_refuses_passthrough_after_key_was_wiped() {
+        // Defense-in-depth: once a key has been injected, wiping it (app-lock
+        // background) must NOT let a stray write silently downgrade an envelope
+        // to plaintext. seal is the last line behind the app-lock command gate.
+        let ar = AtRest::new(Some(generate_master_key().unwrap()));
+        ar.set_key(None);
+        let err = ar.seal("repo_config", b"x").unwrap_err();
+        assert_eq!(err.code, "AT_REST_KEY_UNAVAILABLE");
+    }
+
+    #[test]
+    fn seal_passthrough_when_never_keyed() {
+        // Desktop/tests never inject a key, so passthrough stays available —
+        // the ever_keyed latch must not break the no-encryption platform path.
+        let ar = AtRest::new(None);
+        assert!(!is_envelope(&ar.seal("repo_config", b"x").unwrap()));
+    }
+
+    #[test]
+    fn seal_refuses_passthrough_after_key_swap_then_wipe() {
+        // The app-lock migration path: swap the master key (enable/disable
+        // moves it between Keystore stores — same blob, but set_key is called),
+        // then wipe it on background. The ever_keyed latch must hold across the
+        // swap, so seal still refuses to write plaintext where an envelope is
+        // expected — the defense the migration relies on.
+        let a = generate_master_key().unwrap();
+        let b = generate_master_key().unwrap();
+        let ar = AtRest::new(Some(a));
+        ar.set_key(Some(b)); // swap (migration)
+        ar.set_key(None); // wipe (background)
+        let err = ar.seal("repo_config", b"x").unwrap_err();
+        assert_eq!(err.code, "AT_REST_KEY_UNAVAILABLE");
     }
 }

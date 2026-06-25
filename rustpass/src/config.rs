@@ -96,6 +96,15 @@ impl Config {
         }
     }
 
+    /// Replace the at-rest master key at runtime. Used by the app-launch
+    /// biometric lock to inject the key after the unlock prompt (retrieved from
+    /// the biometric-gated Keystore) and to wipe it (`None`) when the process is
+    /// backgrounded, so a locked store's envelopes fail `AtRestKeyUnavailable`
+    /// until the next unlock. On desktop the key stays `None` (passthrough).
+    pub fn set_master_key(&self, master_key: Option<[u8; 32]>) {
+        self.atrest.set_key(master_key);
+    }
+
     /// Get the config directory used by this instance.
     #[must_use]
     pub fn config_dir(&self) -> &Path {
