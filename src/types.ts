@@ -129,6 +129,15 @@ export interface AuthState {
   identity_type: string;
 }
 
+/** App-launch biometric gate state from get_app_lock_state / the
+ * `app-lock-state` event. `enabled` = the gate is on (master key is
+ * biometric-gated); `locked` = the master key is not in memory (cold start or
+ * after a background re-lock), so the app-lock overlay should be shown. */
+export interface AppLockState {
+  enabled: boolean;
+  locked: boolean;
+}
+
 /** Identity validation result from validate_identity command. */
 export interface IdentityInfoResult {
   key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
@@ -171,6 +180,13 @@ export type BiometricErrorCode =
 /** Error from the biometric commands — same `{ code, message }` shape as AppError. */
 export interface BiometricError {
   code: BiometricErrorCode | string;
+  message: string;
+}
+
+/** Error from the app-launch gate commands (`APP_LOCK_FAILED`, `BIOMETRIC_*`,
+ * `SECURE_KEYSTORE_*`, or a `rustpass` code). Same shape as BiometricError. */
+export interface AppLockError {
+  code: string;
   message: string;
 }
 

@@ -7,10 +7,13 @@ import { computed, onMounted } from "vue";
 import { applySafeAreaInsets } from "./utils/safe-area";
 import { useLockState } from "./utils/useLockState";
 import { useOverlayBackHandler } from "./utils/useOverlayBackHandler";
+import { useAppLockState } from "./utils/useAppLockState";
 import { useSecuritySettings } from "./utils/useSecuritySettings";
 import UnlockModal from "./components/UnlockModal.vue";
+import AppLockOverlay from "./components/AppLockOverlay.vue";
 
 const { overlayUp, ready, init, cancelAuth } = useLockState();
+const { appLocked, appReady, init: initAppLock } = useAppLockState();
 const { loadSecuritySettings } = useSecuritySettings();
 
 // Capture the Android back button while the unlock overlay is up: back cancels a
@@ -25,6 +28,8 @@ onMounted(() => {
   applySafeAreaInsets();
   // init() reconciles `locked` with the backend's real state and flips `ready`.
   init();
+  // init the app-launch gate state (no-op when the gate is off / on desktop).
+  initAppLock();
   // Prime the view-clear cache so the first reveal uses the configured timer.
   loadSecuritySettings();
 });
@@ -34,12 +39,20 @@ onMounted(() => {
   <div class="app-shell">
     <router-view />
     <!--
-      Global unlock overlay: shown over whatever page is current when the
+      App-launch biometric gate overlay: shown over everything while the
+      at-rest master key is not in memory (cold start with the gate on, or after
+      a background re-lock). Sits above the identity UnlockModal (z-index 70 vs
+      60) and suppresses it while up, so the two gates never race to show
+      competing prompts.
+    -->
+    <AppLockOverlay v-if="appReady && appLocked" />
+    <!--
+      Identity unlock overlay: shown over whatever page is current when the
       identity needs authentication — either a hard lock (manual/idle) or a
       per-operation auth prompt (Immediate no-cache mode). `overlayUp` covers
-      both; `ready` suppresses the overlay during the boot window before the
-      first state is known. An overlay implies "configured + encrypted".
+      both; `ready` suppresses it during the boot window; `!appLocked` suppresses
+      it while the app-launch gate overlay is up.
     -->
-    <UnlockModal v-if="ready && overlayUp" />
+    <UnlockModal v-if="ready && overlayUp && !appLocked" />
   </div>
 </template>
