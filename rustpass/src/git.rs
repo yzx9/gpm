@@ -5,6 +5,8 @@
 #[cfg(target_os = "android")]
 use std::ffi::c_int;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 
@@ -186,8 +188,78 @@ pub enum GitAuth {
     },
 }
 
+/// Shared cancellation token. Set to `true` to abort an in-progress git
+/// operation (clone/pull): the `transfer_progress` callback returns `false`,
+/// libgit2 aborts the transfer, and the caller maps the result to
+/// [`ErrorCode::Cancelled`].
+pub type CancelToken = Arc<AtomicBool>;
+
+/// Progress data reported by git2 during a transfer. Sent over a synchronous
+/// [`ProgressSender`] from inside git2's C callbacks (which run on the blocking
+/// thread), so the channel is `std::sync::mpsc` — not async — keeping the
+/// library runtime-free.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct GitProgress {
+    /// Total objects the remote advertised.
+    pub total_objects: usize,
+    /// Objects received so far.
+    pub received_objects: usize,
+    /// Objects indexed so far.
+    pub indexed_objects: usize,
+    /// Raw bytes received so far.
+    pub received_bytes: usize,
+    /// Total deltas the remote advertised.
+    pub total_deltas: usize,
+    /// Deltas indexed so far.
+    pub indexed_deltas: usize,
+    /// Textual sideband message (e.g. "Counting objects"). `None` for pure
+    /// transfer-stat updates.
+    pub message: Option<String>,
+}
+
+/// Synchronous sender for [`GitProgress`], safe to call from git2's C callbacks
+/// running on the blocking thread.
+pub type ProgressSender = std::sync::mpsc::Sender<GitProgress>;
+
+/// `true` if `cancel` is set, signalling the running git operation to abort.
+fn cancelled(cancel: Option<&CancelToken>) -> bool {
+    cancel.is_some_and(|c| c.load(Ordering::Relaxed))
+}
+
+/// Map a git2 transfer-progress snapshot onto the serialisable [`GitProgress`].
+fn progress_from_transfer(p: &git2::Progress<'_>) -> GitProgress {
+    GitProgress {
+        total_objects: p.total_objects(),
+        received_objects: p.received_objects(),
+        indexed_objects: p.indexed_objects(),
+        received_bytes: p.received_bytes(),
+        total_deltas: p.total_deltas(),
+        indexed_deltas: p.indexed_deltas(),
+        message: None,
+    }
+}
+
+/// If `result` failed and the cancel token is set, re-map it to
+/// [`ErrorCode::Cancelled`]; otherwise pass it through. Wraps the fetch paths
+/// (`pull_off`/`pull_verified`) whose `remote.fetch` `?`-propagates a libgit2
+/// abort when `transfer_progress` returned `false`.
+fn cancelled_or<T>(result: Result<T, Error>, cancel: Option<&CancelToken>) -> Result<T, Error> {
+    match result {
+        Err(_) if cancelled(cancel) => Err(Error::new(ErrorCode::Cancelled, "Pull cancelled")),
+        other => other,
+    }
+}
+
 /// Build credential callbacks based on the authentication method.
-fn build_remote_callbacks(auth: &GitAuth) -> RemoteCallbacks<'_> {
+///
+/// When `cancel`/`progress` are `Some`, also register `transfer_progress`
+/// (reports object/byte stats and aborts the transfer by returning `false` once
+/// the token is set) and `sideband_progress` (forwards textual messages).
+fn build_remote_callbacks<'a>(
+    auth: &'a GitAuth,
+    cancel: Option<&CancelToken>,
+    progress: Option<&ProgressSender>,
+) -> RemoteCallbacks<'a> {
     let mut callbacks = RemoteCallbacks::new();
     match auth {
         GitAuth::None => {}
@@ -218,6 +290,34 @@ fn build_remote_callbacks(auth: &GitAuth) -> RemoteCallbacks<'_> {
             });
         }
     }
+
+    // Report object/byte transfer stats; abort the transfer (return `false`)
+    // once the cancel token is set — libgit2 then errors the in-flight fetch.
+    let cancel_tok = cancel.cloned();
+    let progress_tx = progress.cloned();
+    callbacks.transfer_progress(move |p| {
+        if let Some(tx) = progress_tx.as_ref() {
+            let _ = tx.send(progress_from_transfer(&p));
+        }
+        !cancelled(cancel_tok.as_ref())
+    });
+
+    // Forward textual sideband messages (e.g. "Counting objects..."). Also
+    // abort the transfer once the cancel token is set: sideband fires more
+    // often than `transfer_progress` during the counting/resolving phases, so
+    // honouring it keeps cancel latency tight there too.
+    let progress_tx = progress.cloned();
+    let cancel_tok = cancel.cloned();
+    callbacks.sideband_progress(move |msg| {
+        if let Some(tx) = progress_tx.as_ref() {
+            let _ = tx.send(GitProgress {
+                message: Some(String::from_utf8_lossy(msg).into_owned()),
+                ..Default::default()
+            });
+        }
+        !cancelled(cancel_tok.as_ref())
+    });
+
     callbacks
 }
 
@@ -229,7 +329,13 @@ fn build_remote_callbacks(auth: &GitAuth) -> RemoteCallbacks<'_> {
 ///
 /// Returns an error if the clone fails due to authentication, network, or
 /// filesystem issues.
-pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
+pub fn clone_repo(
+    url: &str,
+    dest: &Path,
+    auth: &GitAuth,
+    cancel: Option<&CancelToken>,
+    progress: Option<&ProgressSender>,
+) -> Result<(), Error> {
     #[cfg(target_os = "android")]
     if url.starts_with("https://") {
         ensure_https_ca_loaded()?;
@@ -239,7 +345,7 @@ pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
         std::fs::remove_dir_all(dest)?;
     }
 
-    let callbacks = build_remote_callbacks(auth);
+    let callbacks = build_remote_callbacks(auth, cancel, progress);
 
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
@@ -247,10 +353,17 @@ pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
     let mut builder = git2::build::RepoBuilder::new();
     builder.fetch_options(fetch_opts);
 
-    builder.clone(url, dest).map_err(|e| {
-        let msg = e.message().to_string();
-        classify_git_error(&msg)
-    })?;
+    if let Err(e) = builder.clone(url, dest) {
+        // A failed or cancelled clone leaves a partial `dest` on disk (notably
+        // `config_dir/repo` after a user cancel). Remove it so the next attempt
+        // starts clean, mirroring `Store::create_store`'s failure cleanup.
+        let _ = std::fs::remove_dir_all(dest);
+        return Err(if cancelled(cancel) {
+            Error::new(ErrorCode::Cancelled, "Clone cancelled")
+        } else {
+            classify_git_error(e.message())
+        });
+    }
 
     Ok(())
 }
@@ -293,6 +406,8 @@ pub fn pull_repo(
     repo_path: &Path,
     auth: &GitAuth,
     policy: &AuthenticityConfig,
+    cancel: Option<&CancelToken>,
+    progress: Option<&ProgressSender>,
 ) -> Result<SyncOutcome, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -315,15 +430,15 @@ pub fn pull_repo(
         }));
     };
 
-    let callbacks = build_remote_callbacks(auth);
+    let callbacks = build_remote_callbacks(auth, cancel, progress);
 
     // Off mode: temp-ref fetch + fast-forward (divergence surfaced, not errored).
     if policy.mode == VerifyMode::Off {
-        return pull_off(&repo, &mut remote, callbacks);
+        return cancelled_or(pull_off(&repo, &mut remote, callbacks), cancel);
     }
 
     // Audit / Enforce: verify-before-checkout.
-    pull_verified(&repo, &mut remote, callbacks, policy)
+    cancelled_or(pull_verified(&repo, &mut remote, callbacks, policy), cancel)
 }
 
 /// The signature gpm commits under. `name` / `email` come from the configured
@@ -463,7 +578,7 @@ fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(), Error> {
 
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     let mut opts = git2::PushOptions::new();
-    opts.remote_callbacks(build_remote_callbacks(auth));
+    opts.remote_callbacks(build_remote_callbacks(auth, None, None));
     remote
         .push(&[&refspec], Some(&mut opts))
         .map_err(|e| classify_push_error(&e.to_string()))
@@ -630,7 +745,7 @@ fn fetch_remote_into_temp(
         )
     })?;
     let mut fetch_opts = FetchOptions::new();
-    fetch_opts.remote_callbacks(build_remote_callbacks(auth));
+    fetch_opts.remote_callbacks(build_remote_callbacks(auth, None, None));
     remote.fetch(&[&refspec], Some(&mut fetch_opts), None)?;
 
     let oid = repo.refname_to_id(&temp_ref).map_err(|e| {
@@ -1263,6 +1378,126 @@ mod tests {
         assert_eq!(err.code, "CLONE_FAILED");
     }
 
+    // ── cancel token + progress ──────────────────────────────────────────
+
+    #[test]
+    fn cancelled_is_false_without_token() {
+        assert!(!cancelled(None));
+    }
+
+    #[test]
+    fn cancelled_reads_token_state() {
+        let token: CancelToken = Arc::new(AtomicBool::new(false));
+        assert!(!cancelled(Some(&token)));
+        token.store(true, Ordering::Relaxed);
+        assert!(cancelled(Some(&token)));
+    }
+
+    #[test]
+    fn cancelled_or_passes_through_success() {
+        let token = Arc::new(AtomicBool::new(true));
+        let ok: Result<(), Error> = Ok(());
+        let out: Result<(), Error> = cancelled_or(ok, Some(&token));
+        assert!(out.is_ok(), "an Ok result is never re-mapped to Cancelled");
+    }
+
+    #[test]
+    fn cancelled_or_maps_failure_to_cancelled_when_set() {
+        let token = Arc::new(AtomicBool::new(true));
+        let err = Error::new(ErrorCode::NetworkError, "boom");
+        let out: Result<(), Error> = cancelled_or(Err(err), Some(&token));
+        let e = out.expect_err("set token must remap the error to Cancelled");
+        assert_eq!(e.code, "CANCELLED");
+    }
+
+    #[test]
+    fn cancelled_or_keeps_original_error_when_not_set() {
+        let token = Arc::new(AtomicBool::new(false));
+        let err = Error::new(ErrorCode::NetworkError, "boom");
+        let out: Result<(), Error> = cancelled_or(Err(err), Some(&token));
+        let e = out.expect_err("unset token must keep the original error");
+        assert_eq!(e.code, "NETWORK_ERROR");
+    }
+
+    // ── transfer_progress callback wiring ────────────────────────────────
+    //
+    // Local clones copy objects directly and bypass the fetch callbacks, so we
+    // force the REMOTE transport via `CloneLocal::None` — the same
+    // `transfer_progress` path a real https/ssh clone drives, where our
+    // cancel/progress hooks ride.
+
+    /// Build a bare "remote" seeded with one committed file.
+    fn bare_repo_with_file() -> tempfile::TempDir {
+        let work = tempfile::tempdir().expect("work dir");
+        let repo = Repository::init(work.path()).expect("init work");
+        std::fs::write(work.path().join("f.age"), b"secret").expect("write file");
+        let mut index = repo.index().expect("index");
+        index.add_path(Path::new("f.age")).expect("add path");
+        index.write().expect("index write");
+        let tree_id = index.write_tree().expect("write tree");
+        drop(index);
+        let tree = repo.find_tree(tree_id).expect("tree");
+        let sig = test_signature();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .expect("commit");
+        drop(tree);
+        drop(repo);
+
+        let bare = tempfile::tempdir().expect("bare dir");
+        git2::build::RepoBuilder::new()
+            .bare(true)
+            .clone(work.path().to_str().expect("work path utf-8"), bare.path())
+            .expect("bare clone");
+        bare
+    }
+
+    /// Clone `src` → `dest` over the fetch transport (`CloneLocal::None`), using
+    /// [`build_remote_callbacks`] with the given cancel/progress hooks.
+    fn clone_via_fetch(
+        src: &Path,
+        dest: &Path,
+        cancel: Option<&CancelToken>,
+        progress: Option<&ProgressSender>,
+    ) -> Result<(), git2::Error> {
+        let auth = GitAuth::None;
+        let callbacks = build_remote_callbacks(&auth, cancel, progress);
+        let mut fetch_opts = FetchOptions::new();
+        fetch_opts.remote_callbacks(callbacks);
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.clone_local(git2::build::CloneLocal::None);
+        builder.fetch_options(fetch_opts);
+        builder.clone(src.to_str().expect("src path utf-8"), dest)?;
+        Ok(())
+    }
+
+    #[test]
+    fn transfer_progress_reports_objects_over_fetch_transport() {
+        let bare = bare_repo_with_file();
+        let dest = tempfile::tempdir().expect("dest dir");
+        let (tx, rx) = std::sync::mpsc::channel::<GitProgress>();
+        clone_via_fetch(bare.path(), dest.path(), None, Some(&tx))
+            .expect("clone via fetch transport should succeed");
+        drop(tx); // close the channel so the drain terminates
+
+        let messages: Vec<GitProgress> = rx.iter().collect();
+        assert!(
+            messages.iter().any(|m| m.total_objects > 0),
+            "expected a transfer-progress update reporting objects, got: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn transfer_progress_aborts_clone_when_cancel_pre_armed() {
+        let bare = bare_repo_with_file();
+        let dest = tempfile::tempdir().expect("dest dir");
+        let cancel: CancelToken = Arc::new(AtomicBool::new(true));
+        let result = clone_via_fetch(bare.path(), dest.path(), Some(&cancel), None);
+        assert!(
+            result.is_err(),
+            "a pre-armed cancel token must make transfer_progress return false and abort the clone"
+        );
+    }
+
     #[test]
     fn find_default_branch_main() {
         let dir = tempfile::tempdir().expect("failed to create temp dir");
@@ -1387,7 +1622,7 @@ mod tests {
         let oid = create_empty_commit(&repo, &test_signature());
 
         let policy = AuthenticityConfig::default();
-        let outcome = pull_repo(dir.path(), &GitAuth::None, &policy)
+        let outcome = pull_repo(dir.path(), &GitAuth::None, &policy, None, None)
             .expect("pull must no-op, not error, without origin");
         match outcome {
             SyncOutcome::FastForwarded(r) => {

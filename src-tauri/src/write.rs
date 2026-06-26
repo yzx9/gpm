@@ -300,11 +300,19 @@ pub(crate) async fn resolve_pending(
 
 /// Pull latest changes from the remote. Returns a `SyncOutcome`: a normal
 /// fast-forward, or `Diverged` when local/remote have diverged (the frontend
-/// shows a resolution modal).
+/// shows a resolution modal). Emits `"git-progress"` events and is cancellable
+/// via `cancel_git` while the fetch runs.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn pull_repo(state: State<'_, AppState>) -> Result<SyncOutcome, Error> {
-    state.store.sync().await
+pub(crate) async fn pull_repo(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<SyncOutcome, Error> {
+    let store = state.store.clone();
+    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
+        store.sync_with(Some(cancel), Some(tx)).await
+    })
+    .await
 }
 
 /// Push the current branch to `origin`. Used by the create flow's deferred first

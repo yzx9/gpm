@@ -29,6 +29,8 @@ fn clone_local_bare_repo() {
         bare_dir.path().to_str().expect("bare path is valid utf-8"),
         &dest_path,
         &git::GitAuth::None,
+        None,
+        None,
     )
     .expect("clone should succeed");
 
@@ -56,6 +58,8 @@ fn clone_removes_existing_dest() {
         bare_dir.path().to_str().expect("bare path is valid utf-8"),
         dest.path(),
         &git::GitAuth::None,
+        None,
+        None,
     )
     .expect("clone should succeed");
 
@@ -99,6 +103,8 @@ fn pull_fast_forward_succeeds() {
             clone_dir.path(),
             &git::GitAuth::None,
             &AuthenticityConfig::default(),
+            None,
+            None,
         )
         .expect("pull should succeed"),
     );
@@ -126,6 +132,8 @@ fn pull_no_changes() {
             clone_dir.path(),
             &git::GitAuth::None,
             &AuthenticityConfig::default(),
+            None,
+            None,
         )
         .expect("pull should succeed"),
     );
@@ -143,6 +151,8 @@ fn pull_nonexistent_repo_errors() {
         nowhere.path(),
         &git::GitAuth::None,
         &AuthenticityConfig::default(),
+        None,
+        None,
     );
     let err = result.expect_err("pull on non-repo dir should fail");
     assert_eq!(
@@ -162,6 +172,8 @@ fn clone_nonexistent_remote_errors() {
         fake_url.to_str().expect("path is valid utf-8"),
         dest.path(),
         &git::GitAuth::None,
+        None,
+        None,
     );
     let err = result.expect_err("clone from nonexistent remote should fail");
     assert_eq!(
@@ -197,6 +209,8 @@ async fn full_workflow_clone_list_decrypt() {
         bare_dir.path().to_str().expect("bare path is valid utf-8"),
         dest.path(),
         &git::GitAuth::None,
+        None,
+        None,
     )
     .expect("clone should succeed");
 

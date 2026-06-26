@@ -15,6 +15,7 @@
 //! `AppHandle` run against a headless [`MockRuntime`] app
 //! (`tauri::test::mock_builder`) rather than a real webview.
 
+mod git_commands;
 mod lock_state;
 mod read_commands;
 mod setup_flow;
@@ -148,6 +149,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
         app_lock_enabled: AtomicBool::new(false),
         app_locked: AtomicBool::new(false),
+        active_cancel_token: Mutex::new(None),
     };
     (
         state,

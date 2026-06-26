@@ -34,6 +34,7 @@ mod biometric;
 mod clipboard;
 mod config;
 mod generator;
+mod git;
 mod identity;
 mod read;
 mod setup;
@@ -81,6 +82,10 @@ pub(crate) struct AppState {
     /// `applock::app_unlock`. Drives the frontend app-lock overlay (which
     /// suppresses the identity overlay while up, so the two never compete).
     pub(crate) app_locked: AtomicBool,
+    /// Cancel token for the in-flight clone/pull (if any). Set by the
+    /// `cancel_git` command; cleared by the owning command once the operation
+    /// settles. `None` outside a user-initiated clone/pull.
+    pub(crate) active_cancel_token: Mutex<Option<rustpass::CancelToken>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +190,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         app_lock_enabled: AtomicBool::new(app_lock_enabled),
         // Locked at startup iff the gate is on (master key not yet injected).
         app_locked: AtomicBool::new(app_lock_enabled),
+        active_cancel_token: Mutex::new(None),
     }
 }
 
@@ -241,6 +247,7 @@ pub fn run() {
             generator::generate_password_batch,
             // write / sync
             write::pull_repo,
+            git::cancel_git,
             write::push_repo,
             write::resolve_sync_divergence,
             write::list_create_presets,

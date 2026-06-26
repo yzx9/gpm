@@ -13,12 +13,14 @@ import {
 } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppError,
   AuthenticityState,
   CommitSigInfo,
   Entry,
   EntryPage,
+  GitProgressEvent,
   PullResult,
   SyncDivergence,
   SyncOutcome,
@@ -46,6 +48,9 @@ const loading = ref(false);
 const pulling = ref(false);
 const error = ref("");
 const pullResult = ref("");
+const pullProgressText = ref("");
+const pullProgressPercent = ref(0);
+let pullProgressUnlisten: UnlistenFn | null = null;
 const toast = ref("");
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -189,12 +194,48 @@ async function loadAuthState() {
   }
 }
 
+function onPullProgress(e: { payload: GitProgressEvent }) {
+  const p = e.payload;
+  if (p.total_objects > 0) {
+    pullProgressPercent.value = Math.min(
+      100,
+      Math.round((p.received_objects / p.total_objects) * 100),
+    );
+  }
+  pullProgressText.value =
+    p.message ?? `${p.received_objects} / ${p.total_objects} objects`;
+}
+
+/** User-initiated cancel of an in-flight pull. */
+async function cancelPull() {
+  try {
+    await invoke("cancel_git");
+  } catch {
+    // best-effort — the pull continues if cancel fails
+  }
+}
+
+/** The header button starts a pull, or cancels one already in flight. */
+function togglePull() {
+  if (pulling.value) {
+    void cancelPull();
+  } else {
+    void pullRepo();
+  }
+}
+
 async function pullRepo() {
   pulling.value = true;
   pullResult.value = "";
   error.value = "";
   auditIssues.value = null;
   blockIssues.value = null;
+  pullProgressText.value = "Pulling…";
+  pullProgressPercent.value = 0;
+  pullProgressUnlisten ??= await listen<GitProgressEvent>(
+    "git-progress",
+    onPullProgress,
+  );
   try {
     const result = await invoke<SyncOutcome>("pull_repo");
     if (result.kind === "diverged") {
@@ -231,8 +272,18 @@ async function pullRepo() {
     }, 3000);
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Pull failed";
+    if (appError?.code === "CANCELLED") {
+      // User-initiated abort — neutral status, not an error.
+      pullResult.value = "Pull cancelled";
+      setTimeout(() => {
+        pullResult.value = "";
+      }, 3000);
+    } else {
+      error.value = appError?.message || "Pull failed";
+    }
   } finally {
+    pullProgressUnlisten?.();
+    pullProgressUnlisten = null;
     pulling.value = false;
   }
 }
@@ -401,6 +452,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  pullProgressUnlisten?.();
+  pullProgressUnlisten = null;
   io?.disconnect();
   io = null;
   if (tickTimer) {
@@ -438,13 +491,13 @@ onBeforeUnmount(() => {
           <span aria-hidden="true">{{ badge.glyph }}</span>
         </button>
         <button
-          @click="pullRepo"
-          :disabled="pulling"
+          @click="togglePull"
           class="btn-sm"
-          aria-label="Pull updates"
-          title="Pull updates"
+          :aria-label="pulling ? 'Cancel pull' : 'Pull updates'"
+          :title="pulling ? 'Cancel pull' : 'Pull updates'"
         >
-          <span aria-hidden="true">{{ pulling ? "⏳" : "↓" }}</span> Pull
+          <span aria-hidden="true">{{ pulling ? "✕" : "↓" }}</span>
+          {{ pulling ? "Cancel" : "Pull" }}
         </button>
         <button
           @click="openGenerate"
@@ -464,6 +517,24 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+
+    <div v-if="pulling" class="pull-progress">
+      <div
+        class="pull-progress-track"
+        role="progressbar"
+        :aria-valuenow="pullProgressPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div
+          class="pull-progress-fill"
+          :style="{ width: `${pullProgressPercent}%` }"
+        ></div>
+      </div>
+      <div class="text-xs text-muted mt-1" aria-live="polite">
+        {{ pullProgressText }}
+      </div>
+    </div>
 
     <div
       v-if="lastSyncLabel"
@@ -772,6 +843,22 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.pull-progress {
+  margin-bottom: 0.75rem;
+}
+.pull-progress-track {
+  height: 4px;
+  background: var(--color-edge);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.pull-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 9999px;
+  transition: width 0.2s ease;
+}
+
 .input-base {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-edge);

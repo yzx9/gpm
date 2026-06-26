@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cloning a repository and pulling updates now show live progress — how many objects and bytes have transferred — instead of a generic spinner, and either can be cancelled mid-flight with an on-screen Cancel button
+
 ### Fixed
 
 - On Android, the back gesture now closes the unlock prompt and the "remote copy exists" dialog instead of navigating away from them. A locked screen can no longer be stepped past with back (use the Home gesture or button to leave); cancelling a per-operation unlock prompt no longer flashes an error

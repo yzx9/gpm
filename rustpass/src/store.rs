@@ -419,6 +419,29 @@ impl Store {
         ssh_key: Option<&str>,
         ssh_passphrase: Option<&str>,
     ) -> Result<(), Error> {
+        self.clone_only_with(repo_url, pat, ssh_key, ssh_passphrase, None, None)
+            .await
+    }
+
+    /// Cancellable, progress-reporting variant of [`clone_only`](Store::clone_only).
+    ///
+    /// `cancel` aborts the in-progress clone (mapped to [`ErrorCode::Cancelled`]
+    /// by `git::clone_repo`); `progress` receives transfer stats. Both are `None`
+    /// on the plain [`clone_only`](Store::clone_only) path, which is used outside
+    /// the user-initiated UI clone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the clone fails or the config cannot be persisted.
+    pub async fn clone_only_with(
+        &self,
+        repo_url: &str,
+        pat: Option<&str>,
+        ssh_key: Option<&str>,
+        ssh_passphrase: Option<&str>,
+        cancel: Option<git::CancelToken>,
+        progress: Option<git::ProgressSender>,
+    ) -> Result<(), Error> {
         let auth = match (ssh_key, pat) {
             (Some(key), _) => git::GitAuth::Ssh {
                 username: "git".to_string(),
@@ -438,7 +461,16 @@ impl Store {
 
         let repo_url_owned = repo_url.to_string();
         let repo_dir_clone = repo_dir.clone();
-        spawn_blocking(move || git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)).await??;
+        spawn_blocking(move || {
+            git::clone_repo(
+                &repo_url_owned,
+                &repo_dir_clone,
+                &auth,
+                cancel.as_ref(),
+                progress.as_ref(),
+            )
+        })
+        .await??;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
@@ -635,6 +667,41 @@ impl Store {
         identity: &str,
         identity_passphrase: Option<&str>,
     ) -> Result<(), Error> {
+        self.configure_with(
+            repo_url,
+            pat,
+            ssh_key,
+            ssh_passphrase,
+            identity,
+            identity_passphrase,
+            None,
+            None,
+        )
+        .await
+    }
+
+    /// Cancellable, progress-reporting variant of [`configure`](Store::configure).
+    ///
+    /// `cancel` aborts the in-progress clone (mapped to [`ErrorCode::Cancelled`]);
+    /// `progress` receives transfer stats. Both are `None` on the plain
+    /// [`configure`](Store::configure) path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the identity format is invalid, the clone fails,
+    /// or the config cannot be persisted.
+    #[allow(clippy::too_many_arguments)] // mirrors configure + cancel/progress hooks
+    pub async fn configure_with(
+        &self,
+        repo_url: &str,
+        pat: Option<&str>,
+        ssh_key: Option<&str>,
+        ssh_passphrase: Option<&str>,
+        identity: &str,
+        identity_passphrase: Option<&str>,
+        cancel: Option<git::CancelToken>,
+        progress: Option<git::ProgressSender>,
+    ) -> Result<(), Error> {
         // age-keygen writes # comment lines before the key; keep only the key
         // so it is parsed and stored consistently with the paste path.
         let identity = crate::identity::normalize_identity_text(identity);
@@ -665,7 +732,16 @@ impl Store {
 
         let repo_url_owned = repo_url.to_string();
         let repo_dir_clone = repo_dir.clone();
-        spawn_blocking(move || git::clone_repo(&repo_url_owned, &repo_dir_clone, &auth)).await??;
+        spawn_blocking(move || {
+            git::clone_repo(
+                &repo_url_owned,
+                &repo_dir_clone,
+                &auth,
+                cancel.as_ref(),
+                progress.as_ref(),
+            )
+        })
+        .await??;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
@@ -1466,11 +1542,40 @@ impl Store {
     /// unreachable, the branches have diverged, or Enforce mode refuses the
     /// pull.
     pub async fn sync(&self) -> Result<SyncOutcome, Error> {
+        self.sync_with(None, None).await
+    }
+
+    /// Cancellable, progress-reporting variant of [`sync`](Store::sync).
+    ///
+    /// `cancel` aborts the in-progress fetch (mapped to [`ErrorCode::Cancelled`]);
+    /// `progress` receives transfer stats. The internal pre-push sync of the
+    /// write path keeps using the plain [`sync`](Store::sync) (silent,
+    /// non-cancellable) — only the user-initiated pull opts in.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store is not configured, the remote is
+    /// unreachable, the branches have diverged, or Enforce mode refuses the
+    /// pull.
+    pub async fn sync_with(
+        &self,
+        cancel: Option<git::CancelToken>,
+        progress: Option<git::ProgressSender>,
+    ) -> Result<SyncOutcome, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
         let policy = repo_config.authenticity;
-        spawn_blocking(move || git::pull_repo(&repo_path, &auth, &policy)).await?
+        spawn_blocking(move || {
+            git::pull_repo(
+                &repo_path,
+                &auth,
+                &policy,
+                cancel.as_ref(),
+                progress.as_ref(),
+            )
+        })
+        .await?
     }
 
     /// Push the current branch to `origin`.

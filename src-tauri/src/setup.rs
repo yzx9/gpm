@@ -146,20 +146,26 @@ pub(crate) fn is_repo_ready(state: State<'_, AppState>) -> Result<bool, Error> {
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn clone_repo(
     state: State<'_, AppState>,
+    app: AppHandle,
     repo_url: String,
     pat: Option<String>,
     ssh_key: Option<String>,
     ssh_passphrase: Option<String>,
 ) -> Result<(), Error> {
-    state
-        .store
-        .clone_only(
-            &repo_url,
-            pat.as_deref(),
-            ssh_key.as_deref(),
-            ssh_passphrase.as_deref(),
-        )
-        .await
+    let store = state.store.clone();
+    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
+        store
+            .clone_only_with(
+                &repo_url,
+                pat.as_deref(),
+                ssh_key.as_deref(),
+                ssh_passphrase.as_deref(),
+                Some(cancel),
+                Some(tx),
+            )
+            .await
+    })
+    .await
 }
 
 /// Mint a fresh identity for the create flow and stage it in backend
@@ -512,8 +518,10 @@ pub(crate) fn clear_pending_identity(state: State<'_, AppState>) -> Result<(), E
 /// Full setup: validate identity, clone repo, save config.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::too_many_arguments)] // Tauri-injected state + app, plus the setup fields
 pub(crate) async fn setup(
     state: State<'_, AppState>,
+    app: AppHandle,
     repo_url: String,
     pat: Option<String>,
     ssh_key: Option<String>,
@@ -521,17 +529,22 @@ pub(crate) async fn setup(
     identity: String,
     identity_passphrase: Option<String>,
 ) -> Result<(), Error> {
-    state
-        .store
-        .configure(
-            &repo_url,
-            pat.as_deref(),
-            ssh_key.as_deref(),
-            ssh_passphrase.as_deref(),
-            &identity,
-            identity_passphrase.as_deref(),
-        )
-        .await
+    let store = state.store.clone();
+    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
+        store
+            .configure_with(
+                &repo_url,
+                pat.as_deref(),
+                ssh_key.as_deref(),
+                ssh_passphrase.as_deref(),
+                &identity,
+                identity_passphrase.as_deref(),
+                Some(cancel),
+                Some(tx),
+            )
+            .await
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -596,6 +609,7 @@ mod tests {
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
             app_lock_enabled: std::sync::atomic::AtomicBool::new(false),
             app_locked: std::sync::atomic::AtomicBool::new(false),
+            active_cancel_token: Mutex::new(None),
         };
         (state, dir)
     }

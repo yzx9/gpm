@@ -79,6 +79,7 @@ pub use config::{Config, LockMode, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
 pub use generator::{GenerateMode, GenerateOptions, generate_password};
+pub use git::{CancelToken, GitProgress, ProgressSender};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use secret::Secret;
 pub use signing::{

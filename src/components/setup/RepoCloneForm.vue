@@ -3,9 +3,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, CommitIdentity } from "../../types";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { AppError, CommitIdentity, GitProgressEvent } from "../../types";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
 import "./forms.css";
@@ -23,9 +24,13 @@ const sshPassphrase = defineModel<string>("sshPassphrase", { required: true });
 
 const loading = ref(false);
 const error = ref("");
-const progressStep = ref(0);
-const progressSteps = ["Cloning repository..."];
-let progressTimer: ReturnType<typeof setInterval> | null = null;
+/** Set when the user cancelled the clone — shown as a neutral status, not a
+ * red error. Cleared on the next clone attempt. */
+const cancelled = ref(false);
+const progressText = ref("");
+const progressPercent = ref(0);
+const receivedBytes = ref(0);
+let progressUnlisten: UnlistenFn | null = null;
 
 // Whether the current URL is an SSH remote (shared helper; RepoAuthFields also
 // derives it for its own UI — same source repoUrl, so both agree).
@@ -36,21 +41,39 @@ const commitName = ref("");
 const commitEmail = ref("");
 const commitDefault = ref<CommitIdentity | null>(null);
 
-function startProgress() {
-  progressStep.value = 0;
-  progressTimer = setInterval(() => {
-    if (progressStep.value < progressSteps.length - 1) {
-      progressStep.value++;
-    }
-  }, 2000);
+function formatBytes(n: number): string {
+  if (n <= 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function stopProgress() {
-  if (progressTimer) {
-    clearInterval(progressTimer);
-    progressTimer = null;
+function onProgress(e: { payload: GitProgressEvent }) {
+  const p = e.payload;
+  receivedBytes.value = p.received_bytes;
+  if (p.total_objects > 0) {
+    progressPercent.value = Math.min(
+      100,
+      Math.round((p.received_objects / p.total_objects) * 100),
+    );
+  }
+  progressText.value =
+    p.message ?? `${p.received_objects} / ${p.total_objects} objects`;
+}
+
+/** User-initiated cancel: flip the backend token so git2 aborts the transfer. */
+async function cancelClone() {
+  try {
+    await invoke("cancel_git");
+  } catch {
+    // best-effort — the clone simply continues if cancel fails
   }
 }
+
+onBeforeUnmount(() => {
+  progressUnlisten?.();
+  progressUnlisten = null;
+});
 
 // Fetch the default commit identity lazily when Advanced is first opened, so
 // the form mount doesn't fire an extra IPC (and stays out of the test
@@ -82,6 +105,7 @@ function validateStep1(): string | null {
 
 async function onClone() {
   error.value = "";
+  cancelled.value = false;
   const validationError = validateStep1();
   if (validationError) {
     error.value = validationError;
@@ -89,7 +113,13 @@ async function onClone() {
   }
 
   loading.value = true;
-  startProgress();
+  progressText.value = "Cloning repository…";
+  progressPercent.value = 0;
+  receivedBytes.value = 0;
+  progressUnlisten ??= await listen<GitProgressEvent>(
+    "git-progress",
+    onProgress,
+  );
 
   try {
     await invoke("clone_repo", {
@@ -98,8 +128,6 @@ async function onClone() {
       sshKey: isSshUrl.value ? sshKey.value : null,
       sshPassphrase: isSshUrl.value ? sshPassphrase.value || null : null,
     });
-    stopProgress();
-    loading.value = false;
     // Persist a custom commit identity if the user set one under Advanced.
     // Best-effort: a failure must not block the (already-cloned) setup.
     if (commitName.value.trim() || commitEmail.value.trim()) {
@@ -115,8 +143,15 @@ async function onClone() {
     emit("done");
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Clone failed";
-    stopProgress();
+    if (appError?.code === "CANCELLED") {
+      // User-initiated abort — surface as a neutral status, not an error.
+      cancelled.value = true;
+    } else {
+      error.value = appError?.message || "Clone failed";
+    }
+  } finally {
+    progressUnlisten?.();
+    progressUnlisten = null;
     loading.value = false;
   }
 }
@@ -173,6 +208,35 @@ async function onClone() {
       </div>
     </details>
 
+    <!-- Real clone progress + cancel -->
+    <div v-if="loading" class="flex flex-col gap-1">
+      <div class="flex justify-between items-center text-xs text-muted">
+        <span aria-live="polite">{{ progressText }}</span>
+        <button type="button" class="cancel-link" @click="cancelClone">
+          Cancel
+        </button>
+      </div>
+      <div
+        class="progress-track"
+        role="progressbar"
+        :aria-valuenow="progressPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div
+          class="progress-fill"
+          :style="{ width: `${progressPercent}%` }"
+        ></div>
+      </div>
+      <div v-if="formatBytes(receivedBytes)" class="text-xs text-subtle">
+        {{ formatBytes(receivedBytes) }} received
+      </div>
+    </div>
+
+    <div v-if="cancelled" class="text-sm text-muted" role="status">
+      Clone cancelled.
+    </div>
+
     <div
       v-if="error"
       class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm"
@@ -183,8 +247,31 @@ async function onClone() {
 
     <button type="submit" :disabled="loading" class="btn-primary">
       <span v-if="loading" class="spinner-white" aria-hidden="true"></span>
-      <span v-if="loading">{{ progressSteps[progressStep] }}</span>
+      <span v-if="loading">Cloning…</span>
       <span v-else>Clone Repository</span>
     </button>
   </form>
 </template>
+
+<style scoped>
+.progress-track {
+  height: 6px;
+  background: var(--color-edge);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 9999px;
+  transition: width 0.2s ease;
+}
+.cancel-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+</style>

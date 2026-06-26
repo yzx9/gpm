@@ -54,6 +54,15 @@ export type SyncOutcome =
   | ({ kind: "fast_forwarded" } & PullResult)
   | ({ kind: "diverged" } & SyncDivergence);
 
+/** Real-time git transfer progress, emitted as the `"git-progress"` event during
+ * clone/pull. Mirrors the Rust `GitProgressEvent` (a subset of `GitProgress`). */
+export interface GitProgressEvent {
+  total_objects: number;
+  received_objects: number;
+  received_bytes: number;
+  message: string | null;
+}
+
 export interface RepoConfig {
   url: string;
   pat: string | null;
