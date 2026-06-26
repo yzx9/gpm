@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-06-26
+
 ### Added
 
 - Start a brand-new password store right on this device — no existing repo and no second tool required. Setup now offers "Create a new store" alongside "Clone": generate an age or SSH identity in-app, seed the store, and optionally add a git remote to sync later. A store gpm creates is indistinguishable from one gopass creates, so you can mix tools or migrate freely
@@ -117,7 +119,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.0...HEAD
+[v0.7.0]: https://github.com/yzx9/gpm/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/yzx9/gpm/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/yzx9/gpm/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/yzx9/gpm/compare/v0.3.0...v0.4.0

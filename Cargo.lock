@@ -1652,7 +1652,7 @@ dependencies = [
 
 [[package]]
 name = "gpm"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "age",
  "base64 0.22.1",
@@ -3653,7 +3653,7 @@ dependencies = [
 
 [[package]]
 name = "rustpass"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "aes-gcm",
  "age",
@@ -4456,7 +4456,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-biometric-keystore"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "tauri",
@@ -4498,7 +4498,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-file-picker"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -4534,7 +4534,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-safe-area"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "tauri",
  "tauri-plugin",
@@ -4542,7 +4542,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-secure-keystore"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "tauri",
