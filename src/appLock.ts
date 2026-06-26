@@ -78,6 +78,30 @@ export async function appLock(): Promise<void> {
   }
 }
 
+/**
+ * Enable the identity-auto-unlock opt-in (req3): validate `passphrase` and seal
+ * it under the master key so a later app-unlock also unlocks the identity with no
+ * second prompt. Requires the gate on + an encrypted identity. Rejects with
+ * {@link AppLockError} on a wrong passphrase or cancel.
+ */
+export async function enableIdentityAutoUnlock(
+  passphrase: string,
+): Promise<void> {
+  await invoke("enable_identity_auto_unlock", { passphrase });
+}
+
+/**
+ * Disable the identity-auto-unlock opt-in: clear the sealed passphrase slot +
+ * the flag. Best-effort.
+ */
+export async function disableIdentityAutoUnlock(): Promise<void> {
+  try {
+    await invoke("disable_identity_auto_unlock");
+  } catch {
+    // Best-effort: the toggle reflects the persisted flag either way.
+  }
+}
+
 /** Type-narrow a caught value into an {@link AppLockError}. */
 export function asAppLockError(e: unknown): AppLockError {
   return e as AppLockError;

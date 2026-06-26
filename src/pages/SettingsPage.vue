@@ -12,10 +12,19 @@ import {
   isBiometricAvailable,
   isBiometricUnlockEnabled,
 } from "../biometric";
+import {
+  asAppLockError,
+  disableBiometricAppLock,
+  disableIdentityAutoUnlock,
+  enableBiometricAppLock,
+  enableIdentityAutoUnlock,
+  isAppLockAvailable,
+} from "../appLock";
 import { onLock } from "../utils/useLockState";
 import { useSecuritySettings } from "../utils/useSecuritySettings";
 import type {
   AppError,
+  AppLockError,
   AuthState,
   AuthenticityConfig,
   BiometricError,
@@ -55,6 +64,13 @@ const biometricAvailable = ref(false);
 const biometricEnabled = ref(false);
 const biometricPassphrase = ref("");
 const biometricLoading = ref(false);
+
+// ── App-launch biometric gate (RFC 0028) state ──────────────────────────
+const appLockAvailable = ref(false);
+const appLockEnabled = ref(false);
+const identityAutoUnlockEnabled = ref(false);
+const appLockPassphrase = ref("");
+const appLockLoading = ref(false);
 
 // ── Repository authenticity state ────────────────────────────────────────
 const authConfig = ref<AuthenticityConfig | null>(null);
@@ -135,6 +151,7 @@ onLock(() => {
   newPassphrase.value = "";
   oldPassphrase.value = "";
   biometricPassphrase.value = "";
+  appLockPassphrase.value = "";
 });
 
 function showToast(message: string) {
@@ -158,6 +175,10 @@ async function loadConfig() {
     identityType.value = auth.identity_type;
     biometricAvailable.value = await isBiometricAvailable();
     biometricEnabled.value = await isBiometricUnlockEnabled();
+    appLockAvailable.value = await isAppLockAvailable();
+    appLockEnabled.value = config.value.biometric_app_lock ?? false;
+    identityAutoUnlockEnabled.value =
+      config.value.unlock_identity_with_app ?? false;
     commitName.value = config.value.commit_user_name ?? "";
     commitEmail.value = config.value.commit_user_email ?? "";
     commitDefault.value = await invoke<CommitIdentity>(
@@ -357,6 +378,77 @@ async function onDisableBiometric() {
   await disableBiometricUnlock();
   biometricEnabled.value = false;
   showToast("Biometric unlock disabled");
+}
+
+// ── App-launch biometric gate (RFC 0028) ─────────────────────────────────
+async function onEnableAppLock() {
+  error.value = "";
+  appLockLoading.value = true;
+  try {
+    await enableBiometricAppLock();
+    appLockEnabled.value = true;
+    showToast("✓ App lock enabled");
+  } catch (e) {
+    const err = asAppLockError(e) as AppLockError;
+    if (err.code === "BIOMETRIC_CANCELLED") {
+      // User cancelled the migration prompt — no error toast.
+    } else {
+      error.value = err.message || "Failed to enable app lock";
+    }
+  } finally {
+    appLockLoading.value = false;
+  }
+}
+
+async function onDisableAppLock() {
+  error.value = "";
+  appLockLoading.value = true;
+  try {
+    await disableBiometricAppLock();
+    appLockEnabled.value = false;
+    // Disabling the gate makes identity auto-unlock moot.
+    identityAutoUnlockEnabled.value = false;
+    showToast("App lock disabled");
+  } catch (e) {
+    const err = asAppLockError(e) as AppLockError;
+    if (err.code === "BIOMETRIC_CANCELLED") {
+      // User cancelled — stays enabled.
+    } else {
+      error.value = err.message || "Failed to disable app lock";
+    }
+  } finally {
+    appLockLoading.value = false;
+  }
+}
+
+async function onEnableIdentityAutoUnlock() {
+  error.value = "";
+  if (!appLockPassphrase.value) {
+    error.value = "Passphrase is required";
+    return;
+  }
+  appLockLoading.value = true;
+  try {
+    await enableIdentityAutoUnlock(appLockPassphrase.value);
+    identityAutoUnlockEnabled.value = true;
+    appLockPassphrase.value = "";
+    showToast("✓ Identity auto-unlock enabled");
+  } catch (e) {
+    const err = asAppLockError(e) as AppLockError;
+    if (err.code === "WRONG_PASSPHRASE") {
+      error.value = "Wrong passphrase";
+    } else {
+      error.value = err.message || "Failed to enable identity auto-unlock";
+    }
+  } finally {
+    appLockLoading.value = false;
+  }
+}
+
+async function onDisableIdentityAutoUnlock() {
+  await disableIdentityAutoUnlock();
+  identityAutoUnlockEnabled.value = false;
+  showToast("Identity auto-unlock disabled");
 }
 
 // ── Repository authenticity ──────────────────────────────────────────────
@@ -761,6 +853,97 @@ onMounted(() => {
           >
             Disable Biometric
           </button>
+        </template>
+      </section>
+
+      <!-- App-launch biometric gate (RFC 0028) -->
+      <section v-if="appLockAvailable" class="settings-card">
+        <h2 class="text-sm font-medium mb-3">App Lock</h2>
+        <p class="text-xs text-muted mb-3">
+          Require biometric every time you open or return to gpm. When on, the
+          whole store is sealed behind your fingerprint — nothing is visible
+          until you authenticate.
+        </p>
+
+        <!-- App lock enable/disable -->
+        <template v-if="!appLockEnabled">
+          <button
+            type="button"
+            class="btn-action"
+            :disabled="appLockLoading"
+            @click="onEnableAppLock"
+          >
+            <span
+              v-if="appLockLoading"
+              class="spinner"
+              aria-hidden="true"
+            ></span>
+            🔒 Enable App Lock
+          </button>
+        </template>
+
+        <template v-else>
+          <p class="text-xs text-muted mb-2">✓ App lock is enabled.</p>
+          <button
+            type="button"
+            class="btn-action btn-action-danger"
+            :disabled="appLockLoading"
+            @click="onDisableAppLock"
+          >
+            Disable App Lock
+          </button>
+
+          <!-- Identity auto-unlock opt-in (req3): separate from the auto-lock
+               timing presets below; only meaningful with the gate on and an
+               encrypted identity. -->
+          <div
+            v-if="isIdentityEncrypted"
+            class="mt-4 pt-4 border-t border-[var(--color-edge)]"
+          >
+            <h3 class="text-sm font-medium mb-1">Identity Auto-Unlock</h3>
+            <p class="text-xs text-muted mb-3">
+              Also unlock your passwords when you unlock the app — one biometric
+              prompt does both. Optional and off by default.
+            </p>
+            <template v-if="!identityAutoUnlockEnabled">
+              <div class="flex flex-col gap-2">
+                <input
+                  v-model="appLockPassphrase"
+                  type="password"
+                  placeholder="Current passphrase"
+                  autocomplete="current-password"
+                  class="input-base"
+                  :disabled="appLockLoading"
+                />
+                <button
+                  type="button"
+                  class="btn-action"
+                  :disabled="appLockLoading"
+                  @click="onEnableIdentityAutoUnlock"
+                >
+                  <span
+                    v-if="appLockLoading"
+                    class="spinner"
+                    aria-hidden="true"
+                  ></span>
+                  Enable Auto-Unlock
+                </button>
+              </div>
+            </template>
+            <template v-else>
+              <p class="text-xs text-muted mb-2">
+                ✓ Identity unlocks together with the app.
+              </p>
+              <button
+                type="button"
+                class="btn-action btn-action-danger"
+                :disabled="appLockLoading"
+                @click="onDisableIdentityAutoUnlock"
+              >
+                Disable Auto-Unlock
+              </button>
+            </template>
+          </div>
         </template>
       </section>
 
