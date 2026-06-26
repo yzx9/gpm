@@ -1,8 +1,17 @@
 # Extract rustpass as a reusable age-store plugin
 
 **Priority:** P3
-**Status:** Draft
+**Status:** Deprecated
 **Phase:** Future
+
+> **Deprecated.** Reassessed and set aside as active future work. The technical premise holds — the engine
+> is genuinely a pure library with no Tauri/platform coupling, so "becoming plugin-ready" is documentation,
+> not refactoring. But the value of _publishing_ is latent: it scales with consumers, and there is currently
+> only one (gpm itself), for which the engine already works as an internal dependency. The reuse and
+> audit-leverage payoff only materializes at a second consumer, and none is in sight. The analysis below is
+> retained so a future consumer can pick this up without re-deriving it; the reassessment at the end records
+> why it is no longer tracked work. A code-free "plugin-ready" documentation pass remains harmless
+> housekeeping, but it no longer needs an RFC to drive it.
 
 ## What
 
@@ -112,3 +121,34 @@ Captures a long-deferred roadmap item — package the age+gopass engine as a reu
 on the list since the project's founding design. Natural to sequence after the in-flight write-path work
 (0020 edit-secrets, 0021 delete-secrets, 0024 totp-2fa-codes) so the published surface reflects a
 feature-complete engine.
+
+## Reassessment: the engine is the asset; publication is a bet on adoption
+
+This reassessment records why the RFC is deprecated as tracked work, without disputing its technical
+premise.
+
+**The boundary, stated plainly.** The engine is the security-critical, hard-to-rebuild core — age
+decryption and identity handling, gopass-compatible on-disk format and templates, fast-forward-only git
+sync over HTTPS and SSH, at-rest AEAD, commit-signature authenticity verification, and sanitized, no-secret
+errors. The consuming app retains the stateful _orchestration policy_ around those primitives: idle
+auto-lock timers, mid-conflict plaintext stashing, biometric-prompt wiring, clipboard auto-clear. That split
+is by design, not a limitation. Reuse pays off on the hard, dangerous core, where bugs are subtle and
+security-relevant; it does not pay off on the easy, app-specific policy, where bugs are merely annoying.
+Pulling the orchestration into the plugin would turn a reusable engine into an opinionated "embed all of
+gpm" package, and would drag Tauri runtime types, frontend event shapes, and other plugins into what must
+remain a pure, auditable core — destroying the very property that makes extraction worth anything.
+
+**The at-rest master key is the canonical seam.** It crosses the boundary as injected bytes, so the engine
+never knows whether those bytes came from a hardware keystore or a desktop passthrough. That is what keeps
+the engine platform-agnostic, and it deliberately avoids coupling the engine to any one keystore plugin.
+Tauri does support one plugin calling another (a plugin's API is managed state, reachable through its
+extension trait on any runtime handle), but this engine should not take such a dependency: doing so would
+force every consumer onto gpm's specific keystore choice. The injection design dissolves the need.
+
+**Intrinsic worth versus an option on adoption.** The engine's worth — concentrating all security-critical
+logic into one auditable unit, which the project's threat model already depends on — exists with or without
+extraction. _Publishing_ the engine as a plugin is a different thing: it is an option whose value is near
+zero at one consumer and only material at two or more. With no consumer in sight, the option costs almost
+nothing to keep on the shelf but is not worth exercising. That is why this RFC is deprecated as tracked
+work: the analysis stands ready if a real consumer ever appears, but it is not active work and should not be
+sequenced behind the in-flight feature work as if it were.
