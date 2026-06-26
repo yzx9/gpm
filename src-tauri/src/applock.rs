@@ -18,11 +18,13 @@
 //!   the two never race to show competing prompts.
 //!
 //! The identity-auto-unlock opt-in (one app-unlock also unlocks the identity)
-//! layers on top in a follow-up.
+//! layers on top: the identity passphrase is sealed under the master key, so
+//! `app_unlock` decrypts it with no second prompt when the opt-in is on.
 
 use std::sync::atomic::Ordering;
 
 use rustpass::Error;
+use rustpass::error::ErrorCode;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_secure_keystore::SecureKeystoreExt;
@@ -182,6 +184,14 @@ pub(crate) async fn disable_biometric_app_lock(
         state.store.set_master_key(Some(key));
     }
     state.store.set_biometric_app_lock(false).await?;
+    // The identity-auto-unlock opt-in is meaningless without the gate (app_unlock
+    // is never called when app_lock_enabled is false). Clear its flag + sealed
+    // passphrase slot so re-enabling the gate later starts clean — otherwise the
+    // persisted flag would silently re-activate auto-unlock with the old sealed
+    // passphrase, and the Settings UI (which hides the opt-in while the gate is
+    // off) would offer no way to clear it.
+    let _ = state.store.clear_app_identity_pass().await;
+    let _ = state.store.set_unlock_identity_with_app(false).await;
 
     state.app_lock_enabled.store(false, Ordering::SeqCst);
     state.app_locked.store(false, Ordering::SeqCst);
@@ -218,10 +228,57 @@ pub(crate) async fn app_unlock(
     state.app_locked.store(false, Ordering::SeqCst);
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
     emit_app_lock_state(&app, enabled, false);
-    // Identity is still wiped — report it as a soft (no-overlay) state so the
-    // frontend leaves the overlay down and uses per-op auth for copy/show.
-    identity::emit_lock_state(&app, &state.store, true).await;
+    // Identity-auto-unlock opt-in: if on and the identity is encrypted, unlock
+    // it now with the passphrase sealed under the (just-injected) master key —
+    // no second prompt. unlock_and_arm emits identity-lock-state{locked:false}.
+    // Otherwise, only for a passphrase-encrypted identity, a SOFT identity event
+    // tells the frontend to use per-op auth (no overlay over the just-unlocked
+    // app). A plaintext identity is always readable straight from disk, so it
+    // must NOT receive a soft event — that would force runWithAuth to raise an
+    // unusable UnlockModal (no passphrase to enter) on every copy/show.
+    if !try_identity_auto_unlock(&state, &app).await && state.store.is_identity_encrypted().await {
+        identity::emit_lock_state(&app, &state.store, true).await;
+    }
     Ok(())
+}
+
+/// Attempt the identity-auto-unlock opt-in after the master key is in memory.
+/// Returns `true` if the identity session is now unlocked. Cheaply skips when
+/// the opt-in is off or the identity isn't passphrase-encrypted; on a missing
+/// slot returns `false` (per-op auth). On a stale sealed passphrase
+/// (`WRONG_PASSPHRASE` — the user changed it), self-heals by clearing the slot +
+/// the opt-in so it stops auto-attempting, and returns `false`.
+async fn try_identity_auto_unlock<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+) -> bool {
+    let Ok(rc) = state.store.config().await else {
+        return false;
+    };
+    if !rc.unlock_identity_with_app {
+        return false;
+    }
+    if !state.store.is_identity_encrypted().await {
+        return false;
+    }
+    let Ok(pass_bytes) = state.store.load_app_identity_pass().await else {
+        return false; // slot absent, or the master key is somehow unavailable
+    };
+    // age passphrases are UTF-8; an invalid sequence means a corrupt slot.
+    let pass = match std::str::from_utf8(pass_bytes.as_slice()) {
+        Ok(s) => Zeroizing::new(s.to_owned()),
+        Err(_) => return false,
+    };
+    match identity::unlock_and_arm(state, app, pass.as_str()).await {
+        Ok(()) => true,
+        Err(e) => {
+            if e.code == "WRONG_PASSPHRASE" {
+                let _ = state.store.clear_app_identity_pass().await;
+                let _ = state.store.set_unlock_identity_with_app(false).await;
+            }
+            false
+        }
+    }
 }
 
 /// Lock the app: wipe the master key (the store becomes unreadable) and the
@@ -248,6 +305,52 @@ pub(crate) async fn app_lock(
     Ok(())
 }
 
+/// Enable the identity-auto-unlock opt-in: validate `passphrase`, then seal it
+/// under the at-rest master key so a later `app_unlock` can unlock the identity
+/// with no second prompt. Requires the gate to be enabled and the identity to be
+/// passphrase-encrypted (the slot seals a passphrase, which a plaintext identity
+/// has none of). The master key must be in memory (i.e. the app is unlocked) for
+/// the seal to succeed.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn enable_identity_auto_unlock(
+    state: State<'_, AppState>,
+    passphrase: String,
+) -> Result<(), AppLockError> {
+    if !state.app_lock_enabled.load(Ordering::SeqCst) {
+        return Err(AppLockError::failed(
+            "Enable the app lock before identity auto-unlock",
+        ));
+    }
+    if !state.store.is_identity_encrypted().await {
+        return Err(AppLockError::from(Error::new(
+            ErrorCode::IdentityNotEncrypted,
+            "Identity auto-unlock requires a passphrase-encrypted identity",
+        )));
+    }
+    let passphrase = Zeroizing::new(passphrase);
+    // Validate before sealing (rejects a wrong passphrase before it is stored).
+    state.store.validate_passphrase(passphrase.as_str()).await?;
+    state
+        .store
+        .save_app_identity_pass(passphrase.as_str())
+        .await?;
+    state.store.set_unlock_identity_with_app(true).await?;
+    Ok(())
+}
+
+/// Disable the identity-auto-unlock opt-in: clear the sealed passphrase slot and
+/// the flag. Never fails on a missing slot (best-effort clear).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn disable_identity_auto_unlock(
+    state: State<'_, AppState>,
+) -> Result<(), AppLockError> {
+    state.store.clear_app_identity_pass().await?;
+    state.store.set_unlock_identity_with_app(false).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,7 +368,7 @@ mod tests {
 
     #[test]
     fn app_lock_error_from_rustpass_preserves_code() {
-        let err = AppLockError::from(Error::new(rustpass::error::ErrorCode::StoreError, "boom"));
+        let err = AppLockError::from(Error::new(ErrorCode::StoreError, "boom"));
         assert_eq!(err.code, "STORE_ERROR");
         assert_eq!(err.message, "boom");
     }

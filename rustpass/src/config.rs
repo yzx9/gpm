@@ -190,6 +190,67 @@ impl Config {
         Ok(())
     }
 
+    /// Path of the optional identity-passphrase slot used by the app-launch
+    /// biometric gate's identity-auto-unlock opt-in (RFC 0028). When that opt-in
+    /// is on, the identity passphrase is AEAD-sealed under the at-rest master
+    /// key here — so a successful app-unlock (which retrieves the master key via
+    /// one biometric prompt) can unlock the identity with NO second prompt. The
+    /// master key (biometric-gated when app-lock is on) gates this slot, so the
+    /// passphrase is effectively behind the single app-unlock biometric.
+    fn app_identity_pass_path(&self) -> PathBuf {
+        self.config_dir.join("app_id_pass")
+    }
+
+    /// Seal `passphrase` under the at-rest master key into the identity-pass
+    /// slot. No-op-equivalent on desktop (the key is `None` ⇒ passthrough, so
+    /// the slot stores plaintext — acceptable since desktop has no app-lock).
+    ///
+    /// The caller is responsible for zeroizing `passphrase` after this call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory cannot be created, the AEAD
+    /// seal fails, or the file cannot be written.
+    pub async fn save_app_identity_pass(&self, passphrase: &[u8]) -> Result<(), Error> {
+        fs::create_dir_all(&self.config_dir).await?;
+        let sealed = self.atrest.seal("app_identity_pass", passphrase)?;
+        save_atomic(&self.app_identity_pass_path(), &sealed).await
+    }
+
+    /// Load the sealed identity passphrase. The caller **must** zeroize the
+    /// returned bytes after use. Returns [`ErrorCode::NoIdentity`] if the slot
+    /// is absent (the opt-in was never enabled, or cleared).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or the AEAD unseal fails
+    /// (e.g. `AtRestKeyUnavailable` while the master key is wiped).
+    pub async fn load_app_identity_pass(&self) -> Result<Vec<u8>, Error> {
+        let path = self.app_identity_pass_path();
+        if !path.exists() {
+            return Err(Error::new(
+                ErrorCode::NoIdentity,
+                "No app identity passphrase stored",
+            ));
+        }
+        let raw = fs::read(&path).await?;
+        self.atrest.unseal("app_identity_pass", &raw)
+    }
+
+    /// Clear the identity-passphrase slot (best-effort). Used when the opt-in is
+    /// disabled or self-healing a stale sealed passphrase.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be removed.
+    pub async fn clear_app_identity_pass(&self) -> Result<(), Error> {
+        let path = self.app_identity_pass_path();
+        if path.exists() {
+            fs::remove_file(path).await?;
+        }
+        Ok(())
+    }
+
     /// Save repository configuration (URL + local path).
     ///
     /// # Errors
@@ -1062,6 +1123,50 @@ mod tests {
             cfg2.clipboard_clear_secs_effective(),
             DEFAULT_CLIPBOARD_CLEAR_SECS
         );
+    }
+
+    #[tokio::test]
+    async fn app_identity_pass_slot_roundtrip_under_master_key() {
+        // The identity-auto-unlock slot seals the passphrase under the master
+        // key (None here ⇒ passthrough, mirroring desktop; the seal/open path is
+        // what matters). With a real key the AAD binding protects it.
+        let (config, _dir) = create_config();
+        let pass = b"correct horse battery staple";
+
+        config.save_app_identity_pass(pass).await.unwrap();
+        assert_eq!(config.load_app_identity_pass().await.unwrap(), pass);
+
+        // Clearing removes the slot.
+        config.clear_app_identity_pass().await.unwrap();
+        let err = config.load_app_identity_pass().await.unwrap_err();
+        assert_eq!(err.code, "NO_IDENTITY");
+    }
+
+    #[tokio::test]
+    async fn app_identity_pass_slot_bound_to_master_key() {
+        // A passphrase sealed under one master key cannot be opened under
+        // another (or with the key absent once it has been used) — the AAD +
+        // AEAD tag enforce that the slot stays under its sealing key.
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::atrest::generate_master_key().unwrap();
+        let sealed_cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        sealed_cfg
+            .save_app_identity_pass(b"secret-pass")
+            .await
+            .unwrap();
+
+        // Opens under the same key.
+        assert_eq!(
+            sealed_cfg.load_app_identity_pass().await.unwrap(),
+            b"secret-pass"
+        );
+
+        // A different key (a fresh store pointing at the same dir) cannot open
+        // the slot the first key sealed.
+        let other_key = crate::atrest::generate_master_key().unwrap();
+        let other_cfg = Config::new(dir.path().to_path_buf(), Some(other_key));
+        let err = other_cfg.load_app_identity_pass().await.unwrap_err();
+        assert_eq!(err.code, "AT_REST_TAMPERED");
     }
 
     #[tokio::test]

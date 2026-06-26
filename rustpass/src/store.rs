@@ -1661,6 +1661,39 @@ impl Store {
         Ok(rc)
     }
 
+    /// Seal the identity passphrase under the at-rest master key, for the
+    /// identity-auto-unlock opt-in. See [`Config::save_app_identity_pass`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the AEAD seal or the write fails.
+    pub async fn save_app_identity_pass(&self, passphrase: &str) -> Result<(), Error> {
+        self.config
+            .save_app_identity_pass(passphrase.as_bytes())
+            .await
+    }
+
+    /// Load the sealed identity passphrase. See
+    /// [`Config::load_app_identity_pass`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::NoIdentity`] if the slot is absent, or an error if
+    /// the AEAD unseal fails (e.g. the master key is wiped).
+    pub async fn load_app_identity_pass(&self) -> Result<Zeroizing<Vec<u8>>, Error> {
+        Ok(Zeroizing::new(self.config.load_app_identity_pass().await?))
+    }
+
+    /// Clear the sealed identity passphrase slot. See
+    /// [`Config::clear_app_identity_pass`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be removed.
+    pub async fn clear_app_identity_pass(&self) -> Result<(), Error> {
+        self.config.clear_app_identity_pass().await
+    }
+
     /// The default commit author identity, for UI display. Reads the shipped
     /// default so the frontend never hardcodes it.
     #[must_use]

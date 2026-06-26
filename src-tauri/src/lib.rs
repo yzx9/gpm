@@ -272,6 +272,8 @@ pub fn run() {
             applock::disable_biometric_app_lock,
             applock::app_unlock,
             applock::app_lock,
+            applock::enable_identity_auto_unlock,
+            applock::disable_identity_auto_unlock,
             // repository authenticity
             authenticity::get_authenticity_state,
             authenticity::set_verification_mode,
@@ -286,4 +288,28 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod decode_master_key_tests {
+    use super::*;
+
+    #[test]
+    fn valid_32_byte_key_roundtrips() {
+        let key = rustpass::atrest::generate_master_key().unwrap();
+        let b64 = B64.encode(key);
+        assert_eq!(decode_master_key(&b64), Some(key));
+    }
+
+    #[test]
+    fn wrong_length_returns_none() {
+        // A 16-byte decode is the right shape but wrong length — must reject.
+        assert_eq!(decode_master_key(&B64.encode([0u8; 16])), None);
+    }
+
+    #[test]
+    fn malformed_base64_returns_none() {
+        // Non-base64 characters ⇒ decode fails ⇒ None, no panic.
+        assert_eq!(decode_master_key("!!!not-base64!!!"), None);
+    }
 }
