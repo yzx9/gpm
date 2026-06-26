@@ -53,6 +53,52 @@ Keystore wiped, factory reset) the encrypted files become unreadable and
 re-setup is required; there is no escrow, since any escrow key stored on disk
 would defeat the purpose.
 
+### App-launch biometric gate (opt-in)
+
+The optional **App Lock** (Settings → App Lock, RFC 0028) raises the at-rest
+defense into a real lock screen. When on, the master key is re-sealed behind a
+**biometric-gated** Keystore key (still hardware-backed AES-GCM, but every use
+requires a STRONG biometric). The store is then unreadable — on disk _and_ in
+memory — until the user authenticates: gpm builds without the master key at
+launch, injects it only after the app-unlock biometric prompt, and **wipes it
+when the app returns to the foreground** (detected via the WebView's
+`visibilitychange`), so a locked app cannot read the store even from a memory
+snapshot. One biometric prompt gates the whole store; the identity `UnlockModal`
+is suppressed while the app-lock overlay is up so the two never race.
+
+The wipe happens on _resume_ (foreground return), not at the instant of
+backgrounding: while the app sits in the background, before the resume fires, the
+master key remains in memory until the re-lock runs. This is consistent with the
+threat model (a process-running attacker is an explicit non-goal), but the
+guarantee rests on the WebView firing `visibilitychange` on resume, which is the
+norm on Android but not contractually guaranteed on every OEM build. If that
+event ever failed to fire on a resume, the key would stay loaded until the next
+one that does. A Kotlin-side `Activity.onResume` hook would make the signal
+authoritative; it is tracked as a future hardening (RFC 0029) rather than
+shipped here.
+
+This binds at-rest encryption to biometrics for users who opt in, and is a
+deliberate departure from the default auth-free master key — adopted only here,
+where the user accepts the tradeoff:
+
+- **Enrollment does not brick.** The biometric-gated master key is _not_
+  invalidated by enrolling a new fingerprint or face, so adding a finger never
+  locks you out of your store.
+- **Removing all biometrics does.** If every enrolled biometric is removed, the
+  key is invalidated and the store becomes unreadable — re-setup (re-clone,
+  re-enter the git token) is the only recovery. There is no escrow; an escrow
+  key on disk would defeat the lock. This is the accepted residual risk of the
+  opt-in feature.
+- **One prompt, not two.** A second toggle, _Identity Auto-Unlock_ (off by
+  default, and separate from the Auto-Lock timing presets), seals the identity
+  passphrase under the master key. When it is on, a successful app-unlock also
+  unlocks the identity session with no second prompt; when off, the identity
+  keeps its existing per-operation/session behavior.
+
+The gate re-challenges on every return to the foreground (cold start and warm
+resume alike). On desktop there is no Keystore equivalent, so App Lock is
+unavailable and the files stay plaintext (the existing asymmetry).
+
 ## Two Password Operation Paths
 
 ### `copy_password` — primary operation (no IPC exposure)
