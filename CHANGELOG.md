@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.1] - 2026-06-27
+
 ### Fixed
 
 - On Android, cloning or syncing a repository over HTTPS no longer fails with a certificate verification error — gpm now bundles the trusted root certificates (Mozilla's set) so the git connection can verify servers like GitHub. Desktop is unchanged
@@ -123,7 +125,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.1...HEAD
+[v0.7.1]: https://github.com/yzx9/gpm/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/yzx9/gpm/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/yzx9/gpm/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/yzx9/gpm/compare/v0.4.0...v0.5.0
