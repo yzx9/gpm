@@ -146,6 +146,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         pending_write: Arc::new(Mutex::new(None)),
         lock_mode: Mutex::new(rustpass::LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+        ca_bundle_error: Mutex::new(None),
     };
     (
         state,

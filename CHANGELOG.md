@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Android, cloning or syncing a repository over HTTPS no longer fails with a certificate verification error — gpm now bundles the trusted root certificates (Mozilla's set) so the git connection can verify servers like GitHub. Desktop is unchanged
+
 ## [v0.7.0] - 2026-06-26
 
 ### Added

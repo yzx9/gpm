@@ -24,6 +24,13 @@ fmt:
   cargo fmt
   prettier --write src
 
+# Refresh the embedded Mozilla CA bundle (rustpass/data/cacert.pem) that backs
+# HTTPS git certificate verification on Android. Run once per release so the
+# trusted roots track Mozilla's trust decisions, then commit the file.
+refresh-ca:
+  curl -fsSL https://curl.se/ca/cacert.pem -o rustpass/data/cacert.pem
+  @echo "Refreshed rustpass/data/cacert.pem — run 'just test' (bundle validity check), then commit."
+
 # Desktop dev server with hot reload
 dev: _gen-icons
   pnpm tauri dev

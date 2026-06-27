@@ -137,6 +137,20 @@ Key details:
 
 **Files involved:** `flake.nix` (shellHook), `src-tauri/Cargo.toml` (`git2` with `vendored-openssl` + `vendored-libgit2`)
 
+### Android: HTTPS git certificate verification
+
+The `git2` (libgit2) backend links vendored OpenSSL, which on Android has no path to the system CA store — so HTTPS clone/pull/push would fail with `SSL certificate is invalid`. gpm works around this by embedding Mozilla's root CA bundle (`rustpass/data/cacert.pem`) and pointing libgit2 at it once at startup (`rustpass::git::set_ca_bundle`, wired in `src-tauri/src/lib.rs` under `#[cfg(target_os = "android")]`). Desktop finds the system CA store on its own and is untouched.
+
+**Refresh the bundle every release** so the trusted roots track Mozilla's trust decisions (root additions/distrusts):
+
+```bash
+just refresh-ca   # re-downloads rustpass/data/cacert.pem from https://curl.se/ca/cacert.pem
+just test         # the embedded_ca_bundle_is_valid_pem test guards against a corrupt bundle
+git commit rustpass/data/cacert.pem
+```
+
+**Known limitation — self-hosted servers behind a private/enterprise CA:** this setup trusts only the public WebPKI roots Mozilla ships. A self-hosted Git server whose certificate chains to a private CA your device trusts is _not_ covered and will still fail verification. For those remotes, use an **SSH** URL (`git@host:repo` or `ssh://`) — gpm supports SSH key auth, and SSH does not go through the OpenSSL CA path. Bundling the device's full system/user CA store is tracked as a future Tier 2/Tier 3 improvement.
+
 ## Contributing
 
 Contributions are welcome! We follow standard GitHub flow:

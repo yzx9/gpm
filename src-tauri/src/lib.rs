@@ -70,6 +70,34 @@ pub(crate) struct AppState {
     pub(crate) lock_mode: Mutex<rustpass::LockMode>,
     /// Cached effective clipboard auto-clear seconds (same refresh contract).
     pub(crate) clipboard_clear_secs: Mutex<u64>,
+    /// Android only: a human-readable reason if the embedded CA bundle failed
+    /// to install at startup (`None` on desktop or on success). Checked before
+    /// HTTPS git ops so the failure surfaces as a clear error, not the opaque
+    /// "SSL certificate is invalid" libgit2 emits.
+    pub(crate) ca_bundle_error: Mutex<Option<String>>,
+}
+
+impl AppState {
+    /// On Android, if the embedded CA bundle failed to install at startup, HTTPS
+    /// git cannot verify servers. Surface a clear error before any network op
+    /// instead of letting libgit2 fail later with an opaque SSL message. No-op
+    /// on desktop (`ca_bundle_error` is always `None`).
+    pub(crate) fn check_ca_bundle(&self) -> Result<(), rustpass::Error> {
+        if let Some(msg) = self
+            .ca_bundle_error
+            .lock()
+            .expect("ca_bundle_error mutex poisoned")
+            .as_ref()
+        {
+            return Err(rustpass::Error::new(
+                rustpass::ErrorCode::StoreError,
+                format!(
+                    "Android CA bundle could not be installed ({msg}); HTTPS git cannot verify servers."
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +139,24 @@ fn master_key_from<R: tauri::Runtime>(
 }
 
 // ---------------------------------------------------------------------------
+// Android HTTPS CA bundle
+// ---------------------------------------------------------------------------
+
+/// On Android, write the embedded Mozilla CA bundle to the config dir and point
+/// libgit2's OpenSSL backend at it, so HTTPS git verifies servers — the vendored
+/// OpenSSL build has no path to the system CA store. `Config::new` does not
+/// create the config dir (it is created lazily on the first config save), so
+/// `create_dir_all` is mandatory on a clean first run. No-op on non-Android.
+#[cfg(target_os = "android")]
+fn install_android_ca_bundle(config_dir: &std::path::Path) -> Result<(), String> {
+    let ca_path = config_dir.join("cacert.pem");
+    std::fs::create_dir_all(config_dir)
+        .and_then(|_| std::fs::write(&ca_path, rustpass::git::EMBEDDED_CA_BUNDLE))
+        .map_err(|e| format!("write CA bundle: {e}"))?;
+    rustpass::git::set_ca_bundle(&ca_path).map_err(|e| format!("set CA bundle: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
 
@@ -134,6 +180,16 @@ pub fn run() {
                 .app_config_dir()
                 .expect("Cannot determine app config directory");
 
+            // Android: point libgit2's OpenSSL backend at the embedded Mozilla
+            // CA bundle so HTTPS git verifies servers (vendored OpenSSL has no
+            // path to the system CA store). Runs before any git network op. A
+            // failure is captured (not logged-and-forgotten) so the first HTTPS
+            // op surfaces a clear error instead of an opaque SSL message.
+            #[cfg(target_os = "android")]
+            let ca_bundle_error = install_android_ca_bundle(&config_dir).err();
+            #[cfg(not(target_os = "android"))]
+            let ca_bundle_error: Option<String> = None;
+
             // At-rest master key: from the Android Keystore on Android; `None`
             // (plaintext passthrough) on desktop.
             let master_key = master_key_from(app.secure_keystore());
@@ -156,6 +212,7 @@ pub fn run() {
                 // pre-setup no op reads them.
                 lock_mode: Mutex::new(rustpass::LockMode::default()),
                 clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+                ca_bundle_error: Mutex::new(ca_bundle_error),
             });
             Ok(())
         })

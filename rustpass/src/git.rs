@@ -3,12 +3,59 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
 use crate::store::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
+
+/// Mozilla (curl) root CA bundle, embedded so the libgit2 OpenSSL backend has a
+/// trust anchor on targets with no discoverable system CA store — notably
+/// Android, where the vendored OpenSSL build cannot read the system keystore and
+/// HTTPS git otherwise fails with `SSL certificate is invalid`. Refreshed via
+/// the `refresh-ca` just recipe; a unit test guards against a truncated/corrupt
+/// bundle shipping.
+pub const EMBEDDED_CA_BUNDLE: &str = include_str!("../data/cacert.pem");
+
+/// Caches the one-time libgit2 CA-location setup so the "exactly once" safety
+/// contract is enforced in code, not just in the SAFETY comment below: a repeat
+/// call is a safe no-op that returns the cached outcome.
+static CA_BUNDLE_RESULT: OnceLock<Result<(), Error>> = OnceLock::new();
+
+/// Point libgit2's OpenSSL backend at `path` (a concatenated PEM of trusted
+/// roots) for HTTPS certificate verification.
+///
+/// This is the only way to give the vendored OpenSSL backend a trust store on
+/// Android (`SSL_CERT_FILE` is not honored), so it sets libgit2's
+/// process-global CA location and must be called exactly once, at startup,
+/// before any git network operation. The caller writes the bundle bytes — e.g.
+/// [`EMBEDDED_CA_BUNDLE`] — to `path` first and applies any platform gating.
+///
+/// # Errors
+///
+/// Returns [`ErrorCode::StoreError`] if libgit2 rejects the path.
+#[allow(unsafe_code)]
+pub fn set_ca_bundle(path: &Path) -> Result<(), Error> {
+    CA_BUNDLE_RESULT
+        .get_or_init(|| {
+            // SAFETY: `git2::opts::set_ssl_cert_file` mutates a libgit2
+            // process-global without synchronization. `OnceLock::get_or_init`
+            // runs this closure at most once process-wide, and the sole call
+            // site is app startup before any git network operation, so no
+            // concurrent libgit2 TLS access is in flight (the global is read
+            // only during a TLS handshake). A repeat call skips the closure
+            // and returns the cached outcome — a safe no-op.
+            unsafe { git2::opts::set_ssl_cert_file(path) }.map_err(|e| {
+                Error::new(
+                    ErrorCode::StoreError,
+                    format!("set_ssl_cert_file failed: {e}"),
+                )
+            })
+        })
+        .clone()
+}
 
 /// Credentials for Git remote authentication.
 #[derive(Debug, Clone)]
@@ -1244,5 +1291,18 @@ mod tests {
         let remote = repo.find_remote("origin").expect("origin should exist");
         assert_eq!(remote.name(), Some("origin"));
         assert_eq!(remote.url(), Some("https://example.invalid/repo.git"));
+    }
+
+    #[test]
+    fn embedded_ca_bundle_is_valid_pem() {
+        // Guards against a truncated/corrupt bundle shipping (e.g. a botched
+        // refresh-ca). The full Mozilla root set carries well over 100 roots.
+        let count = EMBEDDED_CA_BUNDLE
+            .matches("-----BEGIN CERTIFICATE-----")
+            .count();
+        assert!(
+            count >= 100,
+            "embedded CA bundle has only {count} certs, expected a full Mozilla root set (~120+)"
+        );
     }
 }

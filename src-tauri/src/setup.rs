@@ -151,6 +151,7 @@ pub(crate) async fn clone_repo(
     ssh_key: Option<String>,
     ssh_passphrase: Option<String>,
 ) -> Result<(), Error> {
+    state.check_ca_bundle()?;
     state
         .store
         .clone_only(
@@ -594,6 +595,7 @@ mod tests {
             pending_write: Arc::new(Mutex::new(None)),
             lock_mode: Mutex::new(rustpass::LockMode::default()),
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+            ca_bundle_error: Mutex::new(None),
         };
         (state, dir)
     }

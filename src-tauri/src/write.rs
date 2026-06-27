@@ -304,6 +304,7 @@ pub(crate) async fn resolve_pending(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn pull_repo(state: State<'_, AppState>) -> Result<SyncOutcome, Error> {
+    state.check_ca_bundle()?;
     state.store.sync().await
 }
 
@@ -314,6 +315,7 @@ pub(crate) async fn pull_repo(state: State<'_, AppState>) -> Result<SyncOutcome,
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
+    state.check_ca_bundle()?;
     state.store.push().await
 }
 
