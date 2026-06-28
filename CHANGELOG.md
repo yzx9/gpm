@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.2] - 2026-06-28
+
 ### Fixed
 
 - On Android, HTTPS clone/sync/push over public-WebPKI servers (e.g. GitHub) now verifies correctly — the bundled Mozilla roots are loaded into the git TLS trust store on first use. (Servers behind a private/enterprise CA are not covered; use an SSH remote for those.)
@@ -129,7 +131,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.2...HEAD
+[v0.7.2]: https://github.com/yzx9/gpm/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/yzx9/gpm/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/yzx9/gpm/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/yzx9/gpm/compare/v0.5.0...v0.6.0
