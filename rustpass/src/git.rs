@@ -2,11 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(target_os = "android")]
+use std::ffi::c_int;
 use std::path::Path;
-use std::sync::OnceLock;
 
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 
+use crate::config::{DEFAULT_COMMIT_EMAIL, DEFAULT_COMMIT_NAME};
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
 use crate::store::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
@@ -19,42 +21,151 @@ use crate::store::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
 /// bundle shipping.
 pub const EMBEDDED_CA_BUNDLE: &str = include_str!("../data/cacert.pem");
 
-/// Caches the one-time libgit2 CA-location setup so the "exactly once" safety
-/// contract is enforced in code, not just in the SAFETY comment below: a repeat
-/// call is a safe no-op that returns the cached outcome.
-static CA_BUNDLE_RESULT: OnceLock<Result<(), Error>> = OnceLock::new();
-
-/// Point libgit2's OpenSSL backend at `path` (a concatenated PEM of trusted
-/// roots) for HTTPS certificate verification.
+/// Before an HTTPS git op on Android, load the embedded Mozilla roots into
+/// libgit2's OpenSSL trust store. No-op on non-Android targets and on non-HTTPS
+/// remotes (SSH / local-only stores), so a failed load never blocks those flows.
 ///
-/// This is the only way to give the vendored OpenSSL backend a trust store on
-/// Android (`SSL_CERT_FILE` is not honored), so it sets libgit2's
-/// process-global CA location and must be called exactly once, at startup,
-/// before any git network operation. The caller writes the bundle bytes — e.g.
-/// [`EMBEDDED_CA_BUNDLE`] — to `path` first and applies any platform gating.
+/// `rustpass` owns the `git2`/libgit2 dependency, so it owns this
+/// platform-specific transport workaround. The vendored OpenSSL is built
+/// `no-stdio` on Android (`openssl-src`), which compiles out `BIO_new_file` —
+/// the usual approach (`git2::opts::set_ssl_cert_file`) is impossible there,
+/// since libgit2 eagerly calls `SSL_CTX_load_verify_locations` → `BIO_new_file`
+/// → NULL → `x509 certificate routines::BIO lib`. Instead the bundle is parsed
+/// from memory (`BIO_new_mem_buf` survives `no-stdio`) and each root is added
+/// via libgit2's `GIT_OPT_ADD_SSL_X509_CERT` → `X509_STORE_add_cert` (no file
+/// BIO). Runs at most once process-wide; see [`ensure_https_ca_loaded`].
+#[allow(clippy::unnecessary_wraps)] // returns Err only on the android branch below
+fn ensure_https_ca_for_origin(repo: &Repository) -> Result<(), Error> {
+    #[cfg(target_os = "android")]
+    {
+        let origin_is_https = repo
+            .find_remote("origin")
+            .ok()
+            .and_then(|r| r.url().map(|u| u.starts_with("https://")))
+            .unwrap_or(false);
+        if origin_is_https {
+            ensure_https_ca_loaded()?;
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = repo;
+    }
+    Ok(())
+}
+
+/// libgit2 option to push a raw X509 root into its OpenSSL trust store. Not
+/// exported by name in `libgit2-sys` 0.18.x; the value is the last member of
+/// `git_libgit2_opt_t` in the vendored libgit2 1.9.4. [`ensure_https_ca_loaded`]
+/// asserts the version, so a `git2` bump that shifts this fails loudly instead
+/// of silently corrupting the trust store.
+#[cfg(target_os = "android")]
+const GIT_OPT_ADD_SSL_X509_CERT: c_int = 45;
+
+/// Cache the one-time in-memory CA load. A second call would make
+/// `X509_STORE_add_cert` reject every root as a duplicate, so the `OnceLock`
+/// runs the load at most once process-wide and makes repeats a safe no-op
+/// returning the cached outcome.
+#[cfg(target_os = "android")]
+static CA_LOAD_RESULT: std::sync::OnceLock<Result<(), Error>> = std::sync::OnceLock::new();
+
+/// Load [`EMBEDDED_CA_BUNDLE`] into libgit2's trust store, once. Android only.
 ///
 /// # Errors
 ///
-/// Returns [`ErrorCode::StoreError`] if libgit2 rejects the path.
-#[allow(unsafe_code)]
-pub fn set_ca_bundle(path: &Path) -> Result<(), Error> {
-    CA_BUNDLE_RESULT
+/// Returns [`ErrorCode::StoreError`] if the bundle parses zero roots or a
+/// mid-bundle parse failure would leave a partial trust store.
+#[cfg(target_os = "android")]
+fn ensure_https_ca_loaded() -> Result<(), Error> {
+    CA_LOAD_RESULT
         .get_or_init(|| {
-            // SAFETY: `git2::opts::set_ssl_cert_file` mutates a libgit2
-            // process-global without synchronization. `OnceLock::get_or_init`
-            // runs this closure at most once process-wide, and the sole call
-            // site is app startup before any git network operation, so no
-            // concurrent libgit2 TLS access is in flight (the global is read
-            // only during a TLS handshake). A repeat call skips the closure
-            // and returns the cached outcome — a safe no-op.
-            unsafe { git2::opts::set_ssl_cert_file(path) }.map_err(|e| {
-                Error::new(
+            // `add_certs_from_pem` mutates libgit2's process-global trust store,
+            // so the `OnceLock` is load-bearing for thread-safety (not just the
+            // duplicate-cert correctness noted on `CA_LOAD_RESULT`): it runs the
+            // load exactly once process-wide; a repeat returns the cached
+            // outcome.
+            match add_certs_from_pem(EMBEDDED_CA_BUNDLE.as_bytes()) {
+                Ok(n) if n > 0 => Ok(()),
+                Ok(_) => Err(Error::new(
                     ErrorCode::StoreError,
-                    format!("set_ssl_cert_file failed: {e}"),
-                )
-            })
+                    "embedded CA bundle parsed 0 certificates; HTTPS git cannot verify servers",
+                )),
+                Err(e) => Err(e),
+            }
         })
         .clone()
+}
+
+/// Initialize libgit2 (`git2::init` is crate-private) and assert the vendored
+/// libgit2 is 1.9.x — the version the [`GIT_OPT_ADD_SSL_X509_CERT`] value is
+/// pinned to.
+#[cfg(target_os = "android")]
+#[allow(unsafe_code)]
+fn init_libgit2_for_ca_opts() -> Result<(), Error> {
+    unsafe {
+        libgit2_sys::git_libgit2_init();
+        let (mut major, mut minor, mut rev) = (0_c_int, 0_c_int, 0_c_int);
+        let rc = libgit2_sys::git_libgit2_version(&mut major, &mut minor, &mut rev);
+        if rc != 0 || !(major == 1 && minor == 9) {
+            return Err(Error::new(
+                ErrorCode::StoreError,
+                format!(
+                    "GIT_OPT_ADD_SSL_X509_CERT=45 is pinned to libgit2 1.9.x; got \
+                     {major}.{minor}.{rev}"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Parse every `BEGIN CERTIFICATE` block from a concatenated PEM bundle and call
+/// `on_cert` for each. Returns the count parsed.
+///
+/// `openssl::x509::X509::stack_from_pem` owns the EOF-vs-parse-failure
+/// distinction (clean end-of-data → a shorter/empty `Vec`; a corrupt block →
+/// `Err`), so a truncated/corrupt bundle surfaces as an error instead of a
+/// silent partial trust store. Desktop-runnable (only the `openssl` crate, no
+/// libgit2 mutation) so the bundle-validity unit test exercises the real
+/// OpenSSL parser instead of a string match.
+#[cfg(any(target_os = "android", test))]
+fn for_each_cert_in_pem(
+    pem: &[u8],
+    mut on_cert: impl FnMut(&openssl::x509::X509) -> Result<(), Error>,
+) -> Result<usize, Error> {
+    let certs = openssl::x509::X509::stack_from_pem(pem).map_err(|e| {
+        Error::new(
+            ErrorCode::StoreError,
+            format!("CA bundle failed to parse: {e}"),
+        )
+    })?;
+    for cert in &certs {
+        on_cert(cert)?;
+    }
+    Ok(certs.len())
+}
+
+/// Parse `pem` and add every root to libgit2's OpenSSL trust store via
+/// `GIT_OPT_ADD_SSL_X509_CERT` (Android only — desktop finds the system store
+/// itself). Returns the count added. Reuses [`for_each_cert_in_pem`] so the
+/// parse path is shared with the desktop unit test.
+#[cfg(target_os = "android")]
+#[allow(unsafe_code)]
+fn add_certs_from_pem(pem: &[u8]) -> Result<usize, Error> {
+    use openssl::foreign_types::ForeignType;
+    init_libgit2_for_ca_opts()?;
+    for_each_cert_in_pem(pem, |cert| {
+        // SAFETY: `cert` is a valid X509 parsed from the embedded bundle, and
+        // `git_libgit2_opts` is variadic with the X509* as the option arg.
+        let rc = unsafe { libgit2_sys::git_libgit2_opts(GIT_OPT_ADD_SSL_X509_CERT, cert.as_ptr()) };
+        if rc != 0 {
+            return Err(Error::new(
+                ErrorCode::StoreError,
+                "libgit2 rejected an embedded CA root (GIT_OPT_ADD_SSL_X509_CERT)",
+            ));
+        }
+        Ok(())
+    })
 }
 
 /// Credentials for Git remote authentication.
@@ -119,6 +230,10 @@ fn build_remote_callbacks(auth: &GitAuth) -> RemoteCallbacks<'_> {
 /// Returns an error if the clone fails due to authentication, network, or
 /// filesystem issues.
 pub fn clone_repo(url: &str, dest: &Path, auth: &GitAuth) -> Result<(), Error> {
+    #[cfg(target_os = "android")]
+    if url.starts_with("https://") {
+        ensure_https_ca_loaded()?;
+    }
     // Remove existing directory if present (re-clone)
     if dest.exists() {
         std::fs::remove_dir_all(dest)?;
@@ -181,6 +296,7 @@ pub fn pull_repo(
 ) -> Result<SyncOutcome, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    ensure_https_ca_for_origin(&repo)?;
 
     // No `origin` → a local-only store (e.g. created with no remote). Pull is a
     // no-op: there is nothing to fetch. This mirrors the push no-op so the
@@ -219,8 +335,8 @@ fn gpm_signature(
     email: Option<&str>,
 ) -> Result<git2::Signature<'static>, Error> {
     git2::Signature::now(
-        name.unwrap_or(crate::config::DEFAULT_COMMIT_NAME),
-        email.unwrap_or(crate::config::DEFAULT_COMMIT_EMAIL),
+        name.unwrap_or(DEFAULT_COMMIT_NAME),
+        email.unwrap_or(DEFAULT_COMMIT_EMAIL),
     )
     .map_err(|e| {
         Error::new(
@@ -432,6 +548,7 @@ pub fn commit_initial(
 pub fn push(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    ensure_https_ca_for_origin(&repo)?;
     push_current_branch(&repo, auth)
 }
 
@@ -556,6 +673,7 @@ pub fn fetch_remote_blob(
 ) -> Result<Option<Vec<u8>>, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    ensure_https_ca_for_origin(&repo)?;
     let (_branch, temp_ref, tip) = fetch_remote_into_temp(&repo, auth)?;
     let blob = blob_at_commit(&repo, tip, rel_path);
     delete_temp_ref(&repo, &temp_ref);
@@ -572,6 +690,7 @@ pub fn fetch_remote_blob(
 pub fn fast_forward_to_remote(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    ensure_https_ca_for_origin(&repo)?;
     let (_branch, temp_ref, tip) = fetch_remote_into_temp(&repo, auth)?;
     let target = repo.find_commit(tip)?;
     let mut opts = git2::build::CheckoutBuilder::new();
@@ -911,6 +1030,7 @@ pub fn adopt_remote(
 ) -> Result<SyncResult, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    ensure_https_ca_for_origin(&repo)?;
 
     let branch_name = repo
         .head()?
@@ -1294,15 +1414,41 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ca_bundle_is_valid_pem() {
-        // Guards against a truncated/corrupt bundle shipping (e.g. a botched
-        // refresh-ca). The full Mozilla root set carries well over 100 roots.
-        let count = EMBEDDED_CA_BUNDLE
-            .matches("-----BEGIN CERTIFICATE-----")
-            .count();
+    fn embedded_ca_bundle_parses_cleanly() {
+        // Regression guard: parse the shipped bundle through the real OpenSSL
+        // PEM reader — the same path Android uses to load roots — not just a
+        // string match. A botched `refresh-ca` (truncated/corrupt bundle) must
+        // either fail to parse or yield the full ~120+ root set, never a silent
+        // partial trust store.
+        let count = for_each_cert_in_pem(EMBEDDED_CA_BUNDLE.as_bytes(), |_| Ok(()))
+            .expect("embedded CA bundle must parse cleanly under the real OpenSSL PEM reader");
         assert!(
             count >= 100,
-            "embedded CA bundle has only {count} certs, expected a full Mozilla root set (~120+)"
+            "embedded CA bundle parsed only {count} certs, expected a full Mozilla root set (~120+)"
         );
+    }
+
+    #[test]
+    fn for_each_cert_in_pem_rejects_corrupt_pem() {
+        // A `BEGIN CERTIFICATE` line followed by non-base64 must surface as a
+        // parse failure, not silently parse zero certs (which would otherwise
+        // load an empty trust store).
+        let corrupt =
+            b"-----BEGIN CERTIFICATE-----\n@@@ not valid base64 @@@\n-----END CERTIFICATE-----\n";
+        let result = for_each_cert_in_pem(corrupt, |_| Ok(()));
+        assert!(
+            result.is_err(),
+            "corrupt PEM must error, not silently parse zero certs"
+        );
+    }
+
+    #[test]
+    fn for_each_cert_in_pem_empty_is_zero() {
+        // Empty / non-PEM input parses to zero certs with no error (clean EOF).
+        // The Android loader's zero-count guard turns `Ok(0)` into a hard error
+        // so HTTPS never proceeds with an empty trust store.
+        let count = for_each_cert_in_pem(b"", |_| Ok(()))
+            .expect("empty input is clean EOF, not a parse failure");
+        assert_eq!(count, 0, "empty PEM should parse zero certs without error");
     }
 }

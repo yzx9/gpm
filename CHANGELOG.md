@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Android, HTTPS clone/sync/push over public-WebPKI servers (e.g. GitHub) now verifies correctly — the bundled Mozilla roots are loaded into the git TLS trust store on first use. (Servers behind a private/enterprise CA are not covered; use an SSH remote for those.)
+
 ## [v0.7.1] - 2026-06-27
 
 ### Fixed

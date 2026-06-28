@@ -139,13 +139,13 @@ Key details:
 
 ### Android: HTTPS git certificate verification
 
-The `git2` (libgit2) backend links vendored OpenSSL, which on Android has no path to the system CA store — so HTTPS clone/pull/push would fail with `SSL certificate is invalid`. gpm works around this by embedding Mozilla's root CA bundle (`rustpass/data/cacert.pem`) and pointing libgit2 at it once at startup (`rustpass::git::set_ca_bundle`, wired in `src-tauri/src/lib.rs` under `#[cfg(target_os = "android")]`). Desktop finds the system CA store on its own and is untouched.
+On Android the vendored OpenSSL is built `no-stdio`, so HTTPS git would fail certificate verification (it can't read the system CA store or a CA file). gpm embeds Mozilla's root bundle (`rustpass/data/cacert.pem`) and loads it into libgit2's trust store from memory — Android-only, lazily before the first HTTPS op, scheme-gated so SSH / local-only repos are untouched. Desktop is unaffected. The root cause (`no-stdio` → `BIO_new_file` compiled out → load via `GIT_OPT_ADD_SSL_X509_CERT`) is documented in `rustpass/src/git.rs`.
 
 **Refresh the bundle every release** so the trusted roots track Mozilla's trust decisions (root additions/distrusts):
 
 ```bash
 just refresh-ca   # re-downloads rustpass/data/cacert.pem from https://curl.se/ca/cacert.pem
-just test         # the embedded_ca_bundle_is_valid_pem test guards against a corrupt bundle
+just test         # the embedded_ca_bundle_parses_cleanly test guards against a corrupt bundle
 git commit rustpass/data/cacert.pem
 ```
 

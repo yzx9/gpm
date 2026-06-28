@@ -12,6 +12,8 @@ serde_json = { workspace = true }
 age = { workspace = true }
 zeroize = { workspace = true }
 git2 = { workspace = true }
+libgit2-sys = { workspace = true }
+openssl = { workspace = true }
 walkdir = { workspace = true }
 nucleo-matcher = { workspace = true }
 ssh-key = { workspace = true }
