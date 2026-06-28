@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.3] - 2026-06-28
+
 ### Fixed
 
 - Restored the Android build, which failed to compile in v0.7.2. Desktop was unaffected.
@@ -135,7 +137,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.3...HEAD
+[v0.7.3]: https://github.com/yzx9/gpm/compare/v0.7.2...v0.7.3
 [v0.7.2]: https://github.com/yzx9/gpm/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/yzx9/gpm/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/yzx9/gpm/compare/v0.6.0...v0.7.0
