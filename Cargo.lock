@@ -3697,6 +3697,7 @@ version = "0.7.2"
 dependencies = [
  "aes-gcm",
  "age",
+ "foreign-types 0.3.2",
  "getrandom 0.2.17",
  "git2",
  "libgit2-sys",

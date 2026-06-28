@@ -27,6 +27,9 @@ git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
 # on `openssl-sys` — which git2 already vendors — so no extra OpenSSL is built.
 libgit2-sys = "0.18"
 openssl = "0.10"
+# `ForeignType` trait for `X509::as_ptr` in the Android CA-load path; same 0.3.x
+# openssl already pulls in, so this resolves no new crate version.
+foreign-types = "0.3"
 walkdir = "2"
 nucleo-matcher = "0.3"
 tokio = { version = "1", features = ["time"] }

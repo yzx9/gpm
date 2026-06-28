@@ -104,7 +104,7 @@ fn ensure_https_ca_loaded() -> Result<(), Error> {
 fn init_libgit2_for_ca_opts() -> Result<(), Error> {
     unsafe {
         libgit2_sys::git_libgit2_init();
-        let (mut major, mut minor, mut rev) = (0_c_int, 0_c_int, 0_c_int);
+        let (mut major, mut minor, mut rev): (c_int, c_int, c_int) = (0, 0, 0);
         let rc = libgit2_sys::git_libgit2_version(&mut major, &mut minor, &mut rev);
         if rc != 0 || !(major == 1 && minor == 9) {
             return Err(Error::new(
@@ -152,7 +152,7 @@ fn for_each_cert_in_pem(
 #[cfg(target_os = "android")]
 #[allow(unsafe_code)]
 fn add_certs_from_pem(pem: &[u8]) -> Result<usize, Error> {
-    use openssl::foreign_types::ForeignType;
+    use foreign_types::ForeignType;
     init_libgit2_for_ca_opts()?;
     for_each_cert_in_pem(pem, |cert| {
         // SAFETY: `cert` is a valid X509 parsed from the embedded bundle, and

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored the Android build, which failed to compile in v0.7.2. Desktop was unaffected.
+
 ## [v0.7.2] - 2026-06-28
 
 ### Fixed
