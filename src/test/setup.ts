@@ -16,6 +16,15 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
+// Mock the Android back-button listener. Pages wire useOverlayBackHandler, which
+// calls onBackButtonPress; in jsdom there's no Tauri runtime to register with
+// (it would reach globalThis.__TAURI_INTERNALS__.transformCallback and crash).
+// onBackButtonPress returns a listener whose unregister is also a no-op.
+// (Dedicated composable tests override this with a deferred mock of their own.)
+vi.mock("@tauri-apps/api/app", () => ({
+  onBackButtonPress: vi.fn().mockResolvedValue({ unregister: vi.fn() }),
+}));
+
 // Mock vue-router
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),

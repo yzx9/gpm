@@ -131,6 +131,23 @@ describe("EntryDetailPage", () => {
 
       expect(wrapper.text()).toContain("Check your age identity and try again");
     });
+
+    it("swallows AUTH_CANCELLED silently when the auth overlay is dismissed (Android back)", async () => {
+      // Identity NOT cached: runWithAuth parks on the auth overlay instead of
+      // running show_password immediately.
+      __resetLockStateForTests();
+      const { cancelAuth } = useLockState();
+
+      const wrapper = mountPage();
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises(); // parked awaiting auth
+
+      cancelAuth(); // user dismissed the overlay (back)
+      await flushPromises(); // rejection propagates to the catch
+
+      // No error UI — the catch swallowed AUTH_CANCELLED; the op never ran.
+      expect(wrapper.find("[role='alert']").exists()).toBe(false);
+    });
   });
 
   describe("copyPassword", () => {
@@ -149,6 +166,24 @@ describe("EntryDetailPage", () => {
         entryPath: "servers/prod.age",
       });
       expect(wrapper.text()).toContain("✓ Copied prod (45s auto-clear)");
+    });
+
+    it("swallows AUTH_CANCELLED silently on copyPassword when the auth overlay is dismissed", async () => {
+      // Identity NOT cached: runWithAuth parks on the auth overlay.
+      __resetLockStateForTests();
+      const { cancelAuth } = useLockState();
+
+      const wrapper = mountPage();
+      await wrapper
+        .find('button[aria-label="Copy password to clipboard"]')
+        .trigger("click");
+      await flushPromises(); // parked awaiting auth
+
+      cancelAuth(); // user dismissed the overlay (back)
+      await flushPromises();
+
+      // No error UI — the catch swallowed AUTH_CANCELLED; copy never ran.
+      expect(wrapper.find("[role='alert']").exists()).toBe(false);
     });
 
     it("clears sensitive data immediately after copy", async () => {

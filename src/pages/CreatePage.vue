@@ -15,7 +15,8 @@ import type {
   WriteConflict,
   WriteOutcome,
 } from "../types";
-import { onLock, runWithAuth } from "../utils/useLockState";
+import { isAuthCancelled, onLock, runWithAuth } from "../utils/useLockState";
+import { useOverlayBackHandler } from "../utils/useOverlayBackHandler";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
 
 const router = useRouter();
@@ -67,6 +68,19 @@ onLock(() => {
   fields.value = {};
   customContent.value = "";
 });
+
+// Android back while the write-conflict modal is up cancels it — same as the
+// modal's Cancel button (clears the backend stash, returns to the form).
+// `resolving` guards against firing mid-resolution. cancel/keep_remote need no
+// identity, so this never raises the auth overlay over the modal.
+useOverlayBackHandler(
+  computed(() => !!conflict.value),
+  () => {
+    // `resolving` blocks a rapid double-back (or back right after a button
+    // choice) from re-entering resolve once the stash is consumed.
+    if (!resolving.value) resolve("cancel");
+  },
+);
 
 function showToast(message: string) {
   toast.value = message;
@@ -219,6 +233,7 @@ async function submit() {
       };
     }
   } catch (e) {
+    if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || "Failed to create secret";
   } finally {
@@ -230,9 +245,23 @@ async function submit() {
 async function resolve(choice: ConflictChoice) {
   resolving.value = true;
   try {
-    const result = await runWithAuth(() =>
-      invoke<{ commit: string } | null>("resolve_write_conflict", { choice }),
-    );
+    // cancel/keep_remote need no cached identity (store-side). keep_mine/_force
+    // re-encrypt the stashed plaintext — deriving our own recipient + encrypting
+    // requires the identity (store: encrypt_and_write → get_identity_bytes, which
+    // returns IdentityEncrypted when the cache is empty), so those auth-gate.
+    // Back-on-conflict only ever cancels, so the back path stays auth-free (no
+    // stacking); the gate arms only for a deliberate "Keep mine".
+    const needsIdentity =
+      choice === "keep_mine" || choice === "keep_mine_force";
+    const result = needsIdentity
+      ? await runWithAuth(() =>
+          invoke<{ commit: string } | null>("resolve_write_conflict", {
+            choice,
+          }),
+        )
+      : await invoke<{ commit: string } | null>("resolve_write_conflict", {
+          choice,
+        });
     conflict.value = null;
     if (choice === "keep_remote") {
       showToast("Kept the existing entry");

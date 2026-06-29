@@ -6,7 +6,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises, type DOMWrapper } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import CreatePage from "./CreatePage.vue";
-import { __unlockForTests } from "../utils/useLockState";
+import {
+  __resetLockStateForTests,
+  __unlockForTests,
+  useLockState,
+} from "../utils/useLockState";
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
 
@@ -178,6 +182,25 @@ describe("CreatePage", () => {
     expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
   });
 
+  it("swallows AUTH_CANCELLED silently on submit when the auth overlay is dismissed", async () => {
+    const wrapper = await mountPage({
+      create_from_preset_secret: () => ({ kind: "written", commit: "x" }),
+    });
+    // Wipe the cache AFTER mount so submit's runWithAuth parks on the auth overlay.
+    __resetLockStateForTests();
+    const { cancelAuth } = useLockState();
+
+    await fillWebsiteForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+    await flushPromises(); // parked awaiting auth
+
+    cancelAuth(); // user dismissed the overlay (back)
+    await flushPromises();
+
+    // No error UI — the catch swallowed AUTH_CANCELLED; create never ran.
+    expect(wrapper.text()).not.toContain("Failed to create secret");
+  });
+
   it("on a decryptable conflict, Keep mine resolves and navigates", async () => {
     const wrapper = await mountPage({
       create_from_preset_secret: () => ({
@@ -248,6 +271,36 @@ describe("CreatePage", () => {
       choice: "cancel",
     });
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("cancel resolves without the cached identity (resolve dropped runWithAuth — regression)", async () => {
+    const wrapper = await mountPage({
+      create_from_preset_secret: () => ({
+        kind: "conflict",
+        name: "websites/example.com/alice",
+        remote_decryptable: true,
+      }),
+      resolve_write_conflict: () => null,
+    });
+
+    await fillWebsiteForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(wrapper.text()).toContain("Remote copy exists");
+
+    // Wipe the cached identity AFTER the conflict is up. `resolve` no longer
+    // wraps in runWithAuth (cancel/keep_remote need no identity), so this still
+    // resolves — previously it would have parked on the auth overlay forever.
+    __resetLockStateForTests();
+
+    const cancel = findButton(wrapper, "Cancel");
+    expect(cancel).toBeTruthy();
+    await cancel!.trigger("click");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("resolve_write_conflict", {
+      choice: "cancel",
+    });
   });
 
   it("fills the password field with the generated value", async () => {

@@ -14,7 +14,8 @@ import type {
   WriteOutcome,
 } from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
-import { onLock, runWithAuth } from "../utils/useLockState";
+import { isAuthCancelled, onLock, runWithAuth } from "../utils/useLockState";
+import { useOverlayBackHandler } from "../utils/useOverlayBackHandler";
 import { useSecuritySettings } from "../utils/useSecuritySettings";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
 
@@ -62,6 +63,19 @@ onLock(() => {
   conflict.value = null;
 });
 
+// Android back while the write-conflict modal is up cancels it — same as the
+// modal's Cancel button (clears the backend stash, keeps the draft). `resolving`
+// guards against firing mid-resolution. cancel/keep_remote need no identity, so
+// this never raises the auth overlay (no stacking).
+useOverlayBackHandler(
+  computed(() => !!conflict.value),
+  () => {
+    // `resolving` blocks a rapid double-back (or back right after a button
+    // choice) from re-entering resolveEdit once the stash is consumed.
+    if (!resolving.value) resolveEdit("cancel");
+  },
+);
+
 function showToast(message: string) {
   toast.value = message;
   if (toastTimer) clearTimeout(toastTimer);
@@ -80,6 +94,7 @@ async function showPassword() {
     );
     reveal(result);
   } catch (e) {
+    if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || "Decryption failed";
   } finally {
@@ -98,6 +113,7 @@ async function copyPassword() {
       `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
     );
   } catch (e) {
+    if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || "Copy failed";
   }
@@ -237,10 +253,20 @@ async function saveEdit() {
 async function resolveEdit(choice: ConflictChoice) {
   resolving.value = true;
   try {
-    const result = await invoke<{ commit: string } | null>(
-      "resolve_write_conflict",
-      { choice },
-    );
+    // cancel/keep_remote need no cached identity; keep_mine/_force re-encrypt the
+    // stashed plaintext, which needs the identity (store get_identity_bytes
+    // returns IdentityEncrypted when the cache is empty), so those auth-gate.
+    const needsIdentity =
+      choice === "keep_mine" || choice === "keep_mine_force";
+    const result = needsIdentity
+      ? await runWithAuth(() =>
+          invoke<{ commit: string } | null>("resolve_write_conflict", {
+            choice,
+          }),
+        )
+      : await invoke<{ commit: string } | null>("resolve_write_conflict", {
+          choice,
+        });
     conflict.value = null;
     if (choice === "keep_remote") {
       showToast("Kept the existing entry");

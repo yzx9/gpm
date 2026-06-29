@@ -25,7 +25,7 @@ import type {
 } from "../types";
 import { formatRelativeTime } from "../utils/format";
 import { statusGlyph, statusLabel } from "../utils/signature";
-import { runWithAuth } from "../utils/useLockState";
+import { isAuthCancelled, runWithAuth } from "../utils/useLockState";
 
 const router = useRouter();
 
@@ -352,6 +352,7 @@ async function copyPassword(entry: Entry) {
       `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
     );
   } catch (e) {
+    if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     showToast(`Failed: ${appError?.message || "Copy failed"}`);
   }

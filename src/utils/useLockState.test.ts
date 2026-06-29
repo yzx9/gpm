@@ -6,16 +6,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  AUTH_CANCELLED,
   __resetLockStateForTests,
   __unlockForTests,
+  isAuthCancelled,
   onLock,
   runWithAuth,
   useLockState,
 } from "./useLockState";
 
 describe("useLockState", () => {
-  const { locked, overlayUp, identityCached, ready, init, setLocked } =
-    useLockState();
+  const {
+    locked,
+    overlayUp,
+    identityCached,
+    ready,
+    init,
+    setLocked,
+    cancelAuth,
+  } = useLockState();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -220,5 +229,73 @@ describe("useLockState", () => {
     expect(op).toHaveBeenCalledTimes(1);
     expect(identityCached.value).toBe(true);
     expect(overlayUp.value).toBe(false);
+  });
+
+  // ── cancelAuth: dismiss the per-op overlay, rejecting parked callers ────────
+
+  it("cancelAuth is a no-op when no per-op auth is in flight (hard lock)", () => {
+    setLocked(true); // hard lock: authPromise stays null
+    expect(() => cancelAuth()).not.toThrow();
+    expect(locked.value).toBe(true);
+    expect(overlayUp.value).toBe(true); // hard-lock overlay untouched
+  });
+
+  it("cancelAuth rejects a parked runWithAuth with AUTH_CANCELLED and drops the overlay", async () => {
+    // Per-op auth scenario: identity unlocked (locked=false, cached), then a soft
+    // wipe empties the cache without raising the overlay (Immediate post-op).
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: true,
+      identity_type: "x25519",
+    });
+    await init();
+    expect(locked.value).toBe(false);
+    expect(identityCached.value).toBe(true);
+
+    const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
+      payload: { locked: boolean; soft?: boolean };
+    }) => void;
+    handler({ payload: { locked: true, soft: true } }); // soft wipe: cache empty, overlay down
+    expect(identityCached.value).toBe(false);
+    expect(locked.value).toBe(false);
+
+    const op = vi.fn().mockResolvedValue("done");
+    const p = runWithAuth(op);
+    expect(overlayUp.value).toBe(true); // authPrompted raised
+    expect(op).not.toHaveBeenCalled();
+
+    cancelAuth();
+    await expect(p).rejects.toMatchObject({ code: AUTH_CANCELLED });
+    expect(op).not.toHaveBeenCalled(); // the op never ran
+    expect(overlayUp.value).toBe(false); // overlay dismissed (locked stayed false)
+  });
+
+  it("cancelAuth rejects every concurrent parked caller (single-flight cancel)", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: false,
+      identity_type: "x25519",
+    });
+    await init();
+
+    const op = vi.fn().mockResolvedValue("done");
+    const p1 = runWithAuth(op);
+    const p2 = runWithAuth(op);
+    expect(overlayUp.value).toBe(true);
+
+    cancelAuth();
+    await expect(p1).rejects.toMatchObject({ code: AUTH_CANCELLED });
+    await expect(p2).rejects.toMatchObject({ code: AUTH_CANCELLED });
+    expect(op).not.toHaveBeenCalled();
+  });
+
+  it("isAuthCancelled recognizes only the AUTH_CANCELLED code", () => {
+    expect(isAuthCancelled({ code: AUTH_CANCELLED })).toBe(true);
+    expect(isAuthCancelled({ code: "WRONG_PASSPHRASE" })).toBe(false);
+    expect(isAuthCancelled(new Error("boom"))).toBe(false);
+    expect(isAuthCancelled(undefined)).toBe(false);
+    expect(isAuthCancelled(null)).toBe(false);
   });
 });

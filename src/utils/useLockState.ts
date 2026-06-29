@@ -46,6 +46,9 @@ const authPrompted = ref(false);
 /// not N). Resolved when the backend reports an unlock.
 let authPromise: Promise<void> | null = null;
 let resolveAuth: (() => void) | null = null;
+// Reject fn paired with `authPromise` — invoked by `cancelAuth()` to abort every
+// parked caller when the user dismisses the per-op auth overlay (e.g. Android back).
+let rejectAuth: ((e: unknown) => void) | null = null;
 
 let initialized = false;
 const listeners = new Set<() => void>();
@@ -55,7 +58,15 @@ let unlisten: UnlistenFn | null = null;
 const overlayUp = computed(() => locked.value || authPrompted.value);
 
 export function useLockState() {
-  return { locked, overlayUp, identityCached, ready, init, setLocked };
+  return {
+    locked,
+    overlayUp,
+    identityCached,
+    ready,
+    init,
+    setLocked,
+    cancelAuth,
+  };
 }
 
 /**
@@ -164,6 +175,11 @@ function setLocked(v: boolean) {
  * (`Store::get` returns `IdentityEncrypted` against an empty cache): a racing op
  * fails with a benign error rather than ever serving a secret without auth. A
  * mutex/queue would smooth the UX but is not needed for correctness.
+ *
+ * Cancellation: if the user dismisses the per-op auth overlay (e.g. via Android
+ * back while it is up — see `cancelAuth`), this rejects with
+ * `{ code: "AUTH_CANCELLED" }`. Callers MUST swallow that via
+ * `isAuthCancelled(e)` and show no error UI — the op never ran.
  */
 async function runWithAuth<T>(op: () => Promise<T>): Promise<T> {
   while (!identityCached.value) {
@@ -178,8 +194,9 @@ async function ensureUnlocked() {
   if (identityCached.value) return;
   if (!authPromise) {
     authPrompted.value = true;
-    authPromise = new Promise<void>((r) => {
-      resolveAuth = r;
+    authPromise = new Promise<void>((resolve, reject) => {
+      resolveAuth = resolve;
+      rejectAuth = reject;
     });
   }
   await authPromise;
@@ -189,9 +206,38 @@ async function ensureUnlocked() {
 function releaseAuthWaiters() {
   authPrompted.value = false;
   authPromise = null;
+  rejectAuth = null;
   const r = resolveAuth;
   resolveAuth = null;
   r?.();
+}
+
+/** Error code carried by the rejection `cancelAuth()` issues to parked callers. */
+export const AUTH_CANCELLED = "AUTH_CANCELLED";
+
+/** True if `e` is the cancellation a parked `runWithAuth` caller receives when the
+ *  user dismisses the per-op auth overlay (e.g. via Android back). Callers should
+ *  swallow it silently — the user cancelled; the op never ran. This is the one
+ *  canonical check, so future `runWithAuth` callers don't each re-derive it. */
+export function isAuthCancelled(e: unknown): boolean {
+  return (e as { code?: unknown } | null | undefined)?.code === AUTH_CANCELLED;
+}
+
+/**
+ * Dismiss the per-op auth overlay as cancelled: drop `authPrompted`, clear the
+ * single-flight promise, and reject every parked `runWithAuth` caller with
+ * `{ code: AUTH_CANCELLED }`. No-op when no per-op auth is in flight (e.g. a hard
+ * lock, where `authPromise` is null), so it is safe to wire unconditionally as a
+ * back-press handler — on a hard lock it leaves the overlay up (back consumed).
+ */
+function cancelAuth() {
+  if (!authPromise) return;
+  authPrompted.value = false;
+  const reject = rejectAuth;
+  authPromise = null;
+  resolveAuth = null;
+  rejectAuth = null;
+  reject?.({ code: AUTH_CANCELLED });
 }
 
 /** Test-only: reset the module singleton between cases. */
@@ -203,6 +249,7 @@ export function __resetLockStateForTests() {
   authPrompted.value = false;
   authPromise = null;
   resolveAuth = null;
+  rejectAuth = null;
   listeners.clear();
   unlisten?.();
   unlisten = null;

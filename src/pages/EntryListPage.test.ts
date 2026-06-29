@@ -7,7 +7,11 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import EntryListPage from "./EntryListPage.vue";
 import type { Entry, EntryPage } from "../types";
-import { __unlockForTests } from "../utils/useLockState";
+import {
+  __resetLockStateForTests,
+  __unlockForTests,
+  useLockState,
+} from "../utils/useLockState";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -182,6 +186,26 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(wrapper.text()).toContain("Loading entries...");
+    });
+  });
+
+  describe("copyPassword", () => {
+    it("swallows AUTH_CANCELLED silently when the auth overlay is dismissed during copy", async () => {
+      when("list_entries", page(sampleEntries));
+      const wrapper = mountPage();
+      await flushPromises();
+      // Identity NOT cached: runWithAuth parks on the auth overlay.
+      __resetLockStateForTests();
+      const { cancelAuth } = useLockState();
+
+      await wrapper.find('button[aria-label="Copy password"]').trigger("click");
+      await flushPromises(); // parked awaiting auth
+
+      cancelAuth(); // user dismissed the overlay (back)
+      await flushPromises();
+
+      // No failure toast — the catch swallowed AUTH_CANCELLED; copy never ran.
+      expect(wrapper.text()).not.toContain("Failed:");
     });
   });
 

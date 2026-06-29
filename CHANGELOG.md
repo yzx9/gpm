@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Android, the back gesture now closes the unlock prompt and the "remote copy exists" dialog instead of navigating away from them. A locked screen can no longer be stepped past with back (use the Home gesture or button to leave); cancelling a per-operation unlock prompt no longer flashes an error
+- On Android, resolving a "remote copy exists" conflict — cancel or keep the existing copy — no longer asks you to unlock first
+
 ## [v0.7.3] - 2026-06-28
 
 ### Fixed
