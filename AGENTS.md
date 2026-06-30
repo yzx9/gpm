@@ -86,7 +86,7 @@ Write an RFC when:
 ### How to write one
 
 - One file per RFC: `NNNN-kebab-title.md`.
-- `NNNN` is 4-digit zero-padded; **next number = current max + 1**
+- `NNNN` is 4-digit zero-padded; **next number = current max + 1**. The "current max" is the highest `NNNN` on **any branch** (local or remote), not just the local checkout — scan every branch tip's `.plans/` (e.g. `git ls-tree -r --name-only <ref> -- .plans/` over each `git branch -a` ref), since an in-flight branch may already hold a higher number than your local `main`.
 - Follow the template in `0000-rfc-template.md`.
 - If an RFC is completed or superseded, it may be removed.
 

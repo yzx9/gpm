@@ -1,7 +1,7 @@
 # Multi-identity support + .age-recipients
 
 **Priority:** P3
-**Status:** TODO
+**Status:** Draft
 **Phase:** Future
 
 ## What
@@ -37,18 +37,9 @@ Single identity tried against every `.age` file. If decryption fails, return err
    - EntryListPage: show entries the user can't decrypt (grayed out, with "add identity" hint)
    - New: identity management section (add, remove, label identities)
 
-### Key files
-
-- `rustpass/src/config.rs` — Support multiple identities (Vec instead of single)
-- `rustpass/src/crypto.rs` — Try multiple identities, return on first success
-- `rustpass/src/store.rs` — Parse `.age-recipients`, map entries to required recipients
-- `src/views/SetupPage.vue` — Multi-identity input UI
-- `src/views/EntryListPage.vue` — Show decryptability status per entry
-- `src/types.ts` — Update Entry type with recipient info
-
 ### Relationship to 0003 (encrypted SSH key)
 
-Encrypted SSH keys (0003) are already supported as identities. Multi-identity must handle both x25519 and SSH key types with their optional passphrases.
+Encrypted SSH keys are already supported as identities. Multi-identity must handle both x25519 and SSH key types with their optional passphrases.
 
 ## Effort
 
@@ -56,4 +47,4 @@ Encrypted SSH keys (0003) are already supported as identities. Multi-identity mu
 
 ## Depends on
 
-0007-reconfiguration-flow.md (reconfiguration should land first so the identity type system handles both formats from the start)
+0004-reconfiguration-flow.md (reconfiguration should land first so the identity type system handles both formats from the start)

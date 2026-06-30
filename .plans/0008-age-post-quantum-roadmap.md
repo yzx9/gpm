@@ -1,7 +1,7 @@
 # Long-term roadmap: age post-quantum (X-Wing / mlkem768x25519) decryption
 
-**Priority:** P4
-**Status:** TODO (research / roadmap)
+**Priority:** P3
+**Status:** Blocked
 **Phase:** Future
 
 ## What
@@ -58,3 +58,13 @@ Full, native support for decrypting age files encrypted to post-quantum recipien
 - RustCrypto `x-wing`: https://crates.io/crates/x-wing ; `hpke`: https://lib.rs/crates/hpke
 - CCTV test vectors: https://github.com/C2SP/CCTV/tree/main/age
 - Prerequisite (recognition): done — PQ keys are now recognized and surface a clear "not yet supported" error instead of a confusing failure (shipped)
+
+## Effort
+
+Route A (wait for upstream): ~S (human) / ~S (CC) — small, once rage ships native `mlkem768x25519`; the existing decryption dispatch already accommodates a new identity type, so the integration surface is small.
+
+Route B (self-implement, if upstream stalls): ~L (human) / ~L (CC) — new security-critical code (X-Wing KEM + stanza handling) that must pass the CCTV test-vector suite and confirm KEM-construction alignment with age's reference.
+
+## Depends on / Supersedes
+
+External blocker: rage native `mlkem768x25519` (tracking str4d/rage#621). Builds on the already-shipped PQ-key recognition.

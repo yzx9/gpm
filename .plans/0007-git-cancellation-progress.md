@@ -1,5 +1,9 @@
 # Plan: Git Cancellation & Progress Reporting
 
+**Priority:** P2
+**Status:** Draft
+**Phase:** Future
+
 ## Context
 
 After the Phase 1 async migration (complete), git clone and pull are the only operations that genuinely benefit from cancellation — they can take seconds to minutes depending on network and repo size. The frontend currently shows a fake progress spinner during clone and no feedback during pull. This plan adds real git2 progress callbacks and user-initiated cancellation for both clone and pull.

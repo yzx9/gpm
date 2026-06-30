@@ -1,8 +1,8 @@
 # Add re-configuration flow
 
 **Priority:** P2
-**Status:** TODO
-**Phase:** Post-MVP (v0.2)
+**Status:** Draft
+**Phase:** Future
 
 ## What
 
@@ -33,13 +33,6 @@ SetupPage → configure() → clear_all() → save_identity() → clone_repo()
 ### Recommended approach
 
 Option 2 (modify SetupPage). Least new code. If config exists, pre-fill the form fields and show "Update configuration" button. Add a checkbox: "Re-clone repository (clears local data)" — unchecked by default. If only the identity changed, skip clone. If the repo URL changed, force re-clone.
-
-### Key files
-
-- `src/views/SetupPage.vue` — Add update mode, pre-fill fields, conditional clone
-- `rustpass/src/config.rs` — Add `update_identity()`, `update_pat()` methods that don't clear repo
-- `rustpass/src/store.rs` — Split `configure()` into granular update methods
-- `src/views/EntryListPage.vue` — Add settings/gear button to access SetupPage in update mode
 
 ### Edge cases
 

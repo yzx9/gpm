@@ -1,8 +1,8 @@
 # GPG / OpenPGP commit signature verification
 
-**Priority:** P4
-**Status:** Proposal (not yet scheduled)
-**Phase:** Future (extension to the SSH-only authenticity feature — see [repo-authenticity](../docs/SECURITY.md#repository-authenticity))
+**Priority:** P3
+**Status:** Draft
+**Phase:** Future
 
 ## Goal
 

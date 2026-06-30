@@ -1,5 +1,9 @@
 # Plan: Remove `Store::set`'s pre-sync? (deferred)
 
+**Priority:** P3
+**Status:** Deprecated
+**Phase:** Future
+
 ## Context
 
 `Store::set` does `self.sync().await?` (pull) before writing — gopass _PushPull_

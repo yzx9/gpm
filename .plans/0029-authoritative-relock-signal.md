@@ -14,7 +14,7 @@ notifications.
 
 ## Why
 
-0028's app lock wipes the master key on resume, and that wipe only happens if the
+The app lock wipes the master key on resume, and that wipe only happens if the
 frontend receives a foreground signal. Today that signal comes from the WebView's
 visibility event. The wipe is therefore _on resume, not at the instant of
 backgrounding_: while the app sits in the background, before the resume signal
@@ -74,7 +74,7 @@ there).
 - **Keep the WebView visibility signal.** Rejected as the long-term answer: it
   works in practice but rests on OEM behavior that is not guaranteed, leaving a
   silent-failure mode in a security-critical trigger. Acceptable to ship behind
-  for now (as 0028 does), but it should not be the resting state.
+  for now (as the app lock does today), but it should not be the resting state.
 - **Wipe at the instant of backgrounding rather than on resume.** Rejected: it is
   tempting because it would shrink the in-memory window to the backgrounding
   moment, but the background transition is the _less_ reliable of the two WebView
@@ -83,7 +83,7 @@ there).
   Wipe-on-resume is the right semantic; this RFC only makes that resume signal
   authoritative.
 - **Add a background-duration threshold so only long backgrounds re-challenge.**
-  Rejected (as in 0028): adds a knob and a timing race for no security gain over
+  Rejected (same rationale as the app lock itself): adds a knob and a timing race for no security gain over
   "every resume," and the re-challenge is already every resume.
 
 ## Effort
@@ -96,6 +96,6 @@ guard and the warm-resume path across a background/foreground cycle.
 
 ## Depends on / Supersedes
 
-Extends 0028 (whose master-key wipe-on-resume this makes authoritative) and 0022
-(whose resume-re-challenge model and in-flight-prompt loop guard it preserves).
-Does not supersede either.
+Extends the app-launch biometric lock — making its master-key wipe-on-resume
+authoritative, while preserving its resume-re-challenge model and in-flight-prompt
+loop guard. Does not supersede it.
