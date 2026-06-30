@@ -1,0 +1,13 @@
+[package]
+name = "tauri-plugin-screen-secure"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+links = "tauri-plugin-screen-secure"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = "2"

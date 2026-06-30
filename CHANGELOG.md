@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Control screen-capture protection from Settings — a master toggle (on by default) blocks screenshots and screen recording on pages that show secrets: setup, create, generate, entry detail, and settings (including the SSH key export). Turn it off to allow screenshots anywhere. Android only; elsewhere the toggle has no screen effect
 - Cloning a repository and pulling updates now show live progress — how many objects and bytes have transferred — instead of a generic spinner, and either can be cancelled mid-flight with an on-screen Cancel button
 - gpm now recognizes age plugin recipients (such as `age1yubikey1...` from age-plugin-yubikey) and can encrypt secrets to them, so a shared store that includes a teammate's hardware-key recipient keeps working. The matching `age-plugin-<name>` tool must be installed for encryption, which runs on desktop only (Android can't launch it). Decrypting with a plugin identity is not supported yet.
+
+### Changed
+
+- Screen-capture protection is now per-page instead of app-wide. Previously every screen blocked screenshots; now only pages that show secrets do (when the toggle is on), so you can screenshot the entry list and history. The entry list shows secret names and history shows commit signatures — neither reveals secret content
 
 ### Fixed
 

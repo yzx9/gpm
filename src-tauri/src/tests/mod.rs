@@ -141,6 +141,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
     // it into the config dir's repo.
     let state = AppState {
         store,
+        app_config: crate::app_config::AppConfigStore::new(config_dir.path()),
         lock_timer: Mutex::new(None),
         lock_generation: Arc::new(AtomicU64::new(0)),
         pending_identity: Mutex::new(None),

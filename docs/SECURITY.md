@@ -133,11 +133,35 @@ Mitigations:
 | Safe Debug output       | Custom `Debug` impl shows `[REDACTED]`, never actual secrets                 |
 | Clipboard isolation     | `copy_password` keeps password in Rust; JS receives only metadata            |
 | Lifecycle cleanup       | Vue refs cleared on timer, navigation, and unmount                           |
-| Screen capture block    | Android `FLAG_SECURE` prevents screenshots and screen recording              |
+| Screen capture block    | Per-route Android `FLAG_SECURE` (user toggle); see Screen capture protection |
 | Error sanitization      | Error messages contain only codes and generic descriptions                   |
 | Path traversal guard    | Resolved paths validated to stay within repository; symlink escape detection |
 | Content Security Policy | CSP restricts `script-src`, `connect-src` to `self` and IPC only             |
 | Commit signature verify | Optional SSH-signed-commit verification on every pull (see below)            |
+
+## Screen capture protection
+
+On Android, gpm sets `WindowManager.FLAG_SECURE` on the activity window for
+**secret-bearing pages** — setup, create, generate, entry detail, and settings
+(settings renders the SSH private key on export). `FLAG_SECURE` blanks
+screenshots, screen recording, and the Recents/task-switcher thumbnail for that
+window. The entry list (entry _names_ only) and history (commit signatures)
+carry no secret content and stay capturable.
+
+This is **per-route**, gated by a user **master toggle** (Settings, default on):
+`secure = toggle && route.secret-bearing`. With the toggle off, no page is
+secured. The flag is applied in the navigation guard _before_ the target page
+paints, and `MainActivity` sets it on at boot as a safe default until the
+frontend reconciles — so a secret-bearing page is never shown unprotected. A
+guard that cannot confirm the flag on a secret-bearing route aborts the
+navigation and toasts, rather than render it unprotected.
+
+Caveats: `FLAG_SECURE` is Android-only (desktop has no equivalent); it is
+bypassable on rooted devices (e.g. Magisk "Disable Flag Secure"); and the
+non-secret list/history pages are capturable by design. The toggle is a
+device-level preference stored in `app.json` and intentionally survives a repo
+reset. Component-level granularity (securing just a reveal action on an
+otherwise-capturable page) is deferred — see RFC 0028.
 
 ## Repository authenticity
 

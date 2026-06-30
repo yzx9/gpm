@@ -3,18 +3,29 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { applySafeAreaInsets } from "./utils/safe-area";
 import { useLockState } from "./utils/useLockState";
 import { useOverlayBackHandler } from "./utils/useOverlayBackHandler";
 import { useAppLockState } from "./utils/useAppLockState";
 import { useSecuritySettings } from "./utils/useSecuritySettings";
+import { useSecureScreen } from "./utils/useSecureScreen";
+import { useToast } from "./utils/useToast";
 import UnlockModal from "./components/UnlockModal.vue";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
 
 const { overlayUp, ready, init, cancelAuth } = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
 const { loadSecuritySettings } = useSecuritySettings();
+const { initSecureScreen, setSecureOverlay } = useSecureScreen();
+const { toast } = useToast();
+
+// The global unlock overlay collects the identity passphrase — a credential.
+// Force FLAG_SECURE on whenever it's up, even on an otherwise-capturable route
+// (e.g. /entries), and restore the route's level when it dismisses.
+watch(overlayUp, (up) => {
+  void setSecureOverlay(up);
+});
 
 // Capture the Android back button while the unlock overlay is up: back cancels a
 // per-op auth prompt (cancelAuth dismisses it) or is consumed by a hard lock
@@ -32,6 +43,10 @@ onMounted(() => {
   initAppLock();
   // Prime the view-clear cache so the first reveal uses the configured timer.
   loadSecuritySettings();
+  // Load the screen-capture master toggle + platform availability, then
+  // reconcile FLAG_SECURE for the current route. The boot default in
+  // MainActivity.onCreate keeps every screen secure until this runs.
+  initSecureScreen();
 });
 </script>
 
@@ -54,5 +69,14 @@ onMounted(() => {
       it while the app-launch gate overlay is up.
     -->
     <UnlockModal v-if="ready && overlayUp && !appLocked" />
+    <!-- Global toast: app-shell messages (e.g. a screen-secure abort). -->
+    <div
+      v-if="toast"
+      class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-danger-soft text-danger p-2 px-4 rounded-md text-sm shadow-lg z-50"
+      role="status"
+      aria-live="polite"
+    >
+      {{ toast }}
+    </div>
   </div>
 </template>

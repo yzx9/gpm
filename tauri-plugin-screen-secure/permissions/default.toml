@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Allow toggling Android FLAG_SECURE screen-capture protection."
+permissions = ["allow-set-secure"]

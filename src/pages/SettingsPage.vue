@@ -22,6 +22,7 @@ import {
 } from "../appLock";
 import { onLock } from "../utils/useLockState";
 import { useSecuritySettings } from "../utils/useSecuritySettings";
+import { useSecureScreen } from "../utils/useSecureScreen";
 import type {
   AppError,
   AppLockError,
@@ -87,6 +88,7 @@ const commitDefault = ref<CommitIdentity | null>(null);
 
 // ── Auto-lock & auto-clear state ────────────────────────────────────────
 const { applySecurityConfig } = useSecuritySettings();
+const { secureScreen, secureAvailable, setSecureScreen } = useSecureScreen();
 const lockLoading = ref(false);
 
 // App auto-lock presets. "Immediate" (no-cache, per-op) is the default.
@@ -210,6 +212,27 @@ async function onSaveCommitIdentity() {
   } finally {
     commitLoading.value = false;
   }
+}
+
+async function onSecureScreenChange(enabled: boolean) {
+  const ok = await setSecureScreen(enabled);
+  if (!ok) {
+    showToast("Couldn't save screen-capture setting — try again");
+    return;
+  }
+  // Disarming protection while a secret is still on screen would expose it, so
+  // wipe any revealed key material first (mirrors the onLock wipe above).
+  if (!enabled) {
+    publicKey.value = "";
+    privateKey.value = "";
+    showPublic.value = false;
+    showPrivate.value = false;
+  }
+  showToast(
+    enabled
+      ? "Screen capture blocked on sensitive pages"
+      : "Screen capture allowed",
+  );
 }
 
 async function onLockModeChange(mode: LockMode) {
@@ -945,6 +968,48 @@ onMounted(() => {
             </template>
           </div>
         </template>
+      </section>
+
+      <!-- Screen capture protection (Android FLAG_SECURE) — Android only -->
+      <section v-if="secureAvailable" class="settings-card">
+        <h2 class="text-sm font-medium mb-2">Screen capture protection</h2>
+        <p class="text-xs text-muted mb-3">
+          Block screenshots and screen recording on pages that show secrets
+          (setup, create, generate, entry, settings — including the SSH key
+          export). Android only.
+        </p>
+        <fieldset class="border-0 p-0 m-0">
+          <legend class="text-xs text-muted mb-1">Block screen capture</legend>
+          <div class="flex gap-2">
+            <label class="mode-pill" :class="{ 'mode-active': secureScreen }">
+              <input
+                type="radio"
+                name="secure-screen"
+                class="sr-only"
+                :checked="secureScreen"
+                @change="onSecureScreenChange(true)"
+              />
+              <span>On</span>
+            </label>
+            <label class="mode-pill" :class="{ 'mode-active': !secureScreen }">
+              <input
+                type="radio"
+                name="secure-screen"
+                class="sr-only"
+                :checked="!secureScreen"
+                @change="onSecureScreenChange(false)"
+              />
+              <span>Off</span>
+            </label>
+          </div>
+          <p class="text-xs text-subtle mt-1">
+            <template v-if="secureScreen"
+              >Sensitive pages block capture; the entry list and history stay
+              capturable.</template
+            >
+            <template v-else>No page blocks screen capture.</template>
+          </p>
+        </fieldset>
       </section>
 
       <!-- Auto-lock & auto-clear -->

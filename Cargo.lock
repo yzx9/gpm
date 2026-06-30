@@ -1691,6 +1691,7 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-file-picker",
  "tauri-plugin-safe-area",
+ "tauri-plugin-screen-secure",
  "tauri-plugin-secure-keystore",
  "tempfile",
  "tokio",
@@ -4616,6 +4617,14 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-safe-area"
+version = "0.7.3"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "tauri-plugin-screen-secure"
 version = "0.7.3"
 dependencies = [
  "tauri",

@@ -7,6 +7,7 @@ members = [
   "tauri-plugin-biometric-keystore",
   "tauri-plugin-secure-keystore",
   "tauri-plugin-file-picker",
+  "tauri-plugin-screen-secure",
 ]
 
 [workspace.package]

@@ -28,6 +28,7 @@ use tauri::Manager;
 use tauri_plugin_secure_keystore::SecureKeystoreExt;
 use tokio::task::JoinHandle;
 
+mod app_config;
 mod applock;
 mod authenticity;
 mod biometric;
@@ -86,6 +87,9 @@ pub(crate) struct AppState {
     /// `cancel_git` command; cleared by the owning command once the operation
     /// settles. `None` outside a user-initiated clone/pull.
     pub(crate) active_cancel_token: Mutex<Option<rustpass::CancelToken>>,
+    /// App-shell (non-repo) preferences — primarily the screen-capture master
+    /// toggle. Persists at `app.json`; survives `reset_config` (device pref).
+    pub(crate) app_config: app_config::AppConfigStore,
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +171,9 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // the user authenticates on launch/resume. Otherwise the auth-free master
     // key loads silently (the pre-app-lock path).
     let (master_key, app_lock_enabled) = startup_master_key(app.secure_keystore());
+    // App-shell (non-repo) preferences — primarily the screen-capture master
+    // toggle. Borrows `config_dir` before it is moved into `Store` below.
+    let app_config = app_config::AppConfigStore::new(&config_dir);
     let store = Arc::new(Store::new(config_dir, master_key));
     // One-time migration of any pre-existing plaintext files into the at-rest
     // envelope (no-op on desktop / already-wrapped). Each file is wrapped
@@ -179,6 +186,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
 
     AppState {
         store,
+        app_config,
         lock_timer: Mutex::new(None),
         lock_generation: Arc::new(AtomicU64::new(0)),
         pending_identity: Mutex::new(None),
@@ -207,6 +215,7 @@ pub fn run() {
         .plugin(tauri_plugin_biometric_keystore::init())
         .plugin(tauri_plugin_secure_keystore::init())
         .plugin(tauri_plugin_file_picker::init())
+        .plugin(tauri_plugin_screen_secure::init())
         .setup(|app| {
             app.manage(init_state(app));
             Ok(())
@@ -266,6 +275,10 @@ pub fn run() {
             config::set_clipboard_clear_secs,
             config::get_commit_identity_default,
             config::reset_config,
+            // app config: screen-capture master toggle + platform availability
+            app_config::get_app_config,
+            app_config::set_secure_screen,
+            app_config::screen_secure_available,
             // biometric
             biometric::is_biometric_available,
             biometric::is_biometric_unlock_enabled,
