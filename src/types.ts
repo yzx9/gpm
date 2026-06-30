@@ -126,7 +126,7 @@ export interface SshPrivateKeyResult {
 export interface RecipientInfo {
   public_key: string;
   comment: string | null;
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
 }
 
 /** Auth state snapshot from get_auth_state command. */
@@ -134,7 +134,7 @@ export interface AuthState {
   configured: boolean;
   encrypted: boolean;
   unlocked: boolean;
-  /** Identity type: "x25519", "ssh_ed25519", "ssh_rsa", "age_encrypted", "post_quantum", "unknown". */
+  /** Identity type: "x25519", "ssh_ed25519", "ssh_rsa", "age_encrypted", "plugin", "post_quantum", "unknown". */
   identity_type: string;
 }
 
@@ -149,13 +149,13 @@ export interface AppLockState {
 
 /** Identity validation result from validate_identity command. */
 export interface IdentityInfoResult {
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
   encrypted: boolean;
 }
 
 /** Identity metadata from pick_identity_file — bytes stay backend-side. */
 export interface PickedIdentityResult {
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "post_quantum";
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
   encrypted: boolean;
   /** Best-effort display name from the picker (null if unknown). */
   filename: string | null;
@@ -313,7 +313,4 @@ export type WriteOutcome =
 
 /** How the user chose to resolve a `WriteOutcome` conflict (serde snake_case). */
 export type ConflictChoice =
-  | "keep_mine"
-  | "keep_mine_force"
-  | "keep_remote"
-  | "cancel";
+  "keep_mine" | "keep_mine_force" | "keep_remote" | "cancel";

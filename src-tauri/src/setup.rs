@@ -89,6 +89,7 @@ impl From<Recipient> for RecipientInfo {
                 KeyType::X25519 => "x25519".to_string(),
                 KeyType::SshEd25519 => "ssh_ed25519".to_string(),
                 KeyType::SshRsa => "ssh_rsa".to_string(),
+                KeyType::Plugin => "plugin".to_string(),
                 KeyType::PostQuantum => "post_quantum".to_string(),
             },
         }
@@ -361,6 +362,16 @@ pub(crate) async fn pick_identity_file(
                 "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
             ));
         }
+        IdentityType::Plugin => {
+            // An age plugin identity (age-plugin-yubikey, …). Recognized, but
+            // decrypting with one isn't wired yet — plugin recipients are fully
+            // supported. See RFC 0030 for the staged plan.
+            return Err(Error::new(
+                ErrorCode::PluginIdentityNotSupported,
+                "age plugin identities (age-plugin-yubikey, …) aren't supported yet — \
+                 plugin recipients are, but decrypting with a plugin identity is not",
+            ));
+        }
         IdentityType::Unknown => {
             return Err(Error::new(
                 ErrorCode::InvalidIdentity,
@@ -559,6 +570,7 @@ fn identity_type_string(itype: IdentityType) -> String {
         IdentityType::SshEd25519 => "ssh_ed25519",
         IdentityType::SshRsa => "ssh_rsa",
         IdentityType::AgeEncrypted => "age_encrypted",
+        IdentityType::Plugin => "plugin",
         IdentityType::PostQuantum => "post_quantum",
         IdentityType::Unknown => "unknown",
     }
@@ -572,6 +584,7 @@ fn key_type_string(key_type: KeyType) -> &'static str {
         KeyType::X25519 => "x25519",
         KeyType::SshEd25519 => "ssh_ed25519",
         KeyType::SshRsa => "ssh_rsa",
+        KeyType::Plugin => "plugin",
         KeyType::PostQuantum => "post_quantum",
     }
 }

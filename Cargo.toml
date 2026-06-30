@@ -18,7 +18,10 @@ license = "Apache-2.0"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-age = { version = "0.11", features = ["armor", "ssh"] }
+# `plugin` enables the age plugin protocol (age-plugin-yubikey etc.). The library
+# spawns `age-plugin-<name>` as a subprocess, so plugin encrypt/decrypt only works
+# where that binary exists (desktop); Android lacks the binary and fails cleanly.
+age = { version = "0.11", features = ["armor", "ssh", "plugin"] }
 zeroize = { version = "1", features = ["derive", "serde"] }
 git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
 # For Android HTTPS CA loading (see `rustpass::git::ensure_https_ca_loaded`):
@@ -47,3 +50,5 @@ aes-gcm = "0.10"
 getrandom = "0.2"
 # Base64 for the master key crossing the Rust ↔ Android-plugin IPC boundary.
 base64 = "0.22"
+# Bech32 for tests that construct valid age plugin recipient/identity encodings.
+bech32 = { version = "0.9", default-features = false }

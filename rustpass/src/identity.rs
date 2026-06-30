@@ -26,6 +26,9 @@ pub enum IdentityType {
     SshRsa,
     /// Age passphrase-encrypted identity file (armored age encrypted blob).
     AgeEncrypted,
+    /// Age plugin identity (`AGE-PLUGIN-<NAME>-1...`, e.g. age-plugin-yubikey),
+    /// recognized but not yet supported as a decrypt identity (recipients are).
+    Plugin,
     /// Post-quantum MLKEM768-X25519 key (`AGE-SECRET-KEY-PQ-1...`), recognized
     /// but unsupported.
     PostQuantum,
@@ -46,6 +49,8 @@ pub fn classify_identity(bytes: &[u8]) -> IdentityType {
 
     if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
         IdentityType::PostQuantum
+    } else if trimmed.starts_with("AGE-PLUGIN-") {
+        IdentityType::Plugin
     } else if trimmed.starts_with("AGE-SECRET-KEY-") {
         IdentityType::X25519
     } else if trimmed.starts_with("-----BEGIN AGE ENCRYPTED FILE-----") {
@@ -93,13 +98,17 @@ pub fn normalize_identity_text(text: &str) -> &str {
 /// Delegates to [`classify_identity`] for the actual prefix detection, keeping
 /// it as the single source of truth. Accepts native x25519, OpenSSH, RSA, and
 /// PKCS#8 private keys. Rejects age-encrypted blobs (not a private key),
-/// unrecognized formats, and post-quantum keys (recognized but unsupported).
+/// unrecognized formats, post-quantum keys (recognized but unsupported), and age
+/// plugin identities (recognized — recipients are supported — but decrypting with
+/// one is not yet implemented).
 ///
 /// # Errors
 ///
 /// Returns `InvalidIdentity` if the format is not recognized.
 /// Returns `PostQuantumNotSupported` for post-quantum (`AGE-SECRET-KEY-PQ-1`)
 /// keys.
+/// Returns `PluginIdentityNotSupported` for age plugin (`AGE-PLUGIN-<NAME>-1`)
+/// identities.
 pub fn validate_identity_format(identity_bytes: &[u8]) -> Result<(), Error> {
     match classify_identity(identity_bytes) {
         IdentityType::Unknown | IdentityType::AgeEncrypted => Err(Error::new(
@@ -109,6 +118,11 @@ pub fn validate_identity_format(identity_bytes: &[u8]) -> Result<(), Error> {
         IdentityType::PostQuantum => Err(Error::new(
             ErrorCode::PostQuantumNotSupported,
             "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
+        )),
+        IdentityType::Plugin => Err(Error::new(
+            ErrorCode::PluginIdentityNotSupported,
+            "age plugin identities (age-plugin-yubikey, …) aren't supported yet — \
+             plugin recipients are, but decrypting with a plugin identity is not",
         )),
         _ => Ok(()),
     }
@@ -137,6 +151,27 @@ mod tests {
             classify_identity(encrypted.as_bytes()),
             IdentityType::AgeEncrypted,
         );
+    }
+
+    #[test]
+    fn classify_plugin() {
+        // age-plugin-yubikey identity. Prefix is enough; the body is illustrative.
+        let identity = "AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJQZL98RLMC67F9PJ";
+        assert_eq!(classify_identity(identity.as_bytes()), IdentityType::Plugin);
+    }
+
+    #[test]
+    fn classify_plugin_generic_name() {
+        // Any AGE-PLUGIN-<NAME>-1 identity is recognized as a plugin identity.
+        let identity = "AGE-PLUGIN-FOO-1ABCD";
+        assert_eq!(classify_identity(identity.as_bytes()), IdentityType::Plugin);
+    }
+
+    #[test]
+    fn classify_plugin_is_not_swallowed_by_secret_key_prefix() {
+        // Regression: AGE-PLUGIN- must not fall through to the AGE-SECRET-KEY- arm.
+        let identity = "AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ";
+        assert_ne!(classify_identity(identity.as_bytes()), IdentityType::X25519);
     }
 
     #[test]
@@ -263,5 +298,17 @@ mod tests {
     #[test]
     fn validate_rejects_empty() {
         assert!(validate_identity_format(b"").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_plugin() {
+        let identity = b"AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ";
+        let result = validate_identity_format(identity);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            "PLUGIN_IDENTITY_NOT_SUPPORTED",
+            "plugin identity must be rejected as not-yet-supported, not as invalid format"
+        );
     }
 }

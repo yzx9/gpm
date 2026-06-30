@@ -32,6 +32,9 @@ pub enum KeyType {
     SshEd25519,
     /// SSH RSA key (ssh-rsa ...).
     SshRsa,
+    /// Age plugin recipient (`age1<plugin>1...`, e.g. `age1yubikey1...` from
+    /// age-plugin-yubikey). Encrypting to it spawns `age-plugin-<name>`.
+    Plugin,
     /// Post-quantum MLKEM768-X25519 key (age1pq1...), recognized but unsupported.
     PostQuantum,
 }
@@ -149,16 +152,44 @@ fn parse_recipients(content: &str) -> Vec<Recipient> {
                     key_type: KeyType::PostQuantum,
                 })
             } else if key_part.starts_with("age1") {
+                // A native x25519 recipient and a plugin recipient share the
+                // `age1` prefix; they're told apart by the bech32 HRP (`age` for
+                // native, `age1<plugin>` for a plugin). Post-quantum is already
+                // handled above. `is_plugin_recipient` is a pure bech32 parse —
+                // it does NOT spawn the plugin binary.
+                let key_type = if is_plugin_recipient(key_part) {
+                    KeyType::Plugin
+                } else {
+                    KeyType::X25519
+                };
                 Some(Recipient {
                     public_key: key_part.to_string(),
                     comment: hash_comment,
-                    key_type: KeyType::X25519,
+                    key_type,
                 })
             } else {
                 parse_ssh_recipient_line(key_part, hash_comment)
             }
         })
         .collect()
+}
+
+/// True if `key` is an age plugin recipient (`age1<plugin>1...`).
+///
+/// Distinguished from a native x25519 recipient (`age1<data>`) by the bech32
+/// HRP: a plugin recipient's HRP is `age1<plugin>`, a native recipient's is
+/// `age`. This is a pure bech32 parse via the age plugin protocol — it does
+/// **not** spawn `age-plugin-<name>`. Post-quantum recipients (`age1pq1...`)
+/// are excluded so they keep their own key type rather than being misread as a
+/// plugin named `pq`.
+///
+/// Returns `false` for everything that is not an `age1` plugin recipient
+/// (native x25519, SSH, post-quantum, garbage).
+pub(crate) fn is_plugin_recipient(key: &str) -> bool {
+    let trimmed = key.trim();
+    !trimmed.starts_with("age1pq1")
+        && trimmed.starts_with("age1")
+        && age::plugin::Recipient::from_str(trimmed).is_ok()
 }
 
 /// Parse an SSH recipient line like `ssh-ed25519 AAAA... user@host`.
@@ -219,6 +250,15 @@ pub fn identity_to_recipient(identity: &str, passphrase: Option<&str>) -> Result
             ErrorCode::PostQuantumNotSupported,
             "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
         ))
+    } else if trimmed.starts_with("AGE-PLUGIN-") {
+        // Plugin identities are recognized but not yet supported as a decrypt
+        // identity — a plugin recipient can't be derived from the identity
+        // encoding alone, and decrypting needs per-operation PIN plumbing that
+        // isn't wired yet. Recipients (encrypt) are fully supported.
+        Err(Error::new(
+            ErrorCode::PluginIdentityNotSupported,
+            "age plugin identities (age-plugin-yubikey, …) aren't supported yet",
+        ))
     } else if trimmed.starts_with("AGE-SECRET-KEY-") {
         // x25519 path
         let sk = x25519::Identity::from_str(trimmed)
@@ -273,6 +313,8 @@ pub fn detect_identity_type(identity: &str) -> KeyType {
     let trimmed = identity.trim();
     if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
         KeyType::PostQuantum
+    } else if trimmed.starts_with("AGE-PLUGIN-") {
+        KeyType::Plugin
     } else if trimmed.starts_with("AGE-SECRET-KEY-") {
         KeyType::X25519
     } else if trimmed.contains("ssh-ed25519") {
@@ -308,6 +350,14 @@ pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
         return Err(Error::new(
             ErrorCode::PostQuantumNotSupported,
             "Post-quantum (ML-KEM-768 / X-Wing) age keys aren't supported yet",
+        ));
+    }
+
+    if trimmed.starts_with("AGE-PLUGIN-") {
+        return Err(Error::new(
+            ErrorCode::PluginIdentityNotSupported,
+            "age plugin identities (age-plugin-yubikey, …) aren't supported yet — \
+             plugin recipients are, but decrypting with a plugin identity is not",
         ));
     }
 
@@ -357,6 +407,7 @@ pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bech32::ToBase32;
 
     #[test]
     fn parse_recipients_basic() {
@@ -455,6 +506,94 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
         assert_eq!(recipients.len(), 2);
         assert_eq!(recipients[0].key_type, KeyType::X25519);
         assert_eq!(recipients[1].key_type, KeyType::PostQuantum);
+    }
+
+    /// Build a valid `age1yubikey1...` recipient encoding (bech32, `age1yubikey`
+    /// HRP). Dummy payload — only the HRP/plugin name matters for classification.
+    fn yubikey_recipient_line() -> String {
+        bech32::encode(
+            "age1yubikey",
+            [0u8; 32].to_base32(),
+            bech32::Variant::Bech32,
+        )
+        .expect("bech32 encode")
+    }
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn parse_recipients_plugin_yubikey_is_plugin_not_x25519() {
+        // Regression for the core bug: an age-plugin-yubikey recipient shares
+        // the `age1` prefix with native x25519, so it used to be tagged X25519
+        // (and then break encryption). It must now classify as Plugin.
+        let yubikey = yubikey_recipient_line();
+        let content = format!("{yubikey}\n");
+        let recipients = parse_recipients(&content);
+        assert_eq!(recipients.len(), 1);
+        assert_eq!(recipients[0].key_type, KeyType::Plugin);
+        assert_eq!(recipients[0].public_key, yubikey);
+    }
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn parse_recipients_plugin_not_swallowed_by_native_or_pq() {
+        // All three age1 variants in one file: native x25519, a yubikey plugin
+        // recipient, and a post-quantum recipient — each must keep its own type.
+        let yubikey = yubikey_recipient_line();
+        let content = format!(
+            "age1abc123...\n{yubikey}\nage1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\n"
+        );
+        let recipients = parse_recipients(&content);
+        assert_eq!(recipients.len(), 3);
+        assert_eq!(recipients[0].key_type, KeyType::X25519);
+        assert_eq!(recipients[1].key_type, KeyType::Plugin);
+        assert_eq!(recipients[1].public_key, yubikey);
+        assert_eq!(recipients[2].key_type, KeyType::PostQuantum);
+    }
+
+    #[test]
+    fn is_plugin_recipient_helpers() {
+        assert!(is_plugin_recipient(&yubikey_recipient_line()));
+        // A second, non-yubikey plugin name must also classify as plugin — the
+        // bech32 HRP check is not yubikey-specific.
+        let github = bech32::encode("age1github", [0u8; 32].to_base32(), bech32::Variant::Bech32)
+            .expect("bech32 encode");
+        assert!(
+            is_plugin_recipient(&github),
+            "a non-yubikey plugin recipient must classify as plugin"
+        );
+        // native age1 recipient: not a plugin (HRP `age`, not `age1<plugin>`)
+        assert!(!is_plugin_recipient("age1abcdefghijklmnopqrstuvwxyz"));
+        // post-quantum: explicitly excluded so it stays PostQuantum, not Plugin
+        assert!(!is_plugin_recipient(
+            "age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+        ));
+        // SSH and garbage: not plugin
+        assert!(!is_plugin_recipient("ssh-ed25519 AAAA"));
+        assert!(!is_plugin_recipient("not-a-key"));
+    }
+
+    #[test]
+    fn identity_to_recipient_rejects_plugin_identity() {
+        let identity = "AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ";
+        let result = identity_to_recipient(identity, None);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "PLUGIN_IDENTITY_NOT_SUPPORTED");
+    }
+
+    #[test]
+    fn validate_identity_rejects_plugin_identity() {
+        let identity = "AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ";
+        let result = validate_identity(identity);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "PLUGIN_IDENTITY_NOT_SUPPORTED");
+    }
+
+    #[test]
+    fn detect_identity_type_plugin() {
+        assert_eq!(
+            detect_identity_type("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ"),
+            KeyType::Plugin,
+        );
     }
 
     #[test]

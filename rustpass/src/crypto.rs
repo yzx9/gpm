@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeMap;
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
 use std::str::{self, FromStr};
@@ -197,10 +198,17 @@ pub fn decrypt_bytes(
 
 /// Encrypt plaintext to one or more age recipients, returning binary ciphertext.
 ///
-/// Each recipient string may be a native x25519 public key (`age1...`) or an SSH
-/// public key (`ssh-ed25519 ...` / `ssh-rsa ...`), exactly as they appear in a
-/// gopass `.gopass-recipients` / `.age-recipients` file. This mirrors gopass's
-/// `age` crypto backend, which encrypts every secret to all store recipients.
+/// Each recipient string may be a native x25519 public key (`age1...`), an SSH
+/// public key (`ssh-ed25519 ...` / `ssh-rsa ...`), or an age plugin recipient
+/// (`age1<plugin>1...`, e.g. `age1yubikey1...` from age-plugin-yubikey) — exactly
+/// as they appear in a gopass `.gopass-recipients` / `.age-recipients` file. This
+/// mirrors gopass's `age` crypto backend, which encrypts every secret to all
+/// store recipients.
+///
+/// Plugin recipients are grouped by plugin name and wrapped one-per-plugin; the
+/// age library then spawns `age-plugin-<name>` to wrap the file key. That only
+/// works where the binary exists (desktop); on Android or without the binary it
+/// fails with [`ErrorCode::PluginUnavailable`].
 ///
 /// The output is unarmored (binary) age — the standard on-disk format for
 /// gopass secrets and what [`decrypt_bytes`] expects.
@@ -208,8 +216,10 @@ pub fn decrypt_bytes(
 /// # Errors
 ///
 /// Returns `InvalidIdentity` if the recipient list is empty or any recipient
-/// string cannot be parsed (unknown format, post-quantum key, malformed SSH
-/// key). Returns `DecryptFailed` if the age encryption step itself fails.
+/// string cannot be parsed (unknown format, malformed SSH key). Returns
+/// `PostQuantumNotSupported` for a post-quantum recipient. Returns
+/// `PluginUnavailable` if a required `age-plugin-<name>` binary is missing.
+/// Returns `DecryptFailed` if the age encryption step itself fails.
 pub fn encrypt_to_recipients(plaintext: &[u8], recipients: &[String]) -> Result<Vec<u8>, Error> {
     if recipients.is_empty() {
         return Err(Error::new(
@@ -218,18 +228,47 @@ pub fn encrypt_to_recipients(plaintext: &[u8], recipients: &[String]) -> Result<
         ));
     }
 
+    // Native/SSH recipients become individual age Recipient trait objects. Plugin
+    // recipients are grouped by plugin name and wrapped one-per-plugin, because
+    // the age plugin protocol drives a single `age-plugin-<name>` subprocess for
+    // all of that plugin's recipients at once. Post-quantum is rejected up front
+    // so it keeps a distinct, accurate error (its `age1pq1` prefix would
+    // otherwise parse as a plugin named `pq`).
     let mut parsed: Vec<Box<dyn age::Recipient>> = Vec::with_capacity(recipients.len());
-    for r in recipients {
-        parsed.push(parse_recipient(r)?);
+    let mut plugin_groups: BTreeMap<String, Vec<age::plugin::Recipient>> = BTreeMap::new();
+
+    for recipient in recipients {
+        let trimmed = recipient.trim();
+        if trimmed.starts_with("age1pq1") {
+            return Err(Error::new(
+                ErrorCode::PostQuantumNotSupported,
+                "Post-quantum age recipients aren't supported yet",
+            ));
+        } else if let Ok(plugin_recipient) = age::plugin::Recipient::from_str(trimmed) {
+            // A plugin recipient (`age1<plugin>1...`). Grouped by plugin name
+            // because the protocol drives one `age-plugin-<name>` subprocess per
+            // plugin. Native x25519 (`age1<data>`, bech32 HRP `age`) and SSH
+            // keys both fail this parse and fall through to the native path.
+            plugin_groups
+                .entry(plugin_recipient.plugin().to_string())
+                .or_default()
+                .push(plugin_recipient);
+        } else {
+            parsed.push(parse_native_recipient(trimmed)?);
+        }
+    }
+
+    // For each plugin, locate its binary (PATH lookup) and build the wrapper.
+    // `MissingPlugin` surfaces here, before any file key is wrapped.
+    for (plugin_name, group) in plugin_groups {
+        let wrapper =
+            age::plugin::RecipientPluginV1::new(&plugin_name, &group, &[], age::NoCallbacks)
+                .map_err(map_encrypt_error)?;
+        parsed.push(Box::new(wrapper));
     }
 
     let encryptor =
-        Encryptor::with_recipients(parsed.iter().map(AsRef::as_ref)).map_err(|err| {
-            Error::new(
-                ErrorCode::DecryptFailed,
-                format!("Encryption setup failed: {err}"),
-            )
-        })?;
+        Encryptor::with_recipients(parsed.iter().map(AsRef::as_ref)).map_err(map_encrypt_error)?;
 
     let mut ciphertext = Vec::new();
     let mut writer = encryptor.wrap_output(&mut ciphertext).map_err(|err| {
@@ -256,20 +295,62 @@ pub fn encrypt_to_recipients(plaintext: &[u8], recipients: &[String]) -> Result<
     Ok(ciphertext)
 }
 
-/// Parse a recipient string into an age `Recipient`.
+/// Map an age [`EncryptError`] to a safe [`Error`].
 ///
-/// Dispatches by prefix: `age1pq1` is rejected as unsupported post-quantum,
-/// `age1` is a native x25519 recipient, `ssh-` is an SSH recipient. This is the
-/// same classification [`recipient::parse_recipients`](crate::recipient) uses,
-/// kept here so the crypto module is self-contained for encryption.
-fn parse_recipient(recipient: &str) -> Result<Box<dyn age::Recipient>, Error> {
-    let trimmed = recipient.trim();
-    if trimmed.starts_with("age1pq1") {
-        Err(Error::new(
-            ErrorCode::PostQuantumNotSupported,
-            "Post-quantum age recipients aren't supported yet",
-        ))
-    } else if trimmed.starts_with("age1") {
+/// The plugin-specific cases are surfaced explicitly: a missing binary is
+/// [`ErrorCode::PluginUnavailable`] with platform-appropriate guidance (install
+/// it on desktop; on Android, where the binary cannot run at all, say so
+/// plainly instead of suggesting an impossible install), and any other
+/// plugin-reported error is a fixed string (NOT the plugin's `CMD_ERROR` body,
+/// which is plugin-controlled text and must not reach the `WebView`). Everything
+/// else (age-internal I/O, incompatible recipients) collapses to `DecryptFailed`
+/// with the age message — those carry no plugin-controlled or secret content.
+fn map_encrypt_error(err: age::EncryptError) -> Error {
+    match err {
+        age::EncryptError::MissingPlugin { binary_name } => {
+            // The message is tailored per build target so it never tells a user
+            // to do something impossible on their platform. `cfg!` is evaluated
+            // at compile time, so each build gets the string for its target.
+            let message = if cfg!(target_os = "android") {
+                format!(
+                    "Encryption needs the age plugin '{binary_name}', which can't run on \
+                     Android — age plugins are external binaries this device cannot launch. \
+                     A store that uses this recipient can't be written from this device."
+                )
+            } else {
+                format!(
+                    "age plugin '{binary_name}' was not found in PATH. Install it and try \
+                     again (for age-plugin-yubikey: `cargo install age-plugin-yubikey` or \
+                     your package manager). Plugin encryption only works where the binary \
+                     is installed."
+                )
+            };
+            Error::new(ErrorCode::PluginUnavailable, message)
+        }
+        // A plugin that ran but reported an error: the error body comes from the
+        // `age-plugin-<name>` subprocess's `CMD_ERROR` stanza, so it is
+        // plugin-controlled text. Surface a fixed message rather than echoing it,
+        // to honor the "no untrusted/secret content in error messages" invariant.
+        age::EncryptError::Plugin(_) => Error::new(
+            ErrorCode::DecryptFailed,
+            "An age plugin reported an error while wrapping the file key",
+        ),
+        other => Error::new(
+            ErrorCode::DecryptFailed,
+            format!("Encryption failed: {other}"),
+        ),
+    }
+}
+
+/// Parse a **non-plugin** recipient string into an age `Recipient`.
+///
+/// Handles native x25519 (`age1...`) and SSH (`ssh-...`) recipients. Plugin
+/// recipients (`age1<plugin>1...`) and post-quantum (`age1pq1...`) are handled
+/// by the caller ([`encrypt_to_recipients`]); this must not be called with them.
+/// This mirrors the classification [`recipient::parse_recipients`](crate::recipient)
+/// uses, kept here so the crypto module is self-contained for encryption.
+fn parse_native_recipient(trimmed: &str) -> Result<Box<dyn age::Recipient>, Error> {
+    if trimmed.starts_with("age1") {
         let r = age::x25519::Recipient::from_str(trimmed).map_err(|_| {
             Error::new(
                 ErrorCode::InvalidIdentity,
@@ -288,7 +369,8 @@ fn parse_recipient(recipient: &str) -> Result<Box<dyn age::Recipient>, Error> {
     } else {
         Err(Error::new(
             ErrorCode::InvalidIdentity,
-            "Recipient must be an age public key (age1...) or SSH public key (ssh-...)",
+            "Recipient must be an age public key (age1...), a plugin recipient \
+             (age1<plugin>1...), or an SSH public key (ssh-...)",
         ))
     }
 }
@@ -460,6 +542,7 @@ pub fn validate_ssh_key_passphrase(identity_bytes: &[u8], passphrase: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bech32::ToBase32;
     use std::io::Write;
 
     /// Generate a random x25519 keypair, returning `(identity, recipient)` strings.
@@ -631,6 +714,100 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
             err.code, "POST_QUANTUM_NOT_SUPPORTED",
             "PQ identity must be rejected as unsupported before age parsing"
         );
+    }
+
+    // ── Plugin recipient (age-plugin-yubikey) tests ──────────────────────
+    //
+    // These don't have a YubiKey or the `age-plugin-yubikey` binary available,
+    // so they can't do a real encrypt round-trip. They *do* prove the two
+    // things that matter for correctness here: a plugin recipient is recognized
+    // and routed (not misparsed as native x25519, which used to break every
+    // write in a store sharing a yubikey recipient), and a missing plugin binary
+    // surfaces as the dedicated `PluginUnavailable` error.
+
+    /// Build a valid `age1yubikey1...` recipient encoding (bech32 with the
+    /// `age1yubikey` HRP). The data is dummy bytes — `Recipient::from_str` only
+    /// validates the HRP/plugin name, not the payload.
+    fn yubikey_recipient() -> String {
+        bech32::encode(
+            "age1yubikey",
+            [0u8; 32].to_base32(),
+            bech32::Variant::Bech32,
+        )
+        .expect("bech32 encode of a yubikey recipient")
+    }
+
+    #[test]
+    fn plugin_recipient_is_recognized_not_misparsed_as_x25519() {
+        // The encoding must round-trip through the age plugin parser (pure
+        // bech32 — no binary spawned). If this regressed, encrypt_to_recipients
+        // would treat it as a native age1 recipient and fail with InvalidIdentity.
+        let recipient = yubikey_recipient();
+        assert!(recipient.starts_with("age1yubikey1"));
+        assert!(
+            crate::recipient::is_plugin_recipient(&recipient),
+            "constructed yubikey recipient must classify as a plugin recipient"
+        );
+        assert!(
+            age::plugin::Recipient::from_str(&recipient).is_ok(),
+            "age must parse the constructed yubikey recipient"
+        );
+    }
+
+    #[test]
+    fn encrypt_to_plugin_recipient_reports_missing_binary() {
+        // age-plugin-yubikey is not installed in the test environment, so
+        // wrapping to a yubikey recipient cannot proceed. The error must be the
+        // dedicated PluginUnavailable (with install guidance), not a generic
+        // decrypt/parse failure.
+        let recipient = yubikey_recipient();
+        let err = encrypt_to_recipients(b"secret", &[recipient]).unwrap_err();
+        assert_eq!(
+            err.code, "PLUGIN_UNAVAILABLE",
+            "missing age-plugin-yubikey binary must surface as PLUGIN_UNAVAILABLE, got: {err}"
+        );
+    }
+
+    #[test]
+    fn encrypt_mixed_native_and_plugin_reports_missing_binary() {
+        // A native recipient parses fine; the plugin recipient then fails at
+        // binary lookup. Confirms native parsing still happens and the plugin
+        // failure is what surfaces.
+        let (identity, recipient) = generate_keypair();
+        let yubikey = yubikey_recipient();
+        let recipients = vec![recipient, yubikey];
+        let _ = identity; // unused; we only exercise the encrypt path
+        let err = encrypt_to_recipients(b"secret", &recipients).unwrap_err();
+        assert_eq!(err.code, "PLUGIN_UNAVAILABLE");
+    }
+
+    #[test]
+    fn encrypt_groups_multiple_same_plugin_recipients() {
+        // Two recipients of the same plugin must be grouped into a single
+        // age-plugin-<name> lookup (one subprocess), not one per recipient. With
+        // no binary installed the grouped lookup still surfaces a single
+        // PLUGIN_UNAVAILABLE — this guards against a regression that spawned N
+        // subprocesses (the BTreeMap grouping is the one non-obvious bit of the
+        // encrypt path).
+        let yk = yubikey_recipient();
+        let err = encrypt_to_recipients(b"secret", &[yk.clone(), yk]).unwrap_err();
+        assert_eq!(err.code, "PLUGIN_UNAVAILABLE");
+    }
+
+    #[test]
+    fn encrypt_rejects_post_quantum_recipient_with_dedicated_error() {
+        // PQ must keep its own error even though `age1pq1` would otherwise parse
+        // as a plugin named `pq`.
+        let (_identity, native_recipient) = generate_keypair();
+        let err = encrypt_to_recipients(
+            b"secret",
+            &[
+                native_recipient,
+                "age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq".to_string(),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "POST_QUANTUM_NOT_SUPPORTED");
     }
 
     // ── Identity encryption tests ─────────────────────────────────────────

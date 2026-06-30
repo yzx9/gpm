@@ -10,6 +10,7 @@ export type IdentityType =
   | "ssh_ed25519"
   | "ssh_rsa"
   | "age_encrypted"
+  | "plugin"
   | "post_quantum"
   | "unknown";
 
@@ -21,6 +22,7 @@ export function classifyIdentity(text: string): IdentityType {
   const trimmed = text.trim();
 
   if (trimmed.startsWith("AGE-SECRET-KEY-PQ-1")) return "post_quantum";
+  if (trimmed.startsWith("AGE-PLUGIN-")) return "plugin";
   if (trimmed.startsWith("AGE-SECRET-KEY-")) return "x25519";
   if (trimmed.startsWith("-----BEGIN AGE ENCRYPTED FILE-----"))
     return "age_encrypted";

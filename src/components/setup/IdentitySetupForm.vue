@@ -289,7 +289,13 @@ watch(identity, async (val) => {
             <span
               v-if="r.key_type !== 'x25519'"
               class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--color-edge)] text-muted"
-              >{{ r.key_type === "post_quantum" ? "PQ" : "SSH" }}</span
+              >{{
+                r.key_type === "post_quantum"
+                  ? "PQ"
+                  : r.key_type === "plugin"
+                    ? "Plugin"
+                    : "SSH"
+              }}</span
             >
           </div>
           <span v-if="r.comment" class="text-xs text-muted">{{

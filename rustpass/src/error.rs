@@ -53,6 +53,13 @@ pub enum ErrorCode {
     Cancelled,
     /// Post-quantum (X-Wing) age key recognized but decryption not yet supported.
     PostQuantumNotSupported,
+    /// An age plugin binary (`age-plugin-<name>`, e.g. `age-plugin-yubikey`) was
+    /// required but not found in `PATH`. Plugin encrypt/decrypt only works where
+    /// the binary is installed (desktop); Android cannot run it.
+    PluginUnavailable,
+    /// An age plugin identity (`AGE-PLUGIN-<NAME>-1...`) was recognized, but
+    /// decrypting with a plugin identity is not supported yet (recipients are).
+    PluginIdentityNotSupported,
     /// At-rest envelope failed AEAD authentication (tampered or corrupt).
     AtRestTampered,
     /// An at-rest envelope exists but the master key is unavailable (Keystore
@@ -97,6 +104,8 @@ impl Error {
                 ErrorCode::PostQuantumNotSupported => "POST_QUANTUM_NOT_SUPPORTED",
                 ErrorCode::AtRestTampered => "AT_REST_TAMPERED",
                 ErrorCode::AtRestKeyUnavailable => "AT_REST_KEY_UNAVAILABLE",
+                ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
+                ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
             }
             .to_string(),
             message: message.into(),
@@ -191,6 +200,8 @@ mod tests {
             ErrorCode::PostQuantumNotSupported => "POST_QUANTUM_NOT_SUPPORTED",
             ErrorCode::AtRestTampered => "AT_REST_TAMPERED",
             ErrorCode::AtRestKeyUnavailable => "AT_REST_KEY_UNAVAILABLE",
+            ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
+            ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
         }
     }
 
@@ -220,6 +231,8 @@ mod tests {
             ErrorCode::PostQuantumNotSupported,
             ErrorCode::AtRestTampered,
             ErrorCode::AtRestKeyUnavailable,
+            ErrorCode::PluginUnavailable,
+            ErrorCode::PluginIdentityNotSupported,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -257,6 +270,8 @@ mod tests {
             ErrorCode::PostQuantumNotSupported,
             ErrorCode::AtRestTampered,
             ErrorCode::AtRestKeyUnavailable,
+            ErrorCode::PluginUnavailable,
+            ErrorCode::PluginIdentityNotSupported,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");
