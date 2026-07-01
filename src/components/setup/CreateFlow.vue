@@ -8,7 +8,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AppError, CreateIdentityKind } from "../../types";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
-import "./forms.css";
+import BaseInput from "../base/BaseInput.vue";
+import BaseButton from "../base/BaseButton.vue";
 
 // The public recipient of the generated identity — the only part the frontend
 // ever holds. The secret identity itself lives in backend state (staged by
@@ -215,14 +216,13 @@ async function onCreate() {
       <label for="create-passphrase" class="text-sm font-medium"
         >Passphrase (optional)</label
       >
-      <input
+      <BaseInput
         id="create-passphrase"
         v-model="passphrase"
         type="password"
         placeholder="Leave empty for plaintext storage"
         autocomplete="new-password"
         :disabled="loading || (identityKind === 'ssh' && !!recipient)"
-        class="input-base"
       />
       <small class="text-xs text-muted">{{
         identityKind === "ssh"
@@ -232,18 +232,20 @@ async function onCreate() {
     </div>
 
     <!-- Generate -->
-    <button
-      type="button"
-      :disabled="generating || loading"
-      class="btn-secondary"
+    <BaseButton
+      variant="secondary"
+      :loading="generating"
+      :disabled="loading"
       @click="generate"
     >
-      <span v-if="generating" class="spinner" aria-hidden="true"></span>
-      <span v-if="generating">Generating…</span>
-      <span v-else>{{
-        identityKind === "ssh" ? "🔑 Generate SSH key" : "🔑 Generate identity"
-      }}</span>
-    </button>
+      {{
+        generating
+          ? "Generating…"
+          : identityKind === "ssh"
+            ? "🔑 Generate SSH key"
+            : "🔑 Generate identity"
+      }}
+    </BaseButton>
 
     <!-- Recipient (public key) — shown once generated. The secret identity is
          never rendered. -->
@@ -290,10 +292,8 @@ async function onCreate() {
       {{ error }}
     </div>
 
-    <button type="submit" :disabled="loading" class="btn-primary">
-      <span v-if="loading" class="spinner-white" aria-hidden="true"></span>
-      <span v-if="loading">Creating…</span>
-      <span v-else>Create Store</span>
-    </button>
+    <BaseButton variant="primary" type="submit" :loading="loading">{{
+      loading ? "Creating…" : "Create Store"
+    }}</BaseButton>
   </form>
 </template>

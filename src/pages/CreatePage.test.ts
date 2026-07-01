@@ -241,11 +241,12 @@ describe("CreatePage", () => {
     await wrapper.find("form").trigger("submit");
     await flushPromises();
 
-    const force = wrapper.find(".btn-danger");
-    expect((force.element as HTMLButtonElement).disabled).toBe(true);
+    const force = findButton(wrapper, "Keep mine anyway");
+    expect(force).toBeTruthy();
+    expect((force!.element as HTMLButtonElement).disabled).toBe(true);
 
     await wrapper.find('input[type="checkbox"]').setValue(true);
-    expect((force.element as HTMLButtonElement).disabled).toBe(false);
+    expect((force!.element as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("cancel resolves with `cancel` and does not navigate", async () => {

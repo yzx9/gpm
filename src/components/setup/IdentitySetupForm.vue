@@ -12,8 +12,10 @@ import type {
   RecipientInfo,
   VerifiedIdentityResult,
 } from "../../types";
-import "./forms.css";
 import { truncateKey } from "./url";
+import BaseInput from "../base/BaseInput.vue";
+import BaseTextarea from "../base/BaseTextarea.vue";
+import BaseButton from "../base/BaseButton.vue";
 
 const props = defineProps<{
   /** Step-1 SSH key, so the "Use my SSH key for decryption" affordance has
@@ -313,26 +315,25 @@ watch(identity, async (val) => {
     </div>
 
     <!-- SSH key reuse offer -->
-    <button
+    <BaseButton
       v-if="canReuseSshKey && !identity.trim() && identitySource === 'paste'"
-      type="button"
-      class="btn-secondary text-sm"
+      variant="secondary"
+      size="sm"
       @click="useSshKeyForIdentity"
     >
       🔑 Use my SSH key for decryption
-    </button>
+    </BaseButton>
 
     <div class="flex flex-col gap-1">
       <label for="identity" class="text-sm font-medium">Age Identity</label>
-      <textarea
+      <BaseTextarea
         id="identity"
         v-model="identity"
-        placeholder="AGE-SECRET-KEY-...&#10;or paste an SSH private key"
         rows="5"
+        placeholder="AGE-SECRET-KEY-...&#10;or paste an SSH private key"
         autocomplete="off"
         spellcheck="false"
         :disabled="loadingIdentity || identitySource === 'file'"
-        class="input-base"
       />
 
       <!-- Picked-file panel: the bytes live in backend state, not here -->
@@ -365,22 +366,20 @@ watch(identity, async (val) => {
 
         <!-- Encrypted: unlock + verify before the key is usable -->
         <div v-else class="flex flex-col gap-1">
-          <input
+          <BaseInput
             v-model="passphrase"
             type="password"
             placeholder="Passphrase to unlock this file"
             autocomplete="off"
             :disabled="verifying"
-            class="input-base"
           />
-          <button
-            type="button"
-            class="btn-secondary"
+          <BaseButton
+            variant="secondary"
             :disabled="verifying || !passphrase"
             @click="onVerify"
           >
             {{ verifying ? "Verifying…" : "Unlock & verify" }}
-          </button>
+          </BaseButton>
           <small class="text-muted"
             >Enter the file's passphrase to verify it and reveal its public key.
             A wrong passphrase discards the file.</small
@@ -393,15 +392,15 @@ watch(identity, async (val) => {
       >
 
       <!-- Upload via the native picker (hidden once a file is picked) -->
-      <button
+      <BaseButton
         v-if="identitySource !== 'file'"
-        type="button"
-        class="btn-secondary text-sm"
+        variant="secondary"
+        size="sm"
         :disabled="picking || loadingIdentity"
         @click="onPickFile"
       >
         {{ picking ? "Reading…" : "📁 Upload identity file…" }}
-      </button>
+      </BaseButton>
     </div>
 
     <!-- SSH key passphrase (paste path: required for an encrypted SSH key) -->
@@ -412,14 +411,13 @@ watch(identity, async (val) => {
       <label for="passphrase" class="text-sm font-medium"
         >SSH Key Passphrase</label
       >
-      <input
+      <BaseInput
         id="passphrase"
         v-model="passphrase"
         type="password"
         placeholder="Passphrase to decrypt the SSH key"
         autocomplete="off"
         :disabled="loadingIdentity"
-        class="input-base"
       />
       <small class="text-xs text-muted"
         >This SSH key is passphrase-encrypted. Enter its passphrase to use it as
@@ -435,14 +433,13 @@ watch(identity, async (val) => {
       <label for="passphrase" class="text-sm font-medium"
         >Passphrase (optional)</label
       >
-      <input
+      <BaseInput
         id="passphrase"
         v-model="passphrase"
         type="password"
         placeholder="Leave empty for plaintext storage"
         autocomplete="new-password"
         :disabled="loadingIdentity"
-        class="input-base"
       />
       <small class="text-xs text-muted"
         >Encrypts the identity file at rest. Recommended for Android.</small
@@ -467,14 +464,8 @@ watch(identity, async (val) => {
       {{ error }}
     </div>
 
-    <button type="submit" :disabled="loadingIdentity" class="btn-primary">
-      <span
-        v-if="loadingIdentity"
-        class="spinner-white"
-        aria-hidden="true"
-      ></span>
-      <span v-if="loadingIdentity">Verifying…</span>
-      <span v-else>Complete Setup</span>
-    </button>
+    <BaseButton variant="primary" type="submit" :loading="loadingIdentity">{{
+      loadingIdentity ? "Verifying…" : "Complete Setup"
+    }}</BaseButton>
   </form>
 </template>

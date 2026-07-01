@@ -18,6 +18,10 @@ import type {
 import { isAuthCancelled, onLock, runWithAuth } from "../utils/useLockState";
 import { useOverlayBackHandler } from "../utils/useOverlayBackHandler";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
+import BaseInput from "../components/base/BaseInput.vue";
+import BaseTextarea from "../components/base/BaseTextarea.vue";
+import BaseButton from "../components/base/BaseButton.vue";
+import BaseSpinner from "../components/base/BaseSpinner.vue";
 
 const router = useRouter();
 
@@ -315,9 +319,7 @@ onBeforeUnmount(() => {
     <!-- Step 1: pick a type -->
     <section v-if="mode === 'pick'">
       <p class="text-sm text-muted mb-3">Choose a type of secret to create.</p>
-      <div v-if="presetsLoading" class="loading">
-        <span class="spinner" /> Loading…
-      </div>
+      <div v-if="presetsLoading" class="loading"><BaseSpinner /> Loading…</div>
       <ul v-else class="list-none flex flex-col gap-2" role="list">
         <li v-for="p in presets" :key="p.id">
           <button class="type-card" @click="pickPreset(p)">
@@ -353,13 +355,13 @@ onBeforeUnmount(() => {
             {{ f.label }}<span v-if="f.required" aria-hidden="true">*</span>
           </label>
           <div class="field-row">
-            <input
+            <BaseInput
               :id="`f-${f.key}`"
               v-model="fields[f.key]"
               :type="
                 f.type === 'password' && !revealed[f.key] ? 'password' : 'text'
               "
-              class="input-base flex-1"
+              class="flex-1"
               :autocomplete="f.key === 'password' ? 'new-password' : 'off'"
               :inputmode="f.charset === '0123456789' ? 'numeric' : undefined"
               autocorrect="off"
@@ -399,9 +401,9 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <button type="submit" class="btn-primary" :disabled="!canSubmit">
-          {{ submitting ? "Saving…" : "Save secret" }}
-        </button>
+        <BaseButton variant="primary" type="submit" :disabled="!canSubmit">{{
+          submitting ? "Saving…" : "Save secret"
+        }}</BaseButton>
       </form>
     </section>
 
@@ -412,11 +414,10 @@ onBeforeUnmount(() => {
           <label for="c-name" class="text-sm font-medium">
             Path / name<span aria-hidden="true">*</span>
           </label>
-          <input
+          <BaseInput
             id="c-name"
             v-model="customName"
             type="text"
-            class="input-base"
             placeholder="e.g. servers/db1"
             autocomplete="off"
           />
@@ -428,10 +429,9 @@ onBeforeUnmount(() => {
           <label for="c-content" class="text-sm font-medium">
             Content<span aria-hidden="true">*</span>
           </label>
-          <textarea
+          <BaseTextarea
             id="c-content"
             v-model="customContent"
-            class="input-base"
             rows="4"
             autocomplete="off"
           />
@@ -441,9 +441,9 @@ onBeforeUnmount(() => {
           below is what will be stored.
         </div>
         <pre v-if="preview" class="preview">{{ preview }}</pre>
-        <button type="submit" class="btn-primary" :disabled="!canSubmit">
-          {{ submitting ? "Saving…" : "Save secret" }}
-        </button>
+        <BaseButton variant="primary" type="submit" :disabled="!canSubmit">{{
+          submitting ? "Saving…" : "Save secret"
+        }}</BaseButton>
       </form>
     </section>
 
@@ -483,21 +483,6 @@ onBeforeUnmount(() => {
   background: var(--color-hover);
 }
 
-.input-base {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  background: var(--color-surface);
-  color: inherit;
-  min-height: 48px;
-}
-.input-base:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
-}
-
 .field-row {
   display: flex;
   gap: 0.5rem;
@@ -532,25 +517,6 @@ onBeforeUnmount(() => {
 }
 
 .icon-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  padding: 0.75rem;
-  background: var(--color-accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-weight: 500;
-  cursor: pointer;
-  min-height: 48px;
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-deep);
-}
-.btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -592,18 +558,6 @@ onBeforeUnmount(() => {
   text-align: center;
   color: var(--color-muted);
   padding: 2rem 0;
-}
-
-.spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--color-edge);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: 0.5rem;
-  vertical-align: middle;
 }
 
 code {

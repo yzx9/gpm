@@ -7,7 +7,9 @@ import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError, SshKeyPairResult } from "../../types";
 import { isSshUrl as isSshRepoUrl } from "./url";
-import "./forms.css";
+import BaseInput from "../base/BaseInput.vue";
+import BaseTextarea from "../base/BaseTextarea.vue";
+import BaseButton from "../base/BaseButton.vue";
 
 // Two-way bound fields. Each consumer (RepoCloneForm, future CreateFlow)
 // owns the underlying ref and passes it via v-model.
@@ -69,7 +71,7 @@ async function copyPublicKey() {
   <!-- Git Repository URL — always present -->
   <div class="flex flex-col gap-1">
     <label for="repo-url" class="text-sm font-medium">Git Repository URL</label>
-    <input
+    <BaseInput
       id="repo-url"
       v-model="repoUrl"
       type="url"
@@ -77,7 +79,6 @@ async function copyPublicKey() {
       required
       autocomplete="off"
       :disabled="disabled"
-      class="input-base"
     />
     <small class="text-xs text-muted"
       >HTTPS or SSH (e.g. git@github.com:user/repo.git)</small
@@ -87,14 +88,13 @@ async function copyPublicKey() {
   <!-- PAT field (shown for HTTPS URLs) -->
   <div v-if="!isSshUrl" class="flex flex-col gap-1">
     <label for="pat" class="text-sm font-medium">Personal Access Token</label>
-    <input
+    <BaseInput
       id="pat"
       v-model="pat"
       type="password"
       placeholder="Optional — for private repos"
       autocomplete="off"
       :disabled="disabled"
-      class="input-base"
     />
     <small class="text-xs text-muted"
       >HTTPS PAT for git authentication. Leave empty for public repos.</small
@@ -134,16 +134,15 @@ async function copyPublicKey() {
     <template v-if="sshKeySource === 'paste' || !showKeygen">
       <div class="flex flex-col gap-1">
         <label for="ssh-key" class="text-sm font-medium">SSH Private Key</label>
-        <textarea
+        <BaseTextarea
           id="ssh-key"
           v-model="sshKey"
-          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
           rows="5"
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
           required
           autocomplete="off"
           spellcheck="false"
           :disabled="disabled"
-          class="input-base"
         />
         <small class="text-xs text-muted"
           >Paste your SSH private key (OpenSSH or PEM format)</small
@@ -153,14 +152,13 @@ async function copyPublicKey() {
         <label for="ssh-passphrase" class="text-sm font-medium"
           >SSH Key Passphrase</label
         >
-        <input
+        <BaseInput
           id="ssh-passphrase"
           v-model="sshPassphrase"
           type="password"
           placeholder="Optional — if key is encrypted"
           autocomplete="off"
           :disabled="disabled"
-          class="input-base"
         />
       </div>
     </template>
@@ -171,26 +169,23 @@ async function copyPublicKey() {
         <label for="ssh-gen-passphrase" class="text-sm font-medium"
           >Key Passphrase (optional)</label
         >
-        <input
+        <BaseInput
           id="ssh-gen-passphrase"
           v-model="sshPassphrase"
           type="password"
           placeholder="Optional — encrypt the generated key"
           autocomplete="off"
           :disabled="disabled || generating"
-          class="input-base"
         />
       </div>
-      <button
-        type="button"
-        :disabled="generating || disabled"
-        class="btn-secondary"
+      <BaseButton
+        variant="secondary"
+        :loading="generating"
+        :disabled="disabled"
         @click="generateKey"
       >
-        <span v-if="generating" class="spinner" aria-hidden="true"></span>
-        <span v-if="generating">Generating...</span>
-        <span v-else>🔑 Generate SSH Key</span>
-      </button>
+        {{ generating ? "Generating..." : "🔑 Generate SSH Key" }}
+      </BaseButton>
 
       <!-- Public key display after generation -->
       <div v-if="generatedPublicKey" class="flex flex-col gap-2">

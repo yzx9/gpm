@@ -7,6 +7,7 @@ import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ConflictChoice, SensitiveContent, WriteConflict } from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
+import BaseButton from "./base/BaseButton.vue";
 
 const props = defineProps<{
   /** The conflict to show, or null to render nothing. */
@@ -97,31 +98,41 @@ async function viewExisting() {
           </div>
           <p class="text-xs text-muted mt-2">Auto-clears in 30 seconds</p>
         </div>
-        <button v-else class="btn-sm w-full mb-3" @click="viewExisting">
+        <BaseButton
+          v-else
+          variant="secondary"
+          size="sm"
+          block
+          class="mb-3"
+          @click="viewExisting"
+        >
           View existing
-        </button>
+        </BaseButton>
         <div class="flex flex-col gap-2">
-          <button
-            class="btn-sm"
+          <BaseButton
+            variant="secondary"
+            size="sm"
             :disabled="resolving"
             @click="emit('resolve', 'keep_mine')"
           >
             Keep mine (overwrite remote)
-          </button>
-          <button
-            class="btn-sm"
+          </BaseButton>
+          <BaseButton
+            variant="secondary"
+            size="sm"
             :disabled="resolving"
             @click="emit('resolve', 'keep_remote')"
           >
             Keep existing
-          </button>
-          <button
-            class="btn-sm"
+          </BaseButton>
+          <BaseButton
+            variant="secondary"
+            size="sm"
             :disabled="resolving"
             @click="emit('resolve', 'cancel')"
           >
             Cancel
-          </button>
+          </BaseButton>
         </div>
       </template>
 
@@ -138,27 +149,30 @@ async function viewExisting() {
           >
         </label>
         <div class="flex flex-col gap-2">
-          <button
-            class="btn-danger"
+          <BaseButton
+            variant="danger"
+            size="sm"
             :disabled="!confirmForce || resolving"
             @click="emit('resolve', 'keep_mine_force')"
           >
             Keep mine anyway
-          </button>
-          <button
-            class="btn-sm"
+          </BaseButton>
+          <BaseButton
+            variant="secondary"
+            size="sm"
             :disabled="resolving"
             @click="emit('resolve', 'keep_remote')"
           >
             Keep existing
-          </button>
-          <button
-            class="btn-sm"
+          </BaseButton>
+          <BaseButton
+            variant="secondary"
+            size="sm"
             :disabled="resolving"
             @click="emit('resolve', 'cancel')"
           >
             Cancel
-          </button>
+          </BaseButton>
         </div>
       </template>
     </div>
@@ -200,42 +214,6 @@ async function viewExisting() {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-}
-
-.btn-sm {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: inherit;
-  cursor: pointer;
-  min-height: 48px;
-}
-.btn-sm:hover:not(:disabled) {
-  background: var(--color-hover);
-}
-.btn-sm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-danger {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 48px;
-}
-.btn-danger:hover:not(:disabled) {
-  background: var(--color-danger-soft);
-}
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .alert-warn {

@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appUnlock, asAppLockError } from "../appLock";
 import { useAppLockState } from "../utils/useAppLockState";
 import type { AppLockError } from "../types";
+import BaseButton from "./base/BaseButton.vue";
 
 const router = useRouter();
 const { setUnlockInFlight } = useAppLockState();
@@ -81,16 +82,10 @@ onMounted(() => {
         {{ notice }}
       </div>
 
-      <button
-        type="button"
-        :disabled="loading"
-        class="btn-biometric"
-        @click="tryUnlock"
-      >
-        <span v-if="loading" class="spinner" aria-hidden="true"></span>
-        <span v-else>👁</span>
+      <BaseButton variant="primary" :loading="loading" @click="tryUnlock">
+        <span v-if="!loading">👁</span>
         <span>{{ loading ? "Unlocking…" : "Unlock with biometric" }}</span>
-      </button>
+      </BaseButton>
 
       <button
         type="button"
@@ -127,42 +122,5 @@ onMounted(() => {
   border-radius: var(--radius-lg);
   padding: 2rem;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-
-.btn-biometric {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  background: var(--color-accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--text-md);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  min-height: 48px;
-}
-
-.btn-biometric:hover:not(:disabled) {
-  background: var(--color-accent-deep);
-}
-
-.btn-biometric:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  vertical-align: middle;
 }
 </style>

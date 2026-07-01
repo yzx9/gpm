@@ -36,6 +36,9 @@ import type {
   SshPrivateKeyResult,
   VerifyMode,
 } from "../types";
+import BaseInput from "../components/base/BaseInput.vue";
+import BaseTextarea from "../components/base/BaseTextarea.vue";
+import BaseButton from "../components/base/BaseButton.vue";
 
 const router = useRouter();
 
@@ -601,9 +604,9 @@ onMounted(() => {
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-6" role="banner">
       <h1 class="text-xl">⚙ Settings</h1>
-      <button class="btn-sm" @click="goBack" aria-label="Back to entries">
+      <BaseButton size="sm" aria-label="Back to entries" @click="goBack">
         ← Back
-      </button>
+      </BaseButton>
     </header>
 
     <div v-if="loading" class="text-center text-muted py-8">Loading...</div>
@@ -637,37 +640,33 @@ onMounted(() => {
         </p>
         <div class="flex flex-col gap-1 mb-3">
           <label for="commit-name" class="text-xs text-muted">Name</label>
-          <input
+          <BaseInput
             id="commit-name"
             v-model="commitName"
             type="text"
             placeholder="Name"
             autocomplete="off"
             :disabled="commitLoading"
-            class="input-base"
           />
         </div>
         <div class="flex flex-col gap-1 mb-3">
           <label for="commit-email" class="text-xs text-muted">Email</label>
-          <input
+          <BaseInput
             id="commit-email"
             v-model="commitEmail"
             type="email"
             placeholder="Email"
             autocomplete="off"
             :disabled="commitLoading"
-            class="input-base"
           />
         </div>
-        <button
-          type="button"
-          class="btn-action"
-          :disabled="commitLoading"
+        <BaseButton
+          variant="action"
+          :loading="commitLoading"
           @click="onSaveCommitIdentity"
         >
-          <span v-if="commitLoading" class="spinner" aria-hidden="true"></span>
           Save
-        </button>
+        </BaseButton>
       </section>
 
       <!-- SSH key management -->
@@ -676,9 +675,9 @@ onMounted(() => {
 
         <!-- Show public key -->
         <div class="flex flex-col gap-2">
-          <button type="button" class="btn-action" @click="showPublicKey">
+          <BaseButton variant="action" @click="showPublicKey">
             🔑 Show Public Key
-          </button>
+          </BaseButton>
 
           <div v-if="showPublic" class="mt-2 flex flex-col gap-2">
             <div class="flex justify-between items-center">
@@ -693,13 +692,9 @@ onMounted(() => {
 
         <!-- Export private key -->
         <div class="flex flex-col gap-2 mt-3">
-          <button
-            type="button"
-            class="btn-action btn-action-danger"
-            @click="exportPrivateKey"
-          >
+          <BaseButton variant="action-danger" @click="exportPrivateKey">
             🔓 Export Private Key
-          </button>
+          </BaseButton>
 
           <div v-if="showPrivate" class="mt-2 flex flex-col gap-2">
             <div
@@ -715,16 +710,16 @@ onMounted(() => {
               </button>
             </div>
             <pre class="key-display private-key-display">{{ privateKey }}</pre>
-            <button
-              type="button"
-              class="btn-action mt-1"
+            <BaseButton
+              variant="action"
+              class="mt-1"
               @click="
                 showPrivate = false;
                 privateKey = '';
               "
             >
               Hide Private Key
-            </button>
+            </BaseButton>
           </div>
         </div>
       </section>
@@ -739,36 +734,28 @@ onMounted(() => {
           <p class="text-xs text-muted mb-2">
             The identity is stored in plaintext. Set a passphrase to encrypt it.
           </p>
-          <button
+          <BaseButton
             v-if="!showSetPassphrase"
-            type="button"
-            class="btn-action"
+            variant="action"
             @click="showSetPassphrase = true"
           >
             🔒 Set Passphrase
-          </button>
+          </BaseButton>
           <div v-if="showSetPassphrase" class="flex flex-col gap-2">
-            <input
+            <BaseInput
               v-model="newPassphrase"
               type="password"
               placeholder="New passphrase"
               autocomplete="new-password"
-              class="input-base"
               :disabled="passphraseLoading"
             />
-            <button
-              type="button"
-              class="btn-action"
-              :disabled="passphraseLoading"
+            <BaseButton
+              variant="action"
+              :loading="passphraseLoading"
               @click="onSetPassphrase"
             >
-              <span
-                v-if="passphraseLoading"
-                class="spinner"
-                aria-hidden="true"
-              ></span>
               Encrypt Identity
-            </button>
+            </BaseButton>
           </div>
         </template>
 
@@ -777,44 +764,35 @@ onMounted(() => {
           <p class="text-xs text-muted mb-2">
             ✓ Identity is passphrase-encrypted.
           </p>
-          <button
+          <BaseButton
             v-if="!showChangePassphrase"
-            type="button"
-            class="btn-action"
+            variant="action"
             @click="showChangePassphrase = true"
           >
             🔑 Change Passphrase
-          </button>
+          </BaseButton>
           <div v-if="showChangePassphrase" class="flex flex-col gap-2">
-            <input
+            <BaseInput
               v-model="oldPassphrase"
               type="password"
               placeholder="Current passphrase"
               autocomplete="current-password"
-              class="input-base"
               :disabled="passphraseLoading"
             />
-            <input
+            <BaseInput
               v-model="newPassphrase"
               type="password"
               placeholder="New passphrase"
               autocomplete="new-password"
-              class="input-base"
               :disabled="passphraseLoading"
             />
-            <button
-              type="button"
-              class="btn-action"
-              :disabled="passphraseLoading"
+            <BaseButton
+              variant="action"
+              :loading="passphraseLoading"
               @click="onChangePassphrase"
             >
-              <span
-                v-if="passphraseLoading"
-                class="spinner"
-                aria-hidden="true"
-              ></span>
               Change Passphrase
-            </button>
+            </BaseButton>
           </div>
         </template>
       </section>
@@ -843,39 +821,28 @@ onMounted(() => {
             every launch.
           </p>
           <div class="flex flex-col gap-2">
-            <input
+            <BaseInput
               v-model="biometricPassphrase"
               type="password"
               placeholder="Current passphrase"
               autocomplete="current-password"
-              class="input-base"
               :disabled="biometricLoading"
             />
-            <button
-              type="button"
-              class="btn-action"
-              :disabled="biometricLoading"
+            <BaseButton
+              variant="action"
+              :loading="biometricLoading"
               @click="onEnableBiometric"
             >
-              <span
-                v-if="biometricLoading"
-                class="spinner"
-                aria-hidden="true"
-              ></span>
               Enable Biometric
-            </button>
+            </BaseButton>
           </div>
         </template>
 
         <template v-else>
           <p class="text-xs text-muted mb-2">✓ Biometric unlock is enabled.</p>
-          <button
-            type="button"
-            class="btn-action btn-action-danger"
-            @click="onDisableBiometric"
-          >
+          <BaseButton variant="action-danger" @click="onDisableBiometric">
             Disable Biometric
-          </button>
+          </BaseButton>
         </template>
       </section>
 
@@ -890,31 +857,24 @@ onMounted(() => {
 
         <!-- App lock enable/disable -->
         <template v-if="!appLockEnabled">
-          <button
-            type="button"
-            class="btn-action"
-            :disabled="appLockLoading"
+          <BaseButton
+            variant="action"
+            :loading="appLockLoading"
             @click="onEnableAppLock"
           >
-            <span
-              v-if="appLockLoading"
-              class="spinner"
-              aria-hidden="true"
-            ></span>
             🔒 Enable App Lock
-          </button>
+          </BaseButton>
         </template>
 
         <template v-else>
           <p class="text-xs text-muted mb-2">✓ App lock is enabled.</p>
-          <button
-            type="button"
-            class="btn-action btn-action-danger"
+          <BaseButton
+            variant="action-danger"
             :disabled="appLockLoading"
             @click="onDisableAppLock"
           >
             Disable App Lock
-          </button>
+          </BaseButton>
 
           <!-- Identity auto-unlock opt-in (req3): separate from the auto-lock
                timing presets below; only meaningful with the gate on and an
@@ -930,41 +890,33 @@ onMounted(() => {
             </p>
             <template v-if="!identityAutoUnlockEnabled">
               <div class="flex flex-col gap-2">
-                <input
+                <BaseInput
                   v-model="appLockPassphrase"
                   type="password"
                   placeholder="Current passphrase"
                   autocomplete="current-password"
-                  class="input-base"
                   :disabled="appLockLoading"
                 />
-                <button
-                  type="button"
-                  class="btn-action"
-                  :disabled="appLockLoading"
+                <BaseButton
+                  variant="action"
+                  :loading="appLockLoading"
                   @click="onEnableIdentityAutoUnlock"
                 >
-                  <span
-                    v-if="appLockLoading"
-                    class="spinner"
-                    aria-hidden="true"
-                  ></span>
                   Enable Auto-Unlock
-                </button>
+                </BaseButton>
               </div>
             </template>
             <template v-else>
               <p class="text-xs text-muted mb-2">
                 ✓ Identity unlocks together with the app.
               </p>
-              <button
-                type="button"
-                class="btn-action btn-action-danger"
+              <BaseButton
+                variant="action-danger"
                 :disabled="appLockLoading"
                 @click="onDisableIdentityAutoUnlock"
               >
                 Disable Auto-Unlock
-              </button>
+              </BaseButton>
             </template>
           </div>
         </template>
@@ -1170,47 +1122,44 @@ onMounted(() => {
         </p>
 
         <div class="flex flex-col gap-2">
-          <button
+          <BaseButton
             v-if="authConfig.trusted_keys.length === 0"
-            type="button"
-            class="btn-action"
+            variant="action"
             @click="onTrustHead"
           >
             🔑 Trust this repo's signer (HEAD)
-          </button>
-          <button
+          </BaseButton>
+          <BaseButton
             v-if="!showAddKey"
-            type="button"
-            class="btn-action"
+            variant="action"
             @click="showAddKey = true"
           >
             + Add a signing public key
-          </button>
+          </BaseButton>
           <div v-if="showAddKey" class="flex flex-col gap-2">
-            <textarea
+            <BaseTextarea
               v-model="newPublicKey"
-              placeholder="ssh-ed25519 AAAA… [comment]"
               rows="2"
-              class="input-base font-mono text-xs"
-            ></textarea>
-            <input
+              placeholder="ssh-ed25519 AAAA… [comment]"
+              class="font-mono text-xs"
+            />
+            <BaseInput
               v-model="newKeyLabel"
               type="text"
               placeholder="Label (e.g. Alice — laptop)"
-              class="input-base"
             />
             <div class="flex gap-2">
-              <button
-                type="button"
-                class="btn-action flex-1"
+              <BaseButton
+                variant="action"
+                class="flex-1"
                 :disabled="authLoading"
                 @click="onAddKey"
               >
                 Save key
-              </button>
-              <button
-                type="button"
-                class="btn-action flex-1"
+              </BaseButton>
+              <BaseButton
+                variant="action"
+                class="flex-1"
                 @click="
                   showAddKey = false;
                   newPublicKey = '';
@@ -1218,25 +1167,21 @@ onMounted(() => {
                 "
               >
                 Cancel
-              </button>
+              </BaseButton>
             </div>
           </div>
-          <button type="button" class="btn-action" @click="openHistory">
+          <BaseButton variant="action" @click="openHistory">
             📜 View commit history &amp; signatures
-          </button>
+          </BaseButton>
         </div>
       </section>
 
       <!-- Danger zone -->
       <section class="settings-card settings-card-danger">
         <h2 class="text-sm font-medium mb-2 text-danger">Danger Zone</h2>
-        <button
-          type="button"
-          class="btn-action btn-action-danger"
-          @click="resetConfig"
-        >
+        <BaseButton variant="action-danger" @click="resetConfig">
           🗑 Reset All Data
-        </button>
+        </BaseButton>
         <p class="text-xs text-subtle mt-1">
           Remove all local data and configuration.
         </p>
@@ -1267,57 +1212,6 @@ onMounted(() => {
   border-color: var(--color-danger-edge, var(--color-danger, #c66));
 }
 
-.btn-sm {
-  padding: 0.3rem 0.6rem;
-  font-size: var(--text-xs);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: inherit;
-  cursor: pointer;
-  min-height: 48px;
-}
-
-.btn-sm:hover {
-  background: var(--color-hover);
-}
-
-.btn-action {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: inherit;
-  cursor: pointer;
-  min-height: 48px;
-  width: 100%;
-  text-align: left;
-}
-
-.btn-action:hover {
-  background: var(--color-hover);
-}
-
-.btn-action-danger {
-  border-color: var(--color-danger-edge, var(--color-danger, #c66));
-  color: #c66;
-}
-
-.btn-copy {
-  padding: 0.3rem 0.6rem;
-  font-size: var(--text-xs);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 36px;
-}
-
-.btn-copy:hover {
-  background: var(--color-hover);
-}
-
 .key-display {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-edge);
@@ -1334,35 +1228,6 @@ onMounted(() => {
 
 .private-key-display {
   max-height: 250px;
-}
-
-.input-base {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-family: inherit;
-  background: var(--color-input);
-  color: inherit;
-  min-height: 48px;
-}
-
-.input-base:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
-}
-
-.spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--color-edge);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: 0.4rem;
-  vertical-align: middle;
 }
 
 .sr-only {

@@ -19,6 +19,10 @@ import { isAuthCancelled, onLock, runWithAuth } from "../utils/useLockState";
 import { useOverlayBackHandler } from "../utils/useOverlayBackHandler";
 import { useSecuritySettings } from "../utils/useSecuritySettings";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
+import BaseButton from "../components/base/BaseButton.vue";
+import BaseInput from "../components/base/BaseInput.vue";
+import BaseTextarea from "../components/base/BaseTextarea.vue";
+import BaseSpinner from "../components/base/BaseSpinner.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -354,45 +358,54 @@ function handleKeydown(e: KeyboardEvent) {
     <!-- Read-only view -->
     <div v-if="!editing">
       <div class="flex gap-3 mb-6">
-        <button
-          @click="copyPassword"
-          class="btn-primary flex-1"
+        <BaseButton
+          variant="primary"
+          class="flex-1"
           :disabled="loading || deleting"
           aria-label="Copy password to clipboard"
+          @click="copyPassword"
         >
           <span aria-hidden="true">📋</span> Copy Password
-        </button>
-        <button
-          @click="showPassword"
-          class="btn-secondary flex-1"
+        </BaseButton>
+        <BaseButton
+          variant="outline"
+          class="flex-1"
           :disabled="loading || deleting"
           :aria-label="revealed ? 'Password is showing' : 'Show password'"
+          @click="showPassword"
         >
           <span aria-hidden="true">👁</span>
           {{ revealed ? "Showing..." : "Show Password" }}
-        </button>
+        </BaseButton>
       </div>
 
-      <button
-        @click="enterEdit"
-        class="btn-secondary w-full mb-3"
+      <BaseButton
+        variant="outline"
+        block
+        class="mb-3"
         :disabled="loading || deleting"
         :aria-label="`Edit ${entryName}`"
+        @click="enterEdit"
       >
         ✎ Edit
-      </button>
+      </BaseButton>
 
-      <button
-        @click="deleteSecret"
-        class="btn-danger w-full mb-6"
+      <BaseButton
+        variant="danger"
+        block
+        class="mb-6"
         :disabled="deleting || loading"
         :aria-label="`Delete ${entryName}`"
+        @click="deleteSecret"
       >
         {{ deleting ? "Deleting…" : "Delete" }}
-      </button>
+      </BaseButton>
 
-      <div v-if="loading" class="text-center text-muted py-4">
-        <span class="spinner"></span>
+      <div
+        v-if="loading"
+        class="flex items-center justify-center gap-2 text-center text-muted py-4"
+      >
+        <BaseSpinner />
         <span>Decrypting...</span>
       </div>
 
@@ -438,21 +451,20 @@ function handleKeydown(e: KeyboardEvent) {
     <form v-else class="flex flex-col gap-4 mb-6" @submit.prevent="saveEdit">
       <div class="flex flex-col gap-1">
         <label for="e-password" class="text-sm font-medium">Password</label>
-        <input
+        <BaseInput
           id="e-password"
           v-model="editPassword"
           type="text"
-          class="input-base font-mono"
+          class="font-mono"
           autocomplete="off"
           spellcheck="false"
         />
       </div>
       <div class="flex flex-col gap-1">
         <label for="e-notes" class="text-sm font-medium">Notes</label>
-        <textarea
+        <BaseTextarea
           id="e-notes"
           v-model="editNotes"
-          class="input-base"
           rows="6"
           autocomplete="off"
         />
@@ -461,23 +473,25 @@ function handleKeydown(e: KeyboardEvent) {
         >
       </div>
       <div class="flex gap-3">
-        <button
+        <BaseButton
+          variant="primary"
           type="submit"
-          class="btn-primary flex-1"
+          class="flex-1"
           :disabled="!canSave"
           aria-label="Save changes"
         >
           {{ saving ? "Saving…" : "Save" }}
-        </button>
-        <button
+        </BaseButton>
+        <BaseButton
+          variant="outline"
           type="button"
-          class="btn-secondary flex-1"
-          @click="cancelEdit"
+          class="flex-1"
           :disabled="saving"
           aria-label="Cancel edit"
+          @click="cancelEdit"
         >
           Cancel
-        </button>
+        </BaseButton>
       </div>
     </form>
 
@@ -489,99 +503,3 @@ function handleKeydown(e: KeyboardEvent) {
     />
   </main>
 </template>
-
-<style scoped>
-.btn-primary {
-  padding: 0.75rem;
-  background: var(--color-accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  min-height: 48px;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-deep);
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  padding: 0.75rem;
-  background: var(--color-surface);
-  color: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  min-height: 48px;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--color-hover);
-}
-
-.btn-secondary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-danger {
-  padding: 0.75rem;
-  background: var(--color-surface);
-  color: var(--color-danger);
-  border: 1px solid var(--color-danger);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  min-height: 48px;
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: var(--color-danger-soft);
-}
-
-.btn-danger:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.input-base {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  background: var(--color-input, var(--color-surface));
-  color: inherit;
-  min-height: 48px;
-  width: 100%;
-}
-.input-base:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
-}
-
-.spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--color-edge);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: 0.5rem;
-  vertical-align: middle;
-}
-</style>

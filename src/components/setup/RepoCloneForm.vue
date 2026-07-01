@@ -9,7 +9,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppError, CommitIdentity, GitProgressEvent } from "../../types";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
-import "./forms.css";
+import BaseInput from "../base/BaseInput.vue";
+import BaseButton from "../base/BaseButton.vue";
 
 const emit = defineEmits<{
   done: [];
@@ -183,26 +184,24 @@ async function onClone() {
         </p>
         <div class="flex flex-col gap-1">
           <label for="su-commit-name" class="text-xs text-muted">Name</label>
-          <input
+          <BaseInput
             id="su-commit-name"
             v-model="commitName"
             type="text"
             placeholder="Name"
             autocomplete="off"
             :disabled="loading"
-            class="input-base"
           />
         </div>
         <div class="flex flex-col gap-1">
           <label for="su-commit-email" class="text-xs text-muted">Email</label>
-          <input
+          <BaseInput
             id="su-commit-email"
             v-model="commitEmail"
             type="email"
             placeholder="Email"
             autocomplete="off"
             :disabled="loading"
-            class="input-base"
           />
         </div>
       </div>
@@ -245,11 +244,9 @@ async function onClone() {
       {{ error }}
     </div>
 
-    <button type="submit" :disabled="loading" class="btn-primary">
-      <span v-if="loading" class="spinner-white" aria-hidden="true"></span>
-      <span v-if="loading">Cloning…</span>
-      <span v-else>Clone Repository</span>
-    </button>
+    <BaseButton variant="primary" type="submit" :loading="loading">{{
+      loading ? "Cloning…" : "Clone Repository"
+    }}</BaseButton>
   </form>
 </template>
 

@@ -198,7 +198,7 @@ describe("SettingsPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const buttons = wrapper.findAll(".btn-action");
+      const buttons = wrapper.findAll("button");
       const showPublicBtn = buttons.find((b) =>
         b.text().includes("Show Public Key"),
       );
@@ -222,7 +222,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const showPublicBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Show Public Key"));
       await showPublicBtn!.trigger("click");
       await flushPromises();
@@ -241,7 +241,7 @@ describe("SettingsPage", () => {
       const invokeCount = (invoke as ReturnType<typeof vi.fn>).mock.calls
         .length;
       const exportBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Export Private Key"));
       await exportBtn!.trigger("click");
       await flushPromises();
@@ -262,7 +262,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const exportBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Export Private Key"));
       await exportBtn!.trigger("click");
       await flushPromises();
@@ -283,7 +283,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const exportBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Export Private Key"));
       await exportBtn!.trigger("click");
       await flushPromises();
@@ -299,7 +299,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const exportBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Export Private Key"));
       await exportBtn!.trigger("click");
       await flushPromises();
@@ -307,7 +307,7 @@ describe("SettingsPage", () => {
       expect(wrapper.text()).toContain("secret-key-data");
 
       const hideBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Hide Private Key"));
       expect(hideBtn).toBeDefined();
       await hideBtn!.trigger("click");
@@ -323,7 +323,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const showPublicBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Show Public Key"));
       await showPublicBtn!.trigger("click");
       await flushPromises();
@@ -345,7 +345,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const showPublicBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Show Public Key"));
       await showPublicBtn!.trigger("click");
       await flushPromises();
@@ -371,7 +371,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const resetBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Reset All Data"));
       expect(resetBtn).toBeDefined();
       await resetBtn!.trigger("click");
@@ -389,7 +389,7 @@ describe("SettingsPage", () => {
       const invokeCount = (invoke as ReturnType<typeof vi.fn>).mock.calls
         .length;
       const resetBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Reset All Data"));
       await resetBtn!.trigger("click");
       await flushPromises();
@@ -406,7 +406,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const resetBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Reset All Data"));
       await resetBtn!.trigger("click");
       await flushPromises();
@@ -467,7 +467,7 @@ describe("SettingsPage", () => {
       const bioInput = wrapper.find('input[type="password"]');
       await bioInput.setValue("my-pass");
       const enableBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Enable Biometric"));
       expect(enableBtn).toBeDefined();
       await enableBtn!.trigger("click");
@@ -493,7 +493,7 @@ describe("SettingsPage", () => {
       const bioInput = wrapper.find('input[type="password"]');
       await bioInput.setValue("bad");
       const enableBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Enable Biometric"));
       await enableBtn!.trigger("click");
       await flushPromises();
@@ -512,7 +512,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const disableBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Disable Biometric"));
       expect(disableBtn).toBeDefined();
       await disableBtn!.trigger("click");
@@ -592,7 +592,7 @@ describe("SettingsPage", () => {
       await wrapper.find("#commit-name").setValue("Alice");
       await wrapper.find("#commit-email").setValue("alice@example.com");
       const saveBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("Save"));
       expect(saveBtn).toBeDefined();
       await saveBtn!.trigger("click");
@@ -609,7 +609,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       const historyBtn = wrapper
-        .findAll(".btn-action")
+        .findAll("button")
         .find((b) => b.text().includes("View commit history"));
       expect(historyBtn).toBeDefined();
       await historyBtn!.trigger("click");

@@ -119,8 +119,10 @@ describe("UnlockModal", () => {
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
-    const btn = wrapper.find("button.btn-biometric");
-    expect(btn.exists()).toBe(true);
+    const btn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Unlock with biometric"))!;
+    expect(btn).toBeTruthy();
     await btn.trigger("click");
     await flushPromises();
 

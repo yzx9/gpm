@@ -29,6 +29,9 @@ import type {
 import { formatRelativeTime } from "../utils/format";
 import { statusGlyph, statusLabel } from "../utils/signature";
 import { isAuthCancelled, runWithAuth } from "../utils/useLockState";
+import BaseInput from "../components/base/BaseInput.vue";
+import BaseButton from "../components/base/BaseButton.vue";
+import BaseSpinner from "../components/base/BaseSpinner.vue";
 
 const router = useRouter();
 
@@ -474,14 +477,14 @@ onBeforeUnmount(() => {
     <header class="flex justify-between items-center mb-4" role="banner">
       <h1 class="text-xl">🔐 gpm</h1>
       <div class="flex gap-2 items-center">
-        <button
-          @click="openCreate"
-          class="btn-sm"
+        <BaseButton
+          size="sm"
           aria-label="Create a new secret"
           title="Create a new secret"
+          @click="openCreate"
         >
           <span aria-hidden="true">＋</span>
-        </button>
+        </BaseButton>
         <button
           @click="openHistory"
           class="badge-btn"
@@ -491,31 +494,31 @@ onBeforeUnmount(() => {
         >
           <span aria-hidden="true">{{ badge.glyph }}</span>
         </button>
-        <button
-          @click="togglePull"
-          class="btn-sm"
+        <BaseButton
+          size="sm"
           :aria-label="pulling ? 'Cancel pull' : 'Pull updates'"
           :title="pulling ? 'Cancel pull' : 'Pull updates'"
+          @click="togglePull"
         >
           <span aria-hidden="true">{{ pulling ? "✕" : "↓" }}</span>
           {{ pulling ? "Cancel" : "Pull" }}
-        </button>
-        <button
-          @click="openGenerate"
-          class="btn-sm"
+        </BaseButton>
+        <BaseButton
+          size="sm"
           aria-label="Generate passwords"
           title="Generate passwords"
+          @click="openGenerate"
         >
           <span aria-hidden="true">🎲</span>
-        </button>
-        <button
-          @click="openSettings"
-          class="btn-sm"
+        </BaseButton>
+        <BaseButton
+          size="sm"
           aria-label="Settings"
           title="Settings"
+          @click="openSettings"
         >
           <span aria-hidden="true">⚙</span>
-        </button>
+        </BaseButton>
       </div>
     </header>
 
@@ -547,11 +550,11 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="mb-4">
-      <input
+      <BaseInput
         v-model="search"
         type="search"
         placeholder="Search entries..."
-        class="input-base w-full"
+        class="w-full"
       />
     </div>
 
@@ -582,9 +585,9 @@ onBeforeUnmount(() => {
 
     <div
       v-if="loading && displayedEntries.length === 0"
-      class="text-center text-muted py-8"
+      class="flex items-center justify-center gap-2 text-center text-muted py-8"
     >
-      <span class="spinner"></span>
+      <BaseSpinner />
       <span>Loading entries...</span>
     </div>
     <div
@@ -639,15 +642,15 @@ onBeforeUnmount(() => {
 
     <!-- Load more (explicit infinite-scroll fallback) -->
     <div v-if="hasMore" class="flex justify-center py-3">
-      <button
-        class="btn-sm"
+      <BaseButton
+        size="sm"
+        :loading="loading"
         :disabled="loading"
         aria-label="Load more entries"
         @click="loadMore"
       >
-        <span v-if="loading" class="spinner" aria-hidden="true"></span>
         {{ loading ? "Loading…" : `Load more (${remaining} more)` }}
-      </button>
+      </BaseButton>
     </div>
     <!-- Sentinel the IntersectionObserver watches to auto-load the next page -->
     <div ref="sentinel" class="h-1" aria-hidden="true"></div>
@@ -682,19 +685,20 @@ onBeforeUnmount(() => {
           </li>
         </ul>
         <div class="flex gap-2">
-          <button class="btn-sm flex-1" @click="openHistory">
+          <BaseButton size="sm" class="flex-1" @click="openHistory">
             Review in history
-          </button>
-          <button
+          </BaseButton>
+          <BaseButton
             v-if="auditIssues.length === 1"
-            class="btn-sm flex-1"
+            size="sm"
+            class="flex-1"
             @click="ignoreIssue(auditIssues[0]!)"
           >
             Ignore this commit
-          </button>
-          <button class="btn-sm flex-1" @click="auditIssues = null">
+          </BaseButton>
+          <BaseButton size="sm" class="flex-1" @click="auditIssues = null">
             Dismiss
-          </button>
+          </BaseButton>
         </div>
       </div>
     </div>
@@ -728,9 +732,9 @@ onBeforeUnmount(() => {
           </li>
         </ul>
         <div class="flex flex-col gap-2">
-          <button
+          <BaseButton
             v-if="blockIssues.some((c) => c.status.kind === 'untrusted_key')"
-            class="btn-sm"
+            size="sm"
             @click="
               trustBlockSigner(
                 blockIssues.find((c) => c.status.kind === 'untrusted_key')!,
@@ -738,11 +742,11 @@ onBeforeUnmount(() => {
             "
           >
             Trust this signer
-          </button>
-          <button class="btn-sm" @click="switchToAudit">
+          </BaseButton>
+          <BaseButton size="sm" @click="switchToAudit">
             Switch to Audit mode
-          </button>
-          <button class="btn-sm" @click="blockIssues = null">Cancel</button>
+          </BaseButton>
+          <BaseButton size="sm" @click="blockIssues = null">Cancel</BaseButton>
         </div>
       </div>
     </div>
@@ -831,12 +835,12 @@ onBeforeUnmount(() => {
             :disabled="!adoptConfirmed || adopting"
             @click="adoptRemote"
           >
-            <span v-if="adopting" class="spinner" aria-hidden="true"></span>
+            <BaseSpinner v-if="adopting" />
             {{ adopting ? "Adopting…" : "Adopt remote (discard local)" }}
           </button>
-          <button class="btn-sm" :disabled="adopting" @click="cancelDivergence">
+          <BaseButton size="sm" :disabled="adopting" @click="cancelDivergence">
             Cancel
-          </button>
+          </BaseButton>
         </div>
       </div>
     </div>
@@ -860,42 +864,6 @@ onBeforeUnmount(() => {
   transition: width 0.2s ease;
 }
 
-.input-base {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  background: var(--color-surface);
-  color: inherit;
-  min-height: 48px;
-}
-
-.input-base:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
-}
-
-.btn-sm {
-  padding: 0.3rem 0.6rem;
-  font-size: var(--text-xs);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: inherit;
-  cursor: pointer;
-  min-height: 48px;
-}
-
-.btn-sm:hover {
-  background: var(--color-hover);
-}
-
-.btn-sm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .btn-retry {
   background: none;
   border: 1px solid var(--color-danger);
@@ -909,18 +877,6 @@ onBeforeUnmount(() => {
 
 .btn-retry:hover {
   opacity: 0.8;
-}
-
-.spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--color-edge);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: 0.5rem;
-  vertical-align: middle;
 }
 
 .badge-btn {

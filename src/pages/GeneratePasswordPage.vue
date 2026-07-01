@@ -8,6 +8,8 @@ import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError, GenerateMode } from "../types";
 import { onLock } from "../utils/useLockState";
+import BaseInput from "../components/base/BaseInput.vue";
+import BaseButton from "../components/base/BaseButton.vue";
 
 const router = useRouter();
 
@@ -147,13 +149,12 @@ onBeforeUnmount(() => {
         <label for="g-length" class="text-sm font-medium">
           {{ lengthLabel }}
         </label>
-        <input
+        <BaseInput
           id="g-length"
           v-model.number="length"
           type="number"
           min="1"
           max="256"
-          class="input-base"
           :disabled="generating"
           aria-label="Length"
         />
@@ -161,21 +162,20 @@ onBeforeUnmount(() => {
 
       <div class="flex flex-col gap-1">
         <label for="g-count" class="text-sm font-medium">How many</label>
-        <input
+        <BaseInput
           id="g-count"
           v-model.number="count"
           type="number"
           min="1"
           max="32"
-          class="input-base"
           :disabled="generating"
           aria-label="How many"
         />
       </div>
 
-      <button type="submit" class="btn-primary" :disabled="generating">
-        {{ generating ? "Generating…" : "🎲 Generate" }}
-      </button>
+      <BaseButton variant="primary" type="submit" :disabled="generating">{{
+        generating ? "Generating…" : "🎲 Generate"
+      }}</BaseButton>
     </form>
 
     <ul v-if="generated.length" class="result-list" role="list">
@@ -211,21 +211,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 1rem;
   margin-bottom: 1.5rem;
-}
-
-.input-base {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  background: var(--color-surface);
-  color: inherit;
-  min-height: 48px;
-}
-.input-base:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .gen-select {
@@ -283,25 +268,6 @@ onBeforeUnmount(() => {
   background: var(--color-hover);
 }
 .icon-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  padding: 0.75rem;
-  background: var(--color-accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-weight: 500;
-  cursor: pointer;
-  min-height: 48px;
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-deep);
-}
-.btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

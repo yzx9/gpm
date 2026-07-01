@@ -16,6 +16,8 @@ import {
   statusGlyph,
   statusLabel,
 } from "../utils/signature";
+import BaseButton from "../components/base/BaseButton.vue";
+import BaseSpinner from "../components/base/BaseSpinner.vue";
 
 const router = useRouter();
 
@@ -135,18 +137,18 @@ onBeforeUnmount(() => {
     <header class="flex justify-between items-center mb-4" role="banner">
       <h1 class="text-xl">📜 History</h1>
       <div class="flex gap-2">
-        <button
-          class="btn-sm"
+        <BaseButton
+          size="sm"
           :disabled="loading"
           @click="loadHistory"
           aria-label="Re-check signatures"
           title="Re-check signatures"
         >
           ⟳ Re-check
-        </button>
-        <button class="btn-sm" @click="openSettings" aria-label="Settings">
+        </BaseButton>
+        <BaseButton size="sm" @click="openSettings" aria-label="Settings">
           ⚙
-        </button>
+        </BaseButton>
       </div>
     </header>
 
@@ -165,9 +167,9 @@ onBeforeUnmount(() => {
 
     <div
       v-if="loading && commits.length === 0"
-      class="text-center text-muted py-8"
+      class="flex items-center justify-center gap-2 text-center text-muted py-8"
     >
-      <span class="spinner"></span>
+      <BaseSpinner />
       <span>Loading history...</span>
     </div>
     <div
@@ -275,27 +277,25 @@ onBeforeUnmount(() => {
         </p>
 
         <div class="flex flex-col gap-2 mt-4">
-          <button
+          <BaseButton
             v-if="selected.status.kind === 'untrusted_key'"
-            type="button"
-            class="btn-action"
+            variant="action"
             :disabled="actionLoading"
             @click="onTrust(selected)"
           >
             Trust this signer
-          </button>
-          <button
+          </BaseButton>
+          <BaseButton
             v-if="isIgnorable(selected.status) && !selected.ignored"
-            type="button"
-            class="btn-action"
+            variant="action"
             :disabled="actionLoading"
             @click="onIgnore(selected)"
           >
             Ignore this issue
-          </button>
-          <button type="button" class="btn-action" @click="copyHash(selected)">
+          </BaseButton>
+          <BaseButton variant="action" @click="copyHash(selected)">
             Copy hash
-          </button>
+          </BaseButton>
         </div>
       </div>
     </div>
@@ -319,54 +319,6 @@ onBeforeUnmount(() => {
   background: var(--color-surface);
 }
 
-.btn-sm {
-  padding: 0.3rem 0.6rem;
-  font-size: var(--text-xs);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: inherit;
-  cursor: pointer;
-  min-height: 48px;
-}
-.btn-sm:hover {
-  background: var(--color-hover);
-}
-.btn-sm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-copy {
-  padding: 0.3rem 0.6rem;
-  font-size: var(--text-xs);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 36px;
-}
-
-.btn-action {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: inherit;
-  cursor: pointer;
-  min-height: 48px;
-  width: 100%;
-  text-align: left;
-}
-.btn-action:hover {
-  background: var(--color-hover);
-}
-.btn-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .sig-verified {
   color: var(--color-success, #3a9);
 }
@@ -375,17 +327,5 @@ onBeforeUnmount(() => {
 }
 .sig-bad {
   color: var(--color-danger, #c66);
-}
-
-.spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--color-edge);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: 0.5rem;
-  vertical-align: middle;
 }
 </style>

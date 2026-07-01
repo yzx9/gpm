@@ -14,6 +14,8 @@ import {
   isBiometricUnlockEnabled,
 } from "../biometric";
 import type { BiometricError } from "../types";
+import BaseInput from "./base/BaseInput.vue";
+import BaseButton from "./base/BaseButton.vue";
 
 const router = useRouter();
 
@@ -130,19 +132,18 @@ onMounted(async () => {
       </div>
 
       <!-- Unlock with biometric -->
-      <button
+      <BaseButton
         v-if="biometricAvailable && biometricEnabled"
-        type="button"
-        :disabled="biometricLoading || loading"
-        class="btn-biometric"
+        variant="secondary"
+        :loading="biometricLoading"
+        :disabled="loading"
         @click="tryBiometricUnlock"
       >
-        <span v-if="biometricLoading" class="spinner" aria-hidden="true"></span>
-        <span v-else>👁</span>
+        <span v-if="!biometricLoading">👁</span>
         <span>{{
           biometricLoading ? "Unlocking…" : "Unlock with biometric"
         }}</span>
-      </button>
+      </BaseButton>
 
       <div
         v-if="biometricAvailable && biometricEnabled"
@@ -157,7 +158,7 @@ onMounted(async () => {
       <form @submit.prevent="onUnlock" class="flex flex-col gap-4">
         <div class="flex flex-col gap-1">
           <label for="passphrase" class="text-sm font-medium">Passphrase</label>
-          <input
+          <BaseInput
             id="passphrase"
             v-model="passphrase"
             type="password"
@@ -165,7 +166,6 @@ onMounted(async () => {
             required
             autocomplete="off"
             :disabled="loading"
-            class="input-base"
             autofocus
           />
           <small class="text-xs text-muted"
@@ -181,11 +181,9 @@ onMounted(async () => {
           {{ error }}
         </div>
 
-        <button type="submit" :disabled="loading" class="btn-primary">
-          <span v-if="loading" class="spinner-white" aria-hidden="true"></span>
-          <span v-if="loading">Decrypting…</span>
-          <span v-else>Unlock</span>
-        </button>
+        <BaseButton variant="primary" type="submit" :loading="loading">{{
+          loading ? "Decrypting…" : "Unlock"
+        }}</BaseButton>
 
         <button
           type="button"
@@ -225,97 +223,9 @@ onMounted(async () => {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
-.input-base {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-family: inherit;
-  background: var(--color-input);
-  color: inherit;
-  min-height: 48px;
-}
-
-.input-base:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
-}
-
-.btn-primary {
-  padding: 0.75rem;
-  background: var(--color-accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--text-md);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  min-height: 48px;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-deep);
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-biometric {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  background: var(--color-surface);
-  color: inherit;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-md);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  min-height: 48px;
-}
-
-.btn-biometric:hover:not(:disabled) {
-  background: var(--color-hover);
-}
-
-.btn-biometric:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .divider-line {
   flex: 1;
   height: 1px;
   background: var(--color-edge);
-}
-
-.spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--color-edge);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  vertical-align: middle;
-}
-
-.spinner-white {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: 0.4rem;
-  vertical-align: middle;
 }
 </style>
