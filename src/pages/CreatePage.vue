@@ -301,7 +301,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="max-w-[480px] md:max-w-[600px] mx-auto p-4" role="main">
+  <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex items-center gap-3 mb-6" role="banner">
       <button @click="goBack" class="back-btn" aria-label="Back">← Back</button>
       <h1 class="text-lg flex-1">New secret</h1>

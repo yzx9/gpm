@@ -312,7 +312,7 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <main class="max-w-[480px] mx-auto p-4" role="main" @keydown="handleKeydown">
+  <main class="max-w-120 mx-auto p-4" role="main" @keydown="handleKeydown">
     <header class="flex items-center gap-3 mb-6" role="banner">
       <button
         @click="goBack"
@@ -419,7 +419,7 @@ function handleKeydown(e: KeyboardEvent) {
 
           <!-- prettier-ignore -->
           <pre
-            class="text-sm p-2 bg-input rounded-sm whitespace-pre-wrap break-all font-[inherit] select-text max-h-[200px] overflow-y-auto"
+            class="text-sm p-2 bg-input rounded-sm whitespace-pre-wrap break-all font-[inherit] select-text max-h-50 overflow-y-auto"
             >{{ notes }}</pre>
         </div>
 

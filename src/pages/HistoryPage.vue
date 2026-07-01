@@ -131,7 +131,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="max-w-[480px] md:max-w-[600px] mx-auto p-4" role="main">
+  <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-4" role="banner">
       <h1 class="text-xl">📜 History</h1>
       <div class="flex gap-2">
@@ -227,7 +227,7 @@ onBeforeUnmount(() => {
       aria-modal="true"
       @click.self="closeDetail"
     >
-      <div class="settings-card w-full max-w-[480px]">
+      <div class="settings-card w-full max-w-120">
         <div class="flex justify-between items-start mb-2">
           <code class="text-xs text-muted">{{ selected.short_hash }}</code>
           <button class="btn-copy" @click="closeDetail" aria-label="Close">
@@ -235,10 +235,12 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <h2 class="text-base font-medium break-words">
+        <h2 class="text-base font-medium wrap-break-word">
           {{ selected.subject || "(no message)" }}
         </h2>
-        <p class="text-xs text-muted mt-1 break-words">{{ selected.author }}</p>
+        <p class="text-xs text-muted mt-1 wrap-break-word">
+          {{ selected.author }}
+        </p>
         <p class="text-xs text-subtle mt-0.5">{{ selected.date }}</p>
 
         <div

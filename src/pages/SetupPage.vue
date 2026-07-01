@@ -28,7 +28,7 @@ function onDone() {
     role="main"
   >
     <div
-      class="w-full max-w-[420px] bg-surface rounded-lg p-8 shadow-[0_2px_12px_rgba(0,0,0,0.08)] max-[480px]:p-4 max-[480px]:pb-[calc(3rem+4rem)]"
+      class="w-full max-w-105 bg-surface rounded-lg p-8 shadow-[0_2px_12px_rgba(0,0,0,0.08)] max-[480px]:p-4 max-[480px]:pb-28"
     >
       <h1 class="text-center text-display mb-1">🔐 gpm</h1>
       <p class="text-center text-muted text-sm mb-6">

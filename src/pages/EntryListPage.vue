@@ -469,7 +469,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="max-w-[480px] md:max-w-[600px] mx-auto p-4" role="main">
+  <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-4" role="banner">
       <h1 class="text-xl">🔐 gpm</h1>
       <div class="flex gap-2 items-center">
@@ -659,7 +659,7 @@ onBeforeUnmount(() => {
       aria-modal="true"
       aria-label="Signature check"
     >
-      <div class="modal-card w-full max-w-[480px]">
+      <div class="modal-card w-full max-w-120">
         <h2 class="text-base font-medium mb-1">Signature check</h2>
         <p class="text-xs text-muted mb-3">
           Pulled {{ auditIssues.length }}
@@ -706,7 +706,7 @@ onBeforeUnmount(() => {
       aria-modal="true"
       aria-label="Pull blocked"
     >
-      <div class="modal-card w-full max-w-[480px]">
+      <div class="modal-card w-full max-w-120">
         <h2 class="text-base font-medium mb-1 text-danger">Pull blocked</h2>
         <p class="text-xs text-muted mb-3">
           Enforce mode refused to update the store — HEAD did not advance.
@@ -753,7 +753,7 @@ onBeforeUnmount(() => {
       aria-modal="true"
       aria-label="Local and remote have diverged"
     >
-      <div class="modal-card w-full max-w-[480px]">
+      <div class="modal-card w-full max-w-120">
         <h2 class="text-base font-medium mb-1 text-danger">
           Local and remote have diverged
         </h2>

@@ -72,7 +72,7 @@ async function viewExisting() {
     aria-modal="true"
     aria-label="Remote copy exists"
   >
-    <div class="modal-card w-full max-w-[480px]">
+    <div class="modal-card w-full max-w-120">
       <h2 class="text-base font-medium mb-1">Remote copy exists</h2>
       <p class="text-xs text-muted mb-3">
         <code>{{ conflict.name }}</code> already exists on the remote with a

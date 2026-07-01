@@ -598,7 +598,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="max-w-[480px] md:max-w-[600px] mx-auto p-4" role="main">
+  <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-6" role="banner">
       <h1 class="text-xl">⚙ Settings</h1>
       <button class="btn-sm" @click="goBack" aria-label="Back to entries">
@@ -921,7 +921,7 @@ onMounted(() => {
                encrypted identity. -->
           <div
             v-if="isIdentityEncrypted"
-            class="mt-4 pt-4 border-t border-[var(--color-edge)]"
+            class="mt-4 pt-4 border-t border-edge"
           >
             <h3 class="text-sm font-medium mb-1">Identity Auto-Unlock</h3>
             <p class="text-xs text-muted mb-3">
