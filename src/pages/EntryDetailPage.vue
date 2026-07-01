@@ -416,10 +416,11 @@ function handleKeydown(e: KeyboardEvent) {
             class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
             >Notes</label
           >
+
+          <!-- prettier-ignore -->
           <pre
             class="text-sm p-2 bg-input rounded-sm whitespace-pre-wrap break-all font-[inherit] select-text max-h-[200px] overflow-y-auto"
-            >{{ notes }}</pre
-          >
+            >{{ notes }}</pre>
         </div>
 
         <p class="text-center text-xs text-muted mt-3">

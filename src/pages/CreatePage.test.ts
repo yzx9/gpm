@@ -109,9 +109,9 @@ const PIN_PRESET = {
 
 /** Find the first button whose text contains `needle`. */
 function findButton(wrapper: ReturnType<typeof mount>, needle: string) {
+  // prettier-ignore
   return wrapper.findAll("button").find((b) => b.text().includes(needle)) as
-    | DOMWrapper<HTMLButtonElement>
-    | undefined;
+    DOMWrapper<HTMLButtonElement> | undefined;
 }
 
 /** Wire `invoke` per command; returns a fresh mounted CreatePage. */

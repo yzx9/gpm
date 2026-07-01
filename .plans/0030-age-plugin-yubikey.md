@@ -6,7 +6,7 @@
 
 ## What
 
-Recognize and operate on age *plugin* recipients and identities — the `age1<plugin>1...`
+Recognize and operate on age _plugin_ recipients and identities — the `age1<plugin>1...`
 recipient encoding and the `AGE-PLUGIN-<NAME>-1...` identity encoding defined by the age
 plugin protocol — with `age-plugin-yubikey` as the primary target. On platforms where the
 matching `age-plugin-<name>` binary is reachable, encrypt secrets to plugin recipients and
@@ -22,7 +22,7 @@ Two things break today, and one thing is impossible today:
    `age1yubikey1...` line in the shared recipients file is currently misclassified as a
    native x25519 recipient (it shares the `age1` prefix), so the encryption step fails to
    parse it and the whole write aborts. The most common real-world yubikey scenario —
-   *someone else* on the shared store uses a hardware key — is enough to make gpm unable to
+   _someone else_ on the shared store uses a hardware key — is enough to make gpm unable to
    add or edit any secret in that store.
 
 2. **Plugin identities are invisible.** An `AGE-PLUGIN-YUBIKEY-1...` identity is today
@@ -38,8 +38,8 @@ Two things break today, and one thing is impossible today:
 
 **How age plugins work.** The age plugin protocol fronts hardware-backed or exotic key
 types behind an external `age-plugin-<name>` binary that the age library spawns as a
-subprocess, speaking a line-based protocol over stdio. Encryption *to* a plugin recipient
-and decryption *with* a plugin identity both require that subprocess to run; the recipient
+subprocess, speaking a line-based protocol over stdio. Encryption _to_ a plugin recipient
+and decryption _with_ a plugin identity both require that subprocess to run; the recipient
 and identity strings are just bech32-encoded references into it. The Rust age crate exposes
 this through its `plugin` feature: a plugin recipient/identity parses from the bech32
 string, but the actual `Recipient`/`Identity` trait implementation is a wrapper that locates
@@ -70,7 +70,7 @@ YubiKey over USB or NFC. Neither is possible inside an Android app: there is no 
 on the device, apps cannot freely exec arbitrary binaries, and YubiKey access on Android
 requires the platform USB-Host / NFC ISO-7816 APIs that only an Android app context can
 open. So plugin encrypt/decrypt cannot work on Android through the upstream library. The
-only path to yubikey *on Android* is a native, in-process reimplementation (talk to the key
+only path to yubikey _on Android_ is a native, in-process reimplementation (talk to the key
 directly via a PIV-capable crate over Android USB/NFC, reusing the age stanza format) — a
 large, separate project. This RFC therefore delivers the desktop story in full and treats
 Android as "recognize and refuse, with a clear reason," mirroring the existing documented
@@ -100,9 +100,9 @@ symmetric in cost or testability:
 - **Next (follow-on): decrypt-with-a-plugin-identity.** A plugin identity is a hardware
   reference, not a decryptable blob, so "unlock" means physical presence plus a YubiKey PIN
   at decrypt time. That needs per-operation PIN plumbing the app does not have today, plus a
-  frontend prompt, and it can never run on Android. Until that lands, plugin *identities*
+  frontend prompt, and it can never run on Android. Until that lands, plugin _identities_
   are recognized but rejected as not-yet-supported (the same pattern used for post-quantum
-  keys), while plugin *recipients* are fully supported.
+  keys), while plugin _recipients_ are fully supported.
 
 1. **Recognize everywhere.** A new "plugin" key/identity type, detected by prefix, for both
    recipients (`age1<plugin>1...`, excluding the already-special-cased post-quantum
@@ -155,8 +155,9 @@ symmetric in cost or testability:
 ## Effort
 
 ~1–1.5 days (human) / ~30–45 min (CC) — library-layer recognition + both plugin directions
-+ the `|RECIPIENT` convention + IPC/frontend type mirror + deterministic tests. Hardware
-round-trip is validated manually / via an opt-in ignored test; it cannot be a CI gate.
+
+- the `|RECIPIENT` convention + IPC/frontend type mirror + deterministic tests. Hardware
+  round-trip is validated manually / via an opt-in ignored test; it cannot be a CI gate.
 
 ## Depends on / Supersedes
 
