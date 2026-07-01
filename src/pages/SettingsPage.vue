@@ -20,9 +20,7 @@ import {
   enableIdentityAutoUnlock,
   isAppLockAvailable,
 } from "../appLock";
-import { onLock } from "../utils/useLockState";
-import { useSecuritySettings } from "../utils/useSecuritySettings";
-import { useSecureScreen } from "../utils/useSecureScreen";
+import { onLock, useSecureScreen, useSecuritySettings } from "../composables";
 import type {
   AppError,
   AppLockError,

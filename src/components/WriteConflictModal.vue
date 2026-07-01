@@ -6,10 +6,10 @@
 import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ConflictChoice, SensitiveContent, WriteConflict } from "../types";
-import { useSecretReveal } from "../utils/useSecretReveal";
 import BaseButton from "./base/BaseButton.vue";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
+import { useSecretReveal } from "../composables";
 
 const props = defineProps<{
   /** The conflict to show, or null to render nothing. */

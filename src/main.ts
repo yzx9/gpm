@@ -17,8 +17,7 @@ import SettingsPage from "./pages/SettingsPage.vue";
 import HistoryPage from "./pages/HistoryPage.vue";
 import CreatePage from "./pages/CreatePage.vue";
 import GeneratePasswordPage from "./pages/GeneratePasswordPage.vue";
-import { useSecureScreen } from "./utils/useSecureScreen";
-import { globalToast } from "./utils/useToast";
+import { globalToast, useSecureScreen } from "./composables";
 
 const { applySecureForRoute, raiseSecureForRoute } = useSecureScreen();
 

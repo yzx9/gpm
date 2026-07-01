@@ -15,8 +15,12 @@ import type {
   WriteConflict,
   WriteOutcome,
 } from "../types";
-import { isAuthCancelled, onLock, runWithAuth } from "../utils/useLockState";
-import { useOverlayBackHandler } from "../utils/useOverlayBackHandler";
+import {
+  isAuthCancelled,
+  onLock,
+  runWithAuth,
+  useOverlayBackHandler,
+} from "../composables";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
 import BaseInput from "../components/base/BaseInput.vue";
 import BaseTextarea from "../components/base/BaseTextarea.vue";

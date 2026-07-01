@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import GeneratePasswordPage from "./GeneratePasswordPage.vue";
-import { useLockState, __resetLockStateForTests } from "../utils/useLockState";
+import { useLockState, __resetLockStateForTests } from "../composables";
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
 

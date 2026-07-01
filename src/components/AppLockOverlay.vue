@@ -7,7 +7,7 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import { appUnlock, asAppLockError } from "../appLock";
-import { useAppLockState } from "../utils/useAppLockState";
+import { useAppLockState } from "../composables";
 import type { AppLockError } from "../types";
 import BaseButton from "./base/BaseButton.vue";
 import BaseAlert from "./base/BaseAlert.vue";

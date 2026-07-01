@@ -5,12 +5,14 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from "vue";
 import { applySafeAreaInsets } from "./utils/safe-area";
-import { useLockState } from "./utils/useLockState";
-import { useOverlayBackHandler } from "./utils/useOverlayBackHandler";
-import { useAppLockState } from "./utils/useAppLockState";
-import { useSecuritySettings } from "./utils/useSecuritySettings";
-import { useSecureScreen } from "./utils/useSecureScreen";
-import { useToast } from "./utils/useToast";
+import {
+  useAppLockState,
+  useLockState,
+  useOverlayBackHandler,
+  useSecureScreen,
+  useSecuritySettings,
+  useToast,
+} from "./composables";
 import UnlockModal from "./components/UnlockModal.vue";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
 import BaseToast from "./components/base/BaseToast.vue";

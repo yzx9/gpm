@@ -11,7 +11,7 @@ import {
   __resetLockStateForTests,
   __unlockForTests,
   useLockState,
-} from "../utils/useLockState";
+} from "../composables";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),

@@ -28,12 +28,12 @@ import type {
 } from "../types";
 import { formatRelativeTime } from "../utils/format";
 import { statusGlyph, statusLabel } from "../utils/signature";
-import { isAuthCancelled, runWithAuth } from "../utils/useLockState";
 import BaseInput from "../components/base/BaseInput.vue";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
 import BaseAlert from "../components/base/BaseAlert.vue";
 import BaseModalShell from "../components/base/BaseModalShell.vue";
+import { isAuthCancelled, runWithAuth } from "../composables";
 
 const router = useRouter();
 

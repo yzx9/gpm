@@ -14,10 +14,14 @@ import type {
   WriteConflict,
   WriteOutcome,
 } from "../types";
-import { useSecretReveal } from "../utils/useSecretReveal";
-import { isAuthCancelled, onLock, runWithAuth } from "../utils/useLockState";
-import { useOverlayBackHandler } from "../utils/useOverlayBackHandler";
-import { useSecuritySettings } from "../utils/useSecuritySettings";
+import {
+  isAuthCancelled,
+  onLock,
+  runWithAuth,
+  useOverlayBackHandler,
+  useSecretReveal,
+  useSecuritySettings,
+} from "../composables";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseInput from "../components/base/BaseInput.vue";
