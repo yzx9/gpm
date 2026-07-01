@@ -15,6 +15,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 /// Android package hosting the `FilePickerPlugin` Kotlin class.
