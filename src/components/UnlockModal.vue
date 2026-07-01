@@ -16,6 +16,8 @@ import {
 import type { BiometricError } from "../types";
 import BaseInput from "./base/BaseInput.vue";
 import BaseButton from "./base/BaseButton.vue";
+import BaseAlert from "./base/BaseAlert.vue";
+import BaseModalShell from "./base/BaseModalShell.vue";
 
 const router = useRouter();
 
@@ -112,117 +114,80 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div
-    class="overlay"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Unlock identity"
-  >
-    <div class="card">
-      <h1 class="text-center text-display mb-1">🔐 gpm</h1>
-      <p class="text-center text-muted text-sm mb-6">Identity is locked</p>
+  <BaseModalShell variant="center" :z="60" aria-label="Unlock identity">
+    <h1 class="text-center text-display mb-1">🔐 gpm</h1>
+    <p class="text-center text-muted text-sm mb-6">Identity is locked</p>
 
-      <!-- Biometric notice (reset / stale / failure) -->
-      <div
-        v-if="biometricNotice"
-        class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-4"
-        role="status"
-      >
-        {{ biometricNotice }}
-      </div>
+    <!-- Biometric notice (reset / stale / failure) -->
+    <BaseAlert
+      v-if="biometricNotice"
+      variant="danger"
+      role="status"
+      class="mb-4"
+    >
+      {{ biometricNotice }}
+    </BaseAlert>
 
-      <!-- Unlock with biometric -->
-      <BaseButton
-        v-if="biometricAvailable && biometricEnabled"
-        variant="secondary"
-        :loading="biometricLoading"
-        :disabled="loading"
-        @click="tryBiometricUnlock"
-      >
-        <span v-if="!biometricLoading">👁</span>
-        <span>{{
-          biometricLoading ? "Unlocking…" : "Unlock with biometric"
-        }}</span>
-      </BaseButton>
+    <!-- Unlock with biometric -->
+    <BaseButton
+      v-if="biometricAvailable && biometricEnabled"
+      variant="secondary"
+      :loading="biometricLoading"
+      :disabled="loading"
+      @click="tryBiometricUnlock"
+    >
+      <span v-if="!biometricLoading">👁</span>
+      <span>{{
+        biometricLoading ? "Unlocking…" : "Unlock with biometric"
+      }}</span>
+    </BaseButton>
 
-      <div
-        v-if="biometricAvailable && biometricEnabled"
-        class="flex items-center gap-2 my-4"
-        aria-hidden="true"
-      >
-        <span class="divider-line"></span>
-        <span class="text-xs text-subtle">or use passphrase</span>
-        <span class="divider-line"></span>
-      </div>
-
-      <form @submit.prevent="onUnlock" class="flex flex-col gap-4">
-        <div class="flex flex-col gap-1">
-          <label for="passphrase" class="text-sm font-medium">Passphrase</label>
-          <BaseInput
-            id="passphrase"
-            v-model="passphrase"
-            type="password"
-            placeholder="Enter your passphrase"
-            required
-            autocomplete="off"
-            :disabled="loading"
-            autofocus
-          />
-          <small class="text-xs text-muted"
-            >Enter the passphrase to unlock your identity</small
-          >
-        </div>
-
-        <div
-          v-if="error"
-          class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm"
-          role="alert"
-        >
-          {{ error }}
-        </div>
-
-        <BaseButton variant="primary" type="submit" :loading="loading">{{
-          loading ? "Decrypting…" : "Unlock"
-        }}</BaseButton>
-
-        <button
-          type="button"
-          class="self-center text-xs text-muted hover:text-danger transition-colors"
-          @click="onReset"
-        >
-          Reset all data
-        </button>
-      </form>
+    <div
+      v-if="biometricAvailable && biometricEnabled"
+      class="flex items-center gap-2 my-4"
+      aria-hidden="true"
+    >
+      <span class="divider-line"></span>
+      <span class="text-xs text-subtle">or use passphrase</span>
+      <span class="divider-line"></span>
     </div>
-  </div>
+
+    <form @submit.prevent="onUnlock" class="flex flex-col gap-4">
+      <div class="flex flex-col gap-1">
+        <label for="passphrase" class="text-sm font-medium">Passphrase</label>
+        <BaseInput
+          id="passphrase"
+          v-model="passphrase"
+          type="password"
+          placeholder="Enter your passphrase"
+          required
+          autocomplete="off"
+          :disabled="loading"
+          autofocus
+        />
+        <small class="text-xs text-muted"
+          >Enter the passphrase to unlock your identity</small
+        >
+      </div>
+
+      <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
+
+      <BaseButton variant="primary" type="submit" :loading="loading">{{
+        loading ? "Decrypting…" : "Unlock"
+      }}</BaseButton>
+
+      <button
+        type="button"
+        class="self-center text-xs text-muted hover:text-danger transition-colors"
+        @click="onReset"
+      >
+        Reset all data
+      </button>
+    </form>
+  </BaseModalShell>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  /* Honor notch/gesture insets; the overlay sits above the safe-area-padded shell. */
-  padding-top: calc(1rem + var(--safe-area-inset-top, 0px));
-  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, 0px));
-  background: rgba(0, 0, 0, 0.4);
-  /* The backdrop must fully capture interaction with the locked page behind it. */
-  overscroll-behavior: contain;
-}
-
-.card {
-  width: 100%;
-  max-width: 420px;
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  padding: 2rem;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-
 .divider-line {
   flex: 1;
   height: 1px;

@@ -16,6 +16,7 @@ import { truncateKey } from "./url";
 import BaseInput from "../base/BaseInput.vue";
 import BaseTextarea from "../base/BaseTextarea.vue";
 import BaseButton from "../base/BaseButton.vue";
+import BaseAlert from "../base/BaseAlert.vue";
 
 const props = defineProps<{
   /** Step-1 SSH key, so the "Use my SSH key for decryption" affordance has
@@ -444,25 +445,16 @@ watch(identity, async (val) => {
       <small class="text-xs text-muted"
         >Encrypts the identity file at rest. Recommended for Android.</small
       >
-      <p
-        v-if="!passphrase.trim()"
-        class="text-xs text-warning bg-warning-soft p-1.5 px-2.5 rounded-sm"
-      >
+      <BaseAlert v-if="!passphrase.trim()" variant="warning">
         ⚠ Without a passphrase, the identity is stored in plaintext.
-      </p>
+      </BaseAlert>
     </div>
 
-    <p class="text-center text-xs text-info bg-info-soft p-2 px-3 rounded-sm">
+    <BaseAlert variant="info" class="text-center">
       Stored locally. Nothing leaves your device.
-    </p>
+    </BaseAlert>
 
-    <div
-      v-if="error"
-      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm"
-      role="alert"
-    >
-      {{ error }}
-    </div>
+    <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
     <BaseButton variant="primary" type="submit" :loading="loadingIdentity">{{
       loadingIdentity ? "Verifying…" : "Complete Setup"

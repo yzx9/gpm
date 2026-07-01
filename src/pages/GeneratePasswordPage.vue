@@ -10,6 +10,7 @@ import type { AppError, GenerateMode } from "../types";
 import { onLock } from "../utils/useLockState";
 import BaseInput from "../components/base/BaseInput.vue";
 import BaseButton from "../components/base/BaseButton.vue";
+import BaseAlert from "../components/base/BaseAlert.vue";
 
 const router = useRouter();
 
@@ -124,10 +125,12 @@ onBeforeUnmount(() => {
       <h1 class="text-lg flex-1">Generate password</h1>
     </header>
 
-    <div v-if="error" class="alert-error" role="alert">{{ error }}</div>
-    <div v-if="toast" class="alert-toast" role="status" aria-live="polite">
+    <BaseAlert v-if="error" variant="danger" class="mb-3">{{
+      error
+    }}</BaseAlert>
+    <BaseAlert v-if="toast" variant="success" class="mb-3">
       {{ toast }}
-    </div>
+    </BaseAlert>
 
     <form class="controls" @submit.prevent="onGenerate">
       <div class="flex flex-col gap-1">
@@ -270,22 +273,5 @@ onBeforeUnmount(() => {
 .icon-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.alert-error {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  margin-bottom: 0.75rem;
-}
-.alert-toast {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  margin-bottom: 0.75rem;
 }
 </style>

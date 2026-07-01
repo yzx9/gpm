@@ -10,6 +10,7 @@ import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
 import BaseInput from "../base/BaseInput.vue";
 import BaseButton from "../base/BaseButton.vue";
+import BaseAlert from "../base/BaseAlert.vue";
 
 // The public recipient of the generated identity — the only part the frontend
 // ever holds. The secret identity itself lives in backend state (staged by
@@ -280,17 +281,11 @@ async function onCreate() {
       </div>
     </div>
 
-    <p class="text-center text-xs text-info bg-info-soft p-2 px-3 rounded-sm">
+    <BaseAlert variant="info" class="text-center">
       Stored locally. Nothing leaves your device.
-    </p>
+    </BaseAlert>
 
-    <div
-      v-if="error"
-      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm"
-      role="alert"
-    >
-      {{ error }}
-    </div>
+    <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
     <BaseButton variant="primary" type="submit" :loading="loading">{{
       loading ? "Creating…" : "Create Store"

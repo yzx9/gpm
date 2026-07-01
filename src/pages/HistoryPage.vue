@@ -18,6 +18,9 @@ import {
 } from "../utils/signature";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
+import BaseAlert from "../components/base/BaseAlert.vue";
+import BaseToast from "../components/base/BaseToast.vue";
+import BaseModalShell from "../components/base/BaseModalShell.vue";
 
 const router = useRouter();
 
@@ -157,13 +160,9 @@ onBeforeUnmount(() => {
       trust its signer.
     </p>
 
-    <div
-      v-if="error"
-      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-3"
-      role="alert"
-    >
+    <BaseAlert v-if="error" variant="danger" class="mb-3">
       {{ error }}
-    </div>
+    </BaseAlert>
 
     <div
       v-if="loading && commits.length === 0"
@@ -222,103 +221,86 @@ onBeforeUnmount(() => {
     </ul>
 
     <!-- Detail sheet -->
-    <div
+    <BaseModalShell
       v-if="selected"
-      class="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      @click.self="closeDetail"
+      variant="sheet"
+      aria-label="Commit detail"
+      @close="closeDetail"
     >
-      <div class="settings-card w-full max-w-120">
-        <div class="flex justify-between items-start mb-2">
-          <code class="text-xs text-muted">{{ selected.short_hash }}</code>
-          <button class="btn-copy" @click="closeDetail" aria-label="Close">
-            ✕
-          </button>
-        </div>
-
-        <h2 class="text-base font-medium wrap-break-word">
-          {{ selected.subject || "(no message)" }}
-        </h2>
-        <p class="text-xs text-muted mt-1 wrap-break-word">
-          {{ selected.author }}
-        </p>
-        <p class="text-xs text-subtle mt-0.5">{{ selected.date }}</p>
-
-        <div
-          class="mt-3 p-2 rounded-sm text-sm flex items-center gap-2"
-          :class="statusBgClass(selected.status)"
-        >
-          <span class="text-lg" aria-hidden="true">{{
-            statusGlyph(selected.status)
-          }}</span>
-          <div class="flex-1 min-w-0">
-            <div class="font-medium">{{ statusLabel(selected.status) }}</div>
-            <div
-              v-if="signerFp(selected.status)"
-              class="text-xs text-muted break-all"
-            >
-              {{ signerFp(selected.status) }}
-            </div>
-          </div>
-          <span
-            v-if="selected.ignored"
-            class="text-[0.6rem] text-subtle px-1 rounded-sm bg-edge"
-            >ignored</span
-          >
-        </div>
-
-        <p
-          v-if="selected.status.kind === 'bad_signature'"
-          class="text-xs text-danger mt-2"
-        >
-          ⚠ This commit's signature does not validate — the commit object may
-          have been altered after signing. It cannot be ignored in Enforce mode.
-        </p>
-
-        <div class="flex flex-col gap-2 mt-4">
-          <BaseButton
-            v-if="selected.status.kind === 'untrusted_key'"
-            variant="action"
-            :disabled="actionLoading"
-            @click="onTrust(selected)"
-          >
-            Trust this signer
-          </BaseButton>
-          <BaseButton
-            v-if="isIgnorable(selected.status) && !selected.ignored"
-            variant="action"
-            :disabled="actionLoading"
-            @click="onIgnore(selected)"
-          >
-            Ignore this issue
-          </BaseButton>
-          <BaseButton variant="action" @click="copyHash(selected)">
-            Copy hash
-          </BaseButton>
-        </div>
+      <div class="flex justify-between items-start mb-2">
+        <code class="text-xs text-muted">{{ selected.short_hash }}</code>
+        <button class="btn-copy" @click="closeDetail" aria-label="Close">
+          ✕
+        </button>
       </div>
-    </div>
 
-    <div
-      v-if="toast"
-      class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-success-soft text-success p-2 px-4 rounded-md text-sm shadow-lg z-50"
-      role="status"
-      aria-live="polite"
-    >
-      {{ toast }}
-    </div>
+      <h2 class="text-base font-medium wrap-break-word">
+        {{ selected.subject || "(no message)" }}
+      </h2>
+      <p class="text-xs text-muted mt-1 wrap-break-word">
+        {{ selected.author }}
+      </p>
+      <p class="text-xs text-subtle mt-0.5">{{ selected.date }}</p>
+
+      <div
+        class="mt-3 p-2 rounded-sm text-sm flex items-center gap-2"
+        :class="statusBgClass(selected.status)"
+      >
+        <span class="text-lg" aria-hidden="true">{{
+          statusGlyph(selected.status)
+        }}</span>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">{{ statusLabel(selected.status) }}</div>
+          <div
+            v-if="signerFp(selected.status)"
+            class="text-xs text-muted break-all"
+          >
+            {{ signerFp(selected.status) }}
+          </div>
+        </div>
+        <span
+          v-if="selected.ignored"
+          class="text-[0.6rem] text-subtle px-1 rounded-sm bg-edge"
+          >ignored</span
+        >
+      </div>
+
+      <p
+        v-if="selected.status.kind === 'bad_signature'"
+        class="text-xs text-danger mt-2"
+      >
+        ⚠ This commit's signature does not validate — the commit object may have
+        been altered after signing. It cannot be ignored in Enforce mode.
+      </p>
+
+      <div class="flex flex-col gap-2 mt-4">
+        <BaseButton
+          v-if="selected.status.kind === 'untrusted_key'"
+          variant="action"
+          :disabled="actionLoading"
+          @click="onTrust(selected)"
+        >
+          Trust this signer
+        </BaseButton>
+        <BaseButton
+          v-if="isIgnorable(selected.status) && !selected.ignored"
+          variant="action"
+          :disabled="actionLoading"
+          @click="onIgnore(selected)"
+        >
+          Ignore this issue
+        </BaseButton>
+        <BaseButton variant="action" @click="copyHash(selected)">
+          Copy hash
+        </BaseButton>
+      </div>
+    </BaseModalShell>
+
+    <BaseToast v-if="toast" variant="success">{{ toast }}</BaseToast>
   </main>
 </template>
 
 <style scoped>
-.settings-card {
-  padding: 1rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-
 .sig-verified {
   color: var(--color-success, #3a9);
 }

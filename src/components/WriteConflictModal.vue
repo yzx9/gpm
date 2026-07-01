@@ -8,6 +8,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ConflictChoice, SensitiveContent, WriteConflict } from "../types";
 import { useSecretReveal } from "../utils/useSecretReveal";
 import BaseButton from "./base/BaseButton.vue";
+import BaseAlert from "./base/BaseAlert.vue";
+import BaseModalShell from "./base/BaseModalShell.vue";
 
 const props = defineProps<{
   /** The conflict to show, or null to render nothing. */
@@ -66,143 +68,116 @@ async function viewExisting() {
 </script>
 
 <template>
-  <div
+  <BaseModalShell
     v-if="conflict"
-    class="overlay"
-    role="dialog"
-    aria-modal="true"
+    variant="sheet"
     aria-label="Remote copy exists"
   >
-    <div class="modal-card w-full max-w-120">
-      <h2 class="text-base font-medium mb-1">Remote copy exists</h2>
-      <p class="text-xs text-muted mb-3">
-        <code>{{ conflict.name }}</code> already exists on the remote with a
-        different version. Your entry was not saved.
-      </p>
+    <h2 class="text-base font-medium mb-1">Remote copy exists</h2>
+    <p class="text-xs text-muted mb-3">
+      <code>{{ conflict.name }}</code> already exists on the remote with a
+      different version. Your entry was not saved.
+    </p>
 
-      <!-- Decryptable: the user can inspect the remote and choose freely. -->
-      <template v-if="conflict.remote_decryptable">
-        <p class="text-sm mb-3">
-          You can read the existing version (it's encrypted to you too).
-        </p>
-        <div v-if="remoteRevealed && remotePw !== null" class="reveal-box mb-3">
-          <div class="mb-2">
-            <span class="block text-xs text-muted mb-1">Existing password</span>
-            <span class="font-mono break-all">{{ remotePw }}</span>
-          </div>
-          <div v-if="remoteNotes">
-            <span class="block text-xs text-muted mb-1">Existing notes</span>
-            <pre class="text-sm whitespace-pre-wrap break-all">{{
-              remoteNotes
-            }}</pre>
-          </div>
-          <p class="text-xs text-muted mt-2">Auto-clears in 30 seconds</p>
+    <!-- Decryptable: the user can inspect the remote and choose freely. -->
+    <template v-if="conflict.remote_decryptable">
+      <p class="text-sm mb-3">
+        You can read the existing version (it's encrypted to you too).
+      </p>
+      <div v-if="remoteRevealed && remotePw !== null" class="reveal-box mb-3">
+        <div class="mb-2">
+          <span class="block text-xs text-muted mb-1">Existing password</span>
+          <span class="font-mono break-all">{{ remotePw }}</span>
         </div>
+        <div v-if="remoteNotes">
+          <span class="block text-xs text-muted mb-1">Existing notes</span>
+          <pre class="text-sm whitespace-pre-wrap break-all">{{
+            remoteNotes
+          }}</pre>
+        </div>
+        <p class="text-xs text-muted mt-2">Auto-clears in 30 seconds</p>
+      </div>
+      <BaseButton
+        v-else
+        variant="secondary"
+        size="sm"
+        block
+        class="mb-3"
+        @click="viewExisting"
+      >
+        View existing
+      </BaseButton>
+      <div class="flex flex-col gap-2">
         <BaseButton
-          v-else
           variant="secondary"
           size="sm"
-          block
-          class="mb-3"
-          @click="viewExisting"
+          :disabled="resolving"
+          @click="emit('resolve', 'keep_mine')"
         >
-          View existing
+          Keep mine (overwrite remote)
         </BaseButton>
-        <div class="flex flex-col gap-2">
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="resolving"
-            @click="emit('resolve', 'keep_mine')"
-          >
-            Keep mine (overwrite remote)
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="resolving"
-            @click="emit('resolve', 'keep_remote')"
-          >
-            Keep existing
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="resolving"
-            @click="emit('resolve', 'cancel')"
-          >
-            Cancel
-          </BaseButton>
-        </div>
-      </template>
+        <BaseButton
+          variant="secondary"
+          size="sm"
+          :disabled="resolving"
+          @click="emit('resolve', 'keep_remote')"
+        >
+          Keep existing
+        </BaseButton>
+        <BaseButton
+          variant="secondary"
+          size="sm"
+          :disabled="resolving"
+          @click="emit('resolve', 'cancel')"
+        >
+          Cancel
+        </BaseButton>
+      </div>
+    </template>
 
-      <!-- Undecryptable: we can't read it; overwriting destroys unreadable data. -->
-      <template v-else>
-        <p class="alert-warn mb-3">
-          The existing entry is encrypted for someone else — you can't read it.
-          Keeping yours overwrites and destroys that unreadable version.
-        </p>
-        <label class="confirm-row mb-3">
-          <input v-model="confirmForce" type="checkbox" />
-          <span class="text-sm"
-            >I understand this destroys the version I can't read.</span
-          >
-        </label>
-        <div class="flex flex-col gap-2">
-          <BaseButton
-            variant="danger"
-            size="sm"
-            :disabled="!confirmForce || resolving"
-            @click="emit('resolve', 'keep_mine_force')"
-          >
-            Keep mine anyway
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="resolving"
-            @click="emit('resolve', 'keep_remote')"
-          >
-            Keep existing
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="resolving"
-            @click="emit('resolve', 'cancel')"
-          >
-            Cancel
-          </BaseButton>
-        </div>
-      </template>
-    </div>
-  </div>
+    <!-- Undecryptable: we can't read it; overwriting destroys unreadable data. -->
+    <template v-else>
+      <BaseAlert variant="warning" class="mb-3">
+        The existing entry is encrypted for someone else — you can't read it.
+        Keeping yours overwrites and destroys that unreadable version.
+      </BaseAlert>
+      <label class="confirm-row mb-3">
+        <input v-model="confirmForce" type="checkbox" />
+        <span class="text-sm"
+          >I understand this destroys the version I can't read.</span
+        >
+      </label>
+      <div class="flex flex-col gap-2">
+        <BaseButton
+          variant="danger"
+          size="sm"
+          :disabled="!confirmForce || resolving"
+          @click="emit('resolve', 'keep_mine_force')"
+        >
+          Keep mine anyway
+        </BaseButton>
+        <BaseButton
+          variant="secondary"
+          size="sm"
+          :disabled="resolving"
+          @click="emit('resolve', 'keep_remote')"
+        >
+          Keep existing
+        </BaseButton>
+        <BaseButton
+          variant="secondary"
+          size="sm"
+          :disabled="resolving"
+          @click="emit('resolve', 'cancel')"
+        >
+          Cancel
+        </BaseButton>
+      </div>
+    </template>
+  </BaseModalShell>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 40;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 1rem;
-}
-@media (min-width: 640px) {
-  .overlay {
-    align-items: center;
-  }
-}
-
-.modal-card {
-  padding: 1rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-
 .reveal-box {
   padding: 0.75rem;
   border: 1px solid var(--color-edge);
@@ -214,14 +189,6 @@ async function viewExisting() {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-}
-
-.alert-warn {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
 }
 
 code {

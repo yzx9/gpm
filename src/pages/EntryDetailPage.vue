@@ -23,6 +23,7 @@ import BaseButton from "../components/base/BaseButton.vue";
 import BaseInput from "../components/base/BaseInput.vue";
 import BaseTextarea from "../components/base/BaseTextarea.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
+import BaseAlert from "../components/base/BaseAlert.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -333,11 +334,7 @@ function handleKeydown(e: KeyboardEvent) {
       </h1>
     </header>
 
-    <div
-      v-if="error"
-      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-4"
-      role="alert"
-    >
+    <BaseAlert v-if="error" variant="danger" class="mb-4">
       {{ error }}
       <span
         v-if="error.includes('ecrypt')"
@@ -345,15 +342,10 @@ function handleKeydown(e: KeyboardEvent) {
       >
         Check your age identity and try again
       </span>
-    </div>
-    <div
-      v-if="toast"
-      class="bg-success-soft text-success p-2 px-3 rounded-sm text-sm mb-4"
-      role="status"
-      aria-live="polite"
-    >
+    </BaseAlert>
+    <BaseAlert v-if="toast" variant="success" class="mb-4">
       {{ toast }}
-    </div>
+    </BaseAlert>
 
     <!-- Read-only view -->
     <div v-if="!editing">

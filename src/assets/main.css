@@ -46,6 +46,8 @@
   --color-success-soft: #e8f5e9;
   --color-info: #1976d2;
   --color-info-soft: #e8f4fd;
+  --color-warning: #cc9933;
+  --color-warning-soft: #fef3c7;
 
   /* Border radius */
   --radius-sm: 6px;
@@ -68,6 +70,8 @@
     --color-danger-edge: #5a2a2a;
     --color-success-soft: #1a3a1a;
     --color-info-soft: #1a2a3a;
+    --color-warning: #d9a441;
+    --color-warning-soft: #3a2a1a;
   }
 }
 

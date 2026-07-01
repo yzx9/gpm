@@ -40,6 +40,9 @@ import BaseInput from "../components/base/BaseInput.vue";
 import BaseTextarea from "../components/base/BaseTextarea.vue";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseSegmentedControl from "../components/base/BaseSegmentedControl.vue";
+import BaseAlert from "../components/base/BaseAlert.vue";
+import BaseToast from "../components/base/BaseToast.vue";
+import BaseCard from "../components/base/BaseCard.vue";
 
 const router = useRouter();
 
@@ -628,26 +631,22 @@ onMounted(() => {
 
     <div v-if="loading" class="text-center text-muted py-8">Loading...</div>
 
-    <div
-      v-else-if="error"
-      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-4"
-      role="alert"
-    >
+    <BaseAlert v-else-if="error" variant="danger" class="mb-4">
       {{ error }}
-    </div>
+    </BaseAlert>
 
     <div v-else-if="config" class="flex flex-col gap-4">
       <!-- Repo info -->
-      <section class="settings-card">
+      <BaseCard as="section">
         <h2 class="text-sm font-medium mb-2">Repository</h2>
         <div class="text-sm text-muted break-all">{{ config.url }}</div>
         <div class="text-xs text-subtle mt-1">
           Auth: {{ isSsh ? "SSH Key" : config.pat ? "PAT" : "None (public)" }}
         </div>
-      </section>
+      </BaseCard>
 
       <!-- Commit identity -->
-      <section class="settings-card">
+      <BaseCard as="section">
         <h2 class="text-sm font-medium mb-2">Commit Identity</h2>
         <p class="text-xs text-muted mb-3">
           Name and email written to each git commit. Leave blank to use the
@@ -684,10 +683,10 @@ onMounted(() => {
         >
           Save
         </BaseButton>
-      </section>
+      </BaseCard>
 
       <!-- SSH key management -->
-      <section v-if="isSsh" class="settings-card">
+      <BaseCard as="section" v-if="isSsh">
         <h2 class="text-sm font-medium mb-3">SSH Key</h2>
 
         <!-- Show public key -->
@@ -714,13 +713,10 @@ onMounted(() => {
           </BaseButton>
 
           <div v-if="showPrivate" class="mt-2 flex flex-col gap-2">
-            <div
-              class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-xs"
-              role="alert"
-            >
+            <BaseAlert variant="danger">
               ⚠ Private key is now visible. Copy it to a safe place and close
               this screen.
-            </div>
+            </BaseAlert>
             <div class="flex justify-end">
               <button class="btn-copy" @click="copyText(privateKey)">
                 📋 Copy
@@ -739,11 +735,11 @@ onMounted(() => {
             </BaseButton>
           </div>
         </div>
-      </section>
+      </BaseCard>
 
       <!-- Passphrase management (x25519 identities only — SSH keys rely on
            their own native passphrase protection) -->
-      <section v-if="!isSshIdentity" class="settings-card">
+      <BaseCard as="section" v-if="!isSshIdentity">
         <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
 
         <!-- Not encrypted: set passphrase -->
@@ -812,19 +808,19 @@ onMounted(() => {
             </BaseButton>
           </div>
         </template>
-      </section>
+      </BaseCard>
 
       <!-- SSH key identities are not encrypted by gpm -->
-      <section v-else class="settings-card">
+      <BaseCard as="section" v-else>
         <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
         <p class="text-xs text-muted">
           SSH key identities rely on their own native passphrase protection and
           are not re-encrypted by gpm.
         </p>
-      </section>
+      </BaseCard>
 
       <!-- Biometric unlock (only meaningful when the identity is encrypted) -->
-      <section v-if="isIdentityEncrypted" class="settings-card">
+      <BaseCard as="section" v-if="isIdentityEncrypted">
         <h2 class="text-sm font-medium mb-3">Biometric Unlock</h2>
 
         <p v-if="!biometricAvailable" class="text-xs text-muted">
@@ -861,10 +857,10 @@ onMounted(() => {
             Disable Biometric
           </BaseButton>
         </template>
-      </section>
+      </BaseCard>
 
       <!-- App-launch biometric gate (RFC 0028) -->
-      <section v-if="appLockAvailable" class="settings-card">
+      <BaseCard as="section" v-if="appLockAvailable">
         <h2 class="text-sm font-medium mb-3">App Lock</h2>
         <p class="text-xs text-muted mb-3">
           Require biometric every time you open or return to gpm. When on, the
@@ -937,10 +933,10 @@ onMounted(() => {
             </template>
           </div>
         </template>
-      </section>
+      </BaseCard>
 
       <!-- Screen capture protection (Android FLAG_SECURE) — Android only -->
-      <section v-if="secureAvailable" class="settings-card">
+      <BaseCard as="section" v-if="secureAvailable">
         <h2 class="text-sm font-medium mb-2">Screen capture protection</h2>
         <p class="text-xs text-muted mb-3">
           Block screenshots and screen recording on pages that show secrets
@@ -967,10 +963,10 @@ onMounted(() => {
             </p>
           </template>
         </BaseSegmentedControl>
-      </section>
+      </BaseCard>
 
       <!-- Auto-lock & auto-clear -->
-      <section v-if="config" class="settings-card">
+      <BaseCard as="section" v-if="config">
         <h2 class="text-sm font-medium mb-3">Auto-Lock &amp; Auto-Clear</h2>
         <p class="text-xs text-muted mb-3">
           Control when the identity locks and how long secrets stay in the
@@ -1028,10 +1024,10 @@ onMounted(() => {
           :disabled="lockLoading"
           @change="onClipboardClearChange"
         />
-      </section>
+      </BaseCard>
 
       <!-- Repository authenticity -->
-      <section v-if="authConfig" class="settings-card">
+      <BaseCard as="section" v-if="authConfig">
         <h2 class="text-sm font-medium mb-3">Repository Authenticity</h2>
         <p class="text-xs text-muted mb-3">
           Verify SSH-signed commits on every pull to detect a compromised remote
@@ -1142,10 +1138,10 @@ onMounted(() => {
             📜 View commit history &amp; signatures
           </BaseButton>
         </div>
-      </section>
+      </BaseCard>
 
       <!-- Danger zone -->
-      <section class="settings-card settings-card-danger">
+      <BaseCard as="section" border="danger">
         <h2 class="text-sm font-medium mb-2 text-danger">Danger Zone</h2>
         <BaseButton variant="action-danger" @click="resetConfig">
           🗑 Reset All Data
@@ -1153,33 +1149,15 @@ onMounted(() => {
         <p class="text-xs text-subtle mt-1">
           Remove all local data and configuration.
         </p>
-      </section>
+      </BaseCard>
     </div>
 
     <!-- Toast -->
-    <div
-      v-if="toast"
-      class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-success-soft text-success p-2 px-4 rounded-md text-sm shadow-lg z-50"
-      role="status"
-      aria-live="polite"
-    >
-      {{ toast }}
-    </div>
+    <BaseToast v-if="toast" variant="success">{{ toast }}</BaseToast>
   </main>
 </template>
 
 <style scoped>
-.settings-card {
-  padding: 1rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-
-.settings-card-danger {
-  border-color: var(--color-danger-edge, var(--color-danger, #c66));
-}
-
 .key-display {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-edge);

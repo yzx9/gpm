@@ -11,6 +11,7 @@ import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
 import BaseInput from "../base/BaseInput.vue";
 import BaseButton from "../base/BaseButton.vue";
+import BaseAlert from "../base/BaseAlert.vue";
 
 const emit = defineEmits<{
   done: [];
@@ -236,13 +237,7 @@ async function onClone() {
       Clone cancelled.
     </div>
 
-    <div
-      v-if="error"
-      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm"
-      role="alert"
-    >
-      {{ error }}
-    </div>
+    <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
     <BaseButton variant="primary" type="submit" :loading="loading">{{
       loading ? "Cloning…" : "Clone Repository"

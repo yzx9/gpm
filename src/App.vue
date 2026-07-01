@@ -13,6 +13,7 @@ import { useSecureScreen } from "./utils/useSecureScreen";
 import { useToast } from "./utils/useToast";
 import UnlockModal from "./components/UnlockModal.vue";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
+import BaseToast from "./components/base/BaseToast.vue";
 
 const { overlayUp, ready, init, cancelAuth } = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
@@ -70,13 +71,6 @@ onMounted(() => {
     -->
     <UnlockModal v-if="ready && overlayUp && !appLocked" />
     <!-- Global toast: app-shell messages (e.g. a screen-secure abort). -->
-    <div
-      v-if="toast"
-      class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-danger-soft text-danger p-2 px-4 rounded-md text-sm shadow-lg z-50"
-      role="status"
-      aria-live="polite"
-    >
-      {{ toast }}
-    </div>
+    <BaseToast v-if="toast" variant="danger">{{ toast }}</BaseToast>
   </div>
 </template>

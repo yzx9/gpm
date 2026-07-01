@@ -10,6 +10,8 @@ import { appUnlock, asAppLockError } from "../appLock";
 import { useAppLockState } from "../utils/useAppLockState";
 import type { AppLockError } from "../types";
 import BaseButton from "./base/BaseButton.vue";
+import BaseAlert from "./base/BaseAlert.vue";
+import BaseModalShell from "./base/BaseModalShell.vue";
 
 const router = useRouter();
 const { setUnlockInFlight } = useAppLockState();
@@ -69,58 +71,25 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="overlay" role="dialog" aria-modal="true" aria-label="App locked">
-    <div class="card">
-      <h1 class="text-center text-display mb-1">🔐 gpm</h1>
-      <p class="text-center text-muted text-sm mb-6">App is locked</p>
+  <BaseModalShell variant="center" :z="70" aria-label="App locked">
+    <h1 class="text-center text-display mb-1">🔐 gpm</h1>
+    <p class="text-center text-muted text-sm mb-6">App is locked</p>
 
-      <div
-        v-if="notice"
-        class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-4"
-        role="status"
-      >
-        {{ notice }}
-      </div>
+    <BaseAlert v-if="notice" variant="danger" role="status" class="mb-4">
+      {{ notice }}
+    </BaseAlert>
 
-      <BaseButton variant="primary" :loading="loading" @click="tryUnlock">
-        <span v-if="!loading">👁</span>
-        <span>{{ loading ? "Unlocking…" : "Unlock with biometric" }}</span>
-      </BaseButton>
+    <BaseButton variant="primary" :loading="loading" @click="tryUnlock">
+      <span v-if="!loading">👁</span>
+      <span>{{ loading ? "Unlocking…" : "Unlock with biometric" }}</span>
+    </BaseButton>
 
-      <button
-        type="button"
-        class="self-center text-xs text-muted hover:text-danger transition-colors mt-6"
-        @click="onReset"
-      >
-        Reset all data
-      </button>
-    </div>
-  </div>
+    <button
+      type="button"
+      class="self-center text-xs text-muted hover:text-danger transition-colors mt-6"
+      @click="onReset"
+    >
+      Reset all data
+    </button>
+  </BaseModalShell>
 </template>
-
-<style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  /* Honor notch/gesture insets; the overlay sits above the safe-area-padded shell
-     and above the identity UnlockModal (z-index 60). */
-  padding-top: calc(1rem + var(--safe-area-inset-top, 0px));
-  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, 0px));
-  background: rgba(0, 0, 0, 0.4);
-  overscroll-behavior: contain;
-}
-
-.card {
-  width: 100%;
-  max-width: 420px;
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  padding: 2rem;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-</style>

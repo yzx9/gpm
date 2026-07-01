@@ -32,6 +32,8 @@ import { isAuthCancelled, runWithAuth } from "../utils/useLockState";
 import BaseInput from "../components/base/BaseInput.vue";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
+import BaseAlert from "../components/base/BaseAlert.vue";
+import BaseModalShell from "../components/base/BaseModalShell.vue";
 
 const router = useRouter();
 
@@ -558,30 +560,20 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div
+    <BaseAlert
       v-if="error"
-      class="bg-danger-soft text-danger p-2 px-3 rounded-sm text-sm mb-3 flex justify-between items-center"
-      role="alert"
+      variant="danger"
+      class="flex justify-between items-center mb-3"
     >
       {{ error }}
       <button @click="retry" class="btn-retry">Retry</button>
-    </div>
-    <div
-      v-if="pullResult"
-      class="bg-info-soft text-info p-2 px-3 rounded-sm text-sm mb-3"
-      role="status"
-      aria-live="polite"
-    >
+    </BaseAlert>
+    <BaseAlert v-if="pullResult" variant="info" class="mb-3">
       {{ pullResult }}
-    </div>
-    <div
-      v-if="toast"
-      class="bg-success-soft text-success p-2 px-3 rounded-sm text-sm mb-3"
-      role="status"
-      aria-live="polite"
-    >
+    </BaseAlert>
+    <BaseAlert v-if="toast" variant="success" class="mb-3">
       {{ toast }}
-    </div>
+    </BaseAlert>
 
     <div
       v-if="loading && displayedEntries.length === 0"
@@ -656,194 +648,183 @@ onBeforeUnmount(() => {
     <div ref="sentinel" class="h-1" aria-hidden="true"></div>
 
     <!-- Audit-mode mismatch modal (pull succeeded; informational) -->
-    <div
+    <BaseModalShell
       v-if="auditIssues"
-      class="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
+      variant="sheet"
       aria-label="Signature check"
     >
-      <div class="modal-card w-full max-w-120">
-        <h2 class="text-base font-medium mb-1">Signature check</h2>
-        <p class="text-xs text-muted mb-3">
-          Pulled {{ auditIssues.length }}
-          {{ auditIssues.length === 1 ? "commit has" : "commits have" }} a
-          signature issue:
-        </p>
-        <ul class="flex flex-col gap-2 mb-3">
-          <li
-            v-for="c in auditIssues"
-            :key="c.hash"
-            class="flex items-center gap-2 text-sm"
-          >
-            <span class="text-lg" aria-hidden="true">{{
-              statusGlyph(c.status)
-            }}</span>
-            <code class="text-xs text-muted">{{ c.short_hash }}</code>
-            <span class="flex-1 truncate">{{ c.subject }}</span>
-            <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
-          </li>
-        </ul>
-        <div class="flex gap-2">
-          <BaseButton size="sm" class="flex-1" @click="openHistory">
-            Review in history
-          </BaseButton>
-          <BaseButton
-            v-if="auditIssues.length === 1"
-            size="sm"
-            class="flex-1"
-            @click="ignoreIssue(auditIssues[0]!)"
-          >
-            Ignore this commit
-          </BaseButton>
-          <BaseButton size="sm" class="flex-1" @click="auditIssues = null">
-            Dismiss
-          </BaseButton>
-        </div>
+      <h2 class="text-base font-medium mb-1">Signature check</h2>
+      <p class="text-xs text-muted mb-3">
+        Pulled {{ auditIssues.length }}
+        {{ auditIssues.length === 1 ? "commit has" : "commits have" }} a
+        signature issue:
+      </p>
+      <ul class="flex flex-col gap-2 mb-3">
+        <li
+          v-for="c in auditIssues"
+          :key="c.hash"
+          class="flex items-center gap-2 text-sm"
+        >
+          <span class="text-lg" aria-hidden="true">{{
+            statusGlyph(c.status)
+          }}</span>
+          <code class="text-xs text-muted">{{ c.short_hash }}</code>
+          <span class="flex-1 truncate">{{ c.subject }}</span>
+          <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
+        </li>
+      </ul>
+      <div class="flex gap-2">
+        <BaseButton size="sm" class="flex-1" @click="openHistory">
+          Review in history
+        </BaseButton>
+        <BaseButton
+          v-if="auditIssues.length === 1"
+          size="sm"
+          class="flex-1"
+          @click="ignoreIssue(auditIssues[0]!)"
+        >
+          Ignore this commit
+        </BaseButton>
+        <BaseButton size="sm" class="flex-1" @click="auditIssues = null">
+          Dismiss
+        </BaseButton>
       </div>
-    </div>
+    </BaseModalShell>
 
     <!-- Enforce-block modal (HEAD did not advance) -->
-    <div
+    <BaseModalShell
       v-if="blockIssues"
-      class="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
+      variant="sheet"
       aria-label="Pull blocked"
     >
-      <div class="modal-card w-full max-w-120">
-        <h2 class="text-base font-medium mb-1 text-danger">Pull blocked</h2>
-        <p class="text-xs text-muted mb-3">
-          Enforce mode refused to update the store — HEAD did not advance.
-          Resolve the signature issue, then pull again.
-        </p>
-        <ul class="flex flex-col gap-2 mb-3">
-          <li
-            v-for="c in blockIssues"
-            :key="c.hash"
-            class="flex items-center gap-2 text-sm"
-          >
-            <span class="text-lg" aria-hidden="true">{{
-              statusGlyph(c.status)
-            }}</span>
-            <code class="text-xs text-muted">{{ c.short_hash }}</code>
-            <span class="flex-1 truncate">{{ c.subject }}</span>
-            <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
-          </li>
-        </ul>
-        <div class="flex flex-col gap-2">
-          <BaseButton
-            v-if="blockIssues.some((c) => c.status.kind === 'untrusted_key')"
-            size="sm"
-            @click="
-              trustBlockSigner(
-                blockIssues.find((c) => c.status.kind === 'untrusted_key')!,
-              )
-            "
-          >
-            Trust this signer
-          </BaseButton>
-          <BaseButton size="sm" @click="switchToAudit">
-            Switch to Audit mode
-          </BaseButton>
-          <BaseButton size="sm" @click="blockIssues = null">Cancel</BaseButton>
-        </div>
+      <h2 class="text-base font-medium mb-1 text-danger">Pull blocked</h2>
+      <p class="text-xs text-muted mb-3">
+        Enforce mode refused to update the store — HEAD did not advance. Resolve
+        the signature issue, then pull again.
+      </p>
+      <ul class="flex flex-col gap-2 mb-3">
+        <li
+          v-for="c in blockIssues"
+          :key="c.hash"
+          class="flex items-center gap-2 text-sm"
+        >
+          <span class="text-lg" aria-hidden="true">{{
+            statusGlyph(c.status)
+          }}</span>
+          <code class="text-xs text-muted">{{ c.short_hash }}</code>
+          <span class="flex-1 truncate">{{ c.subject }}</span>
+          <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
+        </li>
+      </ul>
+      <div class="flex flex-col gap-2">
+        <BaseButton
+          v-if="blockIssues.some((c) => c.status.kind === 'untrusted_key')"
+          size="sm"
+          @click="
+            trustBlockSigner(
+              blockIssues.find((c) => c.status.kind === 'untrusted_key')!,
+            )
+          "
+        >
+          Trust this signer
+        </BaseButton>
+        <BaseButton size="sm" @click="switchToAudit">
+          Switch to Audit mode
+        </BaseButton>
+        <BaseButton size="sm" @click="blockIssues = null">Cancel</BaseButton>
       </div>
-    </div>
+    </BaseModalShell>
     <!-- Divergence modal (local & remote diverged) -->
-    <div
+    <BaseModalShell
       v-if="divergence"
-      class="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center p-4"
+      variant="sheet"
       role="alertdialog"
-      aria-modal="true"
       aria-label="Local and remote have diverged"
     >
-      <div class="modal-card w-full max-w-120">
-        <h2 class="text-base font-medium mb-1 text-danger">
-          Local and remote have diverged
-        </h2>
-        <p class="text-xs text-muted mb-3">
-          Your branch is {{ divergence.local_ahead }}
-          {{ divergence.local_ahead === 1 ? "commit" : "commits" }} ahead.
-          Adopting the remote discards the local-only changes below — this
-          cannot be undone.
-        </p>
+      <h2 class="text-base font-medium mb-1 text-danger">
+        Local and remote have diverged
+      </h2>
+      <p class="text-xs text-muted mb-3">
+        Your branch is {{ divergence.local_ahead }}
+        {{ divergence.local_ahead === 1 ? "commit" : "commits" }} ahead.
+        Adopting the remote discards the local-only changes below — this cannot
+        be undone.
+      </p>
 
-        <div class="flex flex-col gap-2 mb-3 div-scroll">
-          <div
-            v-if="divergence.local_only_entries.length"
-            class="div-block div-danger"
-          >
-            <div class="div-head text-danger">
-              Will be deleted · {{ divergence.local_only_entries.length }}
-            </div>
-            <ul class="div-list">
-              <li v-for="n in divergence.local_only_entries" :key="n">
-                <code>{{ n }}</code>
-              </li>
-            </ul>
+      <div class="flex flex-col gap-2 mb-3 div-scroll">
+        <div
+          v-if="divergence.local_only_entries.length"
+          class="div-block div-danger"
+        >
+          <div class="div-head text-danger">
+            Will be deleted · {{ divergence.local_only_entries.length }}
           </div>
-          <div
-            v-if="divergence.modified_entries.length"
-            class="div-block div-warn"
-          >
-            <div class="div-head text-warning">
-              Will be overwritten · {{ divergence.modified_entries.length }}
-            </div>
-            <ul class="div-list">
-              <li v-for="n in divergence.modified_entries" :key="n">
-                <code>{{ n }}</code>
-              </li>
-            </ul>
-          </div>
-          <div
-            v-if="divergence.other_changed_files.length"
-            class="div-block div-muted"
-          >
-            <div class="div-head text-muted">
-              Other local changes · {{ divergence.other_changed_files.length }}
-            </div>
-            <ul class="div-list">
-              <li v-for="n in divergence.other_changed_files" :key="n">
-                <code>{{ n }}</code>
-              </li>
-            </ul>
-          </div>
+          <ul class="div-list">
+            <li v-for="n in divergence.local_only_entries" :key="n">
+              <code>{{ n }}</code>
+            </li>
+          </ul>
         </div>
-
-        <p v-if="adoptError" class="text-xs text-danger mb-2" role="alert">
-          {{ adoptError }}
-        </p>
-
-        <label class="flex items-start gap-2 text-sm mb-3 cursor-pointer">
-          <input
-            type="checkbox"
-            class="mt-1"
-            :disabled="adopting"
-            v-model="adoptConfirmed"
-          />
-          <span>
-            I understand this discards my {{ divergence.local_ahead }}
-            {{ divergence.local_ahead === 1 ? "commit" : "commits" }} and the
-            changes listed above.
-          </span>
-        </label>
-
-        <div class="flex flex-col gap-2">
-          <button
-            class="btn-danger"
-            :disabled="!adoptConfirmed || adopting"
-            @click="adoptRemote"
-          >
-            <BaseSpinner v-if="adopting" />
-            {{ adopting ? "Adopting…" : "Adopt remote (discard local)" }}
-          </button>
-          <BaseButton size="sm" :disabled="adopting" @click="cancelDivergence">
-            Cancel
-          </BaseButton>
+        <div
+          v-if="divergence.modified_entries.length"
+          class="div-block div-warn"
+        >
+          <div class="div-head text-warning">
+            Will be overwritten · {{ divergence.modified_entries.length }}
+          </div>
+          <ul class="div-list">
+            <li v-for="n in divergence.modified_entries" :key="n">
+              <code>{{ n }}</code>
+            </li>
+          </ul>
+        </div>
+        <div
+          v-if="divergence.other_changed_files.length"
+          class="div-block div-muted"
+        >
+          <div class="div-head text-muted">
+            Other local changes · {{ divergence.other_changed_files.length }}
+          </div>
+          <ul class="div-list">
+            <li v-for="n in divergence.other_changed_files" :key="n">
+              <code>{{ n }}</code>
+            </li>
+          </ul>
         </div>
       </div>
-    </div>
+
+      <p v-if="adoptError" class="text-xs text-danger mb-2" role="alert">
+        {{ adoptError }}
+      </p>
+
+      <label class="flex items-start gap-2 text-sm mb-3 cursor-pointer">
+        <input
+          type="checkbox"
+          class="mt-1"
+          :disabled="adopting"
+          v-model="adoptConfirmed"
+        />
+        <span>
+          I understand this discards my {{ divergence.local_ahead }}
+          {{ divergence.local_ahead === 1 ? "commit" : "commits" }} and the
+          changes listed above.
+        </span>
+      </label>
+
+      <div class="flex flex-col gap-2">
+        <button
+          class="btn-danger"
+          :disabled="!adoptConfirmed || adopting"
+          @click="adoptRemote"
+        >
+          <BaseSpinner v-if="adopting" />
+          {{ adopting ? "Adopting…" : "Adopt remote (discard local)" }}
+        </button>
+        <BaseButton size="sm" :disabled="adopting" @click="cancelDivergence">
+          Cancel
+        </BaseButton>
+      </div>
+    </BaseModalShell>
   </main>
 </template>
 
@@ -904,13 +885,6 @@ onBeforeUnmount(() => {
 .badge-off,
 .badge-none {
   color: var(--color-subtle, #999);
-}
-
-.modal-card {
-  padding: 1rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
 }
 
 .btn-danger {

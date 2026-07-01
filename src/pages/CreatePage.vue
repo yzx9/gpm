@@ -22,6 +22,7 @@ import BaseInput from "../components/base/BaseInput.vue";
 import BaseTextarea from "../components/base/BaseTextarea.vue";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
+import BaseAlert from "../components/base/BaseAlert.vue";
 
 const router = useRouter();
 
@@ -311,10 +312,12 @@ onBeforeUnmount(() => {
       <h1 class="text-lg flex-1">New secret</h1>
     </header>
 
-    <div v-if="error" class="alert-error" role="alert">{{ error }}</div>
-    <div v-if="toast" class="alert-toast" role="status" aria-live="polite">
+    <BaseAlert v-if="error" variant="danger" class="mb-3">{{
+      error
+    }}</BaseAlert>
+    <BaseAlert v-if="toast" variant="success" class="mb-3">
       {{ toast }}
-    </div>
+    </BaseAlert>
 
     <!-- Step 1: pick a type -->
     <section v-if="mode === 'pick'">
@@ -436,10 +439,10 @@ onBeforeUnmount(() => {
             autocomplete="off"
           />
         </div>
-        <div v-if="hasTemplate" class="alert-info">
+        <BaseAlert v-if="hasTemplate" variant="info">
           A <code>.pass-template</code> applies to this location — what's shown
           below is what will be stored.
-        </div>
+        </BaseAlert>
         <pre v-if="preview" class="preview">{{ preview }}</pre>
         <BaseButton variant="primary" type="submit" :disabled="!canSubmit">{{
           submitting ? "Saving…" : "Save secret"
@@ -519,30 +522,6 @@ onBeforeUnmount(() => {
 .icon-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.alert-error {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  margin-bottom: 0.75rem;
-}
-.alert-toast {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  margin-bottom: 0.75rem;
-}
-.alert-info {
-  background: var(--color-info-soft);
-  color: var(--color-info);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
 }
 
 .preview {
