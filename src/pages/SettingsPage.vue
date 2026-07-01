@@ -39,6 +39,7 @@ import type {
 import BaseInput from "../components/base/BaseInput.vue";
 import BaseTextarea from "../components/base/BaseTextarea.vue";
 import BaseButton from "../components/base/BaseButton.vue";
+import BaseSegmentedControl from "../components/base/BaseSegmentedControl.vue";
 
 const router = useRouter();
 
@@ -127,13 +128,29 @@ const rawClipboardClear = computed<number | null>(
   () => config.value?.clipboard_clear_secs ?? null,
 );
 
-function lockModeActive(p: LockMode): boolean {
-  const cur = rawLockMode.value;
-  if (cur === p) return true;
-  if (typeof cur === "object" && typeof p === "object")
-    return cur.idle === p.idle;
+// Two-arg equality for LockMode (handles the `{ idle }` object presets); passed
+// to BaseSegmentedControl's `by` prop. `lockModeActive` (below) wraps it for the
+// hint-line checks.
+function lockModeEq(a: LockMode, b: LockMode): boolean {
+  if (a === b) return true;
+  if (typeof a === "object" && typeof b === "object") return a.idle === b.idle;
   return false;
 }
+
+function lockModeActive(p: LockMode): boolean {
+  return lockModeEq(rawLockMode.value, p);
+}
+
+// Verification-mode pills (labels capitalize via CSS to match the prior look).
+const VERIFY_MODES: {
+  label: VerifyMode;
+  value: VerifyMode;
+  labelClass: string;
+}[] = (["off", "audit", "enforce"] as VerifyMode[]).map((m) => ({
+  label: m,
+  value: m,
+  labelClass: "capitalize",
+}));
 
 // Whether the stored identity is an SSH key. SSH keys are never
 // passphrase-encrypted by gpm (they rely on their own native protection),
@@ -930,38 +947,26 @@ onMounted(() => {
           (setup, create, generate, entry, settings — including the SSH key
           export). Android only.
         </p>
-        <fieldset class="border-0 p-0 m-0">
-          <legend class="text-xs text-muted mb-1">Block screen capture</legend>
-          <div class="flex gap-2">
-            <label class="mode-pill" :class="{ 'mode-active': secureScreen }">
-              <input
-                type="radio"
-                name="secure-screen"
-                class="sr-only"
-                :checked="secureScreen"
-                @change="onSecureScreenChange(true)"
-              />
-              <span>On</span>
-            </label>
-            <label class="mode-pill" :class="{ 'mode-active': !secureScreen }">
-              <input
-                type="radio"
-                name="secure-screen"
-                class="sr-only"
-                :checked="!secureScreen"
-                @change="onSecureScreenChange(false)"
-              />
-              <span>Off</span>
-            </label>
-          </div>
-          <p class="text-xs text-subtle mt-1">
-            <template v-if="secureScreen"
-              >Sensitive pages block capture; the entry list and history stay
-              capturable.</template
-            >
-            <template v-else>No page blocks screen capture.</template>
-          </p>
-        </fieldset>
+        <BaseSegmentedControl
+          name="secure-screen"
+          legend="Block screen capture"
+          :model-value="secureScreen"
+          :options="[
+            { label: 'On', value: true },
+            { label: 'Off', value: false },
+          ]"
+          @change="onSecureScreenChange"
+        >
+          <template #hint>
+            <p class="text-xs text-subtle mt-1">
+              <template v-if="secureScreen"
+                >Sensitive pages block capture; the entry list and history stay
+                capturable.</template
+              >
+              <template v-else>No page blocks screen capture.</template>
+            </p>
+          </template>
+        </BaseSegmentedControl>
       </section>
 
       <!-- Auto-lock & auto-clear -->
@@ -973,85 +978,56 @@ onMounted(() => {
         </p>
 
         <!-- App auto-lock mode -->
-        <fieldset class="border-0 p-0 m-0 mb-3" :disabled="lockLoading">
-          <legend class="text-xs text-muted mb-1">Auto-lock</legend>
-          <div class="flex flex-wrap gap-2">
-            <label
-              v-for="p in LOCK_PRESETS"
-              :key="p.label"
-              class="mode-pill"
-              :class="{ 'mode-active': lockModeActive(p.value) }"
-            >
-              <input
-                type="radio"
-                name="lock-mode"
-                class="sr-only"
-                :checked="lockModeActive(p.value)"
-                @change="onLockModeChange(p.value)"
-              />
-              <span>{{ p.label }}</span>
-            </label>
-          </div>
-          <p class="text-xs text-subtle mt-1">
-            <template v-if="lockModeActive('immediate')"
-              >Per-operation: re-authenticate each copy/show/create. Strongest
-              default.</template
-            >
-            <template v-else-if="lockModeActive('never')"
-              >Never auto-lock; the identity stays cached until you lock
-              manually.</template
-            >
-            <template v-else
-              >Session: stay unlocked, lock after the idle period.</template
-            >
-          </p>
-        </fieldset>
+        <BaseSegmentedControl
+          class="mb-3"
+          name="lock-mode"
+          legend="Auto-lock"
+          wrap
+          :model-value="rawLockMode"
+          :by="lockModeEq"
+          :options="LOCK_PRESETS"
+          :disabled="lockLoading"
+          @change="onLockModeChange"
+        >
+          <template #hint>
+            <p class="text-xs text-subtle mt-1">
+              <template v-if="lockModeActive('immediate')"
+                >Per-operation: re-authenticate each copy/show/create. Strongest
+                default.</template
+              >
+              <template v-else-if="lockModeActive('never')"
+                >Never auto-lock; the identity stays cached until you lock
+                manually.</template
+              >
+              <template v-else
+                >Session: stay unlocked, lock after the idle period.</template
+              >
+            </p>
+          </template>
+        </BaseSegmentedControl>
 
         <!-- View auto-clear -->
-        <fieldset class="border-0 p-0 m-0 mb-3" :disabled="lockLoading">
-          <legend class="text-xs text-muted mb-1">
-            Password view auto-clear
-          </legend>
-          <div class="flex flex-wrap gap-2">
-            <label
-              v-for="p in VIEW_CLEAR_PRESETS"
-              :key="p.label"
-              class="mode-pill"
-              :class="{ 'mode-active': rawViewClear === p.value }"
-            >
-              <input
-                type="radio"
-                name="view-clear"
-                class="sr-only"
-                :checked="rawViewClear === p.value"
-                @change="onViewClearChange(p.value)"
-              />
-              <span>{{ p.label }}</span>
-            </label>
-          </div>
-        </fieldset>
+        <BaseSegmentedControl
+          class="mb-3"
+          name="view-clear"
+          legend="Password view auto-clear"
+          wrap
+          :model-value="rawViewClear"
+          :options="VIEW_CLEAR_PRESETS"
+          :disabled="lockLoading"
+          @change="onViewClearChange"
+        />
 
         <!-- Clipboard auto-clear -->
-        <fieldset class="border-0 p-0 m-0" :disabled="lockLoading">
-          <legend class="text-xs text-muted mb-1">Clipboard auto-clear</legend>
-          <div class="flex flex-wrap gap-2">
-            <label
-              v-for="p in CLIPBOARD_CLEAR_PRESETS"
-              :key="p.label"
-              class="mode-pill"
-              :class="{ 'mode-active': rawClipboardClear === p.value }"
-            >
-              <input
-                type="radio"
-                name="clipboard-clear"
-                class="sr-only"
-                :checked="rawClipboardClear === p.value"
-                @change="onClipboardClearChange(p.value)"
-              />
-              <span>{{ p.label }}</span>
-            </label>
-          </div>
-        </fieldset>
+        <BaseSegmentedControl
+          name="clipboard-clear"
+          legend="Clipboard auto-clear"
+          wrap
+          :model-value="rawClipboardClear"
+          :options="CLIPBOARD_CLEAR_PRESETS"
+          :disabled="lockLoading"
+          @change="onClipboardClearChange"
+        />
       </section>
 
       <!-- Repository authenticity -->
@@ -1063,35 +1039,27 @@ onMounted(() => {
         </p>
 
         <!-- Mode selector -->
-        <fieldset class="border-0 p-0 m-0 mb-3" :disabled="authLoading">
-          <legend class="text-xs text-muted mb-1">Verification</legend>
-          <div class="flex gap-2">
-            <label
-              v-for="m in ['off', 'audit', 'enforce'] as VerifyMode[]"
-              :key="m"
-              class="mode-pill"
-              :class="{ 'mode-active': authConfig.mode === m }"
-            >
-              <input
-                type="radio"
-                name="verify-mode"
-                class="sr-only"
-                :checked="authConfig.mode === m"
-                @change="onModeChange(m)"
-              />
-              <span class="capitalize">{{ m }}</span>
-            </label>
-          </div>
-          <p class="text-xs text-subtle mt-1">
-            <template v-if="authConfig.mode === 'off'"
-              >No verification.</template
-            >
-            <template v-else-if="authConfig.mode === 'audit'"
-              >Verify and warn, but always pull.</template
-            >
-            <template v-else>Block pulls with unverified commits.</template>
-          </p>
-        </fieldset>
+        <BaseSegmentedControl
+          class="mb-3"
+          name="verify-mode"
+          legend="Verification"
+          :model-value="authConfig.mode"
+          :options="VERIFY_MODES"
+          :disabled="authLoading"
+          @change="onModeChange"
+        >
+          <template #hint>
+            <p class="text-xs text-subtle mt-1">
+              <template v-if="authConfig.mode === 'off'"
+                >No verification.</template
+              >
+              <template v-else-if="authConfig.mode === 'audit'"
+                >Verify and warn, but always pull.</template
+              >
+              <template v-else>Block pulls with unverified commits.</template>
+            </p>
+          </template>
+        </BaseSegmentedControl>
 
         <!-- Trusted signing keys -->
         <div class="text-xs text-muted mb-1">
@@ -1228,40 +1196,6 @@ onMounted(() => {
 
 .private-key-display {
   max-height: 250px;
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.mode-pill {
-  flex: 1;
-  text-align: center;
-  padding: 0.5rem 0.6rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.mode-pill:hover {
-  background: var(--color-hover);
-}
-.mode-active {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .key-row {
