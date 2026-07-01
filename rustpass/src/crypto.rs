@@ -541,9 +541,12 @@ pub fn validate_ssh_key_passphrase(identity_bytes: &[u8], passphrase: &str) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use bech32::ToBase32;
     use std::io::Write;
+    use std::str::FromStr;
+
+    use bech32::ToBase32;
+
+    use super::*;
 
     /// Generate a random x25519 keypair, returning `(identity, recipient)` strings.
     fn generate_keypair() -> (String, String) {
@@ -553,8 +556,6 @@ mod tests {
 
     /// Encrypt `plaintext` to the given recipient string, returning ciphertext.
     fn encrypt(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
-        use std::str::FromStr;
-
         let recipient = age::x25519::Recipient::from_str(recipient_str).unwrap();
         let recipients: Vec<Box<dyn age::Recipient>> = vec![Box::new(recipient)];
         let encryptor = Encryptor::with_recipients(recipients.iter().map(AsRef::as_ref)).unwrap();

@@ -7,6 +7,7 @@
 //! Uses the `ssh-key` crate to generate ed25519 keypairs compatible with
 //! standard OpenSSH tools and git2's SSH authentication.
 
+use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
 use zeroize::Zeroizing;
 
 use crate::error::{Error, ErrorCode};
@@ -29,8 +30,6 @@ pub struct SshKeyPair {
 ///
 /// Returns `SSH_KEY_INVALID` if key generation or encryption fails.
 pub fn generate_keypair(passphrase: Option<&str>) -> Result<SshKeyPair, Error> {
-    use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
-
     let key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).map_err(|e| {
         Error::new(
             ErrorCode::SshKeyInvalid,
@@ -78,8 +77,6 @@ pub fn generate_keypair(passphrase: Option<&str>) -> Result<SshKeyPair, Error> {
 ///
 /// Returns `SSH_KEY_INVALID` if the private key cannot be parsed.
 pub fn get_public_key(private_key_pem: &str) -> Result<String, Error> {
-    use ssh_key::PrivateKey;
-
     let key = PrivateKey::from_openssh(private_key_pem).map_err(|e| {
         Error::new(
             ErrorCode::SshKeyInvalid,
@@ -104,8 +101,6 @@ pub fn get_public_key(private_key_pem: &str) -> Result<String, Error> {
 ///
 /// Returns `SSH_KEY_INVALID` if the private key cannot be parsed.
 pub fn export_private_key(private_key_pem: &str) -> Result<Zeroizing<String>, Error> {
-    use ssh_key::{LineEnding, PrivateKey};
-
     // Validate the key parses
     let key = PrivateKey::from_openssh(private_key_pem).map_err(|e| {
         Error::new(
@@ -143,8 +138,6 @@ pub fn export_private_key(private_key_pem: &str) -> Result<Zeroizing<String>, Er
 /// incorrect (mirrors `crypto::validate_ssh_key_passphrase`). Returns
 /// `SshKeyInvalid` if the key cannot be parsed or serialized.
 pub fn to_unencrypted_pem(pem: &str, passphrase: &str) -> Result<Zeroizing<String>, Error> {
-    use ssh_key::{LineEnding, PrivateKey};
-
     let key = PrivateKey::from_openssh(pem.trim()).map_err(|e| {
         Error::new(
             ErrorCode::SshKeyInvalid,
@@ -169,6 +162,9 @@ pub fn to_unencrypted_pem(pem: &str, passphrase: &str) -> Result<Zeroizing<Strin
 
 #[cfg(test)]
 mod tests {
+    use age::{Decryptor, Encryptor, ssh};
+    use std::io::{Read, Write};
+
     use super::*;
 
     #[test]
@@ -256,8 +252,6 @@ mod tests {
 
     /// Encrypt `plaintext` to an SSH recipient string, returning ciphertext.
     fn encrypt_to_ssh_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
-        use age::{Encryptor, ssh};
-        use std::io::Write;
         let recipient: ssh::Recipient = recipient_str.parse().unwrap();
         let recipients: Vec<Box<dyn age::Recipient>> = vec![Box::new(recipient)];
         let encryptor = Encryptor::with_recipients(recipients.iter().map(AsRef::as_ref)).unwrap();
@@ -271,8 +265,6 @@ mod tests {
     /// Decrypt `ciphertext` with an UNENCRYPTED SSH PEM (the cached form),
     /// proving the serialized PEM lands on age's no-KDF Unencrypted path.
     fn decrypt_with_unencrypted_pem(ciphertext: &[u8], unencrypted_pem: &str) -> Vec<u8> {
-        use age::{Decryptor, ssh};
-        use std::io::Read;
         let identity = ssh::Identity::from_buffer(unencrypted_pem.as_bytes(), None).unwrap();
         let identities: Vec<Box<dyn age::Identity>> = vec![Box::new(identity)];
         let decryptor = Decryptor::new(ciphertext).unwrap();
@@ -300,9 +292,9 @@ mod tests {
         // age must classify the cached PEM as Unencrypted (no bcrypt KDF) — the
         // whole point of caching it. (The cipher is "none", but it lives inside
         // the base64 payload, so we assert the parsed variant, not a substring.)
-        let parsed = age::ssh::Identity::from_buffer(unenc.as_bytes(), None).unwrap();
+        let parsed = ssh::Identity::from_buffer(unenc.as_bytes(), None).unwrap();
         assert!(
-            matches!(parsed, age::ssh::Identity::Unencrypted(_)),
+            matches!(parsed, ssh::Identity::Unencrypted(_)),
             "cached PEM must parse as Unencrypted"
         );
 

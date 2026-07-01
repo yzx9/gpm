@@ -15,6 +15,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
+use tauri_plugin_dialog::{DialogExt, FilePath};
 
 /// Android package hosting the `FilePickerPlugin` Kotlin class.
 #[cfg(target_os = "android")]
@@ -112,8 +113,6 @@ impl<R: Runtime> FilePicker<R> {
 impl<R: Runtime> FilePicker<R> {
     /// Open the native file dialog, read the picked file, and return its bytes.
     pub async fn pick(&self) -> Result<PickedFile, FilePickerError> {
-        use tauri_plugin_dialog::{DialogExt, FilePath};
-
         let handle = self.0.clone();
         // `blocking_pick_file` drives the dialog on the main thread and blocks
         // the caller — run it on a blocking task so the async runtime is spared.

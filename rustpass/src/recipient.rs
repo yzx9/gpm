@@ -406,8 +406,11 @@ pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use age::secrecy::ExposeSecret;
+    use age::x25519::Identity;
     use bech32::ToBase32;
+
+    use super::*;
 
     #[test]
     fn parse_recipients_basic() {
@@ -694,8 +697,6 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
 
     #[test]
     fn identity_to_recipient_derives_correct_x25519_key() {
-        use age::secrecy::ExposeSecret;
-        use age::x25519::Identity;
         let sk = Identity::generate();
         let pk = sk.to_public();
         let identity_str = sk.to_string().expose_secret().to_string();
@@ -822,8 +823,6 @@ LF7kNlDznn/nyZlg==
 
     #[test]
     fn validate_identity_x25519_not_encrypted() {
-        use age::secrecy::ExposeSecret;
-        use age::x25519::Identity;
         let sk = Identity::generate();
         let identity_str = sk.to_string().expose_secret().to_string();
 

@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError,
   ConflictChoice,
+  CopyResult,
   SensitiveContent,
   WriteConflict,
   WriteOutcome,
@@ -106,7 +107,7 @@ async function copyPassword() {
   error.value = "";
   try {
     const result = await runWithAuth(() =>
-      invoke<import("../types").CopyResult>("copy_password", { entryPath }),
+      invoke<CopyResult>("copy_password", { entryPath }),
     );
     clear();
     showToast(

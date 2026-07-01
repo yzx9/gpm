@@ -8,6 +8,7 @@ use std::io::Write;
 use std::str::FromStr;
 
 use age::secrecy::ExposeSecret;
+use age::ssh;
 use age::x25519::{Identity, Recipient};
 
 use rustpass::{SyncOutcome, SyncResult};
@@ -57,7 +58,6 @@ pub fn generate_ssh_test_keypair(passphrase: &str) -> (String, String) {
 /// Encrypt `plaintext` to an SSH recipient string (e.g. `ssh-ed25519 AAAA…`).
 #[allow(dead_code)]
 pub fn encrypt_to_ssh_recipient(plaintext: &[u8], ssh_recipient_str: &str) -> Vec<u8> {
-    use age::ssh;
     let recipient: ssh::Recipient = ssh_recipient_str.parse().expect("valid SSH recipient");
     let encryptor =
         age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))

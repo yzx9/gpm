@@ -4,6 +4,10 @@
 
 mod common;
 
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+
 use common::*;
 use rustpass::crypto;
 use rustpass::error::{Error, ErrorCode};
@@ -46,11 +50,9 @@ fn path_traversal_encoded_dots() {
 #[test]
 #[cfg(unix)]
 fn path_traversal_symlink_escape() {
-    use std::os::unix::fs::symlink;
-
     let external_dir = tempfile::tempdir().unwrap();
     let external_file = external_dir.path().join("target.txt");
-    std::fs::write(&external_file, b"external-secret").unwrap();
+    fs::write(&external_file, b"external-secret").unwrap();
 
     let repo_dir = tempfile::tempdir().unwrap();
     let link_path = repo_dir.path().join("escape.age");

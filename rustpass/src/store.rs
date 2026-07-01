@@ -2349,8 +2349,11 @@ fn normalize_clear_secs(secs: Option<u64>) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
+    use super::*;
 
     #[test]
     fn resolve_entry_path_valid_file() {
@@ -2391,8 +2394,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn resolve_entry_path_symlink_escape() {
-        use std::os::unix::fs::symlink;
-
         let external_dir = tempfile::tempdir().unwrap();
         let external_file = external_dir.path().join("target.txt");
         fs::write(&external_file, b"external-secret").unwrap();

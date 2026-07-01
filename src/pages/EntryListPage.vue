@@ -18,6 +18,7 @@ import type {
   AppError,
   AuthenticityState,
   CommitSigInfo,
+  CopyResult,
   Entry,
   EntryPage,
   GitProgressEvent,
@@ -395,7 +396,7 @@ async function switchToAudit() {
 async function copyPassword(entry: Entry) {
   try {
     const result = await runWithAuth(() =>
-      invoke<import("../types").CopyResult>("copy_password", {
+      invoke<CopyResult>("copy_password", {
         entryPath: entry.path,
       }),
     );

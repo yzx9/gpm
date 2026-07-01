@@ -601,11 +601,14 @@ fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError) -> Error 
 
 #[cfg(test)]
 mod tests {
-    use super::{CreateIdentityKind, generate_identity_core};
-    use crate::AppState;
-    use rustpass::{KeyType, Store};
     use std::sync::atomic::AtomicU64;
     use std::sync::{Arc, Mutex};
+
+    use rustpass::{KeyType, Store};
+
+    use crate::AppState;
+
+    use super::{CreateIdentityKind, generate_identity_core};
 
     /// Minimal [`AppState`]. `generate_identity_core` only touches
     /// `pending_identity`, so the store / timer / pending-write are inert

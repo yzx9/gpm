@@ -8,6 +8,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(target_os = "android")]
+use foreign_types::ForeignType;
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 
 use crate::config::{DEFAULT_COMMIT_EMAIL, DEFAULT_COMMIT_NAME};
@@ -154,7 +156,6 @@ fn for_each_cert_in_pem(
 #[cfg(target_os = "android")]
 #[allow(unsafe_code)]
 fn add_certs_from_pem(pem: &[u8]) -> Result<usize, Error> {
-    use foreign_types::ForeignType;
     init_libgit2_for_ca_opts()?;
     for_each_cert_in_pem(pem, |cert| {
         // SAFETY: `cert` is a valid X509 parsed from the embedded bundle, and
