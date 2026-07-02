@@ -6,11 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises, type DOMWrapper } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import CreatePage from "./CreatePage.vue";
-import {
-  __resetLockStateForTests,
-  __unlockForTests,
-  useLockState,
-} from "../composables";
+import { mountWithApp } from "../test/appTestUtils";
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
 
@@ -125,7 +121,7 @@ async function mountPage(
     if (cmd === "list_create_presets") return Promise.resolve(presets);
     return Promise.resolve(undefined);
   }) as typeof invoke);
-  const wrapper = mount(CreatePage);
+  const { wrapper } = mountWithApp(CreatePage);
   await flushPromises(); // loadPresets on mount
   return wrapper;
 }
@@ -140,7 +136,6 @@ async function fillWebsiteForm(wrapper: ReturnType<typeof mount>) {
 describe("CreatePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __unlockForTests();
   });
 
   it("loads presets on mount", async () => {
@@ -183,18 +178,23 @@ describe("CreatePage", () => {
   });
 
   it("swallows AUTH_CANCELLED silently on submit when the auth overlay is dismissed", async () => {
-    const wrapper = await mountPage({
-      create_from_preset_secret: () => ({ kind: "written", commit: "x" }),
-    });
-    // Wipe the cache AFTER mount so submit's runWithAuth parks on the auth overlay.
-    __resetLockStateForTests();
-    const { cancelAuth } = useLockState();
+    // unlocked:false → identity NOT cached → submit's runWithAuth parks on the
+    // auth overlay (no singleton to wipe mid-test).
+    vi.mocked(invoke).mockImplementation(((cmd: string) => {
+      if (cmd === "create_from_preset_secret")
+        return Promise.resolve({ kind: "written", commit: "x" });
+      if (cmd === "list_create_presets")
+        return Promise.resolve([WEBSITE_PRESET]);
+      return Promise.resolve(undefined);
+    }) as typeof invoke);
+    const { wrapper, lock } = mountWithApp(CreatePage, { unlocked: false });
+    await flushPromises(); // loadPresets on mount
 
     await fillWebsiteForm(wrapper);
     await wrapper.find("form").trigger("submit");
     await flushPromises(); // parked awaiting auth
 
-    cancelAuth(); // user dismissed the overlay (back)
+    lock.cancelAuth(); // user dismissed the overlay (back)
     await flushPromises();
 
     // No error UI — the catch swallowed AUTH_CANCELLED; create never ran.
@@ -275,14 +275,20 @@ describe("CreatePage", () => {
   });
 
   it("cancel resolves without the cached identity (resolve dropped runWithAuth — regression)", async () => {
-    const wrapper = await mountPage({
-      create_from_preset_secret: () => ({
-        kind: "conflict",
-        name: "websites/example.com/alice",
-        remote_decryptable: true,
-      }),
-      resolve_write_conflict: () => null,
-    });
+    vi.mocked(invoke).mockImplementation(((cmd: string) => {
+      if (cmd === "create_from_preset_secret")
+        return Promise.resolve({
+          kind: "conflict",
+          name: "websites/example.com/alice",
+          remote_decryptable: true,
+        });
+      if (cmd === "resolve_write_conflict") return Promise.resolve(null);
+      if (cmd === "list_create_presets")
+        return Promise.resolve([WEBSITE_PRESET]);
+      return Promise.resolve(undefined);
+    }) as typeof invoke);
+    const { wrapper, lock } = mountWithApp(CreatePage);
+    await flushPromises();
 
     await fillWebsiteForm(wrapper);
     await wrapper.find("form").trigger("submit");
@@ -292,7 +298,7 @@ describe("CreatePage", () => {
     // Wipe the cached identity AFTER the conflict is up. `resolve` no longer
     // wraps in runWithAuth (cancel/keep_remote need no identity), so this still
     // resolves — previously it would have parked on the auth overlay forever.
-    __resetLockStateForTests();
+    lock.setLocked(true);
 
     const cancel = findButton(wrapper, "Cancel");
     expect(cancel).toBeTruthy();
@@ -379,7 +385,7 @@ describe("CreatePage", () => {
       }
       return Promise.resolve(undefined);
     }) as typeof invoke);
-    const wrapper = mount(CreatePage);
+    const { wrapper } = mountWithApp(CreatePage);
     await flushPromises();
 
     await wrapper.findAll(".type-card")[0]!.trigger("click");

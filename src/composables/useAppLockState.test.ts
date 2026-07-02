@@ -2,13 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import {
-  __resetAppLockStateForTests,
-  useAppLockState,
-} from "./useAppLockState";
+import { createAppLockStore, type AppLockStore } from "./useAppLockState";
 
 /** Force jsdom's visibilityState and fire the event the composable listens to. */
 function setVisibility(state: "visible" | "hidden") {
@@ -20,50 +17,56 @@ function setVisibility(state: "visible" | "hidden") {
 }
 
 describe("useAppLockState", () => {
-  const { appLockEnabled, appLocked, appReady, init, setUnlockInFlight } =
-    useAppLockState();
+  let s: AppLockStore;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    __resetAppLockStateForTests();
+    // Fresh per test — replaces the old module-singleton __resetAppLockStateForTests.
+    s = createAppLockStore();
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
       value: "visible",
     });
   });
 
+  afterEach(() => {
+    // Drop this instance's `visibilitychange` listener so it doesn't leak onto
+    // the next test's instance (each test creates a fresh store).
+    s.dispose();
+  });
+
   it("is disabled, unlocked, and not ready until init() resolves", () => {
-    expect(appLockEnabled.value).toBe(false);
-    expect(appLocked.value).toBe(false);
-    expect(appReady.value).toBe(false);
+    expect(s.appLockEnabled.value).toBe(false);
+    expect(s.appLocked.value).toBe(false);
+    expect(s.appReady.value).toBe(false);
   });
 
   it("init() reflects an enabled+locked gate and flips ready", async () => {
     vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: true });
 
-    await init();
+    await s.init();
 
     expect(invoke).toHaveBeenCalledWith("get_app_lock_state");
-    expect(appLockEnabled.value).toBe(true);
-    expect(appLocked.value).toBe(true);
-    expect(appReady.value).toBe(true);
+    expect(s.appLockEnabled.value).toBe(true);
+    expect(s.appLocked.value).toBe(true);
+    expect(s.appReady.value).toBe(true);
   });
 
   it("init() defaults to disabled when get_app_lock_state rejects", async () => {
     vi.mocked(invoke).mockRejectedValue(new Error("boom"));
 
-    await init();
+    await s.init();
 
-    expect(appLockEnabled.value).toBe(false);
-    expect(appLocked.value).toBe(false);
-    expect(appReady.value).toBe(true);
+    expect(s.appLockEnabled.value).toBe(false);
+    expect(s.appLocked.value).toBe(false);
+    expect(s.appReady.value).toBe(true);
   });
 
   it("init() registers a single app-lock-state listener and is idempotent", async () => {
     vi.mocked(invoke).mockResolvedValue({ enabled: false, locked: false });
 
-    await init();
-    await init();
+    await s.init();
+    await s.init();
 
     expect(listen).toHaveBeenCalledTimes(1);
     expect(listen).toHaveBeenCalledWith("app-lock-state", expect.any(Function));
@@ -71,17 +74,17 @@ describe("useAppLockState", () => {
 
   it("the app-lock-state handler mirrors the backend payload", async () => {
     vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: true });
-    await init();
+    await s.init();
 
     const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
       payload: { enabled: boolean; locked: boolean };
     }) => void;
 
     handler({ payload: { enabled: true, locked: false } });
-    expect(appLocked.value).toBe(false);
+    expect(s.appLocked.value).toBe(false);
 
     handler({ payload: { enabled: true, locked: true } });
-    expect(appLocked.value).toBe(true);
+    expect(s.appLocked.value).toBe(true);
   });
 
   it("resume (visibilitychange→visible) re-locks when enabled+unlocked", async () => {
@@ -90,9 +93,9 @@ describe("useAppLockState", () => {
         return Promise.resolve({ enabled: true, locked: false });
       return Promise.resolve();
     });
-    await init();
-    expect(appLockEnabled.value).toBe(true);
-    expect(appLocked.value).toBe(false);
+    await s.init();
+    expect(s.appLockEnabled.value).toBe(true);
+    expect(s.appLocked.value).toBe(false);
 
     vi.mocked(invoke).mockClear();
     setVisibility("visible");
@@ -102,7 +105,7 @@ describe("useAppLockState", () => {
 
   it("resume does NOT re-lock when the gate is disabled", async () => {
     vi.mocked(invoke).mockResolvedValue({ enabled: false, locked: false });
-    await init();
+    await s.init();
 
     vi.mocked(invoke).mockClear();
     setVisibility("visible");
@@ -112,7 +115,7 @@ describe("useAppLockState", () => {
 
   it("resume does NOT re-lock when already locked", async () => {
     vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: true });
-    await init();
+    await s.init();
 
     vi.mocked(invoke).mockClear();
     setVisibility("visible");
@@ -126,9 +129,9 @@ describe("useAppLockState", () => {
         return Promise.resolve({ enabled: true, locked: false });
       return Promise.resolve();
     });
-    await init();
+    await s.init();
 
-    setUnlockInFlight(true);
+    s.setUnlockInFlight(true);
     vi.mocked(invoke).mockClear();
     setVisibility("visible");
 
@@ -141,7 +144,7 @@ describe("useAppLockState", () => {
         return Promise.resolve({ enabled: true, locked: false });
       return Promise.resolve();
     });
-    await init();
+    await s.init();
 
     vi.mocked(invoke).mockClear();
     setVisibility("hidden");
@@ -152,12 +155,12 @@ describe("useAppLockState", () => {
   it("resume is debounced right after an unlock (loop guard for prompt dismiss)", async () => {
     // Cold-start locked, then the backend reports an unlock (locked→false).
     vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: true });
-    await init();
+    await s.init();
     const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
       payload: { enabled: boolean; locked: boolean };
     }) => void;
     handler({ payload: { enabled: true, locked: false } }); // unlock transition
-    expect(appLocked.value).toBe(false);
+    expect(s.appLocked.value).toBe(false);
 
     // A resume within the debounce window must NOT re-lock (the prompt's own
     // dismiss could otherwise re-trigger the gate in a loop).

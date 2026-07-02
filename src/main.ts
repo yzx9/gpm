@@ -17,9 +17,28 @@ import SettingsPage from "./pages/SettingsPage.vue";
 import HistoryPage from "./pages/HistoryPage.vue";
 import CreatePage from "./pages/CreatePage.vue";
 import GeneratePasswordPage from "./pages/GeneratePasswordPage.vue";
-import { globalToast, useSecureScreen } from "./composables";
+import {
+  APP_LOCK_KEY,
+  createAppLockStore,
+  createLockState,
+  createSecureScreen,
+  createSecuritySettings,
+  createToast,
+  LOCK_KEY,
+  SECURE_SCREEN_KEY,
+  SECURITY_SETTINGS_KEY,
+  TOAST_KEY,
+} from "./composables";
 
-const { applySecureForRoute, raiseSecureForRoute } = useSecureScreen();
+// App-shell singletons — created once here (the composition root), provided
+// app-wide, and held by direct ref where non-setup code needs them. The router
+// guards below use `secureScreenState`/`toastState` directly because `inject`
+// only resolves inside a component setup.
+const lockState = createLockState();
+const appLockStore = createAppLockStore();
+const secureScreenState = createSecureScreen();
+const securitySettingsState = createSecuritySettings();
+const toastState = createToast();
 
 // `meta.secure` marks routes that render decrypted/generated secrets or
 // credentials — the router guard sets Android FLAG_SECURE on these (when the
@@ -94,9 +113,9 @@ router.beforeEach(async (to, from) => {
   // Cover the departing page too during the swap. `from.meta` is absent on the
   // initial navigation, so the first nav covers only the arriving route.
   const cover = !!(to.meta?.secure || from.meta?.secure);
-  const secureOk = await raiseSecureForRoute(cover);
+  const secureOk = await secureScreenState.raiseSecureForRoute(cover);
   if (to.meta?.secure && !secureOk) {
-    globalToast("Couldn't secure screen — try again");
+    toastState.globalToast("Couldn't secure screen — try again");
     return false;
   }
   return true;
@@ -106,7 +125,14 @@ router.afterEach(async (to) => {
   // The arriving page has mounted/painted; now drop the transition-time cover
   // and reconcile to the arriving route's own level.
   await nextTick();
-  await applySecureForRoute(!!to.meta?.secure);
+  await secureScreenState.applySecureForRoute(!!to.meta?.secure);
 });
 
-createApp(App).use(router).mount("#app");
+const app = createApp(App);
+app.use(router);
+app.provide(LOCK_KEY, lockState);
+app.provide(APP_LOCK_KEY, appLockStore);
+app.provide(SECURE_SCREEN_KEY, secureScreenState);
+app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);
+app.provide(TOAST_KEY, toastState);
+app.mount("#app");

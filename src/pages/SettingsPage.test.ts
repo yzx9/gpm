@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mount } from "@vue/test-utils";
 import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage.vue";
+import { mountWithApp } from "../test/appTestUtils";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -106,7 +106,7 @@ describe("SettingsPage", () => {
   });
 
   function mountPage() {
-    return mount(SettingsPage);
+    return mountWithApp(SettingsPage).wrapper;
   }
 
   describe("config loading", () => {

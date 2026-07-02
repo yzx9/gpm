@@ -3,15 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mount } from "@vue/test-utils";
 import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import EntryDetailPage from "./EntryDetailPage.vue";
-import {
-  useLockState,
-  __resetLockStateForTests,
-  __unlockForTests,
-} from "../composables";
+import { mountWithApp } from "../test/appTestUtils";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -43,10 +38,8 @@ describe("EntryDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    __resetLockStateForTests();
-    // Page tests exercise copy/show without mounting App.vue (which calls
-    // init()), so establish the "identity cached" precondition runWithAuth gates on.
-    __unlockForTests();
+    // "identity cached" precondition is established per-mount by mountWithApp's
+    // default unlocked:true (App.vue's init() doesn't run in page tests).
   });
 
   afterEach(() => {
@@ -54,7 +47,7 @@ describe("EntryDetailPage", () => {
   });
 
   function mountPage() {
-    return mount(EntryDetailPage);
+    return mountWithApp(EntryDetailPage).wrapper;
   }
 
   describe("showPassword", () => {
@@ -133,16 +126,15 @@ describe("EntryDetailPage", () => {
     });
 
     it("swallows AUTH_CANCELLED silently when the auth overlay is dismissed (Android back)", async () => {
-      // Identity NOT cached: runWithAuth parks on the auth overlay instead of
-      // running show_password immediately.
-      __resetLockStateForTests();
-      const { cancelAuth } = useLockState();
-
-      const wrapper = mountPage();
+      // unlocked:false → identity NOT cached → show's runWithAuth parks on the
+      // auth overlay instead of running show_password immediately.
+      const { wrapper, lock } = mountWithApp(EntryDetailPage, {
+        unlocked: false,
+      });
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
       await flushPromises(); // parked awaiting auth
 
-      cancelAuth(); // user dismissed the overlay (back)
+      lock.cancelAuth(); // user dismissed the overlay (back)
       await flushPromises(); // rejection propagates to the catch
 
       // No error UI — the catch swallowed AUTH_CANCELLED; the op never ran.
@@ -169,17 +161,16 @@ describe("EntryDetailPage", () => {
     });
 
     it("swallows AUTH_CANCELLED silently on copyPassword when the auth overlay is dismissed", async () => {
-      // Identity NOT cached: runWithAuth parks on the auth overlay.
-      __resetLockStateForTests();
-      const { cancelAuth } = useLockState();
-
-      const wrapper = mountPage();
+      // unlocked:false → identity NOT cached → copy's runWithAuth parks on the overlay.
+      const { wrapper, lock } = mountWithApp(EntryDetailPage, {
+        unlocked: false,
+      });
       await wrapper
         .find('button[aria-label="Copy password to clipboard"]')
         .trigger("click");
       await flushPromises(); // parked awaiting auth
 
-      cancelAuth(); // user dismissed the overlay (back)
+      lock.cancelAuth(); // user dismissed the overlay (back)
       await flushPromises();
 
       // No error UI — the catch swallowed AUTH_CANCELLED; copy never ran.
@@ -249,14 +240,12 @@ describe("EntryDetailPage", () => {
     });
 
     it("clears sensitive data on identity lock", async () => {
-      const { setLocked } = useLockState();
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "notes",
       });
       // The modal keeps the page mounted, so a lock transition must wipe in place.
-      setLocked(false);
-      const wrapper = mountPage();
+      const { wrapper, lock } = mountWithApp(EntryDetailPage);
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
       await flushPromises();
 
@@ -264,7 +253,7 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("s3cret");
 
       // Lock fires the shared composable's onLock(clear) without unmounting.
-      setLocked(true);
+      lock.setLocked(true);
       await flushPromises();
 
       expect(wrapper.text()).not.toContain("s3cret");
@@ -547,15 +536,13 @@ describe("EntryDetailPage", () => {
     });
 
     it("on identity lock, exits edit mode and drops the edit draft", async () => {
-      const { setLocked } = useLockState();
-      setLocked(false);
       vi.mocked(invoke).mockResolvedValue({ password: "s3cret", notes: "n" });
-      const wrapper = mountPage();
+      const { wrapper, lock } = mountWithApp(EntryDetailPage);
       await wrapper.find(editBtn()).trigger("click");
       await flushPromises();
       expect(wrapper.find("#e-password").exists()).toBe(true);
 
-      setLocked(true);
+      lock.setLocked(true);
       await flushPromises();
 
       // exitEdit() ran on lock — the edit form (and its in-DOM plaintext) is gone.

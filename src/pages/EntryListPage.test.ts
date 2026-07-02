@@ -3,15 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import EntryListPage from "./EntryListPage.vue";
 import type { Entry, EntryPage } from "../types";
-import {
-  __resetLockStateForTests,
-  __unlockForTests,
-  useLockState,
-} from "../composables";
+import { mountWithApp } from "../test/appTestUtils";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -85,7 +81,6 @@ describe("EntryListPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     for (const k of Object.keys(overrides)) delete overrides[k];
-    __unlockForTests();
     vi.useFakeTimers();
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd in overrides) {
@@ -102,7 +97,7 @@ describe("EntryListPage", () => {
   });
 
   function mountPage() {
-    return mount(EntryListPage);
+    return mountWithApp(EntryListPage).wrapper;
   }
 
   /** Find the "Load more" button by its stable aria-label, if present. */
@@ -192,16 +187,17 @@ describe("EntryListPage", () => {
   describe("copyPassword", () => {
     it("swallows AUTH_CANCELLED silently when the auth overlay is dismissed during copy", async () => {
       when("list_entries", page(sampleEntries));
-      const wrapper = mountPage();
+      // unlocked:false → identity NOT cached → copy's runWithAuth parks on the
+      // auth overlay (no singleton to wipe mid-test).
+      const { wrapper, lock } = mountWithApp(EntryListPage, {
+        unlocked: false,
+      });
       await flushPromises();
-      // Identity NOT cached: runWithAuth parks on the auth overlay.
-      __resetLockStateForTests();
-      const { cancelAuth } = useLockState();
 
       await wrapper.find('button[aria-label="Copy password"]').trigger("click");
       await flushPromises(); // parked awaiting auth
 
-      cancelAuth(); // user dismissed the overlay (back)
+      lock.cancelAuth(); // user dismissed the overlay (back)
       await flushPromises();
 
       // No failure toast — the catch swallowed AUTH_CANCELLED; copy never ran.

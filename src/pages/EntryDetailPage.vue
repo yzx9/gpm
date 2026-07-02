@@ -16,8 +16,7 @@ import type {
 } from "../types";
 import {
   isAuthCancelled,
-  onLock,
-  runWithAuth,
+  useLockState,
   useOverlayBackHandler,
   useSecretReveal,
   useSecuritySettings,
@@ -31,6 +30,7 @@ import BaseAlert from "../components/base/BaseAlert.vue";
 
 const route = useRoute();
 const router = useRouter();
+const { onLock, runWithAuth } = useLockState();
 
 const entryPath = decodeURIComponent(
   Array.isArray(route.params.pathMatch)

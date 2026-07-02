@@ -33,9 +33,10 @@ import BaseButton from "../components/base/BaseButton.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
 import BaseAlert from "../components/base/BaseAlert.vue";
 import BaseModalShell from "../components/base/BaseModalShell.vue";
-import { isAuthCancelled, runWithAuth } from "../composables";
+import { isAuthCancelled, useLockState } from "../composables";
 
 const router = useRouter();
+const { runWithAuth } = useLockState();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
 // not the whole store. `displayedEntries` accumulates appended pages; `total`

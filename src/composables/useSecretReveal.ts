@@ -4,7 +4,7 @@
 
 import { ref, watch, onMounted, onBeforeUnmount } from "vue";
 import type { SensitiveContent } from "../types";
-import { onLock } from "./useLockState";
+import { useLockState } from "./useLockState";
 import { useSecuritySettings } from "./useSecuritySettings";
 
 /**
@@ -24,6 +24,7 @@ import { useSecuritySettings } from "./useSecuritySettings";
  */
 export function useSecretReveal() {
   const { viewClearSecs } = useSecuritySettings();
+  const { onLock } = useLockState();
 
   const password = ref<string | null>(null);
   const notes = ref<string | null>(null);

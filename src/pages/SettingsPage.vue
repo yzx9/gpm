@@ -20,7 +20,11 @@ import {
   enableIdentityAutoUnlock,
   isAppLockAvailable,
 } from "../appLock";
-import { onLock, useSecureScreen, useSecuritySettings } from "../composables";
+import {
+  useLockState,
+  useSecureScreen,
+  useSecuritySettings,
+} from "../composables";
 import type {
   AppError,
   AppLockError,
@@ -43,6 +47,7 @@ import BaseToast from "../components/base/BaseToast.vue";
 import BaseCard from "../components/base/BaseCard.vue";
 
 const router = useRouter();
+const { onLock } = useLockState();
 
 const config = ref<RepoConfig | null>(null);
 const loading = ref(false);

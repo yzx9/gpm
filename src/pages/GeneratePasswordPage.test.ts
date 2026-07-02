@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import GeneratePasswordPage from "./GeneratePasswordPage.vue";
-import { useLockState, __resetLockStateForTests } from "../composables";
+import { mountWithApp } from "../test/appTestUtils";
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
 
@@ -25,7 +25,7 @@ async function mountPage(handlers: Record<string, () => unknown>) {
     if (h) return Promise.resolve(h());
     return Promise.resolve(undefined);
   }) as typeof invoke);
-  const wrapper = mount(GeneratePasswordPage);
+  const { wrapper } = mountWithApp(GeneratePasswordPage);
   await flushPromises();
   return wrapper;
 }
@@ -33,7 +33,6 @@ async function mountPage(handlers: Record<string, () => unknown>) {
 describe("GeneratePasswordPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __resetLockStateForTests();
   });
 
   it("generates 10 passwords by default", async () => {
@@ -138,7 +137,7 @@ describe("GeneratePasswordPage", () => {
       }
       return Promise.resolve(undefined);
     }) as typeof invoke);
-    const wrapper = mount(GeneratePasswordPage);
+    const { wrapper } = mountWithApp(GeneratePasswordPage);
     await flushPromises();
 
     await wrapper.find("form").trigger("submit");
@@ -149,18 +148,21 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("clears the batch the moment the identity locks", async () => {
-    const wrapper = await mountPage({
-      generate_password_batch: () => ["a", "b", "c"],
-    });
+    vi.mocked(invoke).mockImplementation(((cmd: string) => {
+      if (cmd === "generate_password_batch")
+        return Promise.resolve(["a", "b", "c"]);
+      return Promise.resolve(undefined);
+    }) as typeof invoke);
+    const { wrapper, lock } = mountWithApp(GeneratePasswordPage);
+    await flushPromises();
     await wrapper.find("form").trigger("submit");
     await flushPromises();
     expect(wrapper.findAll(".result-row")).toHaveLength(3);
 
     // The page registers an onLock clearer via useLockState; drive the same
-    // transition (unlocked → locked) the backend event would.
-    const { setLocked } = useLockState();
-    setLocked(false);
-    setLocked(true);
+    // unlocked → locked transition the backend event would (default mount is
+    // unlocked, so a single setLocked(true) fires the clearer).
+    lock.setLocked(true);
     await flushPromises();
 
     expect(wrapper.findAll(".result-row")).toHaveLength(0);
@@ -179,7 +181,7 @@ describe("GeneratePasswordPage", () => {
       }
       return Promise.resolve(undefined);
     }) as typeof invoke);
-    const wrapper = mount(GeneratePasswordPage);
+    const { wrapper } = mountWithApp(GeneratePasswordPage);
     await flushPromises();
 
     await wrapper.find("form").trigger("submit"); // first generate, in-flight

@@ -10,9 +10,10 @@ import type { AppError, GenerateMode } from "../types";
 import BaseInput from "../components/base/BaseInput.vue";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseAlert from "../components/base/BaseAlert.vue";
-import { onLock } from "../composables";
+import { useLockState } from "../composables";
 
 const router = useRouter();
+const { onLock } = useLockState();
 
 // ── Generator options ─────────────────────────────────────────────────────
 const mode = ref<GenerateMode>("random");

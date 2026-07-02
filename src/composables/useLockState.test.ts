@@ -7,33 +7,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   AUTH_CANCELLED,
-  __resetLockStateForTests,
-  __unlockForTests,
+  createLockState,
   isAuthCancelled,
-  onLock,
-  runWithAuth,
+  LOCK_KEY,
   useLockState,
+  type LockState,
 } from "./useLockState";
+import { withSetup } from "../test/withSetup";
 
 describe("useLockState", () => {
-  const {
-    locked,
-    overlayUp,
-    identityCached,
-    ready,
-    init,
-    setLocked,
-    cancelAuth,
-  } = useLockState();
+  let s: LockState;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    __resetLockStateForTests();
+    // Fresh, fail-closed, not ready — per-test isolation replaces the old
+    // module-singleton __resetLockStateForTests.
+    s = createLockState();
   });
 
   it("is fail-closed (locked) and not ready until init() resolves", () => {
-    expect(locked.value).toBe(true);
-    expect(ready.value).toBe(false);
+    expect(s.locked.value).toBe(true);
+    expect(s.ready.value).toBe(false);
   });
 
   it("init() reflects encrypted+locked auth state and flips ready", async () => {
@@ -44,11 +38,11 @@ describe("useLockState", () => {
       identity_type: "x25519",
     });
 
-    await init();
+    await s.init();
 
     expect(invoke).toHaveBeenCalledWith("get_auth_state");
-    expect(locked.value).toBe(true);
-    expect(ready.value).toBe(true);
+    expect(s.locked.value).toBe(true);
+    expect(s.ready.value).toBe(true);
   });
 
   it("init() unlocks for an encrypted-but-already-unlocked identity", async () => {
@@ -59,9 +53,9 @@ describe("useLockState", () => {
       identity_type: "x25519",
     });
 
-    await init();
+    await s.init();
 
-    expect(locked.value).toBe(false);
+    expect(s.locked.value).toBe(false);
   });
 
   it("init() unlocks for an unencrypted identity (nothing to lock)", async () => {
@@ -72,17 +66,17 @@ describe("useLockState", () => {
       identity_type: "x25519",
     });
 
-    await init();
+    await s.init();
 
-    expect(locked.value).toBe(false);
+    expect(s.locked.value).toBe(false);
   });
 
   it("init() stays fail-closed when get_auth_state rejects", async () => {
     vi.mocked(invoke).mockRejectedValue(new Error("boom"));
 
-    await init();
+    await s.init();
 
-    expect(locked.value).toBe(true);
+    expect(s.locked.value).toBe(true);
   });
 
   it("init() registers a single identity-lock-state listener and is idempotent", async () => {
@@ -93,8 +87,8 @@ describe("useLockState", () => {
       identity_type: "x25519",
     });
 
-    await init();
-    await init();
+    await s.init();
+    await s.init();
 
     expect(listen).toHaveBeenCalledTimes(1);
     expect(listen).toHaveBeenCalledWith(
@@ -110,8 +104,8 @@ describe("useLockState", () => {
       unlocked: true,
       identity_type: "x25519",
     });
-    await init();
-    expect(locked.value).toBe(false);
+    await s.init();
+    expect(s.locked.value).toBe(false);
 
     const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
       payload: { locked: boolean };
@@ -119,52 +113,52 @@ describe("useLockState", () => {
 
     // Backend says locked → mirror it (and fire clear-on-lock).
     handler({ payload: { locked: true } });
-    expect(locked.value).toBe(true);
+    expect(s.locked.value).toBe(true);
 
     // Backend says unlocked → mirror it.
     handler({ payload: { locked: false } });
-    expect(locked.value).toBe(false);
+    expect(s.locked.value).toBe(false);
   });
 
   it("setLocked(true) fires onLock callbacks AFTER flipping the ref", () => {
     const seen: boolean[] = [];
-    onLock(() => seen.push(locked.value));
+    s.onLock(() => seen.push(s.locked.value));
 
-    setLocked(false);
+    s.setLocked(false);
     expect(seen).toEqual([]); // unlocking fires nothing
 
-    setLocked(true);
+    s.setLocked(true);
     expect(seen).toEqual([true]); // fired, and saw the already-flipped ref
   });
 
   it("setLocked with the same value is a no-op (re-lock while open)", () => {
     const cb = vi.fn();
-    onLock(cb);
+    s.onLock(cb);
 
-    setLocked(true); // default was already true → no transition
+    s.setLocked(true); // default was already true → no transition
     expect(cb).not.toHaveBeenCalled();
   });
 
   it("a throwing clearer does not block subsequent clearers", () => {
     const second = vi.fn();
-    onLock(() => {
+    s.onLock(() => {
       throw new Error("boom");
     });
-    onLock(second);
+    s.onLock(second);
 
-    setLocked(false);
-    setLocked(true);
+    s.setLocked(false);
+    s.setLocked(true);
 
     expect(second).toHaveBeenCalledTimes(1);
   });
 
   it("onLock returns an unsubscribe that removes the callback", () => {
     const cb = vi.fn();
-    const off = onLock(cb);
+    const off = s.onLock(cb);
 
-    setLocked(false);
+    s.setLocked(false);
     off();
-    setLocked(true);
+    s.setLocked(true);
 
     expect(cb).not.toHaveBeenCalled();
   });
@@ -178,12 +172,12 @@ describe("useLockState", () => {
       unlocked: true,
       identity_type: "x25519",
     });
-    await init();
-    expect(identityCached.value).toBe(true);
-    expect(locked.value).toBe(false);
+    await s.init();
+    expect(s.identityCached.value).toBe(true);
+    expect(s.locked.value).toBe(false);
 
     const clearer = vi.fn();
-    onLock(clearer);
+    s.onLock(clearer);
 
     const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
       payload: { locked: boolean; soft?: boolean };
@@ -191,18 +185,18 @@ describe("useLockState", () => {
     // Soft wipe: the identity leaves the cache, but the overlay stays down and
     // onLock must NOT fire (a revealed secret / draft survives it).
     handler({ payload: { locked: true, soft: true } });
-    expect(identityCached.value).toBe(false);
-    expect(locked.value).toBe(false);
-    expect(overlayUp.value).toBe(false);
+    expect(s.identityCached.value).toBe(false);
+    expect(s.locked.value).toBe(false);
+    expect(s.overlayUp.value).toBe(false);
     expect(clearer).not.toHaveBeenCalled();
   });
 
   it("runWithAuth runs the op immediately when the identity is cached", async () => {
-    __unlockForTests();
+    s = createLockState({ unlocked: true }); // replaces __unlockForTests
     const op = vi.fn().mockResolvedValue("done");
-    await expect(runWithAuth(op)).resolves.toBe("done");
+    await expect(s.runWithAuth(op)).resolves.toBe("done");
     expect(op).toHaveBeenCalledTimes(1);
-    expect(overlayUp.value).toBe(false);
+    expect(s.overlayUp.value).toBe(false);
   });
 
   it("runWithAuth prompts, then resumes after an unlock when not cached", async () => {
@@ -212,13 +206,13 @@ describe("useLockState", () => {
       unlocked: false,
       identity_type: "x25519",
     });
-    await init();
-    expect(identityCached.value).toBe(false);
+    await s.init();
+    expect(s.identityCached.value).toBe(false);
 
     const op = vi.fn().mockResolvedValue("done");
-    const p = runWithAuth(op);
+    const p = s.runWithAuth(op);
     // Blocked: the per-op overlay is raised and the op has not run.
-    expect(overlayUp.value).toBe(true);
+    expect(s.overlayUp.value).toBe(true);
     expect(op).not.toHaveBeenCalled();
 
     const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
@@ -227,17 +221,17 @@ describe("useLockState", () => {
     handler({ payload: { locked: false } }); // backend reports unlock
     await expect(p).resolves.toBe("done");
     expect(op).toHaveBeenCalledTimes(1);
-    expect(identityCached.value).toBe(true);
-    expect(overlayUp.value).toBe(false);
+    expect(s.identityCached.value).toBe(true);
+    expect(s.overlayUp.value).toBe(false);
   });
 
   // ── cancelAuth: dismiss the per-op overlay, rejecting parked callers ────────
 
   it("cancelAuth is a no-op when no per-op auth is in flight (hard lock)", () => {
-    setLocked(true); // hard lock: authPromise stays null
-    expect(() => cancelAuth()).not.toThrow();
-    expect(locked.value).toBe(true);
-    expect(overlayUp.value).toBe(true); // hard-lock overlay untouched
+    s.setLocked(true); // hard lock: authPromise stays null
+    expect(() => s.cancelAuth()).not.toThrow();
+    expect(s.locked.value).toBe(true);
+    expect(s.overlayUp.value).toBe(true); // hard-lock overlay untouched
   });
 
   it("cancelAuth rejects a parked runWithAuth with AUTH_CANCELLED and drops the overlay", async () => {
@@ -249,26 +243,26 @@ describe("useLockState", () => {
       unlocked: true,
       identity_type: "x25519",
     });
-    await init();
-    expect(locked.value).toBe(false);
-    expect(identityCached.value).toBe(true);
+    await s.init();
+    expect(s.locked.value).toBe(false);
+    expect(s.identityCached.value).toBe(true);
 
     const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
       payload: { locked: boolean; soft?: boolean };
     }) => void;
     handler({ payload: { locked: true, soft: true } }); // soft wipe: cache empty, overlay down
-    expect(identityCached.value).toBe(false);
-    expect(locked.value).toBe(false);
+    expect(s.identityCached.value).toBe(false);
+    expect(s.locked.value).toBe(false);
 
     const op = vi.fn().mockResolvedValue("done");
-    const p = runWithAuth(op);
-    expect(overlayUp.value).toBe(true); // authPrompted raised
+    const p = s.runWithAuth(op);
+    expect(s.overlayUp.value).toBe(true); // authPrompted raised
     expect(op).not.toHaveBeenCalled();
 
-    cancelAuth();
+    s.cancelAuth();
     await expect(p).rejects.toMatchObject({ code: AUTH_CANCELLED });
     expect(op).not.toHaveBeenCalled(); // the op never ran
-    expect(overlayUp.value).toBe(false); // overlay dismissed (locked stayed false)
+    expect(s.overlayUp.value).toBe(false); // overlay dismissed (locked stayed false)
   });
 
   it("cancelAuth rejects every concurrent parked caller (single-flight cancel)", async () => {
@@ -278,14 +272,14 @@ describe("useLockState", () => {
       unlocked: false,
       identity_type: "x25519",
     });
-    await init();
+    await s.init();
 
     const op = vi.fn().mockResolvedValue("done");
-    const p1 = runWithAuth(op);
-    const p2 = runWithAuth(op);
-    expect(overlayUp.value).toBe(true);
+    const p1 = s.runWithAuth(op);
+    const p2 = s.runWithAuth(op);
+    expect(s.overlayUp.value).toBe(true);
 
-    cancelAuth();
+    s.cancelAuth();
     await expect(p1).rejects.toMatchObject({ code: AUTH_CANCELLED });
     await expect(p2).rejects.toMatchObject({ code: AUTH_CANCELLED });
     expect(op).not.toHaveBeenCalled();
@@ -297,5 +291,29 @@ describe("useLockState", () => {
     expect(isAuthCancelled(new Error("boom"))).toBe(false);
     expect(isAuthCancelled(undefined)).toBe(false);
     expect(isAuthCancelled(null)).toBe(false);
+  });
+});
+
+describe("useLockState() accessor (provide/inject)", () => {
+  // The factory (createLockState) holds the logic and is tested directly above;
+  // these cover the thin inject wrapper — the part the Vue testing guide says
+  // needs a host component (provide/inject needs an active instance).
+
+  it("injects the instance provided under LOCK_KEY", () => {
+    const lock = createLockState();
+    const [result, app] = withSetup(
+      () => useLockState(),
+      (a) => a.provide(LOCK_KEY, lock),
+    );
+    expect(result).toBe(lock);
+    app.unmount();
+  });
+
+  it("throws (fail-loud) when LOCK_KEY is not provided", () => {
+    // Called outside setup so inject() yields undefined and our guard throws —
+    // the throw is NOT wrapped by Vue's setup error-handling, so it propagates.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(() => useLockState()).toThrow(/LOCK_KEY/);
+    warnSpy.mockRestore();
   });
 });

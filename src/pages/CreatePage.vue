@@ -17,8 +17,7 @@ import type {
 } from "../types";
 import {
   isAuthCancelled,
-  onLock,
-  runWithAuth,
+  useLockState,
   useOverlayBackHandler,
 } from "../composables";
 import WriteConflictModal from "../components/WriteConflictModal.vue";
@@ -29,6 +28,7 @@ import BaseSpinner from "../components/base/BaseSpinner.vue";
 import BaseAlert from "../components/base/BaseAlert.vue";
 
 const router = useRouter();
+const { onLock, runWithAuth } = useLockState();
 
 // ── Presets + step ────────────────────────────────────────────────────────
 const presets = ref<CreatePreset[]>([]);

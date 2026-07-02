@@ -4,10 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  useSecureScreen,
-  __resetSecureScreenForTests,
-} from "./useSecureScreen";
+import { createSecureScreen } from "./useSecureScreen";
 
 vi.mock("@tauri-apps/api/core");
 
@@ -16,11 +13,10 @@ const fn = () => invoke as ReturnType<typeof vi.fn>;
 describe("useSecureScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __resetSecureScreenForTests();
   });
 
   it("applySecureForRoute is a no-op (returns true, no invoke) when the plugin is unavailable (desktop)", async () => {
-    const { applySecureForRoute } = useSecureScreen();
+    const { applySecureForRoute } = createSecureScreen();
     const ok = await applySecureForRoute(true);
     expect(ok).toBe(true);
     expect(invoke).not.toHaveBeenCalled();
@@ -28,7 +24,7 @@ describe("useSecureScreen", () => {
 
   it("applySecureForRoute sets secure=true on Android for a sensitive route with the toggle ON", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, applySecureForRoute } = useSecureScreen();
+    const { secureAvailable, applySecureForRoute } = createSecureScreen();
     secureAvailable.value = true;
     const ok = await applySecureForRoute(true);
     expect(ok).toBe(true);
@@ -40,7 +36,7 @@ describe("useSecureScreen", () => {
   it("applySecureForRoute sets secure=false for a non-sensitive route", async () => {
     fn().mockResolvedValue(undefined);
     const { secureAvailable, secureScreen, applySecureForRoute } =
-      useSecureScreen();
+      createSecureScreen();
     secureAvailable.value = true;
     secureScreen.value = true;
     await applySecureForRoute(false);
@@ -52,7 +48,7 @@ describe("useSecureScreen", () => {
   it("applySecureForRoute sets secure=false on a sensitive route when the toggle is OFF (master override)", async () => {
     fn().mockResolvedValue(undefined);
     const { secureAvailable, secureScreen, applySecureForRoute } =
-      useSecureScreen();
+      createSecureScreen();
     secureAvailable.value = true;
     secureScreen.value = false;
     await applySecureForRoute(true);
@@ -63,7 +59,7 @@ describe("useSecureScreen", () => {
 
   it("applySecureForRoute returns false when the plugin call rejects on Android (guard aborts)", async () => {
     fn().mockRejectedValue(new Error("bridge"));
-    const { secureAvailable, applySecureForRoute } = useSecureScreen();
+    const { secureAvailable, applySecureForRoute } = createSecureScreen();
     secureAvailable.value = true;
     const ok = await applySecureForRoute(true);
     expect(ok).toBe(false);
@@ -77,7 +73,7 @@ describe("useSecureScreen", () => {
       return Promise.resolve(undefined); // plugin:screen-secure|set_secure
     });
     const { secureAvailable, secureScreen, initSecureScreen } =
-      useSecureScreen();
+      createSecureScreen();
     await initSecureScreen();
     expect(secureAvailable.value).toBe(true);
     expect(secureScreen.value).toBe(false);
@@ -89,7 +85,7 @@ describe("useSecureScreen", () => {
 
   it("initSecureScreen is idempotent (availability fetched once)", async () => {
     fn().mockResolvedValue(true);
-    const { initSecureScreen } = useSecureScreen();
+    const { initSecureScreen } = createSecureScreen();
     await initSecureScreen();
     await initSecureScreen();
     const calls = fn().mock.calls.filter(
@@ -105,7 +101,7 @@ describe("useSecureScreen", () => {
       secureScreen,
       applySecureForRoute,
       setSecureScreen,
-    } = useSecureScreen();
+    } = createSecureScreen();
     secureAvailable.value = true;
     await applySecureForRoute(true); // current route = sensitive
     await setSecureScreen(false);
@@ -121,7 +117,7 @@ describe("useSecureScreen", () => {
 
   it("initSecureScreen treats an availability rejection as available (fail-closed), not desktop", async () => {
     fn().mockRejectedValue(new Error("bridge"));
-    const { secureAvailable, initSecureScreen } = useSecureScreen();
+    const { secureAvailable, initSecureScreen } = createSecureScreen();
     await initSecureScreen();
     // A flaky bridge on Android must NOT be mistaken for desktop (fail-open).
     expect(secureAvailable.value).toBe(true);
@@ -134,7 +130,7 @@ describe("useSecureScreen", () => {
         return Promise.reject(new Error("pre-setup"));
       return Promise.resolve(undefined); // plugin:screen-secure|set_secure
     });
-    const { secureScreen, initSecureScreen } = useSecureScreen();
+    const { secureScreen, initSecureScreen } = createSecureScreen();
     await initSecureScreen();
     expect(secureScreen.value).toBe(true);
   });
@@ -149,7 +145,7 @@ describe("useSecureScreen", () => {
       secureScreen,
       applySecureForRoute,
       setSecureScreen,
-    } = useSecureScreen();
+    } = createSecureScreen();
     secureAvailable.value = true;
     await applySecureForRoute(true); // settle a sensitive route (toggle ON)
     const ok = await setSecureScreen(false);
@@ -161,7 +157,7 @@ describe("useSecureScreen", () => {
   it("raiseSecureForRoute covers a departing secret page during the transition without committing the route level", async () => {
     fn().mockResolvedValue(undefined);
     const { secureAvailable, applySecureForRoute, raiseSecureForRoute } =
-      useSecureScreen();
+      createSecureScreen();
     secureAvailable.value = true;
     await applySecureForRoute(true); // arrived on a sensitive route
     expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
@@ -182,7 +178,7 @@ describe("useSecureScreen", () => {
   it("setSecureOverlay forces FLAG_SECURE on for a non-sensitive route while the overlay is up", async () => {
     fn().mockResolvedValue(undefined);
     const { secureAvailable, applySecureForRoute, setSecureOverlay } =
-      useSecureScreen();
+      createSecureScreen();
     secureAvailable.value = true;
     await applySecureForRoute(false); // on /entries: not secured
     expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
