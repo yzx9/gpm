@@ -7,31 +7,7 @@ mod common;
 use std::path::Path;
 
 use common::*;
-use rustpass::crypto;
 use rustpass::store::{ConflictChoice, Store, WriteConflict, WriteOutcome, WriteResult};
-
-/// Unwrap a `WriteOutcome::Written`, panicking on `Conflict`.
-fn written(outcome: WriteOutcome) -> WriteResult {
-    match outcome {
-        WriteOutcome::Written(r) => r,
-        other => panic!("expected WriteOutcome::Written, got {other:?}"),
-    }
-}
-
-/// Read a file straight from a bare repo's HEAD tree (the pushed remote).
-fn read_from_bare(bare_path: &Path, rel_path: &str) -> Vec<u8> {
-    let repo = git2::Repository::open(bare_path).expect("open bare repo");
-    let head = repo.head().expect("get head");
-    let commit = repo
-        .find_commit(head.target().expect("head oid"))
-        .expect("find commit");
-    let tree = commit.tree().expect("head tree");
-    let entry = tree
-        .get_path(Path::new(rel_path))
-        .unwrap_or_else(|_| panic!("file {rel_path} should be in the bare repo HEAD"));
-    let blob = repo.find_blob(entry.id()).expect("find blob");
-    blob.content().to_vec()
-}
 
 /// Count commits reachable from a repo's HEAD.
 fn head_commit_count(repo_path: &Path) -> usize {
@@ -83,16 +59,18 @@ async fn writable_store() -> (tempfile::TempDir, tempfile::TempDir, Store, Vec<u
     (bare_dir, config_dir, store, identity_bytes)
 }
 
-/// Full write flow: set → remote received the encrypted file → get reads it back.
+/// Full LOCAL write flow: `set` encrypts + commits locally. The remote (bare)
+/// is NOT advanced — `set` no longer pushes (the autosync orchestrator does).
+/// This pins the local-only regression (HEAD +1 local, origin unchanged).
 #[tokio::test]
-async fn set_writes_encrypts_commits_and_pushes() {
+async fn set_writes_encrypts_and_commits_locally() {
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         vec![],
         vec![(".gopass-recipients", recipient.as_bytes())],
         &recipient,
     );
-    let commits_before = head_commit_count(bare_dir.path());
+    let bare_commits_before = head_commit_count(bare_dir.path());
 
     let config_dir = tempfile::tempdir().expect("config dir");
     let store = Store::new(config_dir.path().to_path_buf(), None);
@@ -107,29 +85,28 @@ async fn set_writes_encrypts_commits_and_pushes() {
         )
         .await
         .expect("configure should succeed");
+    let repo_path = store.config().await.expect("config").local_path;
+    let local_commits_before = head_commit_count(Path::new(&repo_path));
 
-    let result = written(
-        store
-            .set("cloud/aws/root", b"s3kr3t-password\nuser: admin")
-            .await
-            .expect("set should succeed"),
-    );
+    let result = store
+        .set("cloud/aws/root", b"s3kr3t-password\nuser: admin")
+        .await
+        .expect("set should succeed");
     assert!(!result.commit.is_empty(), "set should return a commit hash");
 
-    // 1. The remote (bare) advanced by exactly one commit.
+    // 1. Local HEAD advanced by exactly one commit; the remote (origin) did NOT.
+    assert_eq!(
+        head_commit_count(Path::new(&repo_path)),
+        local_commits_before + 1,
+        "set commits locally (HEAD +1)"
+    );
     assert_eq!(
         head_commit_count(bare_dir.path()),
-        commits_before + 1,
-        "push should add exactly one commit to the remote"
+        bare_commits_before,
+        "set does NOT push — the bare remote is unchanged"
     );
 
-    // 2. The remote holds the encrypted file, and it decrypts to our plaintext.
-    let pushed = read_from_bare(bare_dir.path(), "cloud/aws/root.age");
-    let decrypted =
-        crypto::decrypt_bytes(&pushed, identity.as_bytes(), None).expect("decrypt pushed file");
-    assert_eq!(decrypted, b"s3kr3t-password\nuser: admin");
-
-    // 3. The local store lists the new entry and reads it back.
+    // 2. The local store lists the new entry and reads it back (decrypt round-trip).
     let entries = store.list().await.expect("list");
     assert!(entries.iter().any(|e| e.name == "cloud/aws/root"));
     let secret = store.get("cloud/aws/root").await.expect("get");
@@ -137,10 +114,12 @@ async fn set_writes_encrypts_commits_and_pushes() {
     assert!(secret.body().contains("user: admin"));
 }
 
-/// A configured commit identity flows into the pushed commit's author.
+/// A configured commit identity flows into the LOCAL commit's author (set no
+/// longer pushes, so the author is checked on the local HEAD).
 #[tokio::test]
 async fn write_commit_uses_configured_identity() {
-    let (bare_dir, _config_dir, store, _id) = writable_store().await;
+    let (_bare_dir, _config_dir, store, _id) = writable_store().await;
+    let repo_path = store.config().await.expect("config").local_path;
     store
         .set_commit_identity(
             Some("Alice".to_string()),
@@ -149,14 +128,12 @@ async fn write_commit_uses_configured_identity() {
         .await
         .expect("set_commit_identity");
 
-    written(
-        store
-            .set("cloud/aws/root", b"s3kr3t\n")
-            .await
-            .expect("set should succeed"),
-    );
+    store
+        .set("cloud/aws/root", b"s3kr3t\n")
+        .await
+        .expect("set should succeed");
 
-    let (name, email) = author_of_head(bare_dir.path());
+    let (name, email) = author_of_head(Path::new(&repo_path));
     assert_eq!(name.as_deref(), Some("Alice"));
     assert_eq!(email.as_deref(), Some("alice@example.com"));
 }
@@ -164,55 +141,32 @@ async fn write_commit_uses_configured_identity() {
 /// With no identity configured, commits fall back to the shipped default.
 #[tokio::test]
 async fn write_commit_falls_back_to_default_identity() {
-    let (bare_dir, _config_dir, store, _id) = writable_store().await;
+    let (_bare_dir, _config_dir, store, _id) = writable_store().await;
+    let repo_path = store.config().await.expect("config").local_path;
 
-    written(
-        store
-            .set("cloud/aws/root", b"s3kr3t\n")
-            .await
-            .expect("set should succeed"),
-    );
+    store
+        .set("cloud/aws/root", b"s3kr3t\n")
+        .await
+        .expect("set should succeed");
 
     let default = Store::commit_identity_default();
-    let (name, email) = author_of_head(bare_dir.path());
+    let (name, email) = author_of_head(Path::new(&repo_path));
     assert_eq!(name.as_deref(), Some(default.name.as_str()));
     assert_eq!(email.as_deref(), Some(default.email.as_str()));
 }
 
-/// Writing a nested entry creates intermediate directories.
+/// Writing a nested entry creates intermediate directories (checked locally).
 #[tokio::test]
 async fn set_creates_nested_directories() {
-    let (identity, recipient) = generate_test_keypair();
-    let (bare_dir, _clone_dir) = create_test_git_repo_with(
-        vec![],
-        vec![(".gopass-recipients", recipient.as_bytes())],
-        &recipient,
-    );
-
-    let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf(), None);
-    store
-        .configure(
-            bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
-            &identity,
-            None,
-        )
-        .await
-        .expect("configure");
+    let (_bare_dir, _config_dir, store, _id) = writable_store().await;
 
     store
         .set("a/b/c/deep", b"deep-secret")
         .await
         .expect("set nested");
 
-    let pushed = read_from_bare(bare_dir.path(), "a/b/c/deep.age");
-    assert_eq!(
-        crypto::decrypt_bytes(&pushed, identity.as_bytes(), None).unwrap(),
-        b"deep-secret"
-    );
+    let secret = store.get("a/b/c/deep").await.expect("get nested");
+    assert_eq!(secret.password(), "deep-secret");
 }
 
 /// Our own key is always able to read what we write, even when the
@@ -286,30 +240,10 @@ async fn set_rejects_path_traversal() {
     assert_eq!(err.code, "INVALID_ENTRY_NAME");
 }
 
-/// Overwriting an existing local entry re-encrypts and pushes (happy path,
-/// no remote divergence). This is gopass `set` overwriting in place.
+/// Overwriting an existing local entry re-encrypts and commits (checked locally).
 #[tokio::test]
 async fn set_overwrites_existing_entry() {
-    let (identity, recipient) = generate_test_keypair();
-    let (bare_dir, _clone_dir) = create_test_git_repo_with(
-        vec![],
-        vec![(".gopass-recipients", recipient.as_bytes())],
-        &recipient,
-    );
-
-    let config_dir = tempfile::tempdir().expect("config dir");
-    let store = Store::new(config_dir.path().to_path_buf(), None);
-    store
-        .configure(
-            bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
-            &identity,
-            None,
-        )
-        .await
-        .expect("configure");
+    let (_bare_dir, _config_dir, store, _id) = writable_store().await;
 
     store
         .set("rotate/me", b"old-password")
@@ -322,17 +256,11 @@ async fn set_overwrites_existing_entry() {
 
     let secret = store.get("rotate/me").await.expect("get");
     assert_eq!(secret.password(), "new-password");
-
-    // The remote reflects the latest value.
-    let pushed = read_from_bare(bare_dir.path(), "rotate/me.age");
-    assert_eq!(
-        crypto::decrypt_bytes(&pushed, identity.as_bytes(), None).unwrap(),
-        b"new-password"
-    );
 }
 
 /// `WriteOutcome` serializes as a `kind`-tagged object — the IPC contract
-/// the frontend consumes as a discriminated union.
+/// the frontend consumes as a discriminated union. (`Conflict` is dead-but-
+/// present until `PR2c`; the serialization shape is pinned here.)
 #[test]
 fn write_outcome_serializes_tagged() {
     let written = WriteOutcome::Written(WriteResult {
@@ -354,7 +282,7 @@ fn write_outcome_serializes_tagged() {
 }
 
 /// `ConflictChoice` round-trips as snake_case — it crosses IPC as a
-/// `resolve_write_conflict` command argument.
+/// `resolve_write_conflict` command argument. (Frozen for `PR2c` retirement.)
 #[test]
 fn conflict_choice_round_trips_snake_case() {
     for (choice, s) in [

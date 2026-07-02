@@ -9,7 +9,7 @@ mod common;
 use std::collections::HashMap;
 
 use common::*;
-use rustpass::store::{Store, WriteOutcome};
+use rustpass::store::Store;
 use rustpass::template;
 
 /// Configure a store against a bare repo carrying a recipients file and an
@@ -48,11 +48,11 @@ async fn templated_store(
 async fn create_applies_content_template() {
     let (_bare, _cfg, store) = templated_store(Some("{{ .Content }}\n\nuser: \nurl: ")).await;
 
-    let outcome = store
+    let result = store
         .create("email/gmail", b"s3kr3t")
         .await
         .expect("create");
-    assert!(matches!(outcome, WriteOutcome::Written(_)));
+    assert!(!result.commit.is_empty());
 
     let secret = store.get("email/gmail").await.expect("get");
     assert_eq!(secret.password(), "s3kr3t");
@@ -155,11 +155,11 @@ async fn create_from_website_preset() {
     fields.insert("username", "alice".to_string());
     fields.insert("password", "hunter2".to_string());
 
-    let outcome = store
+    let result = store
         .create_from_preset("website", &fields)
         .await
         .expect("create");
-    assert!(matches!(outcome, WriteOutcome::Written(_)));
+    assert!(!result.commit.is_empty());
 
     // Generated at the prefixed path derived from url + username.
     let secret = store.get("websites/example.com/alice").await.expect("get");

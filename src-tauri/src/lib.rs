@@ -273,6 +273,7 @@ pub fn run() {
             config::set_lock_mode,
             config::set_view_clear_secs,
             config::set_clipboard_clear_secs,
+            config::set_autosync,
             config::get_commit_identity_default,
             config::reset_config,
             // app config: screen-capture master toggle + platform availability

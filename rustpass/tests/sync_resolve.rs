@@ -14,11 +14,12 @@
 mod common;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use common::*;
 use rustpass::SyncOutcome;
 use rustpass::crypto;
-use rustpass::store::DivergenceChoice;
+use rustpass::store::{DivergenceChoice, Store};
 
 /// Write an encrypted `.age` entry into the store's working repo as an unpushed
 /// local commit. `plaintext` is encrypted to `recipient` so the store can decrypt
@@ -395,5 +396,199 @@ async fn sync_local_ahead_is_noop_not_divergence() {
         bare_head_oid(bare_dir.path()),
         local_head_oid(Path::new(&repo_path)),
         "push fast-forwards the remote to local HEAD"
+    );
+}
+
+// ── Store::autosync_write — the pull → write → push orchestrator ─────────────
+
+/// Autosync OFF: `autosync_write` runs the local write only — no pull, no push.
+/// The entry commits locally and the remote (bare) is unchanged.
+#[tokio::test]
+async fn autosync_off_skips_network() {
+    let (bare_dir, _cfg, store, _recipient) = store_with_base(vec![]).await;
+    let store = Arc::new(store);
+    store.set_autosync(false).await.expect("autosync off");
+    let bare_before = bare_head_oid(bare_dir.path());
+
+    let s = store.clone();
+    let result = store
+        .autosync_write(None, move || {
+            let s = s.clone();
+            async move { s.set("offline-entry", b"local-only").await }
+        })
+        .await
+        .expect("autosync-off write");
+
+    assert!(!result.commit.is_empty(), "local commit was made");
+    assert_eq!(
+        store.get("offline-entry").await.expect("get").password(),
+        "local-only"
+    );
+    assert_eq!(
+        bare_head_oid(bare_dir.path()),
+        bare_before,
+        "autosync off must NOT push — the remote is unchanged"
+    );
+}
+
+/// Autosync ON (the default): `autosync_write` pulls, writes, and pushes — the
+/// remote (bare) advances to the new commit and the entry is readable.
+#[tokio::test]
+async fn autosync_on_publishes_via_pull_write_push() {
+    let (bare_dir, _cfg, store, _recipient) = store_with_base(vec![]).await;
+    let store = Arc::new(store);
+    let bare_before = bare_head_oid(bare_dir.path());
+
+    let s = store.clone();
+    let result = store
+        .autosync_write(None, move || {
+            let s = s.clone();
+            async move { s.set("published", b"via-orchestrator").await }
+        })
+        .await
+        .expect("autosync-on write");
+
+    assert!(!result.commit.is_empty(), "commit was made");
+    // The push published: the bare tip advanced to our commit.
+    assert_ne!(bare_head_oid(bare_dir.path()), bare_before);
+    assert!(
+        bare_head_oid(bare_dir.path()).starts_with(&result.commit),
+        "bare tip is the orchestrator's pushed commit"
+    );
+    assert_eq!(
+        store.get("published").await.expect("get").password(),
+        "via-orchestrator"
+    );
+}
+
+/// Autosync ON with a divergent remote: the push is rejected and surfaces as
+/// `Err(PUSH_REJECTED)` (the context-aware divergence modal lands in `PR2c`).
+#[tokio::test]
+async fn autosync_on_push_rejected_returns_err() {
+    let (bare_dir, _cfg, store, recipient) = store_with_base(vec![]).await;
+    let repo_path = store.config().await.expect("config").local_path;
+    let store = Arc::new(store);
+
+    // Diverge: an unpushed local commit AND a remote advance on another file.
+    let unpushed: &[u8] = b"x";
+    local_commit_files(
+        Path::new(&repo_path),
+        &[("local-only.txt", unpushed)],
+        "local-only",
+    );
+    let remote_blob: Vec<u8> = b"r".to_vec();
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("remote.age", remote_blob.as_slice())],
+        &recipient,
+        "remote advance",
+    );
+
+    let s = store.clone();
+    let err = store
+        .autosync_write(None, move || {
+            let s = s.clone();
+            async move { s.set("new", b"v").await }
+        })
+        .await
+        .expect_err("a divergent push should be rejected");
+    assert_eq!(
+        err.code, "PUSH_REJECTED",
+        "divergence surfaces as PUSH_REJECTED until the PR2c modal"
+    );
+}
+
+/// Two `autosync_write` calls in parallel both complete and both entries land —
+/// the `write_mu` critical section serializes them (no deadlock, no git-index
+/// corruption). The local commits interleave cleanly under the lock.
+#[tokio::test]
+async fn autosync_concurrent_writes_both_land() {
+    let (bare_dir, _cfg, store, _recipient) = store_with_base(vec![]).await;
+    let store = Arc::new(store);
+
+    let s1 = store.clone();
+    let s2 = store.clone();
+    let (r1, r2) = tokio::join!(
+        store.autosync_write(None, move || {
+            let s = s1.clone();
+            async move { s.set("a", b"1").await }
+        }),
+        store.autosync_write(None, move || {
+            let s = s2.clone();
+            async move { s.set("b", b"2").await }
+        }),
+    );
+    let _ = r1.expect("concurrent write a");
+    let _ = r2.expect("concurrent write b");
+
+    assert_eq!(store.get("a").await.expect("get a").password(), "1");
+    assert_eq!(store.get("b").await.expect("get b").password(), "2");
+    // Both commits published.
+    assert!(bare_head_oid(bare_dir.path()).len() > 7);
+}
+
+/// ⚠️ ACCEPTED LIMITATION (`0026`, pinned here): with autosync on, a stale edit
+/// silently clobbers a teammate's newer same-name change. The orchestrator's
+/// pre-write pull fast-forwards over the remote's newer version, the local write
+/// commits on top, and the push fast-forwards — returning `Ok`, not a conflict.
+/// Base-version-aware edit is the deferred fix. This test pins the clobber so it
+/// can't drift silently.
+#[tokio::test]
+async fn autosync_silently_clobbers_remote_same_name_change() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo_with(
+        vec![("entry.age", b"v1")],
+        vec![(".gopass-recipients", recipient.as_bytes())],
+        &recipient,
+    );
+    let config_dir = tempfile::tempdir().expect("config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("utf-8"),
+            None,
+            None,
+            None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure");
+    let store = Arc::new(store);
+
+    // A teammate advances the SAME entry on the remote; the local has no
+    // unpushed commit, so there is no divergence — only a behind-local.
+    let newer: Vec<u8> = b"newer-from-teammate".to_vec();
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("entry.age", newer.as_slice())],
+        &recipient,
+        "remote advances same-name",
+    );
+
+    // The user, editing from the stale v1 snapshot, saves via the orchestrator.
+    let s = store.clone();
+    let result = store
+        .autosync_write(None, move || {
+            let s = s.clone();
+            async move { s.set("entry", b"stale-edit").await }
+        })
+        .await
+        .expect("autosync write");
+    assert!(
+        !result.commit.is_empty(),
+        "no divergence → fast-forward → Ok (the silent clobber)"
+    );
+
+    // The teammate's newer version was silently overwritten by the stale edit.
+    assert_eq!(
+        store.get("entry").await.expect("get").password(),
+        "stale-edit"
+    );
+    let blob = bare_blob(bare_dir.path(), "entry.age");
+    assert_eq!(
+        crypto::decrypt_bytes(&blob, identity.as_bytes(), None).unwrap(),
+        b"stale-edit",
+        "remote HEAD has the stale edit, not the teammate's newer version — the clobber"
     );
 }

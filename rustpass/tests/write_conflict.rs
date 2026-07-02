@@ -2,14 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Git-conflict handling on the write path (`Store::set` → `WriteOutcome::Conflict`
-//! and `Store::resolve_write_conflict`).
+//! `Store::resolve_write_conflict` — the legacy write-time conflict resolver,
+//! retained (alive via the frozen `resolve_write_conflict` command) until the
+//! frontend flip in `PR2c`. Conflict surfacing moved to sync time
+//! (`resolve_sync_divergence` / `resolve_keep_mine`, covered in `sync_resolve.rs`);
+//! `set` itself is local-only and no longer surfaces a `Conflict`, so these
+//! tests drive the resolver directly against a manual divergence (an unpushed
+//! local commit + a remote same-name advance).
 //!
-//! A real conflict needs true divergence: the local branch has a commit the
-//! remote does not (an unpushed write), and the remote has a commit the local
-//! does not (a same-name file added upstream). `set`'s fast-forward-only
-//! pre-sync refuses to clobber the divergent local, so the subsequent push is
-//! rejected and the conflict is surfaced — deterministically, no racing.
+//! `set`-surfaces-Conflict and `set`-auto-replays behavior is gone with the
+//! local-only write path and is intentionally not ported.
 
 mod common;
 
@@ -17,7 +19,7 @@ use std::path::Path;
 
 use common::*;
 use rustpass::crypto;
-use rustpass::store::{ConflictChoice, Store, WriteOutcome};
+use rustpass::store::{ConflictChoice, Store};
 
 /// Make a local commit in `repo_path` (the store's working repo) WITHOUT
 /// pushing it. This is the "unpushed local write" that creates divergence.
@@ -55,10 +57,14 @@ fn read_from_bare(bare_path: &Path, rel_path: &str) -> Vec<u8> {
 }
 
 /// Configure a store against a fresh bare repo carrying a recipients file
-/// listing the store's own key. Returns `(bare_dir, config_dir, store,
-/// identity, recipient)` so tests can craft remote commits decryptable (or
-/// not) by the configured identity.
-async fn store_with_recipients() -> (tempfile::TempDir, tempfile::TempDir, Store, String, String) {
+/// listing the store's own key.
+async fn store_with_recipients() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Store,
+    String,
+    String,
+) {
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
@@ -83,95 +89,7 @@ async fn store_with_recipients() -> (tempfile::TempDir, tempfile::TempDir, Store
     (bare_dir, config_dir, store, identity, recipient)
 }
 
-/// `set` surfaces a Conflict (decryptable) when the remote added a same-name
-/// file encrypted to us while we held an unpushed local commit.
-#[tokio::test]
-async fn set_returns_conflict_when_remote_same_name_is_decryptable() {
-    let (bare_dir, _config_dir, store, identity, recipient) = store_with_recipients().await;
-    let repo_path = store.config().await.expect("config").local_path;
-
-    // 1. Unpushed local write → local diverges from the remote base.
-    local_unpushed_commit(
-        Path::new(&repo_path),
-        "local-only.txt",
-        b"unpushed",
-        "local-only commit",
-    );
-
-    // 2. Remote adds a same-name file (encrypted to us → decryptable).
-    add_commit_to_bare(
-        bare_dir.path(),
-        vec![("conflict.age", b"theirs-secret")],
-        &recipient,
-        "remote adds same-name",
-    );
-
-    // 3. set: pre-sync refuses to clobber the divergent local; push rejected.
-    let outcome = store.set("conflict", b"ours-secret").await.expect("set ok");
-    match &outcome {
-        WriteOutcome::Conflict(c) => {
-            assert_eq!(c.name, "conflict");
-            assert!(
-                c.remote_decryptable,
-                "remote version was encrypted to us, should be decryptable"
-            );
-        }
-        other => panic!("expected Conflict, got {other:?}"),
-    }
-
-    // The conflict object must not leak either plaintext.
-    let serialized = serde_json::to_string(&outcome).unwrap();
-    assert!(!serialized.contains("ours-secret"));
-    assert!(!serialized.contains("theirs-secret"));
-    // The identity confirms the remote blob really was decryptable.
-    let blob = read_from_bare(bare_dir.path(), "conflict.age");
-    assert_eq!(
-        crypto::decrypt_bytes(&blob, identity.as_bytes(), None).unwrap(),
-        b"theirs-secret"
-    );
-}
-
-/// `set` surfaces a Conflict with `remote_decryptable: false` when the
-/// remote's same-name file was encrypted to a key we don't hold.
-#[tokio::test]
-async fn set_returns_conflict_when_remote_same_name_is_undecryptable() {
-    let (_other_identity, other_recipient) = generate_test_keypair();
-    let (bare_dir, _config_dir, store, identity, _recipient) = store_with_recipients().await;
-    let repo_path = store.config().await.expect("config").local_path;
-
-    local_unpushed_commit(
-        Path::new(&repo_path),
-        "local-only.txt",
-        b"unpushed",
-        "local-only commit",
-    );
-
-    // Remote adds a same-name file encrypted to OTHER (not us) → undecryptable.
-    add_commit_to_bare(
-        bare_dir.path(),
-        vec![("conflict.age", b"theirs-secret")],
-        &other_recipient,
-        "remote adds same-name (other key)",
-    );
-
-    let outcome = store.set("conflict", b"ours-secret").await.expect("set ok");
-    match outcome {
-        WriteOutcome::Conflict(c) => {
-            assert_eq!(c.name, "conflict");
-            assert!(
-                !c.remote_decryptable,
-                "remote was encrypted to another key; we can't decrypt it"
-            );
-        }
-        other => panic!("expected Conflict, got {other:?}"),
-    }
-
-    // Sanity: we indeed cannot decrypt the remote blob.
-    let blob = read_from_bare(bare_dir.path(), "conflict.age");
-    assert!(crypto::decrypt_bytes(&blob, identity.as_bytes(), None).is_err());
-}
-
-/// KeepMine on a decryptable conflict overwrites the remote with our version.
+/// KeepMine on a decryptable remote overwrites it with our version (and pushes).
 #[tokio::test]
 async fn resolve_keep_mine_overwrites_decryptable_remote() {
     let (bare_dir, _config_dir, store, _identity, recipient) = store_with_recipients().await;
@@ -190,12 +108,7 @@ async fn resolve_keep_mine_overwrites_decryptable_remote() {
         "remote same-name",
     );
 
-    // Drive into the conflict, then resolve with KeepMine.
-    assert!(matches!(
-        store.set("conflict", b"ours").await,
-        Ok(WriteOutcome::Conflict(_))
-    ));
-
+    // Resolve directly — the resolver operates on the remote same-name state.
     let result = store
         .resolve_write_conflict("conflict", b"ours", ConflictChoice::KeepMine)
         .await
@@ -206,12 +119,12 @@ async fn resolve_keep_mine_overwrites_decryptable_remote() {
     assert_eq!(store.get("conflict").await.expect("get").password(), "ours");
 }
 
-/// KeepMine is REFUSED on an undecryptable remote (would destroy data we
-/// can't read) — surfaces `UnsafeOverwrite`.
+/// KeepMine is REFUSED on an undecryptable remote (would destroy data we can't
+/// read) — surfaces `UnsafeOverwrite`.
 #[tokio::test]
 async fn resolve_keep_mine_refused_on_undecryptable() {
     let (_other_identity, other_recipient) = generate_test_keypair();
-    let (_bare_dir, _config_dir, store, _identity, _recipient) = store_with_recipients().await;
+    let (bare_dir, _config_dir, store, _identity, _recipient) = store_with_recipients().await;
     let repo_path = store.config().await.expect("config").local_path;
 
     local_unpushed_commit(
@@ -221,16 +134,11 @@ async fn resolve_keep_mine_refused_on_undecryptable() {
         "local-only commit",
     );
     add_commit_to_bare(
-        _bare_dir.path(),
+        bare_dir.path(),
         vec![("conflict.age", b"theirs")],
         &other_recipient,
         "remote same-name (other key)",
     );
-
-    assert!(matches!(
-        store.set("conflict", b"ours").await,
-        Ok(WriteOutcome::Conflict(_))
-    ));
 
     let err = store
         .resolve_write_conflict("conflict", b"ours", ConflictChoice::KeepMine)
@@ -262,11 +170,6 @@ async fn resolve_keep_mine_force_overwrites_undecryptable() {
         "remote same-name (other key)",
     );
 
-    assert!(matches!(
-        store.set("conflict", b"ours").await,
-        Ok(WriteOutcome::Conflict(_))
-    ));
-
     let result = store
         .resolve_write_conflict("conflict", b"ours", ConflictChoice::KeepMineForce)
         .await
@@ -296,11 +199,6 @@ async fn resolve_keep_remote_adopts_remote() {
         "remote same-name",
     );
 
-    assert!(matches!(
-        store.set("conflict", b"ours").await,
-        Ok(WriteOutcome::Conflict(_))
-    ));
-
     let result = store
         .resolve_write_conflict("conflict", b"ours", ConflictChoice::KeepRemote)
         .await
@@ -314,7 +212,8 @@ async fn resolve_keep_remote_adopts_remote() {
     );
 }
 
-/// Cancel leaves the store at the pre-write state; our write is not pushed.
+/// Cancel leaves the store at the remote tip (the resolver's pre-write state);
+/// our write is not pushed.
 #[tokio::test]
 async fn resolve_cancel_does_not_push() {
     let (bare_dir, _config_dir, store, identity, recipient) = store_with_recipients().await;
@@ -333,64 +232,24 @@ async fn resolve_cancel_does_not_push() {
         "remote same-name",
     );
 
-    assert!(matches!(
-        store.set("conflict", b"ours").await,
-        Ok(WriteOutcome::Conflict(_))
-    ));
-
     let result = store
         .resolve_write_conflict("conflict", b"ours", ConflictChoice::Cancel)
         .await
         .expect("resolve");
     assert!(result.is_none());
 
-    // Cancel rolled back to the pre-write state, so the local repo no longer
-    // has the entry.
+    // Cancel writes nothing and does not fast-forward, so the entry (which the
+    // manual setup only put on the remote) is still absent locally.
     let err = store.get("conflict").await.unwrap_err();
-    assert_eq!(err.code, "ENTRY_NOT_FOUND");
+    assert_eq!(
+        err.code, "ENTRY_NOT_FOUND",
+        "Cancel wrote nothing of ours; conflict.age is not local"
+    );
 
     // And our "ours" was never pushed: the remote still holds "theirs".
     let pushed = read_from_bare(bare_dir.path(), "conflict.age");
     assert_eq!(
         crypto::decrypt_bytes(&pushed, identity.as_bytes(), None).unwrap(),
         b"theirs"
-    );
-}
-
-/// When the remote advanced on OTHER files (no same-name collision), `set`
-/// transparently replays the write on the remote tip → Written.
-#[tokio::test]
-async fn set_auto_replays_when_remote_changed_other_files() {
-    let (bare_dir, _config_dir, store, _identity, recipient) = store_with_recipients().await;
-    let repo_path = store.config().await.expect("config").local_path;
-
-    local_unpushed_commit(
-        Path::new(&repo_path),
-        "local-only.txt",
-        b"unpushed",
-        "local-only commit",
-    );
-    // Remote adds an UNRELATED file (no same-name collision with "mine").
-    add_commit_to_bare(
-        bare_dir.path(),
-        vec![("other.age", b"remote-other")],
-        &recipient,
-        "remote adds other file",
-    );
-
-    let outcome = store.set("mine", b"mine-secret").await.expect("set ok");
-    match outcome {
-        WriteOutcome::Written(r) => assert!(!r.commit.is_empty()),
-        other => panic!("expected Written (auto-replay), got {other:?}"),
-    }
-
-    // Both the unrelated remote file and our new file are present & readable.
-    assert_eq!(
-        store.get("mine").await.expect("get").password(),
-        "mine-secret"
-    );
-    assert_eq!(
-        store.get("other").await.expect("get").password(),
-        "remote-other"
     );
 }

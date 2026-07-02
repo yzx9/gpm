@@ -13,7 +13,6 @@ mod common;
 mod tests {
     use std::path::Path;
 
-    use rustpass::WriteOutcome;
     use rustpass::recipient;
     use rustpass::ssh;
     use rustpass::store::Store;
@@ -82,13 +81,13 @@ mod tests {
 
         // Round-trip a secret. set() pre-syncs (no-op pull), writes, commits, and
         // pushes (no-op push) — all must succeed without an `origin`.
-        let outcome = store
+        let result = store
             .set("test/entry", b"super-secret\nuser: alice")
             .await
             .expect("set on a local-only store");
         assert!(
-            matches!(outcome, WriteOutcome::Written(_)),
-            "local-only write should succeed, not conflict"
+            !result.commit.is_empty(),
+            "local-only write should succeed"
         );
 
         let secret = store.get("test/entry").await.expect("get");
@@ -179,11 +178,11 @@ mod tests {
             .await
             .expect("save_identity for SSH key");
 
-        let outcome = store
+        let result = store
             .set("ssh/entry", b"ssh-secret")
             .await
             .expect("set with SSH identity");
-        assert!(matches!(outcome, WriteOutcome::Written(_)));
+        assert!(!result.commit.is_empty());
         let secret = store.get("ssh/entry").await.expect("get");
         assert_eq!(secret.password(), "ssh-secret");
     }

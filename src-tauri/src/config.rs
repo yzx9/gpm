@@ -91,6 +91,18 @@ pub(crate) async fn set_clipboard_clear_secs(
     Ok(rc)
 }
 
+/// Set the per-device autosync flag — whether each save wraps in a pull → write
+/// → push (`true`, the default) or stays local until a manual Sync. Returns the
+/// updated repo config. The Settings toggle UI lands in `PR2c`.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_autosync(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<RepoConfig, Error> {
+    state.store.set_autosync(enabled).await
+}
+
 /// The default commit author identity (for UI display).
 #[tauri::command]
 pub(crate) async fn get_commit_identity_default() -> CommitIdentity {

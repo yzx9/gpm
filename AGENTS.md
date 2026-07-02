@@ -54,7 +54,7 @@ Local Tauri plugin crates (not published). Each follows the standard Tauri mobil
 - All decrypted content uses `Zeroizing<String>` and is wiped after use
 - Error messages are sanitized to never contain secrets
 - CSP restricts script/connect sources to `self` + IPC only
-- Auto-lock defaults to "Immediate" (no-cache): the identity is decrypted per copy/show/create and wiped right after, so the master key sits in memory only for the operation, not the whole session. Browsing the list needs no identity. The identity cache is also wiped on a failed op (a decode error under Immediate still clears the cache). Known limitation: an unresolved write conflict suppresses the wipe for its whole window — the stashed conflict plaintext is replayed by resolve, which needs the identity, so the cache can't be dropped until the conflict is resolved or cancelled (or the store is hard-locked). Idle-timeout and Never modes keep the session cached as before.
+- Auto-lock defaults to "Immediate" (no-cache): the identity is decrypted per copy/show/create and wiped right after, so the master key sits in memory only for the operation, not the whole session. Browsing the list needs no identity. The identity cache is also wiped on a failed op (a decode error under Immediate still clears the cache). Write conflicts surface at sync time, so the autosync write path never produces a write-time Conflict and no conflict plaintext is stashed — the Immediate wipe always proceeds (the old "unresolved write conflict suppresses the wipe" window no longer applies). Idle-timeout and Never modes keep the session cached as before.
 
 See [SECURITY.md](SECURITY.md) for the full threat model and known limitations.
 

@@ -10,7 +10,6 @@
 mod common;
 
 use common::*;
-use rustpass::WriteOutcome;
 use rustpass::store::Store;
 
 /// Round-trip with an encrypted ed25519 SSH identity:
@@ -77,14 +76,14 @@ async fn ssh_identity_unlock_get_set_round_trip() {
     assert_eq!(again.password(), "my-password");
 
     // set() derives our recipient from the cached unencrypted PEM with
-    // passphrase = None, encrypts, commits, and pushes.
-    let outcome = store
+    // passphrase = None, encrypts, and commits locally.
+    let result = store
         .set("new-secret", b"new-password\n")
         .await
         .expect("set should succeed");
     assert!(
-        matches!(outcome, WriteOutcome::Written(_)),
-        "expected the write to land, got {outcome:?}"
+        !result.commit.is_empty(),
+        "expected the write to land"
     );
 
     // Read back what we just wrote — proves the write encrypted to our key.

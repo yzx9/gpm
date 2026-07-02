@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -207,11 +208,11 @@ pub struct Store {
     config: Config,
     /// Cached decrypted identity (populated after unlock).
     cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
-    /// Serializes all repo-mutating operations (writes, pull, push, divergence
-    /// resolution) so two in-flight mutations can't race the git index or let a
-    /// reviewed divergence go stale vs local HEAD mid-resolution. The field
-    /// exists from PR1; every mutation site acquires it from PR2 on.
-    #[allow(dead_code)]
+    /// Serializes all repo-mutating operations (writes via [`autosync_write`],
+    /// pull, push, divergence resolution) so two in-flight mutations can't race
+    /// the git index or let a reviewed divergence go stale vs local HEAD
+    /// mid-resolution. Public mutation entry points acquire it; the orchestrator
+    /// acquires it once and composes the lock-free `*_locked` inners.
     write_mu: Mutex<()>,
 }
 
@@ -902,163 +903,193 @@ impl Store {
         Ok(Some(secret))
     }
 
-    /// Encrypt and write a secret to the store, then commit and push.
+    /// Encrypt and write a secret to the store, then commit **locally** (no
+    /// sync, no push).
     ///
-    /// This is gopass's `set` (write) command. The plaintext is encrypted to
-    /// every recipient in the store's `.gopass-recipients` / `.age-recipients`,
-    /// with our own key guaranteed to be among the encryption targets (mirroring
-    /// gopass's `ensureOurKeyID`, so we can always read back what we wrote),
-    /// written to `<name>.age`, committed, and pushed to `origin`.
+    /// This is gopass's `set` (write) command, local-only. The plaintext is
+    /// encrypted to every recipient in the store's `.gopass-recipients` /
+    /// `.age-recipients`, with our own key guaranteed to be among the encryption
+    /// targets (mirroring gopass's `ensureOurKeyID`, so we can always read back
+    /// what we wrote), written to `<name>.age`, and committed on the current
+    /// branch. It does **not** pull or push — publishing is the caller's job.
+    /// Production callers go through [`Store::autosync_write`], which wraps this
+    /// in a pull → write → push and routes a rejected push to the sync-time
+    /// divergence surface; calling `set` directly skips that serialization, so
+    /// it is for tests and the orchestrator only.
     ///
-    /// Following gopass's `PushPull`, the store is synced (pulled) immediately
-    /// before writing and the result is pushed immediately after. If the push is
-    /// **rejected** (the remote advanced in a way that can't fast-forward — i.e.
-    /// the local had an unpushed commit):
-    /// - when the remote did **not** add a same-name entry, the write is
-    ///   transparently replayed on the remote tip (the divergence was on other
-    ///   files);
-    /// - when the remote **did** add a same-name entry, this returns
-    ///   [`WriteOutcome::Conflict`] for the caller to resolve via
-    ///   [`Store::resolve_write_conflict`].
-    ///
-    /// **Limitation:** conflict detection fires only on push rejection, which
-    /// needs local divergence. If the local had **no** unpushed commit, the
-    /// pre-write `sync` fast-forwards over a remote same-name change, the write
-    /// commits on top, and the push fast-forwards — returning
-    /// [`WriteOutcome::Written`] and silently overwriting the remote's newer
-    /// version. Any write built on a prior read with no intervening local commit
-    /// (notably edit-after-read) is exposed; a base-version-aware check (capture
-    /// the entry's version at read, refuse on save if it changed) is the fix.
+    /// **Limitation (unchanged — see `.plans/0026-edit-base-version-aware.md`):**
+    /// with no base-version check, a write built on a prior read can silently
+    /// overwrite a teammate's newer same-name change. Decoupling does not fix
+    /// this; `autosync_write`'s pre-write pull can fast-forward over the remote
+    /// change before this local write commits on top.
     ///
     /// # Errors
     ///
     /// Returns `InvalidEntryName` for a malformed name, `InvalidIdentity` if no
     /// usable recipient (and our own key) can be derived, or a git error if
-    /// staging, committing, or pushing fails (other than a recoverable
-    /// same-name conflict, which is returned as [`WriteOutcome::Conflict`]).
-    pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteOutcome, Error> {
+    /// staging or committing fails.
+    pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
-
-        // gopass PushPull: best-effort pull before writing so we build on the
-        // latest remote. Divergence is tolerated — the push-rejection flow
-        // below (rollback → replay | same-name Conflict) handles a diverged or
-        // moved remote authoritatively, since the push result is ground truth,
-        // not this pre-sync. See .plans/0016-set-auto-sync-removal.md for the
-        // deferred question of removing this pre-sync entirely.
-        self.sync().await?;
-        let pre_write_head = self.current_head_hash().await?;
-
-        // Happy path: encrypt + write + commit + push.
-        if let Some(hash) = self.write_commit_push(name, plaintext).await? {
-            return Ok(WriteOutcome::Written(WriteResult { commit: hash }));
-        }
-
-        // Push rejected: roll back the write so the repo is at the synced state.
-        self.reset_hard_to(&pre_write_head).await?;
-
-        // Did the remote add a same-name entry, or just move on other files?
-        let passfile = passfile_rel(name);
-        let remote_blob = self.fetch_remote_blob(&passfile).await?;
-        if remote_blob.is_none() {
-            // No same-name collision — the divergence is on other files. Replay
-            // our write on top of the remote tip and push again.
-            self.fast_forward_to_remote().await?;
-            if let Some(hash) = self.write_commit_push(name, plaintext).await? {
-                return Ok(WriteOutcome::Written(WriteResult { commit: hash }));
-            }
-            // Still rejected (another concurrent change): fall through to a
-            // conflict with no decryptable remote blob.
-        }
-
-        let remote_decryptable = match &remote_blob {
-            Some(blob) => self.can_decrypt(blob).await,
-            None => false,
-        };
-
-        Ok(WriteOutcome::Conflict(WriteConflict {
-            name: name.to_string(),
-            remote_decryptable,
-        }))
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let passfile = self.encrypt_and_write(name, plaintext, &repo_path).await?;
+        let head = self
+            .commit_local(
+                repo_path,
+                passfile,
+                format!("Save secret: {name}"),
+                (
+                    repo_config.commit_user_name.clone(),
+                    repo_config.commit_user_email.clone(),
+                ),
+                git::commit,
+            )
+            .await?;
+        Ok(WriteResult { commit: head })
     }
 
-    /// Delete a secret: remove `<name>.age`, commit the removal, and push. The
-    /// delete sibling of [`set`] — same best-effort pre-sync and push-rejection
-    /// handling, but a removal staged instead of an encrypted write.
+    /// Delete a secret: remove `<name>.age` and commit the removal **locally**
+    /// (no sync, no push). The delete sibling of [`set`].
     ///
-    /// Unlike [`set`], delete has **no inline conflict resolution**: if the push
-    /// is rejected (remote diverged), the local is rolled back to the pre-delete
-    /// state and [`ErrorCode::PushRejected`] is returned so the caller defers to
-    /// the sync/divergence flow — the user syncs to pick up the remote's version,
-    /// then re-deletes if still desired (see `.plans/0021-delete-secrets.md`).
-    /// There is no "force delete"; a conflicting delete is abandoned, not forced.
-    ///
-    /// A push **network/auth failure** (not a rejection) propagates as `Err`
-    /// with the local delete commit left in place, so it syncs later — mirroring
-    /// how [`set`] handles an offline write. A removal/commit failure (rare:
-    /// stale `index.lock`, disk full) likewise propagates as `Err`; this is an
-    /// accepted edge, symmetric to [`set`]'s commit-failure exposure.
+    /// Local-only, like [`set`]: no pre-sync, no push, no rollback. Publishing is
+    /// the caller's job — production callers go through [`Store::autosync_write`],
+    /// which wraps this in pull → delete → push and routes a rejected push to the
+    /// sync-time divergence surface. Calling `delete` directly is for tests and
+    /// the orchestrator only.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorCode::InvalidEntryName`] for a malformed name,
-    /// [`ErrorCode::EntryNotFound`] if the entry doesn't exist (after the
-    /// best-effort sync), [`ErrorCode::PushRejected`] if the remote diverged, or
-    /// a git/network error from the underlying remove/commit/push.
+    /// [`ErrorCode::EntryNotFound`] if the entry doesn't exist, or a git error
+    /// from the underlying remove/commit.
     pub async fn delete(&self, name: &str) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
         let passfile = passfile_rel(name);
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
 
-        // Best-effort pre-sync (gopass PushPull). Divergence is NOT resolved here
-        // — it surfaces as a push rejection below, which rolls back and defers to
-        // the sync flow. So a `Diverged`/`blocked` sync outcome is harmless.
-        self.sync().await?;
-
-        // Existence gate on the (best-effort) synced state.
-        let repo_path = self.repo_path().await?;
+        // Existence gate: a local typo guard (checked before any mutation).
         resolve_entry_path(&repo_path, &passfile)?;
 
-        let pre_delete_head = self.current_head_hash().await?;
-
-        if let Some(hash) = self.remove_commit_push(name, &passfile).await? {
-            Ok(WriteResult { commit: hash })
-        } else {
-            // Push rejected (remote diverged): roll back to the synced state so
-            // the entry is restored locally, and defer resolution to sync.
-            self.reset_hard_to(&pre_delete_head).await?;
-            Err(Error::new(
-                ErrorCode::PushRejected,
-                "Remote moved — sync to review and re-delete.",
-            ))
+        // Remove the worktree file; the index removal is staged in `commit_removal`.
+        let file_path = repo_path.join(&passfile);
+        assert_within_repo(&repo_path, file_path.parent().unwrap_or(Path::new("")))?;
+        match fs::remove_file(&file_path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Error::new(
+                    ErrorCode::EntryNotFound,
+                    format!("Entry not found: {name}"),
+                ));
+            }
+            Err(e) => return Err(e.into()),
         }
+
+        let head = self
+            .commit_local(
+                repo_path,
+                passfile,
+                format!("Delete secret: {name}"),
+                (
+                    repo_config.commit_user_name.clone(),
+                    repo_config.commit_user_email.clone(),
+                ),
+                git::commit_removal,
+            )
+            .await?;
+        Ok(WriteResult { commit: head })
     }
 
-    /// Edit a secret in place: overwrite an **existing** entry's body, then sync,
-    /// commit, and push via [`Store::set`]. The edit sibling of [`create`] — but
-    /// gated on existence and with no template applied, so a typo'd name can't
-    /// silently create a stray entry and the user's raw edited body is stored
-    /// verbatim (templates shape new secrets, not mutations).
+    /// Wrap a local-only write in the per-device autosync policy. This is the
+    /// sole production write entry point: it holds the Store-wide critical
+    /// section across pull → write → push so two in-flight saves can't race the
+    /// git index and a manual pull/push/resolve can't interleave with a save.
     ///
-    /// The existence gate is a **local typo guard** checked before [`set`]'s own
-    /// sync; it is not a remote-state invariant. Like [`set`], edit surfaces a
-    /// [`WriteOutcome::Conflict`] for the caller to resolve when the push is
-    /// rejected (local divergence + a same-name remote entry). Edit also inherits
-    /// [`set`]'s fast-forward limitation (see its docs): a newer same-name remote
-    /// change with no local divergence is overwritten silently.
+    /// - **autosync off** (per-device `repo.json` flag): run `local_write` only
+    ///   — a local commit, zero network. The change publishes on the next manual
+    ///   Sync.
+    /// - **autosync on** (the default): pull (cancellable via `cancel`) → run
+    ///   `local_write` → push. A pre-write pull that **diverged** is benign
+    ///   (local-ahead is common after any unpushed commit; the write still lands
+    ///   on HEAD and the push decides). Only an Enforce authenticity block
+    ///   aborts, and it does so before the write runs, so the repo is untouched.
+    ///   The push is **not** cancellable today (see `.plans/0032-cancellable-saves.md`);
+    ///   it is bounded by git's SSH/HTTP timeout. A `PUSH_REJECTED` is a real
+    ///   divergence; a network failure leaves the local commit in place to sync
+    ///   later.
+    ///
+    /// `local_write` must be one of the local-only primitives ([`set`] /
+    /// [`delete`] / [`create`] / [`update`]) — it runs inside the critical
+    /// section and must NOT re-acquire [`write_mu`] (those primitives don't).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::StoreError`] when Enforce blocks the pre-write pull;
+    /// [`ErrorCode::PushRejected`] when the push is rejected (real divergence);
+    /// a pull/push network error otherwise; or whatever `local_write` returns.
+    pub async fn autosync_write<F, Fut>(
+        &self,
+        cancel: Option<git::CancelToken>,
+        local_write: F,
+    ) -> Result<WriteResult, Error>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<WriteResult, Error>>,
+    {
+        // One critical section across pull → write → push. `set`/`delete` (the
+        // local-only primitives the closure calls) do NOT re-acquire this guard.
+        let _guard = self.write_mu.lock().await;
+
+        let autosync = self.config.load_repo_config().await?.autosync;
+        if !autosync {
+            return local_write().await;
+        }
+
+        // Pull (cancellable). Divergence is benign — proceed and let the push
+        // decide. Only an Enforce block aborts, before the write touches anything.
+        match self.sync_with_locked(cancel, None).await? {
+            SyncOutcome::FastForwarded(result) if result.authenticity.blocked => {
+                return Err(Error::new(
+                    ErrorCode::StoreError,
+                    "Save aborted: the remote failed signature verification under \
+                     Enforce authenticity mode. Pull to review, then retry.",
+                ));
+            }
+            _ => {}
+        }
+
+        // Local write (encrypt + commit), inside the critical section.
+        let result = local_write().await?;
+
+        // Push. Not cancellable today (RFC 0032); a PUSH_REJECTED is a real
+        // divergence, a network error leaves the local commit to sync later.
+        self.push_locked().await?;
+        Ok(result)
+    }
+
+    /// Edit a secret in place: overwrite an **existing** entry's body via the
+    /// local-only [`Store::set`]. The edit sibling of [`create`] — but gated on
+    /// existence and with no template applied, so a typo'd name can't silently
+    /// create a stray entry and the user's raw edited body is stored verbatim
+    /// (templates shape new secrets, not mutations).
+    ///
+    /// The existence gate is a **local typo guard**; it is not a remote-state
+    /// invariant. Edit inherits [`set`]'s base-version limitation (see its docs):
+    /// a newer same-name remote change can be overwritten silently.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorCode::InvalidEntryName`] for a malformed name,
     /// [`ErrorCode::EntryNotFound`] if the entry doesn't exist, or whatever
-    /// [`Store::set`] returns (including [`WriteOutcome::Conflict`]).
-    pub async fn update(&self, name: &str, plaintext: &[u8]) -> Result<WriteOutcome, Error> {
+    /// [`Store::set`] returns.
+    pub async fn update(&self, name: &str, plaintext: &[u8]) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
         let repo_path = self.repo_path().await?;
         // Existence gate: a local typo guard so edit can't create a stray entry.
         // resolve_entry_path also guards path traversal (used identically by `get`
-        // and `delete`). NOT a remote-state check — set's sync runs after this.
+        // and `delete`). NOT a remote-state check.
         resolve_entry_path(&repo_path, &passfile_rel(name))?;
-        // Raw write primitive (no template): sync → encrypt+write → commit → push,
-        // with set's full conflict path.
+        // Raw write primitive (no template), local-only via `set`.
         self.set(name, plaintext).await
     }
 
@@ -1081,6 +1112,19 @@ impl Store {
     /// Returns `UnsafeOverwrite` if `KeepMine` is chosen for an undecryptable
     /// remote, or a git error if the underlying fetch/push fails.
     pub async fn resolve_write_conflict(
+        &self,
+        name: &str,
+        plaintext: &[u8],
+        choice: ConflictChoice,
+    ) -> Result<Option<WriteResult>, Error> {
+        let _guard = self.write_mu.lock().await;
+        self.resolve_write_conflict_locked(name, plaintext, choice)
+            .await
+    }
+
+    /// Lock-free inner of [`resolve_write_conflict`] (see [`sync_with_locked`]).
+    /// Retained for the frozen-frontend command until the `PR2c` retirement.
+    async fn resolve_write_conflict_locked(
         &self,
         name: &str,
         plaintext: &[u8],
@@ -1142,6 +1186,17 @@ impl Store {
     /// git/signing error otherwise. Under Enforce, an authenticity block returns
     /// `Ok` with [`SyncResult::authenticity`] `.blocked = true` (HEAD unchanged).
     pub async fn resolve_sync_divergence(
+        &self,
+        expected_remote_oid: &str,
+        choice: DivergenceChoice,
+    ) -> Result<SyncResult, Error> {
+        let _guard = self.write_mu.lock().await;
+        self.resolve_sync_divergence_locked(expected_remote_oid, choice)
+            .await
+    }
+
+    /// Lock-free inner of [`resolve_sync_divergence`] (see [`sync_with_locked`]).
+    async fn resolve_sync_divergence_locked(
         &self,
         expected_remote_oid: &str,
         choice: DivergenceChoice,
@@ -1317,15 +1372,14 @@ impl Store {
     ///
     /// `content` becomes the template's `.Content` (usually the password); the
     /// rendered template is what gets stored. When no template applies, the
-    /// content is stored verbatim. Either way the result is written, committed,
-    /// and pushed via [`Store::set`] — so conflict handling applies as usual.
+    /// content is stored verbatim. Either way the result is written and
+    /// committed locally via [`Store::set`] (no sync/push from `create` itself).
     ///
     /// # Errors
     ///
     /// Returns `InvalidEntryName` for a bad name, `TemplateError` if a template
-    /// references an unknown variable, or whatever [`Store::set`] returns
-    /// (including [`WriteOutcome::Conflict`]).
-    pub async fn create(&self, name: &str, content: &[u8]) -> Result<WriteOutcome, Error> {
+    /// references an unknown variable, or whatever [`Store::set`] returns.
+    pub async fn create(&self, name: &str, content: &[u8]) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
         let rendered = self.resolve_template(name, content).await?;
         let final_bytes = rendered.map_or_else(|| content.to_vec(), String::into_bytes);
@@ -1385,7 +1439,7 @@ impl Store {
         &self,
         preset_id: &str,
         fields: &HashMap<&str, String, S>,
-    ) -> Result<WriteOutcome, Error> {
+    ) -> Result<WriteResult, Error> {
         let preset = template::find_preset(preset_id).ok_or_else(|| {
             Error::new(
                 ErrorCode::InvalidEntryName,
@@ -1429,60 +1483,38 @@ impl Store {
         .await
     }
 
-    /// Remove `<name>.age` from the worktree, commit the removal, and push. The
-    /// delete-path sibling of [`write_commit_push`]: same commit→push→map shell
-    /// via [`commit_push`], but `fs::remove_file` + [`git::commit_removal`]
-    /// instead of [`encrypt_and_write`] + [`git::commit`]. Assumes a clean,
-    /// synced HEAD. Returns `Ok(Some(hash))` on success, `Ok(None)` on a push
-    /// rejection (non-fast-forward) — the caller rolls back. Other push failures
-    /// (network/auth) and the removal/commit are left in place and propagate as
-    /// `Err`, mirroring [`write_commit_push`] (an offline delete keeps its local
-    /// commit and syncs later).
-    async fn remove_commit_push(
+    /// Commit `passfile` (the caller has already mutated the worktree) locally,
+    /// with **no push**. `commit_fn` is [`git::commit`] for a save or
+    /// [`git::commit_removal`] for a delete. This is the local-only commit half
+    /// shared by the local-only write primitives ([`Store::set`] / [`Store::delete`])
+    /// and by [`commit_push`] (which adds the push).
+    async fn commit_local(
         &self,
-        name: &str,
-        passfile: &str,
-    ) -> Result<Option<String>, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let auth = repo_config.to_git_auth();
-
-        // Defense-in-depth: the passfile stays inside the repo.
-        let file_path = repo_path.join(passfile);
-        assert_within_repo(&repo_path, file_path.parent().unwrap_or(Path::new("")))?;
-
-        // Remove the worktree file; the index removal is staged in `commit_removal`.
-        match fs::remove_file(&file_path).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(Error::new(
-                    ErrorCode::EntryNotFound,
-                    format!("Entry not found: {name}"),
-                ));
-            }
-            Err(e) => return Err(e.into()),
-        }
-
-        self.commit_push(
-            repo_path,
-            auth,
-            passfile.to_string(),
-            format!("Delete secret: {name}"),
-            (
-                repo_config.commit_user_name.clone(),
-                repo_config.commit_user_email.clone(),
-            ),
-            git::commit_removal,
-        )
-        .await
+        repo_path: PathBuf,
+        passfile: String,
+        message: String,
+        commit_identity: (Option<String>, Option<String>),
+        commit_fn: CommitFn,
+    ) -> Result<String, Error> {
+        spawn_blocking(move || {
+            let paths = vec![passfile];
+            commit_fn(
+                &repo_path,
+                &paths,
+                &message,
+                commit_identity.0.as_deref(),
+                commit_identity.1.as_deref(),
+            )
+        })
+        .await?
     }
 
     /// Commit `passfile` (the caller has already mutated the worktree — written
-    /// the file for a save, or removed it for a delete) and push. `commit_fn` is
-    /// [`git::commit`] for a save or [`git::commit_removal`] for a delete; they
-    /// share a signature, so this shells the shared commit→push→map logic for
-    /// both write paths (DRY — the only thing that differs is the mutation and
-    /// the commit function, both supplied by the caller).
+    /// the file for a save, or removed it for a delete) and push. Delegates the
+    /// commit to [`commit_local`] (DRY) and adds the push + push-rejection
+    /// mapping. Used by the legacy push paths ([`Store::resolve_write_conflict`])
+    /// retained until the frontend flip; the local-only write primitives commit
+    /// via [`commit_local`] directly.
     ///
     /// Returns `Ok(Some(head))` on success, `Ok(None)` on a push rejection
     /// (non-fast-forward). The commit/file are left in place on rejection; the
@@ -1496,21 +1528,12 @@ impl Store {
         commit_identity: (Option<String>, Option<String>),
         commit_fn: CommitFn,
     ) -> Result<Option<String>, Error> {
-        let repo_path_for_commit = repo_path.clone();
-        let passfile_for_commit = passfile;
-        let head = spawn_blocking(move || {
-            let paths = vec![passfile_for_commit];
-            commit_fn(
-                &repo_path_for_commit,
-                &paths,
-                &message,
-                commit_identity.0.as_deref(),
-                commit_identity.1.as_deref(),
-            )
-        })
-        .await??;
+        let repo_path_for_push = repo_path.clone();
+        let head = self
+            .commit_local(repo_path, passfile, message, commit_identity, commit_fn)
+            .await?;
 
-        let push_result = spawn_blocking(move || git::push(&repo_path, &auth)).await?;
+        let push_result = spawn_blocking(move || git::push(&repo_path_for_push, &auth)).await?;
         match push_result {
             Ok(()) => Ok(Some(head)),
             Err(e) if e.code == "PUSH_REJECTED" => Ok(None),
@@ -1568,12 +1591,6 @@ impl Store {
     }
 
     // ── thin wrappers over git ops (load config + spawn_blocking) ───────────
-
-    async fn reset_hard_to(&self, oid: &str) -> Result<(), Error> {
-        let repo_path = self.repo_path().await?;
-        let oid = oid.to_string();
-        spawn_blocking(move || git::reset_hard_to(&repo_path, &oid)).await?
-    }
 
     async fn fast_forward_to_remote(&self) -> Result<(), Error> {
         let repo_config = self.config.load_repo_config().await?;
@@ -1733,6 +1750,19 @@ impl Store {
         cancel: Option<git::CancelToken>,
         progress: Option<git::ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
+        let _guard = self.write_mu.lock().await;
+        self.sync_with_locked(cancel, progress).await
+    }
+
+    /// Lock-free inner of [`sync_with`]. The caller already holds the
+    /// [`write_mu`] critical section: [`sync_with`] acquires it for the
+    /// standalone pull, and [`autosync_write`] holds it across pull → write →
+    /// push and calls this directly.
+    async fn sync_with_locked(
+        &self,
+        cancel: Option<git::CancelToken>,
+        progress: Option<git::ProgressSender>,
+    ) -> Result<SyncOutcome, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
@@ -1761,6 +1791,12 @@ impl Store {
     /// Returns an error if the repo cannot be opened or the push fails for a
     /// reason other than a missing origin (which is treated as a no-op).
     pub async fn push(&self) -> Result<(), Error> {
+        let _guard = self.write_mu.lock().await;
+        self.push_locked().await
+    }
+
+    /// Lock-free inner of [`push`] (see [`sync_with_locked`]).
+    async fn push_locked(&self) -> Result<(), Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
         let auth = repo_config.to_git_auth();
@@ -1904,6 +1940,20 @@ impl Store {
         let secs = normalize_clear_secs(secs);
         let mut rc = self.config.load_repo_config().await?;
         rc.clipboard_clear_secs = secs;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
+    /// Set the per-device autosync flag (whether each save wraps in a
+    /// pull → write → push via [`autosync_write`]). Default `true`; when `false`,
+    /// saves stay local until a manual Sync.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or persisted.
+    pub async fn set_autosync(&self, enabled: bool) -> Result<RepoConfig, Error> {
+        let mut rc = self.config.load_repo_config().await?;
+        rc.autosync = enabled;
         self.config.save_repo_config_full(&rc).await?;
         Ok(rc)
     }

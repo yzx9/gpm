@@ -705,24 +705,6 @@ pub fn remote_add(repo_path: &Path, name: &str, url: &str) -> Result<(), Error> 
     Ok(())
 }
 
-/// Hard-reset the current branch and worktree to `oid_str` (a full commit
-/// hash). Used to roll back an unpushed write when its push is rejected.
-///
-/// # Errors
-///
-/// Returns an error if the repo cannot be opened, the hash is invalid, or the
-/// reset fails.
-pub fn reset_hard_to(repo_path: &Path, oid_str: &str) -> Result<(), Error> {
-    let repo = Repository::discover(repo_path)
-        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
-    let oid = git2::Oid::from_str(oid_str)?;
-    let target = repo.find_commit(oid)?;
-    let mut opts = git2::build::CheckoutBuilder::new();
-    opts.force();
-    repo.reset(target.as_object(), git2::ResetType::Hard, Some(&mut opts))?;
-    Ok(())
-}
-
 /// Fetch `origin`'s current branch into a temp ref and return
 /// `(branch_name, temp_ref_name, fetched_oid)`. The caller **must** delete the
 /// temp ref when done. Mirrors the verified-pull probe so we can inspect remote

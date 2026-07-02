@@ -4,29 +4,39 @@
 
 //! Secret writes & sync — the write/sync side of the store.
 //!
-//! These wrap [`rustpass::Store`]'s gopass-style create / template / conflict
-//! APIs ([`Store::create`], [`Store::preview_create`], and
-//! [`Store::resolve_write_conflict`]) plus [`Store::sync`] (pull), and expose
-//! them to the `WebView`.
+//! Writes are **local-only** in `rustpass` (`Store::set`/`create`/`update`/
+//! `delete` encrypt → write → local commit, no network). This module wraps each
+//! save in the per-device autosync policy via [`Store::autosync_write`]: a
+//! pull → write → push when `autosync` is on (the default), or a plain local
+//! commit when it's off. The pull phase is cancellable through the global cancel
+//! slot (mirroring `pull_repo`); the push is not yet cancellable (see
+//! `.plans/0032-cancellable-saves.md`).
 //!
-//! ## Conflict stash
+//! ## Outcome shape (frozen for the frontend until `PR2c`)
 //!
-//! When a create collides with a newer remote copy ([`WriteOutcome::Conflict`]),
-//! the backend rolls the local store back to the pre-write state and the caller
-//! must decide how to resolve it. Re-resolving needs the *plaintext we tried to
-//! write* — but we never want to round-trip that secret across IPC a second time.
-//! So on conflict we stash `(name, plaintext)` in [`AppState::pending_write`]
-//! (Rust heap, [`Zeroizing`]) and [`resolve_write_conflict`] replays it from
-//! there. The stash is cleared on resolve (success *or* failure), on cancel,
-//! and on lock (see [`clear_pending`]) — so a plaintext is never left behind a
-//! wiped identity cache.
+//! A rejected push surfaces as `Err(PUSH_REJECTED)` (the frontend's generic
+//! error path) — the context-aware divergence modal that routes a save-triggered
+//! divergence to `resolve_sync_divergence` lands in `PR2c`. So the write commands
+//! still return [`WriteOutcome`], but only ever `Written`; the `Conflict` variant
+//! is dead-but-present until `PR2c` retires it.
 //!
-//! [`Store::create`]: rustpass::Store::create
-//! [`Store::preview_create`]: rustpass::Store::preview_create
+//! ## Conflict stash (consume-side retained, frozen ABI)
+//!
+//! The `(name, plaintext)` stash ([`PendingWrite`]) carried a write collision's
+//! plaintext across `resolve_write_conflict` so it didn't re-cross IPC. The
+//! autosync path never produces a `Conflict`, so nothing populates the stash
+//! anymore — but [`resolve_pending`], [`stash_pending`], [`clear_pending`], the
+//! [`resolve_write_conflict`] command, and the `pending_write` field stay (kept
+//! alive by their unit tests + the lock handler's defense-in-depth clear) until
+//! `PR2c` retires them alongside the frontend modal. A plaintext is still never
+//! left behind a wiped identity cache: `resolve_pending` consumes on every call
+//! and `clear_pending` runs on lock.
+//!
+//! [`Store::autosync_write`]: rustpass::Store::autosync_write
 //! [`Store::resolve_write_conflict`]: rustpass::Store::resolve_write_conflict
-//! [`WriteOutcome::Conflict`]: rustpass::WriteOutcome::Conflict
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use rustpass::template::{self, CreatePreset};
@@ -66,6 +76,13 @@ pub(crate) fn clear_pending(pending: &Arc<Mutex<Option<PendingWrite>>>) {
 /// [`resolve_pending`] can replay it without the frontend re-sending the secret
 /// across IPC a second time. Pure (no `AppHandle`), so the stash lifecycle is
 /// directly unit-testable.
+///
+/// Test-only now: the autosync write path never produces a `Conflict`, so
+/// nothing populates the stash in production. Kept under `cfg(test)` as the
+/// helper the stash-lifecycle unit tests build the slot with; the consume-side
+/// ([`resolve_pending`] / [`clear_pending`]) stays production-live for the
+/// frozen `resolve_write_conflict` command and the lock handler.
+#[cfg(test)]
 pub(crate) fn stash_pending(pending: &Arc<Mutex<Option<PendingWrite>>>, name: &str, body: Vec<u8>) {
     let mut pw = pending.lock().expect("pending_write mutex poisoned");
     *pw = Some(PendingWrite {
@@ -74,70 +91,83 @@ pub(crate) fn stash_pending(pending: &Arc<Mutex<Option<PendingWrite>>>, name: &s
     });
 }
 
-/// Create a secret (applying a matching `.pass-template`) and stash the
-/// plaintext on conflict. The app/timer side effect lives in [`do_create`];
-/// this core is the directly-testable create + stash path.
-pub(crate) async fn create_and_stash(
+/// Consume the stashed pending write and resolve the conflict per `choice`. The
+/// stash is always taken (cleared) — even on error — so a plaintext never lingers
+/// awaiting a retry that re-stashes fresh. Pure core (no `AppHandle`): directly
+/// unit-testable, and the consume path the (frozen) `resolve_write_conflict`
+/// command still calls.
+pub(crate) async fn resolve_pending(
     state: &AppState,
-    name: &str,
-    body: Vec<u8>,
-) -> Result<WriteOutcome, Error> {
-    let outcome = state.store.create(name, &body).await?;
-    if matches!(outcome, WriteOutcome::Conflict(_)) {
-        stash_pending(&state.pending_write, name, body);
-    }
-    Ok(outcome)
+    choice: ConflictChoice,
+) -> Result<Option<WriteResult>, Error> {
+    let pending = {
+        let mut pw = state
+            .pending_write
+            .lock()
+            .expect("pending_write mutex poisoned");
+        pw.take()
+    };
+    let Some(pending) = pending else {
+        return Err(Error::new(
+            ErrorCode::StoreError,
+            "no pending write to resolve",
+        ));
+    };
+    state
+        .store
+        .resolve_write_conflict(&pending.name, &pending.plaintext, choice)
+        .await
 }
 
-/// Create a secret (applying a matching `.pass-template`), stash the plaintext
-/// on conflict, and reset the auto-lock timer. Shared by the two create entry
-/// points so both stash identically. Runtime-generic so the in-crate tests can
-/// drive it against the mock runtime.
-async fn do_create<R: Runtime>(
+/// Run a local-only write under the autosync orchestrator, with the pull phase
+/// cancellable via the global cancel slot (mirrors `pull_repo`). Returns the
+/// write result; the caller decides the IPC shape (`WriteOutcome::Written` for
+/// create/edit, raw `WriteResult` for delete). The closure runs inside the
+/// orchestrator's `write_mu` critical section and must be one of the local-only
+/// primitives (`Store::create`/`update`/`delete`) — it must NOT re-acquire the
+/// Store lock.
+async fn autosync_write_command<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
-    name: &str,
-    body: Vec<u8>,
-) -> Result<WriteOutcome, Error> {
-    // Create first so a FAILED write still counts as a secret access: under
-    // Immediate we reset the timer + wipe on both paths (an errored create must
-    // not leave the identity cached with no idle timer to eventually clear it).
-    let outcome = create_and_stash(state, name, body).await;
-    reset_lock_timer(state, app);
-    // maybe_soft_wipe no-ops while a conflict is pending: the stashed plaintext
-    // is replayed by resolve_write_conflict, which needs the identity, so a
-    // Conflict correctly leaves the identity cached until resolve/cancel.
-    maybe_soft_wipe(state, app).await;
-    outcome
+    local_write: F,
+) -> Result<WriteResult, Error>
+where
+    R: Runtime,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<WriteResult, Error>> + Send + 'static,
+{
+    let store = state.store.clone();
+    crate::git::run_cancellable(state, app.clone(), move |cancel, _tx| {
+        let store = store.clone();
+        async move { store.autosync_write(Some(cancel), local_write).await }
+    })
+    .await
 }
 
-/// Edit a secret (overwriting the existing entry's raw body, no template) and
-/// stash the plaintext on conflict. The edit sibling of [`create_and_stash`] —
-/// swapped `store.create` → `store.update`. Pure (no `AppHandle`), so the stash
-/// lifecycle is directly unit-testable.
-pub(crate) async fn update_and_stash(
-    state: &AppState,
-    name: &str,
-    body: Vec<u8>,
-) -> Result<WriteOutcome, Error> {
-    let outcome = state.store.update(name, &body).await?;
-    if matches!(outcome, WriteOutcome::Conflict(_)) {
-        stash_pending(&state.pending_write, name, body);
-    }
-    Ok(outcome)
-}
-
-/// Edit a secret, stash the plaintext on conflict, and reset the auto-lock
-/// timer. Shared shape with [`do_create`].
-async fn do_update(
+/// Wrap a local-only save in autosync + the auto-lock side effects (reset the
+/// idle timer; soft-wipe the identity under Immediate). Maps the orchestrator's
+/// `Ok(WriteResult)` to [`WriteOutcome::Written`] so the create/edit IPC shape
+/// is unchanged for the frozen frontend.
+async fn do_save<R, F, Fut>(
     state: &State<'_, AppState>,
-    app: &AppHandle,
-    name: &str,
-    body: Vec<u8>,
-) -> Result<WriteOutcome, Error> {
-    let outcome = update_and_stash(state, name, body).await?;
+    app: &AppHandle<R>,
+    local_write: F,
+) -> Result<WriteOutcome, Error>
+where
+    R: Runtime,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<WriteResult, Error>> + Send + 'static,
+{
+    // Run the write first so a FAILED save still counts as a secret access: under
+    // Immediate we reset the timer + wipe on both paths (an errored save must
+    // not leave the identity cached with no idle timer to eventually clear it).
+    let result = autosync_write_command(state, app, local_write).await;
     reset_lock_timer(state, app);
-    Ok(outcome)
+    // No Conflict is ever produced now (autosync surfaces a rejected push as
+    // Err), so there is never a pending stash gating the wipe — maybe_soft_wipe
+    // proceeds whenever Immediate is in effect.
+    maybe_soft_wipe(state, app).await;
+    Ok(WriteOutcome::Written(result?))
 }
 
 /// List the built-in secret-creation presets (Website login, PIN code) — the
@@ -181,7 +211,17 @@ pub(crate) async fn create_secret(
     name: String,
     content: String,
 ) -> Result<WriteOutcome, Error> {
-    do_create(&state, &app, &name, content.into_bytes()).await
+    let store = state.store.clone();
+    let body = content.into_bytes();
+    do_save(
+        &state,
+        &app,
+        move || {
+            let store = store.clone();
+            async move { store.create(&name, &body).await }
+        },
+    )
+    .await
 }
 
 /// Create a secret from one of the built-in presets, generating it at the
@@ -209,17 +249,22 @@ pub(crate) async fn create_from_preset_secret(
         .collect();
     let name = template::preset_name(preset, &fields_ref)?;
     let body = template::preset_body(preset, &fields_ref)?;
-    do_create(&state, &app, &name, body).await
+    let store = state.store.clone();
+    do_save(
+        &state,
+        &app,
+        move || {
+            let store = store.clone();
+            async move { store.create(&name, &body).await }
+        },
+    )
+    .await
 }
 
-/// Delete a secret at an explicit path. The entry is removed, the removal is
-/// committed, and the change is pushed — the delete sibling of
-/// [`create_secret`]. If the remote has diverged the push is rejected: the local
-/// is rolled back to the pre-delete state and [`ErrorCode::PushRejected`] is
-/// returned so the frontend asks the user to sync first (delete defers all
-/// conflict handling to the sync flow — see `.plans/0021-delete-secrets.md`).
-/// Unlike create there is no stash and no `resolve` step: delete carries no
-/// plaintext.
+/// Delete a secret at an explicit path. The entry is removed and the removal is
+/// committed locally, then published by the autosync orchestrator (pull →
+/// delete → push when autosync is on; local-only when off). Returns the
+/// `WriteResult` (unchanged IPC shape for the frozen frontend).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn delete_secret(
@@ -227,20 +272,28 @@ pub(crate) async fn delete_secret(
     app: AppHandle,
     name: String,
 ) -> Result<WriteResult, Error> {
-    let result = state.store.delete(&name).await;
+    let store = state.store.clone();
+    let result = autosync_write_command(
+        &state,
+        &app,
+        move || {
+            let store = store.clone();
+            async move { store.delete(&name).await }
+        },
+    )
+    .await;
     // Reset the auto-lock timer on the user's activity whether or not the delete
-    // succeeded (mirrors `do_create`).
+    // succeeded (mirrors the save path). Delete carries no plaintext, so no
+    // maybe_soft_wipe coupling.
     reset_lock_timer(&state, &app);
     result
 }
 
 /// Edit a secret at an explicit path from its raw content (first line is the
 /// password). The existing entry is overwritten in place — no `.pass-template`
-/// is re-applied (templates shape new secrets, not mutations). On a same-name
-/// conflict the plaintext is stashed backend-side exactly like
-/// [`create_secret`], so [`resolve_write_conflict`] resolves it unchanged. If the
-/// entry doesn't exist, [`ErrorCode::EntryNotFound`] is returned (edit can't
-/// create a stray entry).
+/// is re-applied (templates shape new secrets, not mutations). If the entry
+/// doesn't exist, [`ErrorCode::EntryNotFound`] is returned (edit can't create a
+/// stray entry).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn edit_secret(
@@ -249,14 +302,28 @@ pub(crate) async fn edit_secret(
     name: String,
     content: String,
 ) -> Result<WriteOutcome, Error> {
-    do_update(&state, &app, &name, content.into_bytes()).await
+    let store = state.store.clone();
+    let body = content.into_bytes();
+    do_save(
+        &state,
+        &app,
+        move || {
+            let store = store.clone();
+            async move { store.update(&name, &body).await }
+        },
+    )
+    .await
 }
 
 /// Resolve a write conflict ([`WriteOutcome::Conflict`]) per the user's
 /// `choice`. Replays the stashed plaintext for `keep_mine` / `keep_mine_force`;
 /// `keep_remote` fast-forwards to the remote, `cancel` leaves the pre-write
-/// state. The stash is always consumed (cleared) on return — the frontend
-/// re-runs `create_secret` / `create_from_preset_secret` to re-stash on retry.
+/// state. The stash is always consumed (cleared) on return.
+///
+/// Frozen frontend ABI: the command stays registered, but the autosync write
+/// path never produces a `Conflict`, so the stash is never populated and this
+/// returns `Err` ("no pending write to resolve") if ever called. It is retired
+/// alongside the frontend modal in `PR2c`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn resolve_write_conflict(
@@ -266,37 +333,8 @@ pub(crate) async fn resolve_write_conflict(
 ) -> Result<Option<WriteResult>, Error> {
     let result = resolve_pending(&state, choice).await;
     reset_lock_timer(&state, &app);
-    // `resolve_pending` consumes the stash, so the pending-write guard now passes
-    // — under Immediate, wipe the identity after resolving (re-auth on next op).
     maybe_soft_wipe(&state, &app).await;
     result
-}
-
-/// Consume the stashed pending write and resolve the conflict per `choice`. The
-/// stash is always taken (cleared) — even on error — so a plaintext never lingers
-/// awaiting a retry that re-stashes fresh. The app/timer side effect lives in
-/// [`resolve_write_conflict`]; this core is the directly-testable consume path.
-pub(crate) async fn resolve_pending(
-    state: &AppState,
-    choice: ConflictChoice,
-) -> Result<Option<WriteResult>, Error> {
-    let pending = {
-        let mut pw = state
-            .pending_write
-            .lock()
-            .expect("pending_write mutex poisoned");
-        pw.take()
-    };
-    let Some(pending) = pending else {
-        return Err(Error::new(
-            ErrorCode::StoreError,
-            "no pending write to resolve",
-        ));
-    };
-    state
-        .store
-        .resolve_write_conflict(&pending.name, &pending.plaintext, choice)
-        .await
 }
 
 /// Pull latest changes from the remote. Returns a `SyncOutcome`: a normal
@@ -347,8 +385,9 @@ pub(crate) async fn resolve_sync_divergence(
 #[cfg(test)]
 mod tests {
     //! The lock-clearing invariant is the security-critical piece of the conflict
-    //! stash: a plaintext must not survive a lock. The create/resolve data flow
-    //! itself is covered end-to-end by the `rustpass` integration tests.
+    //! stash: a plaintext must not survive a lock. The stash utility lifecycle
+    //! (stash → clear → resolve-consumes) is covered here; the rustpass write +
+    //! autosync flows are covered end-to-end by the `rustpass` integration tests.
 
     use super::*;
 

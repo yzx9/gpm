@@ -297,15 +297,18 @@ pub(crate) async fn soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &App
     emit_lock_state(app, &state.store, true).await;
 }
 
-/// After a secret operation: under `Immediate` (no-cache) mode, and only when no
-/// conflict is pending, soft-wipe the identity so the next op re-authenticates.
-/// No-op for `Idle`/`Never` (the session stays). It also no-ops for the entire
-/// window a write conflict is unresolved: the stashed plaintext is replayed by
-/// `resolve_write_conflict`, which needs the identity, so the wipe is suppressed
-/// for every identity-needing op — not just the create that collided — until the
-/// conflict is resolved or cancelled. (The tradeoff: under `Immediate` a
-/// lingering conflict leaves the identity cached longer than the mode's per-op
-/// intent. That is unavoidable — wiping would make the stash undecryptable.)
+/// After a secret operation: under `Immediate` (no-cache) mode, soft-wipe the
+/// identity so the next op re-authenticates. No-op for `Idle`/`Never` (the
+/// session stays).
+///
+/// The `no_pending` guard once held back the wipe for the whole window a write
+/// conflict was unresolved — the stashed plaintext was replayed by
+/// `resolve_write_conflict`, which needs the identity, so wiping was suppressed
+/// until resolve/cancel. The autosync write path never produces a `Conflict`, so
+/// the stash is never populated and this guard is now always true; it stays as
+/// defense-in-depth until the stash machinery is retired in `PR2c`. (The old
+/// tradeoff — a lingering conflict caching the identity past `Immediate`'s
+/// per-op intent — no longer applies.)
 pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
     let immediate = state
         .lock_mode
