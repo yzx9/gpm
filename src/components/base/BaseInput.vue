@@ -10,7 +10,12 @@
 // required, min/max, aria-*) fall through onto the input.
 const [model, modifiers] = defineModel<string | number>({
   set(value) {
-    return modifiers.number ? Number(value) : value;
+    if (!modifiers.number) return value;
+    // Mirror Vue's built-in .number: parseFloat, and keep the raw input when it
+    // isn't parseable (empty string, "abc") so clearing the field doesn't snap
+    // to 0 — Number("")===0, but parseFloat("") is NaN.
+    const n = parseFloat(value as string);
+    return isNaN(n) ? value : n;
   },
 });
 
