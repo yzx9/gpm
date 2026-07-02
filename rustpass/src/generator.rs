@@ -269,7 +269,7 @@ fn default_alphabet() -> &'static [u8] {
 fn wordlist() -> &'static [&'static str] {
     static WORDS: OnceLock<Box<[&'static str]>> = OnceLock::new();
     WORDS.get_or_init(|| {
-        include_str!("wordlist/english.txt")
+        include_str!("../data/wordlist/english.txt")
             .split_ascii_whitespace()
             .collect()
     })

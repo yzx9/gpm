@@ -1,0 +1,10 @@
+# BIP-0039 English wordlist (2048 words), included unmodified.
+# Upstream: https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt
+#
+# Licensing is declared in this adjacent file because the data itself cannot
+# carry an inline SPDX header — the wordlist parser uses split_ascii_whitespace,
+# so any comment line would be collected as a word. Per the REUSE specification
+# rule for "Uncommentable Files".
+
+SPDX-FileCopyrightText: The Bitcoin Core developers
+SPDX-License-Identifier: MIT
