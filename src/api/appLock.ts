@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppLockState, AppLockError } from "./types";
 
 /**
  * Thin wrappers over the app-launch biometric gate commands in
@@ -13,8 +12,21 @@ import type { AppLockState, AppLockError } from "./types";
  * a safe "off" shape on desktop / below API 30 / when the plugin is absent.
  */
 
-/** Re-export so callers can type-narrow caught errors uniformly. */
-export type { AppLockError };
+/** App-launch biometric gate state from get_app_lock_state / the
+ * `app-lock-state` event. `enabled` = the gate is on (master key is
+ * biometric-gated); `locked` = the master key is not in memory (cold start or
+ * after a background re-lock), so the app-lock overlay should be shown. */
+export interface AppLockState {
+  enabled: boolean;
+  locked: boolean;
+}
+
+/** Error from the app-launch gate commands (`APP_LOCK_FAILED`, `BIOMETRIC_*`,
+ * `SECURE_KEYSTORE_*`, or a `rustpass` code). Same shape as BiometricError. */
+export interface AppLockError {
+  code: string;
+  message: string;
+}
 
 /**
  * Whether the app-launch gate is usable (API 30+ with STRONG biometric). `false`

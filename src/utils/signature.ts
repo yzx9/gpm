@@ -4,7 +4,7 @@
 
 /** Helpers for rendering [`CommitSigStatus`] consistently across the badge,
  * the history screen, and the pull modals. */
-import type { CommitSigStatus } from "@/types";
+import type { CommitSigStatus } from "@/api";
 
 /** A short human label for a status (e.g. `"Unsigned"`). */
 export function statusLabel(status: CommitSigStatus): string {

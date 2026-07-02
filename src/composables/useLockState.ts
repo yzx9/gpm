@@ -12,9 +12,8 @@ import {
   type ComputedRef,
   type InjectionKey,
 } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { getAuthState } from "@/api";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AuthState } from "@/types";
 
 /** Error code carried by the rejection `cancelAuth()` issues to parked callers. */
 export const AUTH_CANCELLED = "AUTH_CANCELLED";
@@ -166,7 +165,7 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
     );
 
     try {
-      const auth = await invoke<AuthState>("get_auth_state");
+      const auth = await getAuthState();
       // Unencrypted identities are never "locked" — there is nothing to unlock.
       // setLocked mirrors identityCached: encrypted+locked ⇒ not cached,
       // otherwise cached (plaintext always reads straight from disk).

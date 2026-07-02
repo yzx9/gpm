@@ -4,8 +4,7 @@
 
 import { ref, inject, type Ref, type InjectionKey } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { appLock, getAppLockState } from "@/appLock";
-import type { AppLockState } from "@/types";
+import { appLock, getAppLockState, type AppLockState } from "@/api";
 
 /**
  * Global app-launch biometric gate state — mirrors the backend `app-lock-state`

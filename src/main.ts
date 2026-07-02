@@ -4,11 +4,9 @@
 
 import { createApp, nextTick } from "vue";
 import { createRouter, createWebHashHistory } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
+import { getAuthState } from "./api";
 import App from "./App.vue";
 import "./assets/main.css";
-
-import type { AuthState } from "./types";
 
 import SetupPage from "./pages/SetupPage.vue";
 import EntryListPage from "./pages/EntryListPage.vue";
@@ -103,7 +101,7 @@ const router = createRouter({
 router.beforeEach(async (to, from) => {
   if (to.name !== "setup") {
     try {
-      const auth = await invoke<AuthState>("get_auth_state");
+      const auth = await getAuthState();
       if (!auth.configured) return { name: "setup" }; // /setup leg reconciles
     } catch {
       return { name: "setup" };

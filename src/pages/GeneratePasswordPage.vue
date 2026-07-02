@@ -5,8 +5,12 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
-import type { AppError, GenerateMode } from "@/types";
+import {
+  copyGeneratedPassword,
+  generatePasswordBatch,
+  type AppError,
+  type GenerateMode,
+} from "@/api";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
@@ -70,7 +74,7 @@ async function onGenerate() {
   try {
     // min == max pins an exact length for random; memorable treats it as a
     // floor (word+digit repeated to ≥ min); null keeps the built-in default.
-    const passwords = await invoke<string[]>("generate_password_batch", {
+    const passwords = await generatePasswordBatch({
       mode: mode.value,
       charset: null,
       minLen: lenPayload.value,
@@ -93,7 +97,7 @@ async function onGenerate() {
 /** Copy one generated password; the backend arms a 30s clipboard auto-clear. */
 async function onCopyRow(pw: string) {
   try {
-    await invoke("copy_generated_password", { text: pw });
+    await copyGeneratedPassword(pw);
     showToast("Copied — clipboard clears in 30s");
   } catch (e) {
     const appError = e as AppError;

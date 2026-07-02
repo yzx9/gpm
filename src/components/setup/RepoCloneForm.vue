@@ -4,9 +4,17 @@
 
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppError, CommitIdentity, GitProgressEvent } from "@/types";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import {
+  cancelGit,
+  cloneRepo,
+  getCommitIdentityDefault,
+  setCommitIdentity,
+  subscribeGitProgress,
+  type AppError,
+  type CommitIdentity,
+  type GitProgressEvent,
+} from "@/api";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
 import BaseInput from "@/components/base/BaseInput.vue";
@@ -50,8 +58,7 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function onProgress(e: { payload: GitProgressEvent }) {
-  const p = e.payload;
+function onProgress(p: GitProgressEvent) {
   receivedBytes.value = p.received_bytes;
   if (p.total_objects > 0) {
     progressPercent.value = Math.min(
@@ -66,7 +73,7 @@ function onProgress(e: { payload: GitProgressEvent }) {
 /** User-initiated cancel: flip the backend token so git2 aborts the transfer. */
 async function cancelClone() {
   try {
-    await invoke("cancel_git");
+    await cancelGit();
   } catch {
     // best-effort — the clone simply continues if cancel fails
   }
@@ -83,9 +90,7 @@ onBeforeUnmount(() => {
 async function onAdvancedToggle(e: Event) {
   if (!(e.target as HTMLDetailsElement).open || commitDefault.value) return;
   try {
-    commitDefault.value = await invoke<CommitIdentity>(
-      "get_commit_identity_default",
-    );
+    commitDefault.value = await getCommitIdentityDefault();
   } catch {
     // Non-critical — the default hint just won't render.
   }
@@ -118,26 +123,23 @@ async function onClone() {
   progressText.value = "Cloning repository…";
   progressPercent.value = 0;
   receivedBytes.value = 0;
-  progressUnlisten ??= await listen<GitProgressEvent>(
-    "git-progress",
-    onProgress,
-  );
+  progressUnlisten ??= await subscribeGitProgress(onProgress);
 
   try {
-    await invoke("clone_repo", {
-      repoUrl: repoUrl.value,
-      pat: isSshUrl.value ? null : pat.value || null,
-      sshKey: isSshUrl.value ? sshKey.value : null,
-      sshPassphrase: isSshUrl.value ? sshPassphrase.value || null : null,
-    });
+    await cloneRepo(
+      repoUrl.value,
+      isSshUrl.value ? null : pat.value || null,
+      isSshUrl.value ? sshKey.value : null,
+      isSshUrl.value ? sshPassphrase.value || null : null,
+    );
     // Persist a custom commit identity if the user set one under Advanced.
     // Best-effort: a failure must not block the (already-cloned) setup.
     if (commitName.value.trim() || commitEmail.value.trim()) {
       try {
-        await invoke("set_commit_identity", {
-          name: commitName.value.trim() || null,
-          email: commitEmail.value.trim() || null,
-        });
+        await setCommitIdentity(
+          commitName.value.trim() || null,
+          commitEmail.value.trim() || null,
+        );
       } catch {
         // Non-critical — editable later in Settings.
       }

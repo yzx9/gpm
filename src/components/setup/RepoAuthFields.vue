@@ -4,8 +4,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import type { AppError, SshKeyPairResult } from "@/types";
+import { generateSshKey } from "@/api";
+import type { AppError } from "@/api";
 import { isSshUrl as isSshRepoUrl } from "./url";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
@@ -45,9 +45,7 @@ async function generateKey() {
   generating.value = true;
   error.value = "";
   try {
-    const result = await invoke<SshKeyPairResult>("generate_ssh_key", {
-      passphrase: sshPassphrase.value || null,
-    });
+    const result = await generateSshKey(sshPassphrase.value || null);
     sshKey.value = result.private_key;
     generatedPublicKey.value = result.public_key;
   } catch (e) {

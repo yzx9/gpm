@@ -4,8 +4,11 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import type { ConflictChoice, SensitiveContent, WriteConflict } from "@/types";
+import {
+  showRemoteSecret,
+  type ConflictChoice,
+  type WriteConflict,
+} from "@/api";
 import BaseButton from "./base/BaseButton.vue";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
@@ -53,10 +56,7 @@ watch(
 async function viewExisting() {
   if (!props.conflict) return;
   try {
-    const content = await invoke<SensitiveContent | null>(
-      "show_remote_secret",
-      { name: props.conflict.name },
-    );
+    const content = await showRemoteSecret(props.conflict.name);
     if (content) revealRemote(content);
     else clearRemote();
   } catch {

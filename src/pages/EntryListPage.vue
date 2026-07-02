@@ -12,20 +12,26 @@ import {
   nextTick,
 } from "vue";
 import { useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type {
-  AppError,
-  AuthenticityState,
-  CommitSigInfo,
-  CopyResult,
-  Entry,
-  EntryPage,
-  GitProgressEvent,
-  PullResult,
-  SyncDivergence,
-  SyncOutcome,
-} from "@/types";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import {
+  cancelGit,
+  copyPassword as copyPasswordCmd,
+  getAuthenticityState,
+  ignoreCommitIssue,
+  listEntries,
+  pullRepo as pullRepoCmd,
+  resolveSyncDivergence,
+  searchEntries,
+  setVerificationMode,
+  subscribeGitProgress,
+  trustCommitSigner,
+  type AppError,
+  type AuthenticityState,
+  type CommitSigInfo,
+  type Entry,
+  type GitProgressEvent,
+  type SyncDivergence,
+} from "@/api";
 import { formatRelativeTime } from "@/utils/format";
 import { statusGlyph, statusLabel } from "@/utils/signature";
 import BaseInput from "@/components/base/BaseInput.vue";
@@ -135,12 +141,9 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
   loading.value = true;
   try {
     const searching = q.trim().length > 0;
-    const page = await invoke<EntryPage>(
-      searching ? "search_entries" : "list_entries",
-      searching
-        ? { query: q, offset, limit: PAGE_SIZE }
-        : { offset, limit: PAGE_SIZE },
-    );
+    const page = searching
+      ? await searchEntries(q, offset, PAGE_SIZE)
+      : await listEntries(offset, PAGE_SIZE);
     if (myId !== reqId) return; // superseded by a newer query/reset/pull
     displayedEntries.value = replace
       ? page.entries
@@ -195,14 +198,13 @@ watch(search, (q) => {
 
 async function loadAuthState() {
   try {
-    authState.value = await invoke<AuthenticityState>("get_authenticity_state");
+    authState.value = await getAuthenticityState();
   } catch {
     // Verification unavailable (e.g. repo mid-clone) — leave the badge as-is.
   }
 }
 
-function onPullProgress(e: { payload: GitProgressEvent }) {
-  const p = e.payload;
+function onPullProgress(p: GitProgressEvent) {
   if (p.total_objects > 0) {
     pullProgressPercent.value = Math.min(
       100,
@@ -216,7 +218,7 @@ function onPullProgress(e: { payload: GitProgressEvent }) {
 /** User-initiated cancel of an in-flight pull. */
 async function cancelPull() {
   try {
-    await invoke("cancel_git");
+    await cancelGit();
   } catch {
     // best-effort — the pull continues if cancel fails
   }
@@ -239,12 +241,9 @@ async function pullRepo() {
   blockIssues.value = null;
   pullProgressText.value = "Pulling…";
   pullProgressPercent.value = 0;
-  pullProgressUnlisten ??= await listen<GitProgressEvent>(
-    "git-progress",
-    onPullProgress,
-  );
+  pullProgressUnlisten ??= await subscribeGitProgress(onPullProgress);
   try {
-    const result = await invoke<SyncOutcome>("pull_repo");
+    const result = await pullRepoCmd();
     if (result.kind === "diverged") {
       // Surface the divergence for resolution instead of erroring.
       divergence.value = result;
@@ -301,9 +300,7 @@ async function adoptRemote() {
   adopting.value = true;
   adoptError.value = "";
   try {
-    const result = await invoke<PullResult>("resolve_sync_divergence", {
-      expectedRemoteOid: divergence.value.remote_tip,
-    });
+    const result = await resolveSyncDivergence(divergence.value.remote_tip);
     divergence.value = null;
     adoptConfirmed.value = false;
     pullResult.value = `Updated to ${result.head}`;
@@ -352,7 +349,7 @@ function showToast(message: string) {
 
 async function ignoreIssue(commit: CommitSigInfo) {
   try {
-    await invoke("ignore_commit_issue", { commit: commit.hash });
+    await ignoreCommitIssue(commit.hash);
     showToast("Ignored this commit's issue");
     // Remove it from the modal list.
     if (auditIssues.value) {
@@ -374,10 +371,7 @@ async function trustBlockSigner(commit: CommitSigInfo) {
   );
   if (label === null) return;
   try {
-    await invoke("trust_commit_signer", {
-      commit: commit.hash,
-      label: label.trim() || commit.short_hash,
-    });
+    await trustCommitSigner(commit.hash, label.trim() || commit.short_hash);
     showToast("✓ Signer trusted — pull again");
     blockIssues.value = null;
     await loadAuthState();
@@ -389,7 +383,7 @@ async function trustBlockSigner(commit: CommitSigInfo) {
 
 async function switchToAudit() {
   try {
-    await invoke("set_verification_mode", { mode: "audit" });
+    await setVerificationMode("audit");
     showToast("Switched to Audit — pull again");
     blockIssues.value = null;
     await loadAuthState();
@@ -401,11 +395,7 @@ async function switchToAudit() {
 
 async function copyPassword(entry: Entry) {
   try {
-    const result = await runWithAuth(() =>
-      invoke<CopyResult>("copy_password", {
-        entryPath: entry.path,
-      }),
-    );
+    const result = await runWithAuth(() => copyPasswordCmd(entry.path));
     showToast(
       `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
     );

@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ref, inject, type Ref, type InjectionKey } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import type { RepoConfig } from "@/types";
+import { getConfig, type RepoConfig } from "@/api";
 
 /**
  * Single cache for the security-related config the UI needs reactively — today
@@ -52,7 +51,7 @@ export function createSecuritySettings(): SecuritySettingsState {
     if (initialized) return;
     initialized = true;
     try {
-      applySecurityConfig(await invoke<RepoConfig>("get_config"));
+      applySecurityConfig(await getConfig());
     } catch {
       // Not configured yet, or the load failed — keep defaults.
     }

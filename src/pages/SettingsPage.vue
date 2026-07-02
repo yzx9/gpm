@@ -5,21 +5,35 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
 import {
-  disableBiometricUnlock,
-  enableBiometricUnlock,
-  isBiometricAvailable,
-  isBiometricUnlockEnabled,
-} from "@/biometric";
-import {
+  addTrustedKey,
   asAppLockError,
+  changePassphrase,
   disableBiometricAppLock,
+  disableBiometricUnlock,
   disableIdentityAutoUnlock,
   enableBiometricAppLock,
+  enableBiometricUnlock,
   enableIdentityAutoUnlock,
+  exportSshPrivateKey,
+  getAuthState,
+  getAuthenticityConfig,
+  getCommitIdentityDefault,
+  getConfig,
+  getSshPublicKey,
   isAppLockAvailable,
-} from "@/appLock";
+  isBiometricAvailable,
+  isBiometricUnlockEnabled,
+  removeTrustedKey,
+  resetConfig as apiResetConfig,
+  setClipboardClearSecs,
+  setCommitIdentity,
+  setLockMode,
+  setPassphrase,
+  setVerificationMode,
+  setViewClearSecs,
+  trustHeadSigner,
+} from "@/api";
 import {
   useLockState,
   useSecureScreen,
@@ -28,16 +42,13 @@ import {
 import type {
   AppError,
   AppLockError,
-  AuthState,
   AuthenticityConfig,
   BiometricError,
   CommitIdentity,
   LockMode,
   RepoConfig,
-  SshPublicKeyResult,
-  SshPrivateKeyResult,
   VerifyMode,
-} from "@/types";
+} from "@/api";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -195,10 +206,10 @@ async function loadConfig() {
   loading.value = true;
   error.value = "";
   try {
-    config.value = await invoke<RepoConfig>("get_config");
+    config.value = await getConfig();
     applySecurityConfig(config.value);
     isSsh.value = config.value.ssh_key !== null;
-    const auth = await invoke<AuthState>("get_auth_state");
+    const auth = await getAuthState();
     isIdentityEncrypted.value = auth.encrypted;
     identityType.value = auth.identity_type;
     biometricAvailable.value = await isBiometricAvailable();
@@ -209,9 +220,7 @@ async function loadConfig() {
       config.value.unlock_identity_with_app ?? false;
     commitName.value = config.value.commit_user_name ?? "";
     commitEmail.value = config.value.commit_user_email ?? "";
-    commitDefault.value = await invoke<CommitIdentity>(
-      "get_commit_identity_default",
-    );
+    commitDefault.value = await getCommitIdentityDefault();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load config";
@@ -224,10 +233,10 @@ async function onSaveCommitIdentity() {
   error.value = "";
   commitLoading.value = true;
   try {
-    const updated = await invoke<RepoConfig>("set_commit_identity", {
-      name: commitName.value.trim() || null,
-      email: commitEmail.value.trim() || null,
-    });
+    const updated = await setCommitIdentity(
+      commitName.value.trim() || null,
+      commitEmail.value.trim() || null,
+    );
     config.value = updated;
     commitName.value = updated.commit_user_name ?? "";
     commitEmail.value = updated.commit_user_email ?? "";
@@ -266,7 +275,7 @@ async function onLockModeChange(mode: LockMode) {
   lockLoading.value = true;
   error.value = "";
   try {
-    const updated = await invoke<RepoConfig>("set_lock_mode", { mode });
+    const updated = await setLockMode(mode);
     config.value = updated;
   } catch (e) {
     const appError = e as AppError;
@@ -281,7 +290,7 @@ async function onViewClearChange(secs: number | null) {
   lockLoading.value = true;
   error.value = "";
   try {
-    const updated = await invoke<RepoConfig>("set_view_clear_secs", { secs });
+    const updated = await setViewClearSecs(secs);
     config.value = updated;
     applySecurityConfig(updated);
   } catch (e) {
@@ -297,9 +306,7 @@ async function onClipboardClearChange(secs: number | null) {
   lockLoading.value = true;
   error.value = "";
   try {
-    const updated = await invoke<RepoConfig>("set_clipboard_clear_secs", {
-      secs,
-    });
+    const updated = await setClipboardClearSecs(secs);
     config.value = updated;
   } catch (e) {
     const appError = e as AppError;
@@ -312,7 +319,7 @@ async function onClipboardClearChange(secs: number | null) {
 async function showPublicKey() {
   error.value = "";
   try {
-    const result = await invoke<SshPublicKeyResult>("get_ssh_public_key");
+    const result = await getSshPublicKey();
     publicKey.value = result.public_key;
     showPublic.value = true;
   } catch (e) {
@@ -330,7 +337,7 @@ async function exportPrivateKey() {
     return;
   error.value = "";
   try {
-    const result = await invoke<SshPrivateKeyResult>("export_ssh_private_key");
+    const result = await exportSshPrivateKey();
     privateKey.value = result.private_key;
     showPrivate.value = true;
   } catch (e) {
@@ -356,7 +363,7 @@ async function onSetPassphrase() {
   }
   passphraseLoading.value = true;
   try {
-    await invoke("set_passphrase", { passphrase: newPassphrase.value });
+    await setPassphrase(newPassphrase.value);
     isIdentityEncrypted.value = true;
     showSetPassphrase.value = false;
     newPassphrase.value = "";
@@ -379,10 +386,7 @@ async function onChangePassphrase() {
   }
   passphraseLoading.value = true;
   try {
-    await invoke("change_passphrase", {
-      oldPassphrase: oldPassphrase.value,
-      newPassphrase: newPassphrase.value,
-    });
+    await changePassphrase(oldPassphrase.value, newPassphrase.value);
     showChangePassphrase.value = false;
     oldPassphrase.value = "";
     newPassphrase.value = "";
@@ -503,9 +507,7 @@ async function onDisableIdentityAutoUnlock() {
 // ── Repository authenticity ──────────────────────────────────────────────
 async function loadAuthConfig() {
   try {
-    authConfig.value = await invoke<AuthenticityConfig>(
-      "get_authenticity_config",
-    );
+    authConfig.value = await getAuthenticityConfig();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load authenticity config";
@@ -517,9 +519,7 @@ async function onModeChange(mode: VerifyMode) {
   authLoading.value = true;
   error.value = "";
   try {
-    const effective = await invoke<VerifyMode>("set_verification_mode", {
-      mode,
-    });
+    const effective = await setVerificationMode(mode);
     authConfig.value.mode = effective;
   } catch (e) {
     const appError = e as AppError;
@@ -545,10 +545,7 @@ async function onAddKey() {
   }
   authLoading.value = true;
   try {
-    await invoke("add_trusted_key", {
-      publicKey: key,
-      label: newKeyLabel.value.trim() || "signer",
-    });
+    await addTrustedKey(key, newKeyLabel.value.trim() || "signer");
     newPublicKey.value = "";
     newKeyLabel.value = "";
     showAddKey.value = false;
@@ -566,7 +563,7 @@ async function onRemoveKey(fingerprint: string) {
   if (!confirm("Remove this trusted signing key?")) return;
   authLoading.value = true;
   try {
-    await invoke("remove_trusted_key", { fingerprint });
+    await removeTrustedKey(fingerprint);
     showToast("Trusted key removed");
     await loadAuthConfig();
   } catch (e) {
@@ -585,7 +582,7 @@ async function onTrustHead() {
   if (label === null) return;
   authLoading.value = true;
   try {
-    await invoke("trust_head_signer", { label: label.trim() || "signer" });
+    await trustHeadSigner(label.trim() || "signer");
     showToast("✓ HEAD signer trusted");
     await loadAuthConfig();
   } catch (e) {
@@ -605,7 +602,7 @@ async function resetConfig() {
   if (!confirm("Reset gpm? This will remove all local data and configuration."))
     return;
   try {
-    await invoke("reset_config");
+    await apiResetConfig();
     router.push({ name: "setup" });
   } catch (e) {
     const appError = e as AppError;

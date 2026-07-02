@@ -4,8 +4,16 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import type { AppError, CreateIdentityKind } from "@/types";
+import {
+  clearPendingIdentity,
+  completeSetupFromFile,
+  createStore,
+  generateIdentity,
+  isConfigured,
+  pushRepo,
+  type AppError,
+  type CreateIdentityKind,
+} from "@/api";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
 import BaseInput from "@/components/base/BaseInput.vue";
@@ -47,13 +55,13 @@ function selectKind(kind: CreateIdentityKind) {
   // — drop both so stale values can't be saved, and force a re-generate.
   recipient.value = "";
   mintedSshPassphrase.value = null;
-  invoke("clear_pending_identity").catch(() => {});
+  clearPendingIdentity().catch(() => {});
 }
 
 // Drop any staged identity if the user leaves without completing (no-op after a
 // successful complete_setup_from_file, which consumes it).
 onUnmounted(() => {
-  invoke("clear_pending_identity").catch(() => {});
+  clearPendingIdentity().catch(() => {});
 });
 
 async function generate() {
@@ -68,15 +76,12 @@ async function generate() {
       // edit — or a mid-generate keystroke before the lock takes effect — can't
       // desync the two.
       mintedSshPassphrase.value = passphrase.value || null;
-      recipient.value = await invoke<string>("generate_identity", {
-        kind: "ssh",
-        passphrase: mintedSshPassphrase.value,
-      });
+      recipient.value = await generateIdentity(
+        "ssh",
+        mintedSshPassphrase.value,
+      );
     } else {
-      recipient.value = await invoke<string>("generate_identity", {
-        kind: "age",
-        passphrase: null,
-      });
+      recipient.value = await generateIdentity("age", null);
     }
   } catch (e) {
     const appError = e as AppError;
@@ -123,29 +128,27 @@ async function onCreate() {
     // rm -rf's the repo, and the staged identity is already consumed, so a
     // re-run would destroy the saved identity and strand the store. When the
     // store is complete, skip straight to the (retry) push.
-    const configured = await invoke<boolean>("is_configured");
+    const configured = await isConfigured();
     if (!configured) {
       // create_store bootstraps the local repo + seeds .age-recipients + (if a
       // remote is given) records origin. It does NOT push — the first push is
       // deferred until after the identity is durable (orphan-recipient guard).
-      await invoke("create_store", {
-        recipient: recipient.value,
-        repoUrl: hasRemote ? repoUrl.value.trim() : null,
-        pat: hasRemote && !isSshUrl.value ? pat.value || null : null,
-        sshKey: hasRemote && isSshUrl.value ? sshKey.value : null,
-        sshPassphrase:
-          hasRemote && isSshUrl.value ? sshPassphrase.value || null : null,
-      });
+      await createStore(
+        recipient.value,
+        hasRemote ? repoUrl.value.trim() : null,
+        hasRemote && !isSshUrl.value ? pat.value || null : null,
+        hasRemote && isSshUrl.value ? sshKey.value : null,
+        hasRemote && isSshUrl.value ? sshPassphrase.value || null : null,
+      );
 
       // The identity was staged in backend state at generate time; this consumes
       // it (no secret crosses IPC). For SSH, reuse the passphrase that minted the
       // key (snapshot); for age, the live field (at-rest encryption).
-      await invoke("complete_setup_from_file", {
-        passphrase:
-          identityKind.value === "ssh"
-            ? mintedSshPassphrase.value
-            : passphrase.value || null,
-      });
+      await completeSetupFromFile(
+        identityKind.value === "ssh"
+          ? mintedSshPassphrase.value
+          : passphrase.value || null,
+      );
     }
 
     if (hasRemote) {
@@ -153,7 +156,7 @@ async function onCreate() {
       // fully created + configured locally; a failed push blocks navigation so
       // the user sees it rather than silently believing the store synced.
       try {
-        await invoke("push_repo");
+        await pushRepo();
       } catch (e) {
         const pushError = e as AppError;
         error.value =

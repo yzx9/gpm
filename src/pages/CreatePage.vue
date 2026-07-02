@@ -5,16 +5,22 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
-import type {
-  AppError,
-  ConflictChoice,
-  CreatePreset,
-  GenerateMode,
-  PresetField,
-  WriteConflict,
-  WriteOutcome,
-} from "@/types";
+import {
+  createFromPresetSecret,
+  createSecret,
+  generatePassword,
+  listCreatePresets,
+  lookupTemplate,
+  previewCreate,
+  resolveWriteConflict,
+  type AppError,
+  type ConflictChoice,
+  type CreatePreset,
+  type GenerateMode,
+  type PresetField,
+  type WriteConflict,
+  type WriteOutcome,
+} from "@/api";
 import {
   isAuthCancelled,
   useLockState,
@@ -105,7 +111,7 @@ async function onGeneratePassword(f: PresetField) {
   const myToken = ++generateToken;
   generating.value = true;
   try {
-    const pw = await invoke<string>("generate_password", {
+    const pw = await generatePassword({
       mode: genMode.value,
       charset: f.charset,
       minLen: f.min,
@@ -127,7 +133,7 @@ async function onGeneratePassword(f: PresetField) {
 async function loadPresets() {
   presetsLoading.value = true;
   try {
-    presets.value = await invoke<CreatePreset[]>("list_create_presets");
+    presets.value = await listCreatePresets();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load presets";
@@ -200,12 +206,8 @@ async function refreshPreview() {
     return;
   }
   try {
-    hasTemplate.value =
-      (await invoke<string | null>("lookup_template", { name })) !== null;
-    preview.value = await invoke<string | null>("preview_create", {
-      name,
-      content: customContent.value,
-    });
+    hasTemplate.value = (await lookupTemplate(name)) !== null;
+    preview.value = await previewCreate(name, customContent.value);
   } catch {
     // Invalid name mid-typing, or a template references an unknown var — no preview.
     hasTemplate.value = false;
@@ -220,14 +222,8 @@ async function submit() {
   try {
     const outcome: WriteOutcome = await runWithAuth(() =>
       mode.value === "preset" && activePreset.value
-        ? invoke<WriteOutcome>("create_from_preset_secret", {
-            presetId: activePreset.value.id,
-            fields: fields.value,
-          })
-        : invoke<WriteOutcome>("create_secret", {
-            name: customName.value.trim(),
-            content: customContent.value,
-          }),
+        ? createFromPresetSecret(activePreset.value.id, fields.value)
+        : createSecret(customName.value.trim(), customContent.value),
     );
 
     if (outcome.kind === "written") {
@@ -263,14 +259,8 @@ async function resolve(choice: ConflictChoice) {
     const needsIdentity =
       choice === "keep_mine" || choice === "keep_mine_force";
     const result = needsIdentity
-      ? await runWithAuth(() =>
-          invoke<{ commit: string } | null>("resolve_write_conflict", {
-            choice,
-          }),
-        )
-      : await invoke<{ commit: string } | null>("resolve_write_conflict", {
-          choice,
-        });
+      ? await runWithAuth(() => resolveWriteConflict(choice))
+      : await resolveWriteConflict(choice);
     conflict.value = null;
     if (choice === "keep_remote") {
       showToast("Kept the existing entry");

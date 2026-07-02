@@ -5,8 +5,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
-import type { AppError, CommitSigInfo } from "@/types";
+import {
+  ignoreCommitIssue,
+  listCommitSignatures,
+  trustCommitSigner,
+  type CommitSigInfo,
+} from "@/api";
+import type { AppError } from "@/api";
 import { formatRelativeTime } from "@/utils/format";
 import {
   isIgnorable,
@@ -51,9 +56,7 @@ async function loadHistory() {
   loading.value = true;
   error.value = "";
   try {
-    commits.value = await invoke<CommitSigInfo[]>("list_commit_signatures", {
-      limit: 50,
-    });
+    commits.value = await listCommitSignatures(50);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load commit history";
@@ -77,10 +80,7 @@ async function onTrust(commit: CommitSigInfo) {
   if (label === null) return;
   actionLoading.value = true;
   try {
-    await invoke("trust_commit_signer", {
-      commit: commit.hash,
-      label: label.trim() || suggested,
-    });
+    await trustCommitSigner(commit.hash, label.trim() || suggested);
     showToast(`✓ Trusted ${label || suggested}`);
     await loadHistory();
     selected.value = null;
@@ -95,7 +95,7 @@ async function onTrust(commit: CommitSigInfo) {
 async function onIgnore(commit: CommitSigInfo) {
   actionLoading.value = true;
   try {
-    await invoke("ignore_commit_issue", { commit: commit.hash });
+    await ignoreCommitIssue(commit.hash);
     showToast("Issue ignored for this commit");
     await loadHistory();
     selected.value = null;

@@ -5,10 +5,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
-import { appUnlock, asAppLockError } from "@/appLock";
+import { appUnlock, asAppLockError, resetConfig } from "@/api";
 import { useAppLockState } from "@/composables";
-import type { AppLockError } from "@/types";
+import type { AppLockError } from "@/api";
 import BaseButton from "./base/BaseButton.vue";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
@@ -57,7 +56,7 @@ async function onReset() {
   if (!confirm("Reset gpm? This will remove all local data and configuration."))
     return;
   try {
-    await invoke("reset_config");
+    await resetConfig();
     router.push({ name: "setup" });
   } catch (e) {
     const err = e as { message?: string };

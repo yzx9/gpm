@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { isRepoReady } from "@/api";
 import RepoCloneForm from "./RepoCloneForm.vue";
 import IdentitySetupForm from "./IdentitySetupForm.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
@@ -28,7 +28,7 @@ const isSshUrl = computed(() => isSshRepoUrl(repoUrl.value));
 // Auto-advance to step 2 if repo is already cloned (identity missing).
 onMounted(async () => {
   try {
-    const ready = await invoke<boolean>("is_repo_ready");
+    const ready = await isRepoReady();
     if (ready) {
       step.value = 2;
     }

@@ -5,15 +5,16 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
-import type {
-  AppError,
-  ConflictChoice,
-  CopyResult,
-  SensitiveContent,
-  WriteConflict,
-  WriteOutcome,
-} from "@/types";
+import {
+  copyPassword as copyPasswordCmd,
+  deleteSecret as deleteSecretCmd,
+  editSecret,
+  resolveWriteConflict,
+  showPassword as showPasswordCmd,
+  type ConflictChoice,
+  type WriteConflict,
+} from "@/api";
+import type { AppError } from "@/api";
 import {
   isAuthCancelled,
   useLockState,
@@ -99,9 +100,7 @@ async function showPassword() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await runWithAuth(() =>
-      invoke<SensitiveContent>("show_password", { entryPath }),
-    );
+    const result = await runWithAuth(() => showPasswordCmd(entryPath));
     reveal(result);
   } catch (e) {
     if (isAuthCancelled(e)) return;
@@ -115,9 +114,7 @@ async function showPassword() {
 async function copyPassword() {
   error.value = "";
   try {
-    const result = await runWithAuth(() =>
-      invoke<CopyResult>("copy_password", { entryPath }),
-    );
+    const result = await runWithAuth(() => copyPasswordCmd(entryPath));
     clear();
     showToast(
       `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
@@ -141,9 +138,7 @@ async function deleteSecret() {
   deleting.value = true;
   error.value = "";
   try {
-    const result = await invoke<{ commit: string }>("delete_secret", {
-      name: entryName,
-    });
+    const result = await deleteSecretCmd(entryName);
     clear();
     showToast(`✓ Deleted (commit ${result.commit})`);
     router.push({ name: "entries" });
@@ -196,9 +191,7 @@ async function enterEdit() {
     // Cold edit — the page never revealed; fetch so the form can prefill.
     loading.value = true;
     try {
-      const result = await invoke<SensitiveContent>("show_password", {
-        entryPath,
-      });
+      const result = await showPasswordCmd(entryPath);
       pw = result.password;
       nt = result.notes;
     } catch (e) {
@@ -233,10 +226,7 @@ async function saveEdit() {
   saving.value = true;
   error.value = "";
   try {
-    const outcome = await invoke<WriteOutcome>("edit_secret", {
-      name: entryName,
-      content: editBody.value,
-    });
+    const outcome = await editSecret(entryName, editBody.value);
     if (outcome.kind === "written") {
       showToast(`✓ Saved (commit ${outcome.commit})`);
       // Exit to the read-only view; the user can Show to verify. Don't
@@ -269,14 +259,8 @@ async function resolveEdit(choice: ConflictChoice) {
     const needsIdentity =
       choice === "keep_mine" || choice === "keep_mine_force";
     const result = needsIdentity
-      ? await runWithAuth(() =>
-          invoke<{ commit: string } | null>("resolve_write_conflict", {
-            choice,
-          }),
-        )
-      : await invoke<{ commit: string } | null>("resolve_write_conflict", {
-          choice,
-        });
+      ? await runWithAuth(() => resolveWriteConflict(choice))
+      : await resolveWriteConflict(choice);
     conflict.value = null;
     if (choice === "keep_remote") {
       showToast("Kept the existing entry");

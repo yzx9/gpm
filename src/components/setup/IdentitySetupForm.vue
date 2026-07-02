@@ -4,14 +4,18 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import type {
-  AppError,
-  IdentityInfoResult,
-  PickedIdentityResult,
-  RecipientInfo,
-  VerifiedIdentityResult,
-} from "@/types";
+import {
+  clearPendingIdentity,
+  completeSetup,
+  completeSetupFromFile,
+  listRecipients,
+  pickIdentityFile,
+  validateIdentity,
+  verifyPickedIdentity,
+  type PickedIdentityResult,
+  type RecipientInfo,
+} from "@/api";
+import type { AppError } from "@/api";
 import { truncateKey } from "./url";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
@@ -69,7 +73,7 @@ const isSshIdentity = computed(
 async function fetchRecipients() {
   loadingRecipients.value = true;
   try {
-    recipients.value = await invoke<RecipientInfo[]>("list_recipients");
+    recipients.value = await listRecipients();
     // Auto-select first recipient if only one exists
     if (recipients.value.length === 1) {
       selectedRecipient.value = recipients.value[0].public_key;
@@ -116,14 +120,9 @@ async function onCompleteSetup() {
   loadingIdentity.value = true;
   try {
     if (identitySource.value === "file") {
-      await invoke("complete_setup_from_file", {
-        passphrase: passphrase.value || null,
-      });
+      await completeSetupFromFile(passphrase.value || null);
     } else {
-      await invoke("complete_setup", {
-        identity: identity.value,
-        passphrase: passphrase.value || null,
-      });
+      await completeSetup(identity.value, passphrase.value || null);
     }
     emit("done");
   } catch (e) {
@@ -138,7 +137,7 @@ async function onPickFile() {
   picking.value = true;
   error.value = "";
   try {
-    const info = await invoke<PickedIdentityResult>("pick_identity_file");
+    const info = await pickIdentityFile();
     pickedFile.value = info;
     identityType.value = info.key_type;
     isIdentityEncrypted.value = info.encrypted;
@@ -161,9 +160,7 @@ async function onVerify() {
   verifying.value = true;
   error.value = "";
   try {
-    const res = await invoke<VerifiedIdentityResult>("verify_picked_identity", {
-      passphrase: passphrase.value,
-    });
+    const res = await verifyPickedIdentity(passphrase.value);
     if (pickedFile.value) pickedFile.value.recipient = res.recipient;
   } catch (e) {
     const appError = e as AppError;
@@ -185,12 +182,12 @@ function onUsePaste() {
   isIdentityEncrypted.value = false;
   passphrase.value = "";
   identity.value = "";
-  invoke("clear_pending_identity").catch(() => {});
+  clearPendingIdentity().catch(() => {});
 }
 
 function clearPendingFile() {
   if (identitySource.value === "file") {
-    invoke("clear_pending_identity").catch(() => {});
+    clearPendingIdentity().catch(() => {});
   }
 }
 
@@ -230,9 +227,7 @@ watch(identity, async (val) => {
     return;
   }
   try {
-    const info = await invoke<IdentityInfoResult>("validate_identity", {
-      identity: trimmed,
-    });
+    const info = await validateIdentity(trimmed);
     identityType.value = info.key_type;
     isIdentityEncrypted.value = info.encrypted;
   } catch {

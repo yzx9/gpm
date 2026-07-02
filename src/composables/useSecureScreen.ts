@@ -3,7 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ref, inject, type Ref, type InjectionKey } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  getAppConfig,
+  screenSecureAvailable,
+  setSecure,
+  setSecureScreen as persistSecureScreen,
+} from "@/api";
 
 /**
  * Per-page screen-capture protection (Android `FLAG_SECURE`) state.
@@ -86,9 +91,7 @@ export function createSecureScreen(
   async function pushFlag(routeLevel: boolean): Promise<boolean> {
     if (!secureAvailable.value) return true; // desktop / plugin absent: no-op
     try {
-      await invoke("plugin:screen-secure|set_secure", {
-        secure: desiredSecure(routeLevel),
-      });
+      await setSecure(desiredSecure(routeLevel));
       return true;
     } catch {
       return false;
@@ -108,7 +111,7 @@ export function createSecureScreen(
     if (initialized) return;
     initialized = true;
     try {
-      secureAvailable.value = await invoke<boolean>("screen_secure_available");
+      secureAvailable.value = await screenSecureAvailable();
     } catch {
       // Couldn't confirm availability. On Android this command always returns
       // `true`, so a rejection means the bridge is flaky — NOT "desktop". Assume
@@ -117,7 +120,7 @@ export function createSecureScreen(
       secureAvailable.value = true;
     }
     try {
-      const cfg = await invoke<{ secure_screen: boolean }>("get_app_config");
+      const cfg = await getAppConfig();
       secureScreen.value = cfg.secure_screen;
     } catch {
       // Backend unavailable (e.g. pre-setup) — keep the default ON.
@@ -169,7 +172,7 @@ export function createSecureScreen(
     const prev = secureScreen.value;
     secureScreen.value = enabled;
     try {
-      await invoke("set_secure_screen", { enabled });
+      await persistSecureScreen(enabled);
     } catch {
       // Persistence failed — revert to the last-known-persisted value so the ref
       // tracks disk, not an orphaned optimistic write.

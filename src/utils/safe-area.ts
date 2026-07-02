@@ -2,14 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { invoke, addPluginListener } from "@tauri-apps/api/core";
-
-interface SafeAreaInsets {
-  top: number;
-  bottom: number;
-  left: number;
-  right: number;
-}
+import {
+  getSafeAreaInsets,
+  subscribeSafeArea,
+  type SafeAreaInsets,
+} from "@/api";
 
 function applyInsets(insets: SafeAreaInsets): void {
   document.documentElement.style.setProperty(
@@ -48,14 +45,10 @@ function applyInsets(insets: SafeAreaInsets): void {
  */
 export async function applySafeAreaInsets(): Promise<void> {
   try {
-    const insets = await invoke<SafeAreaInsets>("plugin:safe-area|get_insets");
+    const insets = await getSafeAreaInsets();
     applyInsets(insets);
 
-    await addPluginListener<SafeAreaInsets>(
-      "safe-area",
-      "safe-area-changed",
-      applyInsets,
-    );
+    await subscribeSafeArea(applyInsets);
 
     // Re-pull live insets on rotation. `get_insets` reads the current committed
     // insets, so this stays correct without depending on the plugin's listener.
@@ -63,7 +56,7 @@ export async function applySafeAreaInsets(): Promise<void> {
     // status/nav-bar/cutout insets the plugin reports, so that would only churn
     // the IPC bridge with identical values.
     const refresh = (): void => {
-      invoke<SafeAreaInsets>("plugin:safe-area|get_insets")
+      getSafeAreaInsets()
         .then(applyInsets)
         .catch(() => {
           /* plugin gone (e.g. teardown) — keep last insets */

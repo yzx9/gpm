@@ -5,15 +5,16 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
 import {
   asBiometricError,
   biometricUnlock,
   disableBiometricUnlock,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
-} from "@/biometric";
-import type { BiometricError } from "@/types";
+  resetConfig,
+  unlock,
+} from "@/api";
+import type { BiometricError } from "@/api";
 import BaseInput from "./base/BaseInput.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseAlert from "./base/BaseAlert.vue";
@@ -74,7 +75,7 @@ async function onUnlock() {
 
   loading.value = true;
   try {
-    await invoke("unlock", { passphrase: passphrase.value });
+    await unlock(passphrase.value);
     // Success: the backend emits `identity-lock-state { locked: false }`, which
     // App.vue reacts to and unmounts this overlay. Nothing to do here.
   } catch (e) {
@@ -93,7 +94,7 @@ async function onReset() {
   if (!confirm("Reset gpm? This will remove all local data and configuration."))
     return;
   try {
-    await invoke("reset_config");
+    await resetConfig();
     // The backend emits `identity-lock-state { locked: false }` on reset, which
     // closes this overlay. Then drop the user on Setup to reconfigure.
     router.push({ name: "setup" });
