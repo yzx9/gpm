@@ -13,7 +13,7 @@ import {
   useLockState,
   type LockState,
 } from "./useLockState";
-import { withSetup } from "../test/withSetup";
+import { withSetup } from "@/test/withSetup";
 
 describe("useLockState", () => {
   let s: LockState;

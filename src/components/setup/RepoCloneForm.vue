@@ -6,12 +6,12 @@
 import { computed, ref, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppError, CommitIdentity, GitProgressEvent } from "../../types";
+import type { AppError, CommitIdentity, GitProgressEvent } from "@/types";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
-import BaseInput from "../base/BaseInput.vue";
-import BaseButton from "../base/BaseButton.vue";
-import BaseAlert from "../base/BaseAlert.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
 
 const emit = defineEmits<{
   done: [];

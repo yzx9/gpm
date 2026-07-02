@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import type { RepoConfig } from "../types";
+import type { RepoConfig } from "@/types";
 import {
   createSecuritySettings,
   type SecuritySettingsState,

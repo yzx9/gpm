@@ -12,8 +12,8 @@ import {
   disableBiometricUnlock,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
-} from "../biometric";
-import type { BiometricError } from "../types";
+} from "@/biometric";
+import type { BiometricError } from "@/types";
 import BaseInput from "./base/BaseInput.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseAlert from "./base/BaseAlert.vue";

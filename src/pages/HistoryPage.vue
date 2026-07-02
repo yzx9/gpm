@@ -6,8 +6,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, CommitSigInfo } from "../types";
-import { formatRelativeTime } from "../utils/format";
+import type { AppError, CommitSigInfo } from "@/types";
+import { formatRelativeTime } from "@/utils/format";
 import {
   isIgnorable,
   signerFp,
@@ -15,12 +15,12 @@ import {
   statusClass,
   statusGlyph,
   statusLabel,
-} from "../utils/signature";
-import BaseButton from "../components/base/BaseButton.vue";
-import BaseSpinner from "../components/base/BaseSpinner.vue";
-import BaseAlert from "../components/base/BaseAlert.vue";
-import BaseToast from "../components/base/BaseToast.vue";
-import BaseModalShell from "../components/base/BaseModalShell.vue";
+} from "@/utils/signature";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseToast from "@/components/base/BaseToast.vue";
+import BaseModalShell from "@/components/base/BaseModalShell.vue";
 
 const router = useRouter();
 

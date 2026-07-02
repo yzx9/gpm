@@ -11,7 +11,7 @@ import {
   enableBiometricUnlock,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
-} from "../biometric";
+} from "@/biometric";
 import {
   asAppLockError,
   disableBiometricAppLock,
@@ -19,12 +19,12 @@ import {
   enableBiometricAppLock,
   enableIdentityAutoUnlock,
   isAppLockAvailable,
-} from "../appLock";
+} from "@/appLock";
 import {
   useLockState,
   useSecureScreen,
   useSecuritySettings,
-} from "../composables";
+} from "@/composables";
 import type {
   AppError,
   AppLockError,
@@ -37,14 +37,14 @@ import type {
   SshPublicKeyResult,
   SshPrivateKeyResult,
   VerifyMode,
-} from "../types";
-import BaseInput from "../components/base/BaseInput.vue";
-import BaseTextarea from "../components/base/BaseTextarea.vue";
-import BaseButton from "../components/base/BaseButton.vue";
-import BaseSegmentedControl from "../components/base/BaseSegmentedControl.vue";
-import BaseAlert from "../components/base/BaseAlert.vue";
-import BaseToast from "../components/base/BaseToast.vue";
-import BaseCard from "../components/base/BaseCard.vue";
+} from "@/types";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseToast from "@/components/base/BaseToast.vue";
+import BaseCard from "@/components/base/BaseCard.vue";
 
 const router = useRouter();
 const { onLock } = useLockState();

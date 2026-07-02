@@ -15,7 +15,7 @@ import {
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
-} from "../composables";
+} from "@/composables";
 
 interface MountWithAppOptions<C extends Component> {
   /** Default `true`: start the lock in the "unlocked, identity cached" state page

@@ -4,7 +4,7 @@
 
 import { ref, inject, type Ref, type InjectionKey } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { RepoConfig } from "../types";
+import type { RepoConfig } from "@/types";
 
 /**
  * Single cache for the security-related config the UI needs reactively — today

@@ -5,12 +5,12 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, CreateIdentityKind } from "../../types";
+import type { AppError, CreateIdentityKind } from "@/types";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
-import BaseInput from "../base/BaseInput.vue";
-import BaseButton from "../base/BaseButton.vue";
-import BaseAlert from "../base/BaseAlert.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
 
 // The public recipient of the generated identity — the only part the frontend
 // ever holds. The secret identity itself lives in backend state (staged by

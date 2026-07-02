@@ -11,12 +11,12 @@ import type {
   PickedIdentityResult,
   RecipientInfo,
   VerifiedIdentityResult,
-} from "../../types";
+} from "@/types";
 import { truncateKey } from "./url";
-import BaseInput from "../base/BaseInput.vue";
-import BaseTextarea from "../base/BaseTextarea.vue";
-import BaseButton from "../base/BaseButton.vue";
-import BaseAlert from "../base/BaseAlert.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
 
 const props = defineProps<{
   /** Step-1 SSH key, so the "Use my SSH key for decryption" affordance has

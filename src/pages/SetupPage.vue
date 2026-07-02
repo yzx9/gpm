@@ -5,8 +5,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import CloneFlow from "../components/setup/CloneFlow.vue";
-import CreateFlow from "../components/setup/CreateFlow.vue";
+import CloneFlow from "@/components/setup/CloneFlow.vue";
+import CreateFlow from "@/components/setup/CreateFlow.vue";
 
 const router = useRouter();
 

@@ -13,20 +13,20 @@ import type {
   SensitiveContent,
   WriteConflict,
   WriteOutcome,
-} from "../types";
+} from "@/types";
 import {
   isAuthCancelled,
   useLockState,
   useOverlayBackHandler,
   useSecretReveal,
   useSecuritySettings,
-} from "../composables";
-import WriteConflictModal from "../components/WriteConflictModal.vue";
-import BaseButton from "../components/base/BaseButton.vue";
-import BaseInput from "../components/base/BaseInput.vue";
-import BaseTextarea from "../components/base/BaseTextarea.vue";
-import BaseSpinner from "../components/base/BaseSpinner.vue";
-import BaseAlert from "../components/base/BaseAlert.vue";
+} from "@/composables";
+import WriteConflictModal from "@/components/WriteConflictModal.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
 
 const route = useRoute();
 const router = useRouter();

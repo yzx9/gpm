@@ -25,15 +25,15 @@ import type {
   PullResult,
   SyncDivergence,
   SyncOutcome,
-} from "../types";
-import { formatRelativeTime } from "../utils/format";
-import { statusGlyph, statusLabel } from "../utils/signature";
-import BaseInput from "../components/base/BaseInput.vue";
-import BaseButton from "../components/base/BaseButton.vue";
-import BaseSpinner from "../components/base/BaseSpinner.vue";
-import BaseAlert from "../components/base/BaseAlert.vue";
-import BaseModalShell from "../components/base/BaseModalShell.vue";
-import { isAuthCancelled, useLockState } from "../composables";
+} from "@/types";
+import { formatRelativeTime } from "@/utils/format";
+import { statusGlyph, statusLabel } from "@/utils/signature";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseModalShell from "@/components/base/BaseModalShell.vue";
+import { isAuthCancelled, useLockState } from "@/composables";
 
 const router = useRouter();
 const { runWithAuth } = useLockState();

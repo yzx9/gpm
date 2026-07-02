@@ -14,7 +14,7 @@ import {
 } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AuthState } from "../types";
+import type { AuthState } from "@/types";
 
 /** Error code carried by the rejection `cancelAuth()` issues to parked callers. */
 export const AUTH_CANCELLED = "AUTH_CANCELLED";
