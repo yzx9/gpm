@@ -1825,9 +1825,7 @@ impl Store {
         // what verification will see later.
         let commit_owned = commit.to_string();
         let status = spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            let oid = git2::Oid::from_str(&commit_owned)?;
-            signing::status_of_commit(&repo, oid, &trusted)
+            signing::status_of_commit_at(&repo_path, &commit_owned, &trusted)
         })
         .await??;
 
@@ -1863,11 +1861,7 @@ impl Store {
         let repo_path = self.repo_path().await?;
         let rc = self.config.load_repo_config().await?;
         let trusted = signing::trusted_fingerprints(&rc.authenticity);
-        spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            signing::head_status(&repo, &trusted)
-        })
-        .await?
+        spawn_blocking(move || signing::head_status_at(&repo_path, &trusted)).await?
     }
 
     /// The OpenSSH public key of HEAD's SSH-signature signer (for the
@@ -1879,11 +1873,7 @@ impl Store {
     /// Returns an error if the repo cannot be opened or HEAD cannot be read.
     pub async fn head_signer_public_key(&self) -> Result<Option<String>, Error> {
         let repo_path = self.repo_path().await?;
-        spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            signing::head_signer_public_key(&repo)
-        })
-        .await?
+        spawn_blocking(move || signing::head_signer_public_key_at(&repo_path)).await?
     }
 
     /// Trust the SSH-signature signer of a specific commit ("trust this
@@ -1901,12 +1891,9 @@ impl Store {
     ) -> Result<TrustedKey, Error> {
         let repo_path = self.repo_path().await?;
         let hash_owned = commit_hash.to_string();
-        let public_key = spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            let oid = repo.revparse_single(&hash_owned)?.id();
-            signing::signer_public_key(&repo, oid)
-        })
-        .await??;
+        let public_key =
+            spawn_blocking(move || signing::signer_public_key_at(&repo_path, &hash_owned))
+                .await??;
         let public_key = public_key.ok_or_else(|| {
             Error::new(
                 ErrorCode::SshKeyInvalid,
@@ -1945,10 +1932,7 @@ impl Store {
         let from_owned = from.to_string();
         let to_owned = to.to_string();
         spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            let from = git2::Oid::from_str(&from_owned)?;
-            let to = git2::Oid::from_str(&to_owned)?;
-            signing::verify_range(&repo, from, to, &trusted, &ignored)
+            signing::verify_range_at(&repo_path, &from_owned, &to_owned, &trusted, &ignored)
         })
         .await?
     }
@@ -1965,8 +1949,7 @@ impl Store {
         let trusted = signing::trusted_fingerprints(&rc.authenticity);
         let ignored = rc.authenticity.ignored.clone();
         spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            signing::list_commit_signatures(&repo, limit, &trusted, &ignored)
+            signing::list_commit_signatures_at(&repo_path, limit, &trusted, &ignored)
         })
         .await?
     }
@@ -1985,9 +1968,7 @@ impl Store {
         let ignored = rc.authenticity.ignored.clone();
         let hash_owned = commit_hash.to_string();
         spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            let oid = repo.revparse_single(&hash_owned)?.id();
-            signing::commit_sig_info(&repo, oid, &trusted, &ignored)
+            signing::commit_sig_info_at(&repo_path, &hash_owned, &trusted, &ignored)
         })
         .await?
     }

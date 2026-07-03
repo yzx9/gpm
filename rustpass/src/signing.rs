@@ -23,6 +23,8 @@
 //! (`["ed25519", "encryption", "rand_core", "std"]`) covers `SshSig` parse +
 //! `PublicKey::verify` (both gated by `alloc`, implied by `std`).
 
+use std::path::Path;
+
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
 use ssh_key::{HashAlg, PublicKey, SshSig};
@@ -523,6 +525,125 @@ pub fn signer_public_key(repo: &Repository, oid: Oid) -> Result<Option<String>, 
 pub fn head_signer_public_key(repo: &Repository) -> Result<Option<String>, Error> {
     let head = repo.head()?.peel_to_commit()?.id();
     signer_public_key(repo, head)
+}
+
+// ---------------------------------------------------------------------------
+// Path-based wrappers (keep `git2` out of `store`)
+// ---------------------------------------------------------------------------
+//
+// `store`'s authenticity methods used to open the repo themselves
+// (`git2::Repository::discover` + `git2::Oid::from_str`) only to hand a
+// `&Repository` to the functions above. These `_at` wrappers take a repo
+// *path* and do the discover + hash-parse internally, so `store` no longer
+// names `git2` for authenticity. The `&Repository` versions above stay —
+// `git` calls them directly (it already has a `Repository` open).
+
+/// Discover the repo at `repo_path` and return HEAD's verification status.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered or HEAD cannot be read.
+pub fn head_status_at(
+    repo_path: &Path,
+    trusted_fingerprints: &[String],
+) -> Result<CommitSigStatus, Error> {
+    let repo = Repository::discover(repo_path)?;
+    head_status(&repo, trusted_fingerprints)
+}
+
+/// Discover the repo at `repo_path` and return HEAD signer's public key.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered or HEAD cannot be read.
+pub fn head_signer_public_key_at(repo_path: &Path) -> Result<Option<String>, Error> {
+    let repo = Repository::discover(repo_path)?;
+    head_signer_public_key(&repo)
+}
+
+/// Discover the repo at `repo_path` and return the signer key of the commit
+/// named by `hash` (full or short — resolved via `revparse_single`).
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered or `hash` cannot be
+/// resolved to a commit.
+pub fn signer_public_key_at(repo_path: &Path, hash: &str) -> Result<Option<String>, Error> {
+    let repo = Repository::discover(repo_path)?;
+    let oid = repo.revparse_single(hash)?.id();
+    signer_public_key(&repo, oid)
+}
+
+/// Discover the repo at `repo_path` and return the verification status of the
+/// commit named by `hash` (full hash — resolved via `Oid::from_str`, matching
+/// the previous store-side call).
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered or `hash` is not a valid
+/// full OID.
+pub fn status_of_commit_at(
+    repo_path: &Path,
+    hash: &str,
+    trusted_fingerprints: &[String],
+) -> Result<CommitSigStatus, Error> {
+    let repo = Repository::discover(repo_path)?;
+    let oid = Oid::from_str(hash)?;
+    status_of_commit(&repo, oid, trusted_fingerprints)
+}
+
+/// Discover the repo at `repo_path` and verify the half-open range `(from, to]`
+/// (full hashes).
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered, the walk fails, or
+/// `from`/`to` are not valid full OIDs.
+pub fn verify_range_at(
+    repo_path: &Path,
+    from: &str,
+    to: &str,
+    trusted_fingerprints: &[String],
+    ignored: &[IgnoredIssue],
+) -> Result<Vec<CommitSigInfo>, Error> {
+    let repo = Repository::discover(repo_path)?;
+    let from = Oid::from_str(from)?;
+    let to = Oid::from_str(to)?;
+    verify_range(&repo, from, to, trusted_fingerprints, ignored)
+}
+
+/// Discover the repo at `repo_path` and return the `limit` most recent commits
+/// with per-commit verification status.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered or HEAD cannot be read.
+pub fn list_commit_signatures_at(
+    repo_path: &Path,
+    limit: usize,
+    trusted_fingerprints: &[String],
+    ignored: &[IgnoredIssue],
+) -> Result<Vec<CommitSigInfo>, Error> {
+    let repo = Repository::discover(repo_path)?;
+    list_commit_signatures(&repo, limit, trusted_fingerprints, ignored)
+}
+
+/// Discover the repo at `repo_path` and return metadata + status for a single
+/// commit named by `hash` (full or short — resolved via `revparse_single`).
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered or `hash` cannot be
+/// resolved to a commit.
+pub fn commit_sig_info_at(
+    repo_path: &Path,
+    hash: &str,
+    trusted_fingerprints: &[String],
+    ignored: &[IgnoredIssue],
+) -> Result<CommitSigInfo, Error> {
+    let repo = Repository::discover(repo_path)?;
+    let oid = repo.revparse_single(hash)?.id();
+    commit_sig_info(&repo, oid, trusted_fingerprints, ignored)
 }
 
 // ---------------------------------------------------------------------------
