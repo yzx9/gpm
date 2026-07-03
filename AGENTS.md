@@ -73,6 +73,7 @@ Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration t
 - HTTPS and SSH Git remotes (SSH key generation + paste)
 - Biometric unlock (fingerprint/face) on Android 11+ for passphrase-protected identities (age or SSH); the passphrase is sealed in the Android Keystore with hardware-backed, biometric-gated encryption. Desktop and Android <11 stay passphrase-only. iOS deferred.
 - `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `MainActivity.kt`, `AndroidManifest.xml`, resources, the app `build.gradle.kts`). Plugin Kotlin lives in each plugin crate's own `android/` module, not here. Do not assume `gen/android/` contents are auto-generated or disposable.
+- The Android debug build sets `applicationIdSuffix = ".debug"` (installs as `xyz.yzx9.gpm.debug`) so it coexists with the release — install a debug build for diagnostics without uninstalling.
 
 ## Design RFCs — `.plans/`
 

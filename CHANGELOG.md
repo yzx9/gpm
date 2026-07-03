@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Debug Android builds now install as a separate app — "gpm Debug", application id `xyz.yzx9.gpm.debug` — so a debug build sits alongside the signed release instead of overwriting it. Install a debug build to diagnose an issue without uninstalling your release gpm; the two keep separate data and keys.
+
 ### Changed
 
 - gpm's buttons, status indicators, and empty states now use clean vector icons instead of emoji, so they render consistently and sharply on every device instead of varying with the platform's emoji set (Android vs desktop).
