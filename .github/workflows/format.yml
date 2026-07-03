@@ -37,4 +37,4 @@ jobs:
         run: pnpm install
 
       - name: Check frontend formatting
-        run: pnpm dlx prettier --check src
+        run: pnpm dlx prettier --check .

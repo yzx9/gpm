@@ -30,7 +30,7 @@ lint: _gen-icons
 # Format Rust + Vue code
 fmt:
   cargo fmt
-  prettier --write src
+  prettier --write .
 
 # Refresh the embedded Mozilla CA bundle (rustpass/data/cacert.pem) that backs
 # HTTPS git certificate verification on Android. Run once per release so the

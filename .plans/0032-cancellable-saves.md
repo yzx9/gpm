@@ -44,9 +44,9 @@ stays and syncs on the next manual Sync; nothing is lost).
 Two ownership bugs in the current single global "active cancel token" slot that
 this RFC must fix (they are latent today only because there is no per-save
 Cancel button yet, and the serialization lock prevents any data-corruption
-vector — the worst case today is a Cancel hitting the wrong op's *pull*):
+vector — the worst case today is a Cancel hitting the wrong op's _pull_):
 
-1. **Stomp / blind disarm.** `run_cancellable` arms the slot *before* the
+1. **Stomp / blind disarm.** `run_cancellable` arms the slot _before_ the
    operation acquires the serialization lock, so a second operation that arms
    while the first is queued overwrites the first's token. A subsequent Cancel
    then targets the queued op, not the running one, and the first op's teardown
