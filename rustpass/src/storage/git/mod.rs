@@ -43,6 +43,7 @@ impl StorageBackend for GitStorage {
 
     async fn get(&self, repo_path: &Path, name: &str) -> Result<Vec<u8>, Error> {
         let passfile = passfile_rel(name);
+        ensure_within_repo(&passfile)?;
         let file_path = resolve_entry_path(repo_path, &passfile)?;
         fs::read(&file_path).await.map_err(|e| {
             Error::new(
@@ -54,6 +55,10 @@ impl StorageBackend for GitStorage {
 
     async fn set(&self, repo_path: &Path, name: &str, ciphertext: &[u8]) -> Result<(), Error> {
         let passfile = passfile_rel(name);
+        // Reject `..` / absolute names BEFORE any fs op — the trait is `pub`, so
+        // a caller that skips `Store::validate_secret_name` still can't mkdir or
+        // write outside the repo. (`assert_within_repo` below is the 2nd layer.)
+        ensure_within_repo(&passfile)?;
         let file_path = repo_path.join(&passfile);
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
@@ -64,6 +69,7 @@ impl StorageBackend for GitStorage {
 
     async fn delete(&self, repo_path: &Path, name: &str) -> Result<(), Error> {
         let passfile = passfile_rel(name);
+        ensure_within_repo(&passfile)?;
         // Existence + within-repo guard before any mutation.
         resolve_entry_path(repo_path, &passfile)?;
         let file_path = repo_path.join(&passfile);
@@ -192,6 +198,34 @@ fn assert_within_repo(repo_path: &Path, dir: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Lexically reject a `passfile` whose path could escape the repo, BEFORE any
+/// filesystem op.
+///
+/// This is the backend's own front-line guard: `StorageBackend` is `pub`, so a
+/// caller that skips `Store::validate_secret_name` (e.g. a future in-tree
+/// caller, a second backend impl, or a test) still can't reach
+/// `create_dir_all`/`remove_file` with a `..` or absolute name. It runs before
+/// the post-op `assert_within_repo` canonicalize check — two layers, since
+/// neither alone is a sandbox (canonicalize needs the path to exist; lexical
+/// check can't see symlinks).
+fn ensure_within_repo(passfile: &str) -> Result<(), Error> {
+    let escaped = Path::new(passfile).components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    });
+    if escaped {
+        return Err(Error::new(
+            ErrorCode::EntryNotFound,
+            "Entry path is outside repository",
+        ));
+    }
+    Ok(())
+}
+
 /// Atomic write: write to a temp file beside the target, then rename over it.
 ///
 /// Mirrors [`Config`'s](crate::config::Config) atomic write so a failed write
@@ -216,5 +250,67 @@ pub(crate) fn passfile_rel(name: &str) -> String {
         name.to_string()
     } else {
         format!("{name}.age")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn set_then_get_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        storage
+            .set(dir.path(), "cloud/aws", b"ciphertext-bytes")
+            .await
+            .unwrap();
+        let got = storage.get(dir.path(), "cloud/aws").await.unwrap();
+        assert_eq!(got, b"ciphertext-bytes");
+    }
+
+    #[tokio::test]
+    async fn set_rejects_dotdot_name_before_any_fs_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        // A `..` name must be rejected by the lexical guard BEFORE create_dir_all
+        // runs — so no directory is created outside the repo, and the error is
+        // the within-repo rejection (ENTRY_NOT_FOUND), not an I/O error.
+        let err = storage
+            .set(dir.path(), "../escape", b"x")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+        let err = storage
+            .set(dir.path(), "legit/../escape", b"x")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn get_and_delete_reject_dotdot_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        assert_eq!(
+            storage.get(dir.path(), "../escape").await.unwrap_err().code,
+            "ENTRY_NOT_FOUND"
+        );
+        assert_eq!(
+            storage
+                .delete(dir.path(), "../escape")
+                .await
+                .unwrap_err()
+                .code,
+            "ENTRY_NOT_FOUND"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_missing_returns_entry_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        let err = storage.delete(dir.path(), "nope").await.unwrap_err();
+        assert_eq!(err.code, "ENTRY_NOT_FOUND");
     }
 }

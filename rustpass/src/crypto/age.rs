@@ -923,4 +923,51 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
             "expected IDENTITY_ENCRYPTED for missing passphrase, got: {err}"
         );
     }
+
+    // ── is_ssh_identity_encrypted ───────────────────────────────────────
+
+    /// Unencrypted OpenSSH ed25519 key (aes256-cbc bcrypt KDF absent — `none`).
+    const UNENCRYPTED_ED25519_PEM: &str = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n\
+QyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\n\
+agAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBj\n\
+AAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n\
+1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n\
+-----END OPENSSH PRIVATE KEY-----";
+
+    /// Encrypted OpenSSH ed25519 key (aes256-cbc bcrypt KDF present).
+    const ENCRYPTED_ED25519_PEM: &str = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAO4u+xEG\n\
+c7/4ChBhyKfc5AAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHuEHuK5j/S6zW08\n\
+lcpk06Ast8Z7z7CjjvwJHMnKMjH7AAAAkEGCPxwe5eiPxyho1gM64dg5Upve28LioOvMhW\n\
+2YUSDTCswCAqw6RRLa9ZSJ7IsiqMYblwP1UEyz4vbLM0BqqgpXtlfdnSwiZU6hRr+OU3r1\n\
+AAjj0UXSjYEAglHKALANMwgiHENIsmye/YOH2fCJ8DjB3bvfdUKqBND56NON/MRY+8vujj\n\
+IJjptSbFpDh+zfEg==\n\
+-----END OPENSSH PRIVATE KEY-----";
+
+    #[test]
+    fn is_ssh_identity_encrypted_true_for_encrypted_key() {
+        assert!(
+            is_ssh_identity_encrypted(ENCRYPTED_ED25519_PEM.as_bytes()),
+            "a bcrypt-KDF-encrypted SSH key must read as encrypted"
+        );
+    }
+
+    #[test]
+    fn is_ssh_identity_encrypted_false_for_unencrypted_key() {
+        assert!(
+            !is_ssh_identity_encrypted(UNENCRYPTED_ED25519_PEM.as_bytes()),
+            "an unencrypted SSH key must NOT read as encrypted"
+        );
+    }
+
+    #[test]
+    fn is_ssh_identity_encrypted_false_for_non_ssh_and_invalid_utf8() {
+        // Non-SSH bytes — not an encrypted SSH key.
+        assert!(!is_ssh_identity_encrypted(b"AGE-SECRET-KEY-1..."));
+        assert!(!is_ssh_identity_encrypted(b"just some password text"));
+        assert!(!is_ssh_identity_encrypted(b""));
+        // Invalid UTF-8 — must return false, not panic.
+        assert!(!is_ssh_identity_encrypted(&[0xff, 0xfe, 0xfd]));
+    }
 }
