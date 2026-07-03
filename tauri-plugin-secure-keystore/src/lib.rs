@@ -115,7 +115,7 @@ impl<R: Runtime> SecureKeystore<R> {
             available: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("is_available", ())
+            .run_mobile_plugin::<Resp>("isAvailable", ())
             .map(|r| r.available)
             .map_err(map_invoke_err)
     }
@@ -162,7 +162,7 @@ impl<R: Runtime> SecureKeystore<R> {
             available: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("is_biometric_available", ())
+            .run_mobile_plugin::<Resp>("isBiometricAvailable", ())
             .map(|r| r.available)
             .map_err(map_invoke_err)
     }
@@ -178,7 +178,7 @@ impl<R: Runtime> SecureKeystore<R> {
             stored: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("has_stored_biometric", ())
+            .run_mobile_plugin::<Resp>("hasStoredBiometric", ())
             .map(|r| r.stored)
             .map_err(map_invoke_err)
     }
@@ -192,7 +192,7 @@ impl<R: Runtime> SecureKeystore<R> {
             key: &'a str,
         }
         self.0
-            .run_mobile_plugin_async::<()>("store_biometric", Payload { key: key_b64 })
+            .run_mobile_plugin_async::<()>("storeBiometric", Payload { key: key_b64 })
             .await
             .map_err(map_invoke_err)
     }
@@ -209,7 +209,7 @@ impl<R: Runtime> SecureKeystore<R> {
         }
         let r = self
             .0
-            .run_mobile_plugin_async::<Resp>("retrieve_biometric", ())
+            .run_mobile_plugin_async::<Resp>("retrieveBiometric", ())
             .await
             .map_err(map_invoke_err)?;
         Ok(if r.stored { r.key } else { None })
@@ -220,7 +220,7 @@ impl<R: Runtime> SecureKeystore<R> {
     /// to the auth-free store).
     pub fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
         self.0
-            .run_mobile_plugin::<()>("delete_biometric", ())
+            .run_mobile_plugin::<()>("deleteBiometric", ())
             .map_err(map_invoke_err)
     }
 }

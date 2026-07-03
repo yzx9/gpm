@@ -13,7 +13,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
-/** Argument holder for `set_secure` (deserialized by field name). */
+/** Argument holder for `setSecure` (deserialized by field name). */
 @InvokeArg
 class SetSecureArgs {
     var secure: Boolean = false
@@ -33,7 +33,7 @@ class SetSecureArgs {
 class ScreenSecurePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
-    fun set_secure(invoke: Invoke) {
+    fun setSecure(invoke: Invoke) {
         val secure = invoke.parseArgs(SetSecureArgs::class.java).secure
         if (secure) {
             activity.window.setFlags(

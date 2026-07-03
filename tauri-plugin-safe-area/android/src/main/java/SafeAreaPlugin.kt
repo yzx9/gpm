@@ -71,7 +71,7 @@ class SafeAreaPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun get_insets(invoke: Invoke) {
+    fun getInsets(invoke: Invoke) {
         val density = activity.resources.displayMetrics.density
         val rootInsets = ViewCompat.getRootWindowInsets(activity.window.decorView)
         invoke.resolve(computeInsets(rootInsets, density).toJSObject())

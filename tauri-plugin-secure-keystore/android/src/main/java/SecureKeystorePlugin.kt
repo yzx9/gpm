@@ -59,7 +59,7 @@ private const val PREFS_NAME = "gpm_secure_keystore"
 // Biometric-gated master key (app-lock). Separate alias + prefs so the two
 // policies never collide and a migration is just move-between-stores.
 private const val BIOMETRIC_KEY_ALIAS = "gpm_master_key_biometric"
-private const val BIOMETRIC_PREFS_NAME = "gpm_secure_keystore_biometric"
+private const val BIOMETRIC_PREFS_NAME = "gpm_secure_keystoreBiometric"
 
 private const val PREF_CT = "ct"
 private const val PREF_IV = "iv"
@@ -67,7 +67,7 @@ private const val PREF_IV = "iv"
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
 
-/** Argument for `store` / `store_biometric`: the Base64 32-byte master key. */
+/** Argument for `store` / `storeBiometric`: the Base64 32-byte master key. */
 @InvokeArg
 class StoreArgs {
     lateinit var key: String
@@ -91,7 +91,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
     private fun fragmentActivity(): FragmentActivity? = activity as? FragmentActivity
 
     /** The STRONG biometric authenticators bitmask — must match the key's
-     *  `AUTH_BIOMETRIC_STRONG` or `retrieve_biometric` fails at prompt time. */
+     *  `AUTH_BIOMETRIC_STRONG` or `retrieveBiometric` fails at prompt time. */
     private val strongAuthenticator: Int
         get() = BiometricManager.Authenticators.BIOMETRIC_STRONG
 
@@ -170,7 +170,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
     /**
      * Generate a fresh biometric-gated AES/GCM key, replacing any prior entry.
      *
-     * A fresh key on every `store_biometric` sidesteps the "alias exists but key
+     * A fresh key on every `storeBiometric` sidesteps the "alias exists but key
      * is invalidated" trap (a dead key keeps its alias), so re-enabling after a
      * biometric change just works. API 30+: per-use STRONG biometric auth.
      *
@@ -259,7 +259,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     /** `true` — the Android Keystore is always present on Android. */
     @Command
-    fun is_available(invoke: Invoke) {
+    fun isAvailable(invoke: Invoke) {
         val ret = JSObject()
         ret.put("available", true)
         invoke.resolve(ret)
@@ -336,7 +336,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     /** `true` on API 30+ with a STRONG biometric enrolled. Non-prompting. */
     @Command
-    fun is_biometric_available(invoke: Invoke) {
+    fun isBiometricAvailable(invoke: Invoke) {
         val available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
             BiometricManager.from(activity)
                 .canAuthenticate(strongAuthenticator) == BiometricManager.BIOMETRIC_SUCCESS
@@ -349,7 +349,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
      *  cleanly. Non-prompting. A key invalidated by all-biometrics-removed →
      *  false, so a cold launch skips a doomed prompt. */
     @Command
-    fun has_stored_biometric(invoke: Invoke) {
+    fun hasStoredBiometric(invoke: Invoke) {
         // Explicit API guard BEFORE any reference to the R-only probe, so the
         // method is robust to reordering (the `@RequiresApi(R)` body must never
         // be reached on API <30, or it would verify-error at first touch).
@@ -370,14 +370,14 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
      *  prompt does. Any init failure ⇒ not usable ⇒ fall back / re-setup.
      *
      *  Keep this body free of API-30-only symbols beyond the cipher init: the
-     *  SDK guard in [has_stored_biometric] gatekeeps, and `@RequiresApi(R)` is
+     *  SDK guard in [hasStoredBiometric] gatekeeps, and `@RequiresApi(R)` is
      *  lint-only, not runtime-enforced. */
     @RequiresApi(Build.VERSION_CODES.R)
     private fun biometricKeyUsable(): Boolean = try {
         biometricEncryptionCipher()
         true
     } catch (e: Exception) {
-        Log.w("gpm_secure_keystore", "has_stored_biometric probe failed: ${safeName(e)}")
+        Log.w("gpm_secure_keystore", "hasStoredBiometric probe failed: ${safeName(e)}")
         false
     }
 
@@ -388,7 +388,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
      */
     @RequiresApi(Build.VERSION_CODES.R)
     @Command
-    fun store_biometric(invoke: Invoke) {
+    fun storeBiometric(invoke: Invoke) {
         val fa = fragmentActivity() ?: run {
             invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
             return
@@ -456,10 +456,10 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
      * (all biometrics removed) maps to `BIOMETRIC_KEY_INVALIDATED`.
      */
     @Command
-    fun retrieve_biometric(invoke: Invoke) {
+    fun retrieveBiometric(invoke: Invoke) {
         // API guard FIRST: the R-only cipher helpers must never be touched on
         // API <30. (Robust to reordering; the app layer also gates on
-        // is_biometric_available, but this is the in-plugin backstop.)
+        // isBiometricAvailable, but this is the in-plugin backstop.)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             invoke.reject("biometric requires API 30+", "BIOMETRIC_UNAVAILABLE")
             return
@@ -519,7 +519,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     /** Delete the biometric Keystore key and ciphertext (best-effort). */
     @Command
-    fun delete_biometric(invoke: Invoke) {
+    fun deleteBiometric(invoke: Invoke) {
         try {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
             if (keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {

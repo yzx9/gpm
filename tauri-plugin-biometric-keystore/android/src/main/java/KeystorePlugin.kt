@@ -188,7 +188,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     /** `true` on API 30+ with a STRONG biometric enrolled. Non-prompting. */
     @Command
-    fun is_available(invoke: Invoke) {
+    fun isAvailable(invoke: Invoke) {
         val available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
             BiometricManager.from(activity)
                 .canAuthenticate(strongAuthenticator) == BiometricManager.BIOMETRIC_SUCCESS
@@ -201,10 +201,10 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
      *  cleanly. Non-prompting. A stale key (invalidated by a fingerprint /
      *  lock-screen change) → false, so the cold launch skips the doomed
      *  auto-prompt and lands on the passphrase form. ("Can I prompt right now?"
-     *  stays with [is_available]; "is a STRONG biometric enrolled?" is answered
+     *  stays with [isAvailable]; "is a STRONG biometric enrolled?" is answered
      *  by the key itself — removing all biometrics invalidates it.) */
     @Command
-    fun has_stored(invoke: Invoke) {
+    fun hasStored(invoke: Invoke) {
         // keyUsable() is R-gated; the inline version guard satisfies lint's
         // NewApi and short-circuits on API <30, where readCipherData() is null
         // anyway (store is R-only).
@@ -225,7 +225,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
      *
      *  Keep this body free of API-30-only symbols: `@RequiresApi(R)` is lint-only,
      *  not runtime-enforced, so an R-only call here could verify-error on API <30
-     *  if ever reached (today guarded out by has_stored's SDK_INT check). */
+     *  if ever reached (today guarded out by hasStored's SDK_INT check). */
     @RequiresApi(Build.VERSION_CODES.R)
     private fun keyUsable(): Boolean = try {
         encryptionCipher()
@@ -233,7 +233,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     } catch (e: Exception) {
         // Class name only (never secrets) so a provider bug or probe regression
         // is debuggable, not indistinguishable from "biometric is off".
-        Log.w("gpm_keystore", "has_stored probe failed: ${safeName(e)}")
+        Log.w("gpm_keystore", "hasStored probe failed: ${safeName(e)}")
         false
     }
 

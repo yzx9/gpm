@@ -65,15 +65,16 @@ Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration t
 
 ## Conventions
 
-- Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
 - **gopass compatibility is a hard constraint.** gpm's templates, presets, and secret formats mirror gopass's on-disk/semantic formats — do not invent a parallel abstraction when gopass already defines the concept. Example: the create-wizard field model mirrors gopass's `Attribute` (`type`/`charset`/`min`/`max`/`strict`); PIN vs password is distinguished by per-attribute `charset` (PIN = `0123456789`), not a custom flag. When adding a feature gopass has, check gopass's source (`pkg/pwgen`, `internal/create`, …) and match its schema/semantics.
 - SPDX license headers on all source files
 - Nix flake provides the full dev environment (`direnv allow` to activate)
 - Single age identity only (multi-identity deferred); supports x25519 native keys (optionally passphrase-encrypted at rest) and SSH private keys (ed25519, RSA), including passphrase-protected SSH keys
 - HTTPS and SSH Git remotes (SSH key generation + paste)
-- Biometric unlock (fingerprint/face) on Android 11+ for passphrase-protected identities (age or SSH); the passphrase is sealed in the Android Keystore with hardware-backed, biometric-gated encryption. Desktop and Android <11 stay passphrase-only. iOS deferred.
-- `src-tauri/gen/android/` looks like a generated directory but contains git-tracked, manually maintained files (e.g. `MainActivity.kt`, `AndroidManifest.xml`, resources, the app `build.gradle.kts`). Plugin Kotlin lives in each plugin crate's own `android/` module, not here. Do not assume `gen/android/` contents are auto-generated or disposable.
+- Biometric unlock (fingerprint/face) on Android 11+ for passphrase-protected identities. Desktop and Android <11 stay passphrase-only. iOS deferred.
+- `gen/android/` looks like a generated directory but contains git-tracked, manually maintained files.
+- Tauri v2 IPC naming: Rust uses `snake_case`, frontend/Kotlin use `camelCase` — Tauri auto-converts at the boundary. Match the existing plugin code.
 - The Android debug build sets `applicationIdSuffix = ".debug"` (installs as `xyz.yzx9.gpm.debug`) so it coexists with the release — install a debug build for diagnostics without uninstalling.
+- Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
 
 ## Design RFCs — `.plans/`
 

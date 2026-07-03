@@ -100,7 +100,7 @@ impl<R: Runtime> Keystore<R> {
             available: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("is_available", ())
+            .run_mobile_plugin::<Resp>("isAvailable", ())
             .map(|r| r.available)
             .map_err(map_invoke_err)
     }
@@ -113,7 +113,7 @@ impl<R: Runtime> Keystore<R> {
             stored: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("has_stored", ())
+            .run_mobile_plugin::<Resp>("hasStored", ())
             .map(|r| r.stored)
             .map_err(map_invoke_err)
     }
