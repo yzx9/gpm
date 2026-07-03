@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-07-03
+
 ### Added
 
 - Control screen-capture protection from Settings — a master toggle (on by default) blocks screenshots and screen recording on pages that show secrets: setup, create, generate, entry detail, and settings (including the SSH key export). Turn it off to allow screenshots anywhere. Android only; elsewhere the toggle has no screen effect
@@ -162,7 +164,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.8.0...HEAD
+[v0.8.0]: https://github.com/yzx9/gpm/compare/v0.7.3...v0.8.0
 [v0.7.3]: https://github.com/yzx9/gpm/compare/v0.7.2...v0.7.3
 [v0.7.2]: https://github.com/yzx9/gpm/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/yzx9/gpm/compare/v0.7.0...v0.7.1

@@ -1,7 +1,7 @@
 {
   "name": "gpm",
   "private": true,
-  "version": "0.7.3",
+  "version": "0.8.0",
   "type": "module",
   "author": "Zexin Yuan <gpm@yzx9.xyz> (https://github.com/yzx9)",
   "license": "Apache-2.0",
