@@ -4,12 +4,10 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::{fmt, str};
 
-use age::ssh;
 use nucleo_matcher::{
     Matcher, Utf32Str,
     pattern::{CaseMatching, Normalization, Pattern},
@@ -21,15 +19,16 @@ use walkdir::WalkDir;
 use zeroize::Zeroizing;
 
 use crate::config::{Config, LockMode, RepoConfig};
+use crate::crypto::{AgeBackend, CryptoBackend};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity, validate_identity_format};
-use crate::recipient::{self, Recipient};
+use crate::recipient::Recipient;
 use crate::secret::Secret;
 use crate::signing::{
     self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedKey, VerifyMode,
 };
-use crate::{crypto, git, template};
+use crate::{git, template};
 
 /// Default `Idle` auto-lock timeout in seconds (5 minutes). Used as the
 /// `Idle` preset's fallback and the fail-safe when the lock-mode cache can't be
@@ -64,6 +63,11 @@ pub use crate::storage::{
 /// [`list`](Store::list), [`get`](Store::get), and [`sync`](Store::sync) (pull).
 /// Supports optional passphrase-encrypted identity with in-memory caching.
 pub struct Store {
+    /// The crypto backend (age today). The only path to encrypt/decrypt,
+    /// recipient derivation, and identity management — `Store` never touches the
+    /// age library directly (RFC 0033 PR1). `Box<dyn>` so a second backend can
+    /// arrive without rewriting the facade.
+    crypto: Box<dyn CryptoBackend>,
     config: Config,
     /// Cached decrypted identity (populated after unlock).
     cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
@@ -97,6 +101,7 @@ impl Store {
     #[must_use]
     pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
         Self {
+            crypto: Box::new(AgeBackend),
             config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
             write_mu: Mutex::new(()),
@@ -150,14 +155,7 @@ impl Store {
         }
 
         if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
-            let Ok(text) = str::from_utf8(&bytes) else {
-                return false;
-            };
-            let buf = BufReader::new(text.trim().as_bytes());
-            return matches!(
-                ssh::Identity::from_buffer(buf, None),
-                Ok(ssh::Identity::Encrypted(_))
-            );
+            return self.crypto.is_ssh_identity_encrypted(&bytes);
         }
 
         false
@@ -205,11 +203,13 @@ impl Store {
         let itype = classify_identity(&encrypted_bytes);
 
         if itype == IdentityType::AgeEncrypted {
-            // Age-encrypted identity: decrypt with passphrase on blocking thread
-            // (scrypt is intentionally slow ~100ms+)
-            let pw = passphrase.to_string();
-            let decrypted =
-                spawn_blocking(move || crypto::decrypt_identity(&pw, &encrypted_bytes)).await??;
+            // Age-encrypted identity: decrypt with passphrase. scrypt is
+            // intentionally slow (~100 ms+); the backend runs it on a blocking
+            // thread.
+            let decrypted = self
+                .crypto
+                .decrypt_identity(passphrase, &encrypted_bytes)
+                .await?;
             let zeroizing = Zeroizing::new(decrypted);
 
             {
@@ -265,12 +265,12 @@ impl Store {
 
         match itype {
             IdentityType::AgeEncrypted => {
-                let pw = passphrase.to_string();
-                spawn_blocking(move || crypto::decrypt_identity(&pw, &bytes)).await??;
+                self.crypto.decrypt_identity(passphrase, &bytes).await?;
             }
             IdentityType::SshEd25519 | IdentityType::SshRsa => {
-                let pw = passphrase.to_string();
-                spawn_blocking(move || crypto::validate_ssh_key_passphrase(&bytes, &pw)).await??;
+                self.crypto
+                    .validate_ssh_key_passphrase(&bytes, passphrase)
+                    .await?;
             }
             _ => {}
         }
@@ -430,7 +430,9 @@ impl Store {
             let repo_dir_init = repo_dir.clone();
             spawn_blocking(move || git::init_repo(&repo_dir_init)).await??;
 
-            recipient::write_recipients(&repo_dir, &[recipient.to_string()]).await?;
+            self.crypto
+                .write_recipients(&repo_dir, &[recipient.to_string()])
+                .await?;
 
             let message = format!("Initialized Store for {recipient}");
             let repo_dir_commit = repo_dir.clone();
@@ -472,7 +474,7 @@ impl Store {
     pub async fn list_recipients(&self) -> Result<Vec<Recipient>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        recipient::list_recipients(repo_path).await
+        self.crypto.list_recipients(repo_path).await
     }
 
     /// Save the age identity.
@@ -508,7 +510,9 @@ impl Store {
             IdentityType::SshEd25519 | IdentityType::SshRsa => passphrase,
             _ => None,
         };
-        let derived_recipient = recipient::identity_to_recipient(identity, recipient_passphrase)?;
+        let derived_recipient = self
+            .crypto
+            .identity_to_recipient(identity, recipient_passphrase)?;
 
         let known_recipients = self.list_recipients().await.unwrap_or_default();
         if !known_recipients.is_empty() {
@@ -592,7 +596,9 @@ impl Store {
         validate_identity_format(identity_bytes)?;
 
         // Validate identity can derive a recipient (verifies key is usable)
-        let _ = recipient::identity_to_recipient(identity, identity_passphrase)?;
+        let _ = self
+            .crypto
+            .identity_to_recipient(identity, identity_passphrase)?;
 
         let auth = match (ssh_key, pat) {
             (Some(key), _) => git::GitAuth::Ssh {
@@ -728,7 +734,10 @@ impl Store {
 
         let file_path = resolve_entry_path(repo_path, &entry_path)?;
         let identity_bytes = self.get_identity_bytes().await?;
-        let decrypted = crypto::decrypt_file(&file_path, &identity_bytes, None).await?;
+        let decrypted = self
+            .crypto
+            .decrypt_file(&file_path, &identity_bytes, None)
+            .await?;
         Secret::parse(&decrypted)
     }
 
@@ -1024,11 +1033,14 @@ impl Store {
         let identity = self.get_identity_bytes().await?;
         let identity_str = str::from_utf8(&identity)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
-        let our_recipient = recipient::identity_to_recipient(identity_str, None)?;
-        let decrypted: Vec<(String, Zeroizing<Vec<u8>>)> = spawn_blocking(move || {
-            let mut out = Vec::with_capacity(replays.len());
-            for r in replays {
-                let plaintext = crypto::decrypt_bytes(&r.blob, &identity, None).map_err(|_| {
+        let our_recipient = self.crypto.identity_to_recipient(identity_str, None)?;
+        let mut decrypted: Vec<(String, Zeroizing<Vec<u8>>)> = Vec::with_capacity(replays.len());
+        for r in replays {
+            let plaintext = self
+                .crypto
+                .decrypt_bytes(&r.blob, &identity, None)
+                .await
+                .map_err(|_| {
                     Error::new(
                         ErrorCode::PushRejected,
                         format!(
@@ -1038,11 +1050,8 @@ impl Store {
                         ),
                     )
                 })?;
-                out.push((r.rel_path, Zeroizing::new(plaintext)));
-            }
-            Ok::<_, Error>(out)
-        })
-        .await??;
+            decrypted.push((r.rel_path, Zeroizing::new(plaintext)));
+        }
 
         // 3. Advance to the reviewed remote tip — reuses the plan's fetched oid
         //    (objects still in the DB), so no second fetch can race past the
@@ -1054,7 +1063,9 @@ impl Store {
         // 4. Re-encrypt to the CURRENT (remote-tip) recipients + our own key
         //    (our_recipient derived once in step 2).
         let repo_path_re = self.repo_path().await?;
-        let mut recipients: Vec<String> = recipient::list_recipients(&repo_path_re)
+        let mut recipients: Vec<String> = self
+            .crypto
+            .list_recipients(&repo_path_re)
             .await?
             .into_iter()
             .map(|r| r.public_key)
@@ -1062,15 +1073,14 @@ impl Store {
         if !recipients.contains(&our_recipient) {
             recipients.push(our_recipient);
         }
-        let ciphertexts: Vec<(String, Vec<u8>)> = spawn_blocking(move || {
-            let mut out = Vec::with_capacity(decrypted.len());
-            for (rel, plaintext) in decrypted {
-                let ct = crypto::encrypt_to_recipients(&plaintext, &recipients)?;
-                out.push((rel, ct));
-            }
-            Ok::<_, Error>(out)
-        })
-        .await??;
+        let mut ciphertexts: Vec<(String, Vec<u8>)> = Vec::with_capacity(decrypted.len());
+        for (rel, plaintext) in decrypted {
+            let ct = self
+                .crypto
+                .encrypt_to_recipients(&plaintext, &recipients)
+                .await?;
+            ciphertexts.push((rel, ct));
+        }
 
         // 5. Write the re-encrypted entries, apply local deletes, commit, push.
         let repo_config = self.config.load_repo_config().await?;
@@ -1256,22 +1266,21 @@ impl Store {
         assert_within_repo(repo_path, file_path.parent().unwrap_or(Path::new("")))?;
 
         // Recipients: everyone in the store, plus our own key (ensureOurKeyID).
-        let recipients = recipient::list_recipients(repo_path).await?;
+        let recipients = self.crypto.list_recipients(repo_path).await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let identity_str = str::from_utf8(&identity_bytes)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
-        let our_recipient = recipient::identity_to_recipient(identity_str, None)?;
+        let our_recipient = self.crypto.identity_to_recipient(identity_str, None)?;
         let mut recipients_str: Vec<String> =
             recipients.iter().map(|r| r.public_key.clone()).collect();
         if !recipients_str.iter().any(|r| r == &our_recipient) {
             recipients_str.push(our_recipient);
         }
 
-        let plaintext_owned = Zeroizing::new(plaintext.to_vec());
-        let ciphertext = spawn_blocking(move || {
-            crypto::encrypt_to_recipients(&plaintext_owned, &recipients_str)
-        })
-        .await??;
+        let ciphertext = self
+            .crypto
+            .encrypt_to_recipients(plaintext, &recipients_str)
+            .await?;
 
         write_atomic(&file_path, &ciphertext).await?;
         Ok(passfile)
@@ -1376,10 +1385,12 @@ impl Store {
             ));
         }
 
-        // scrypt is intentionally slow (~100ms+), run on blocking thread
-        let pw = old_passphrase.to_string();
-        let plaintext =
-            spawn_blocking(move || crypto::decrypt_identity(&pw, &encrypted_bytes)).await??;
+        // scrypt is intentionally slow (~100 ms+); the backend runs it on a
+        // blocking thread.
+        let plaintext = self
+            .crypto
+            .decrypt_identity(old_passphrase, &encrypted_bytes)
+            .await?;
         self.config
             .save_identity(&plaintext, Some(new_passphrase))
             .await?;
@@ -2630,10 +2641,7 @@ mod tests {
             "cached SSH identity must be an OpenSSH PEM"
         );
         assert!(
-            matches!(
-                ssh::Identity::from_buffer(pem.as_bytes(), None),
-                Ok(ssh::Identity::Unencrypted(_))
-            ),
+            !crate::crypto::is_ssh_identity_encrypted(pem.as_bytes()),
             "cached SSH PEM must parse as Unencrypted (no KDF)"
         );
         assert!(

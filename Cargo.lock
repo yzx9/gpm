@@ -169,6 +169,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3736,6 +3747,7 @@ version = "0.8.1"
 dependencies = [
  "aes-gcm",
  "age",
+ "async-trait",
  "bech32",
  "foreign-types 0.3.2",
  "getrandom 0.2.17",

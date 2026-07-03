@@ -539,6 +539,29 @@ pub fn validate_ssh_key_passphrase(identity_bytes: &[u8], passphrase: &str) -> R
     }
 }
 
+/// True iff `identity_bytes` is an SSH private key whose body is
+/// passphrase-encrypted.
+///
+/// Returns `false` for non-SSH bytes, invalid UTF-8, unencrypted SSH keys, or
+/// unsupported SSH key types. This is the crypto backend's answer to "does this
+/// identity need a passphrase?" — it keeps the age `ssh` types out of
+/// [`crate::store`], which has no other reason to touch the age library.
+///
+/// The caller ([`crate::store::Store::is_identity_encrypted`]) has already
+/// classified the identity as an SSH variant, so a `false` here means
+/// specifically "unencrypted SSH key", not "not an SSH key".
+#[must_use]
+pub fn is_ssh_identity_encrypted(identity_bytes: &[u8]) -> bool {
+    let Ok(text) = str::from_utf8(identity_bytes) else {
+        return false;
+    };
+    let buf = BufReader::new(text.trim().as_bytes());
+    matches!(
+        ssh::Identity::from_buffer(buf, None),
+        Ok(ssh::Identity::Encrypted(_))
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;

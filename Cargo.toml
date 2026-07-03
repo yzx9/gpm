@@ -23,6 +23,10 @@ serde_json = "1"
 # spawns `age-plugin-<name>` as a subprocess, so plugin encrypt/decrypt only works
 # where that binary exists (desktop); Android lacks the binary and fails cleanly.
 age = { version = "0.11", features = ["armor", "ssh", "plugin"] }
+# async-fn-in-trait under `dyn` dispatch. rust-lang/rust#133119 (`async_fn_in_dyn_trait`)
+# is still unstable, so the crypto/storage backend traits desugar through this macro
+# until native support lands. Drop it (and the macro annotations) once that ships.
+async-trait = "0.1"
 zeroize = { version = "1", features = ["derive", "serde"] }
 git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
 # For Android HTTPS CA loading (see `rustpass::git::ensure_https_ca_loaded`):
