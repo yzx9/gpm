@@ -48,6 +48,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
+import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import BaseToast from "@/components/base/BaseToast.vue";
@@ -630,15 +631,31 @@ function openHistory() {
   router.push({ name: "history" });
 }
 
-async function resetConfig() {
-  if (!confirm("Reset gpm? This will remove all local data and configuration."))
-    return;
+// Reset is gated behind a type-"RESET"-to-confirm modal: a stray tap can't
+// trigger this unrecoverable wipe, and no passphrase is required, so a user
+// who forgot theirs can still reset. (The lock dialogs no longer offer reset.)
+const RESET_CONFIRM_WORD = "RESET";
+const resetOpen = ref(false);
+const resetConfirmText = ref("");
+const resetReady = computed(() =>
+  resetConfirmText.value.trim().toUpperCase() === RESET_CONFIRM_WORD,
+);
+
+function resetConfig() {
+  resetConfirmText.value = "";
+  resetOpen.value = true;
+}
+
+async function doReset() {
+  if (!resetReady.value) return;
   try {
     await apiResetConfig();
+    resetOpen.value = false;
     router.push({ name: "setup" });
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Reset failed";
+    resetOpen.value = false;
   }
 }
 
@@ -1228,6 +1245,42 @@ onMounted(() => {
 
     <!-- Toast -->
     <BaseToast v-if="toast" variant="success">{{ toast }}</BaseToast>
+
+    <!-- Reset confirmation: type RESET to confirm (z=80 stacks above UnlockModal). -->
+    <BaseModalShell
+      v-if="resetOpen"
+      variant="center"
+      :z="80"
+      role="alertdialog"
+      aria-label="Reset all data"
+      @close="resetOpen = false"
+    >
+      <h2 class="text-lg font-medium text-danger mb-3">Reset all data?</h2>
+      <BaseAlert variant="danger" class="mb-4">
+        This permanently removes every secret, the signing identity, and all
+        configuration from this device. Your passphrase cannot recover a reset
+        store — you would need to set gpm up again.
+      </BaseAlert>
+      <div class="flex flex-col gap-1 mb-4">
+        <label class="text-sm font-medium" for="reset-confirm"
+          >Type RESET to confirm</label
+        >
+        <BaseInput
+          id="reset-confirm"
+          v-model="resetConfirmText"
+          autocomplete="off"
+          autofocus
+        />
+      </div>
+      <div class="flex gap-2 justify-end">
+        <BaseButton variant="secondary" @click="resetOpen = false"
+          >Cancel</BaseButton
+        >
+        <BaseButton variant="danger" :disabled="!resetReady" @click="doReset">
+          <BaseIcon :icon="Trash2" /> Reset all data
+        </BaseButton>
+      </div>
+    </BaseModalShell>
   </main>
 </template>
 

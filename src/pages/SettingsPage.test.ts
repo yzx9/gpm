@@ -364,54 +364,107 @@ describe("SettingsPage", () => {
   });
 
   describe("reset", () => {
-    it("calls reset_config and navigates when confirmed", async () => {
-      when("reset_config", undefined);
-      vi.mocked(globalThis.confirm).mockReturnValue(true);
-      const wrapper = mountPage();
-      await flushPromises();
+    type PageWrapper = ReturnType<typeof mountPage>;
 
-      const resetBtn = wrapper
+    async function openReset(wrapper: PageWrapper) {
+      const dangerBtn = wrapper
         .findAll("button")
         .find((b) => b.text().includes("Reset All Data"));
-      expect(resetBtn).toBeDefined();
-      await resetBtn!.trigger("click");
+      await dangerBtn!.trigger("click");
+      await flushPromises();
+    }
+
+    function modalConfirmBtn(wrapper: PageWrapper) {
+      return wrapper
+        .find('[role="alertdialog"]')
+        .findAll("button")
+        .find((b) => b.text().includes("Reset"));
+    }
+
+    it("opens a type-RESET modal from the Danger Zone without wiping", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+      expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
+
+      await openReset(wrapper);
+
+      expect(wrapper.find('[role="alertdialog"]').exists()).toBe(true);
+      expect(wrapper.text()).toContain("Type RESET to confirm");
+      // Opening the modal must NOT touch reset_config.
+      expect(invoke).not.toHaveBeenCalledWith("reset_config");
+    });
+
+    it("calls reset_config and navigates after typing RESET and confirming", async () => {
+      when("reset_config", undefined);
+      const wrapper = mountPage();
+      await flushPromises();
+      await openReset(wrapper);
+
+      await wrapper.find('[role="alertdialog"] input').setValue("RESET");
+      await modalConfirmBtn(wrapper)!.trigger("click");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("reset_config");
       expect(mockPush).toHaveBeenCalledWith({ name: "setup" });
     });
 
-    it("does nothing when reset is cancelled", async () => {
-      vi.mocked(globalThis.confirm).mockReturnValue(false);
+    it("keeps the confirm button disabled until RESET is typed", async () => {
       const wrapper = mountPage();
       await flushPromises();
+      await openReset(wrapper);
 
-      const invokeCount = (invoke as ReturnType<typeof vi.fn>).mock.calls
-        .length;
-      const resetBtn = wrapper
+      await wrapper.find('[role="alertdialog"] input').setValue("RESETT");
+      expect(
+        (modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      // Correcting the text reactively re-enables the confirm button.
+      await wrapper.find('[role="alertdialog"] input').setValue("RESET");
+      expect(
+        (modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled,
+      ).toBe(false);
+
+      // Cancel closes the modal without invoking reset_config.
+      const cancelBtn = wrapper
+        .find('[role="alertdialog"]')
         .findAll("button")
-        .find((b) => b.text().includes("Reset All Data"));
-      await resetBtn!.trigger("click");
+        .find((b) => b.text().includes("Cancel"));
+      await cancelBtn!.trigger("click");
       await flushPromises();
 
-      expect((invoke as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
-        invokeCount,
-      );
+      expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
+      expect(invoke).not.toHaveBeenCalledWith("reset_config");
+    });
+
+    it("accepts case-insensitive, padded RESET", async () => {
+      when("reset_config", undefined);
+      const wrapper = mountPage();
+      await flushPromises();
+      await openReset(wrapper);
+
+      await wrapper.find('[role="alertdialog"] input').setValue("  reset  ");
+      expect(
+        (modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled,
+      ).toBe(false);
+      await modalConfirmBtn(wrapper)!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("reset_config");
     });
 
     it("shows error when reset fails", async () => {
       reject("reset_config", { code: "Err", message: "Reset failed" });
-      vi.mocked(globalThis.confirm).mockReturnValue(true);
       const wrapper = mountPage();
       await flushPromises();
+      await openReset(wrapper);
 
-      const resetBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Reset All Data"));
-      await resetBtn!.trigger("click");
+      await wrapper.find('[role="alertdialog"] input').setValue("RESET");
+      await modalConfirmBtn(wrapper)!.trigger("click");
       await flushPromises();
 
       expect(wrapper.find("[role='alert']").text()).toContain("Reset failed");
+      // A failed reset closes the modal (does not leave it open for retry).
+      expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
     });
   });
 
