@@ -69,6 +69,9 @@ pub mod secret;
 pub mod signing;
 /// SSH key generation and management.
 pub mod ssh;
+/// Storage / RCS backend abstraction (sync, write, commit-identity result
+/// types; future home of the `StorageBackend` trait).
+pub mod storage;
 /// High-level store facade (gopass.Store aligned).
 pub mod store;
 /// gopass-compatible content templates and create presets.

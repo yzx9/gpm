@@ -16,7 +16,7 @@ use git2::{FetchOptions, RemoteCallbacks, Repository};
 use crate::config::{DEFAULT_COMMIT_EMAIL, DEFAULT_COMMIT_NAME};
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
-use crate::store::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
+use crate::storage::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
 
 /// Mozilla (curl) root CA bundle, embedded so the libgit2 OpenSSL backend has a
 /// trust anchor on targets with no discoverable system CA store — notably
