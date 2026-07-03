@@ -144,6 +144,45 @@ describe("UnlockModal", () => {
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
 
+  it("shows the auto-lock policy hint for the Immediate default", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "Identity is cleared after every action.",
+    );
+  });
+
+  it("shows the idle-auto-lock hint for a timed policy", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: { idle: 300 } }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "Identity auto-locks after 5 min of inactivity.",
+    );
+  });
+
+  it("shows the never-lock hint for the Never policy", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "never" }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "Identity stays unlocked until you lock manually.",
+    );
+  });
+
   it("does not expose a Reset affordance (recovery lives in Settings)", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available

@@ -8,12 +8,14 @@ import {
   asBiometricError,
   biometricUnlock,
   disableBiometricUnlock,
+  getConfig,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
   unlock,
+  type LockMode,
 } from "@/api";
 import { LockKeyhole, ScanFace, X } from "@lucide/vue";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
@@ -31,6 +33,20 @@ const biometricAvailable = ref(false);
 const biometricEnabled = ref(false);
 const biometricLoading = ref(false);
 const biometricNotice = ref("");
+
+// ── Auto-lock policy hint ─────────────────────────────────────────────
+// The policy in effect (Immediate / N min idle / Never), shown so the user
+// knows how long the identity stays cached after unlocking. Defaults to
+// "immediate" (the backend default) until getConfig() resolves; a fetch
+// failure leaves that default in place.
+const lockMode = ref<LockMode>("immediate");
+const lockHint = computed(() => describeLockMode(lockMode.value));
+function describeLockMode(m: LockMode): string {
+  if (m === "immediate") return "Identity is cleared after every action.";
+  if (m === "never") return "Identity stays unlocked until you lock manually.";
+  const mins = Math.round(m.idle / 60);
+  return `Identity auto-locks after ${mins} min of inactivity.`;
+}
 
 async function tryBiometricUnlock() {
   biometricNotice.value = "";
@@ -102,6 +118,13 @@ onMounted(async () => {
   if (biometricEnabled.value && biometricAvailable.value) {
     await tryBiometricUnlock();
   }
+  // Best-effort: read the auto-lock policy so the hint matches the user's
+  // setting. A failure (or pre-setup) leaves the "immediate" default.
+  try {
+    lockMode.value = (await getConfig()).lock_mode ?? "immediate";
+  } catch {
+    // keep default
+  }
 });
 </script>
 
@@ -125,7 +148,8 @@ onMounted(async () => {
         <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
       </h1>
     </div>
-    <p class="text-center text-muted text-sm mb-6">Identity is locked</p>
+    <p class="text-center text-muted text-sm mb-1">Identity is locked</p>
+    <p class="text-center text-subtle text-xs mb-6">{{ lockHint }}</p>
 
     <!-- Biometric notice (reset / stale / failure) -->
     <BaseAlert
