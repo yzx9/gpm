@@ -3,10 +3,19 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import type {
+  AppError,
+  AppLockError,
+  AuthenticityConfig,
+  BiometricError,
+  CommitIdentity,
+  LockMode,
+  RepoConfig,
+  VerifyMode,
+} from "@/api";
 import {
   addTrustedKey,
+  resetConfig as apiResetConfig,
   asAppLockError,
   changePassphrase,
   disableBiometricAppLock,
@@ -25,38 +34,29 @@ import {
   isBiometricAvailable,
   isBiometricUnlockEnabled,
   removeTrustedKey,
-  resetConfig as apiResetConfig,
+  setAutosync,
   setClipboardClearSecs,
   setCommitIdentity,
   setLockMode,
-  setAutosync,
   setPassphrase,
   setVerificationMode,
   setViewClearSecs,
   trustHeadSigner,
 } from "@/api";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseCard from "@/components/base/BaseCard.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import BaseToast from "@/components/base/BaseToast.vue";
 import {
   useLockState,
   useSecureScreen,
   useSecuritySettings,
 } from "@/composables";
-import type {
-  AppError,
-  AppLockError,
-  AuthenticityConfig,
-  BiometricError,
-  CommitIdentity,
-  LockMode,
-  RepoConfig,
-  VerifyMode,
-} from "@/api";
-import BaseInput from "@/components/base/BaseInput.vue";
-import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import BaseAlert from "@/components/base/BaseAlert.vue";
-import BaseToast from "@/components/base/BaseToast.vue";
-import BaseCard from "@/components/base/BaseCard.vue";
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock } = useLockState();

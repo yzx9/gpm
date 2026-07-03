@@ -3,23 +3,23 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import type { AppError } from "@/api";
 import {
   ignoreCommitIssue,
   listCommitSignatures,
   trustCommitSigner,
   type CommitSigInfo,
 } from "@/api";
-import type { AppError } from "@/api";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseModalShell from "@/components/base/BaseModalShell.vue";
+import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import BaseToast from "@/components/base/BaseToast.vue";
+import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import { formatRelativeTime } from "@/utils/format";
 import { isIgnorable, signerFp } from "@/utils/signature";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import BaseAlert from "@/components/base/BaseAlert.vue";
-import BaseToast from "@/components/base/BaseToast.vue";
-import BaseModalShell from "@/components/base/BaseModalShell.vue";
-import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 
 const router = useRouter();
 

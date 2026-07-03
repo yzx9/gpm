@@ -3,13 +3,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import type { AppLockError } from "@/api";
 import { appUnlock, asAppLockError, resetConfig } from "@/api";
 import { useAppLockState } from "@/composables";
-import type { AppLockError } from "@/api";
-import BaseButton from "./base/BaseButton.vue";
+import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import BaseAlert from "./base/BaseAlert.vue";
+import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
 const router = useRouter();

@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { mount, type ComponentMountingOptions } from "@vue/test-utils";
-import type { Component } from "vue";
 import {
   APP_LOCK_KEY,
   createAppLockStore,
@@ -16,6 +14,8 @@ import {
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
 } from "@/composables";
+import { mount, type ComponentMountingOptions } from "@vue/test-utils";
+import type { Component } from "vue";
 
 interface MountWithAppOptions<C extends Component> {
   /** Default `true`: start the lock in the "unlocked, identity cached" state page

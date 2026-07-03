@@ -10,8 +10,8 @@
      act, so it carries the right wording whichever button was tapped. -->
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
 import type { DivergenceChoice, SyncDivergence } from "@/api";
+import { computed, nextTick, ref, watch } from "vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 import BaseSpinner from "./base/BaseSpinner.vue";

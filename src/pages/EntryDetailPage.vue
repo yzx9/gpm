@@ -3,8 +3,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import { useRoute, useRouter } from "vue-router";
 import {
   copyPassword as copyPasswordCmd,
   deleteSecret as deleteSecretCmd,
@@ -17,6 +15,12 @@ import {
   type PullResult,
   type SyncDivergence,
 } from "@/api";
+import DivergenceModal from "@/components/DivergenceModal.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import {
   isAuthCancelled,
   useLockState,
@@ -24,12 +28,8 @@ import {
   useSecretReveal,
   useSecuritySettings,
 } from "@/composables";
-import DivergenceModal from "@/components/DivergenceModal.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseInput from "@/components/base/BaseInput.vue";
-import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import BaseAlert from "@/components/base/BaseAlert.vue";
+import { computed, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 const route = useRoute();
 const router = useRouter();

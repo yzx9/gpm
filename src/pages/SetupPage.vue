@@ -3,10 +3,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref } from "vue";
-import { useRouter } from "vue-router";
 import CloneFlow from "@/components/setup/CloneFlow.vue";
 import CreateFlow from "@/components/setup/CreateFlow.vue";
+import { ref } from "vue";
+import { useRouter } from "vue-router";
 
 const router = useRouter();
 

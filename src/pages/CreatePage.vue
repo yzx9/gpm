@@ -3,8 +3,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
-import { useRouter } from "vue-router";
 import {
   createFromPresetSecret,
   createSecret,
@@ -22,17 +20,19 @@ import {
   type SyncDivergence,
   type WriteOutcome,
 } from "@/api";
+import DivergenceModal from "@/components/DivergenceModal.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import {
   isAuthCancelled,
   useLockState,
   useOverlayBackHandler,
 } from "@/composables";
-import DivergenceModal from "@/components/DivergenceModal.vue";
-import BaseInput from "@/components/base/BaseInput.vue";
-import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import BaseAlert from "@/components/base/BaseAlert.vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock, runWithAuth } = useLockState();

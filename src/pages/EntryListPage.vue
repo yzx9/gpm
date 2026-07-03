@@ -4,16 +4,6 @@
 
 <script setup lang="ts">
 import {
-  ref,
-  computed,
-  watch,
-  onMounted,
-  onBeforeUnmount,
-  nextTick,
-} from "vue";
-import { useRouter } from "vue-router";
-import type { UnlistenFn } from "@tauri-apps/api/event";
-import {
   cancelGit,
   copyPassword as copyPasswordCmd,
   getAuthenticityState,
@@ -33,17 +23,27 @@ import {
   type GitProgressEvent,
   type SyncDivergence,
 } from "@/api";
-import { formatRelativeTime } from "@/utils/format";
-import { statusLabel } from "@/utils/signature";
 import AuthenticityBlockModal from "@/components/AuthenticityBlockModal.vue";
-import BaseInput from "@/components/base/BaseInput.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
+import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import { isAuthCancelled, useLockState } from "@/composables";
+import { formatRelativeTime } from "@/utils/format";
+import { statusLabel } from "@/utils/signature";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { runWithAuth } = useLockState();

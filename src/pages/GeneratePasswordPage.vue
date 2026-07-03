@@ -3,18 +3,18 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount } from "vue";
-import { useRouter } from "vue-router";
 import {
   copyGeneratedPassword,
   generatePasswordBatch,
   type AppError,
   type GenerateMode,
 } from "@/api";
-import BaseInput from "@/components/base/BaseInput.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
 import { useLockState } from "@/composables";
+import { computed, onBeforeUnmount, ref } from "vue";
+import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock } = useLockState();

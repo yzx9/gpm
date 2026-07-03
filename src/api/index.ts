@@ -15,14 +15,14 @@
  * {@link ./common}.
  */
 
-export * from "./common";
-export * from "./auth";
-export * from "./biometric";
 export * from "./appLock";
-export * from "./system";
+export * from "./auth";
+export * from "./authenticity";
+export * from "./biometric";
+export * from "./common";
 export * from "./config";
 export * from "./identity";
-export * from "./setup";
-export * from "./authenticity";
-export * from "./secrets";
 export * from "./repo";
+export * from "./secrets";
+export * from "./setup";
+export * from "./system";

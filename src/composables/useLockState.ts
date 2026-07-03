@@ -2,18 +2,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  ref,
-  computed,
-  inject,
-  getCurrentScope,
-  onScopeDispose,
-  type Ref,
-  type ComputedRef,
-  type InjectionKey,
-} from "vue";
 import { getAuthState } from "@/api";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  computed,
+  getCurrentScope,
+  inject,
+  onScopeDispose,
+  ref,
+  type ComputedRef,
+  type InjectionKey,
+  type Ref,
+} from "vue";
 
 /** Error code carried by the rejection `cancelAuth()` issues to parked callers. */
 export const AUTH_CANCELLED = "AUTH_CANCELLED";

@@ -3,10 +3,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
 import { isRepoReady } from "@/api";
-import RepoCloneForm from "./RepoCloneForm.vue";
+import { computed, onMounted, ref } from "vue";
 import IdentitySetupForm from "./IdentitySetupForm.vue";
+import RepoCloneForm from "./RepoCloneForm.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
 
 const emit = defineEmits<{

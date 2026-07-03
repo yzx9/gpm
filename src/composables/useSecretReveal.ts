@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { ref, watch, onMounted, onBeforeUnmount } from "vue";
 import type { SensitiveContent } from "@/api";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useLockState } from "./useLockState";
 import { useSecuritySettings } from "./useSecuritySettings";
 

@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { flushPromises } from "@vue/test-utils";
-import { invoke } from "@tauri-apps/api/core";
-import SettingsPage from "./SettingsPage.vue";
 import { mountWithApp } from "@/test/appTestUtils";
+import { invoke } from "@tauri-apps/api/core";
+import { flushPromises } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import SettingsPage from "./SettingsPage.vue";
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),

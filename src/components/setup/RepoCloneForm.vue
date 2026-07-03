@@ -3,8 +3,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount } from "vue";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   cancelGit,
   cloneRepo,
@@ -15,11 +13,13 @@ import {
   type CommitIdentity,
   type GitProgressEvent,
 } from "@/api";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { computed, onBeforeUnmount, ref } from "vue";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
-import BaseInput from "@/components/base/BaseInput.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseAlert from "@/components/base/BaseAlert.vue";
 
 const emit = defineEmits<{
   done: [];

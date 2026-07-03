@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import type { AppError } from "@/api";
 import {
   clearPendingIdentity,
   completeSetup,
@@ -15,12 +15,12 @@ import {
   type PickedIdentityResult,
   type RecipientInfo,
 } from "@/api";
-import type { AppError } from "@/api";
-import { truncateKey } from "./url";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseAlert from "@/components/base/BaseAlert.vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { truncateKey } from "./url";
 
 const props = defineProps<{
   /** Step-1 SSH key, so the "Use my SSH key for decryption" affordance has

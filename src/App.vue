@@ -4,7 +4,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, watch } from "vue";
-import { applySafeAreaInsets } from "./utils/safe-area";
+import AppLockOverlay from "./components/AppLockOverlay.vue";
+import BaseToast from "./components/base/BaseToast.vue";
+import UnlockModal from "./components/UnlockModal.vue";
 import {
   useAppLockState,
   useLockState,
@@ -13,9 +15,7 @@ import {
   useSecuritySettings,
   useToast,
 } from "./composables";
-import UnlockModal from "./components/UnlockModal.vue";
-import AppLockOverlay from "./components/AppLockOverlay.vue";
-import BaseToast from "./components/base/BaseToast.vue";
+import { applySafeAreaInsets } from "./utils/safe-area";
 
 const { overlayUp, ready, init, cancelAuth } = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();

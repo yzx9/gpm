@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { ref, inject, type Ref, type InjectionKey } from "vue";
 import { getConfig, type RepoConfig } from "@/api";
+import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
  * Single cache for the security-related config the UI needs reactively — today

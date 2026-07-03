@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { ref, inject, type Ref, type InjectionKey } from "vue";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { appLock, getAppLockState, type AppLockState } from "@/api";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
  * Global app-launch biometric gate state — mirrors the backend `app-lock-state`

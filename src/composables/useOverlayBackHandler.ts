@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { onBeforeUnmount, watch, type Ref } from "vue";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import type { PluginListener } from "@tauri-apps/api/core";
+import { onBeforeUnmount, watch, type Ref } from "vue";
 
 /**
  * Take over the Android back button while `shown` is true: each back press calls

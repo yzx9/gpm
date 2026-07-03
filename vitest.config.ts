@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { defineConfig } from "vitest/config";
 import vue from "@vitejs/plugin-vue";
+import { defineConfig } from "vitest/config";
 // @ts-expect-error node:url is a nodejs module (this project ships no @types/node)
 import { fileURLToPath, URL } from "node:url";
 

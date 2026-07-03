@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppLockStore, type AppLockStore } from "./useAppLockState";
 
 /** Force jsdom's visibilityState and fire the event the composable listens to. */

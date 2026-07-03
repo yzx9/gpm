@@ -3,13 +3,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { generateSshKey } from "@/api";
 import type { AppError } from "@/api";
-import { isSshUrl as isSshRepoUrl } from "./url";
+import { generateSshKey } from "@/api";
+import BaseButton from "@/components/base/BaseButton.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
+import { computed, ref } from "vue";
+import { isSshUrl as isSshRepoUrl } from "./url";
 
 // Two-way bound fields. Each consumer (RepoCloneForm, future CreateFlow)
 // owns the underlying ref and passes it via v-model.

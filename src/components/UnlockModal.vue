@@ -3,8 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import type { BiometricError } from "@/api";
 import {
   asBiometricError,
   biometricUnlock,
@@ -14,10 +13,11 @@ import {
   resetConfig,
   unlock,
 } from "@/api";
-import type { BiometricError } from "@/api";
-import BaseInput from "./base/BaseInput.vue";
-import BaseButton from "./base/BaseButton.vue";
+import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import BaseAlert from "./base/BaseAlert.vue";
+import BaseButton from "./base/BaseButton.vue";
+import BaseInput from "./base/BaseInput.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
 const router = useRouter();

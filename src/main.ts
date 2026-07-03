@@ -8,13 +8,6 @@ import { getAuthState } from "./api";
 import App from "./App.vue";
 import "./assets/main.css";
 
-import SetupPage from "./pages/SetupPage.vue";
-import EntryListPage from "./pages/EntryListPage.vue";
-import EntryDetailPage from "./pages/EntryDetailPage.vue";
-import SettingsPage from "./pages/SettingsPage.vue";
-import HistoryPage from "./pages/HistoryPage.vue";
-import CreatePage from "./pages/CreatePage.vue";
-import GeneratePasswordPage from "./pages/GeneratePasswordPage.vue";
 import {
   APP_LOCK_KEY,
   createAppLockStore,
@@ -27,6 +20,13 @@ import {
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
 } from "./composables";
+import CreatePage from "./pages/CreatePage.vue";
+import EntryDetailPage from "./pages/EntryDetailPage.vue";
+import EntryListPage from "./pages/EntryListPage.vue";
+import GeneratePasswordPage from "./pages/GeneratePasswordPage.vue";
+import HistoryPage from "./pages/HistoryPage.vue";
+import SettingsPage from "./pages/SettingsPage.vue";
+import SetupPage from "./pages/SetupPage.vue";
 
 // App-shell singletons — created once here (the composition root), provided
 // app-wide, and held by direct ref where non-setup code needs them. The router

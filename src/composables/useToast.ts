@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { ref, inject, type Ref, type InjectionKey } from "vue";
+import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
  * Global toast host — any caller can surface a brief message, including

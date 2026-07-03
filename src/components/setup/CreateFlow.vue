@@ -3,7 +3,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
 import {
   clearPendingIdentity,
   completeSetupFromFile,
@@ -14,11 +13,12 @@ import {
   type AppError,
   type CreateIdentityKind,
 } from "@/api";
+import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
+import BaseInput from "@/components/base/BaseInput.vue";
+import { computed, onUnmounted, ref } from "vue";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
-import BaseInput from "@/components/base/BaseInput.vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseAlert from "@/components/base/BaseAlert.vue";
 
 // The public recipient of the generated identity — the only part the frontend
 // ever holds. The secret identity itself lives in backend state (staged by

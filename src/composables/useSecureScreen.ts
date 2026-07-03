@@ -2,13 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { ref, inject, type Ref, type InjectionKey } from "vue";
 import {
   getAppConfig,
+  setSecureScreen as persistSecureScreen,
   screenSecureAvailable,
   setSecure,
-  setSecureScreen as persistSecureScreen,
 } from "@/api";
+import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
  * Per-page screen-capture protection (Android `FLAG_SECURE`) state.

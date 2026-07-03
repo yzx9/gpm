@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "vitest";
-import { mount } from "@vue/test-utils";
-import CommitSigIndicator from "./CommitSigIndicator.vue";
 import type { CommitSigStatus } from "@/api";
+import { mount } from "@vue/test-utils";
+import { describe, expect, it } from "vitest";
+import CommitSigIndicator from "./CommitSigIndicator.vue";
 
 const VERIFIED: CommitSigStatus = { kind: "verified", signer_fp: "AB:CD" };
 const UNTRUSTED: CommitSigStatus = {

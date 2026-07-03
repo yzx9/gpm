@@ -8,9 +8,9 @@
      so both entry points share one surface. -->
 
 <script setup lang="ts">
-import { computed } from "vue";
 import type { CommitSigInfo } from "@/api";
 import { statusGlyph, statusLabel } from "@/utils/signature";
+import { computed } from "vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
