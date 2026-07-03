@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Signature status colors are now consistent everywhere they appear: the glyphs in the pull-review modals (shown when a pull brings signature issues) are now colored green/amber/red to match the history page, instead of plain.
 - Screen-capture protection is now per-page instead of app-wide. Previously every screen blocked screenshots; now only pages that show secrets do (when the toggle is on), so you can screenshot the entry list and history. The entry list shows secret names and history shows commit signatures — neither reveals secret content
 
 ### Fixed

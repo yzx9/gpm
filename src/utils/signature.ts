@@ -2,8 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-/** Helpers for rendering [`CommitSigStatus`] consistently across the badge,
- * the history screen, and the pull modals. */
+/** Pure helpers for mapping [`CommitSigStatus`] to display text and domain
+ * predicates. Rendering — glyph colours and the detail banner — lives in
+ * `src/components/CommitSigIndicator.vue`, which owns the kind→tone→class
+ * mapping so consumers no longer reimplement matching CSS classes. */
 import type { CommitSigStatus } from "@/api";
 
 /** A short human label for a status (e.g. `"Unsigned"`). */
@@ -39,33 +41,6 @@ export function statusGlyph(status: CommitSigStatus): string {
       return "?";
     case "unknown":
       return "?";
-  }
-}
-
-/** A CSS class suffix for colouring the glyph/row. */
-export function statusClass(status: CommitSigStatus): string {
-  switch (status.kind) {
-    case "verified":
-      return "sig-verified";
-    case "unsigned":
-    case "untrusted_key":
-    case "unsupported_format":
-    case "unknown":
-      return "sig-warn";
-    case "bad_signature":
-      return "sig-bad";
-  }
-}
-
-/** A background CSS class for a status banner (success / warn / danger). */
-export function statusBgClass(status: CommitSigStatus): string {
-  switch (status.kind) {
-    case "verified":
-      return "bg-success-soft text-success";
-    case "bad_signature":
-      return "bg-danger-soft text-danger";
-    default:
-      return "bg-warning-soft text-warning";
   }
 }
 

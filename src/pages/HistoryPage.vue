@@ -13,19 +13,13 @@ import {
 } from "@/api";
 import type { AppError } from "@/api";
 import { formatRelativeTime } from "@/utils/format";
-import {
-  isIgnorable,
-  signerFp,
-  statusBgClass,
-  statusClass,
-  statusGlyph,
-  statusLabel,
-} from "@/utils/signature";
+import { isIgnorable, signerFp } from "@/utils/signature";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseToast from "@/components/base/BaseToast.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
+import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 
 const router = useRouter();
 
@@ -189,12 +183,10 @@ onBeforeUnmount(() => {
         @click="openDetail(commit)"
         @keydown.enter="openDetail(commit)"
       >
-        <span
-          class="text-lg w-6 text-center shrink-0"
-          :class="statusClass(commit.status)"
-          aria-hidden="true"
-          >{{ statusGlyph(commit.status) }}</span
-        >
+        <CommitSigIndicator
+          :status="commit.status"
+          class="w-6 text-center shrink-0"
+        />
         <div class="flex-1 min-w-0">
           <div class="flex items-baseline gap-2">
             <code class="text-xs text-muted">{{ commit.short_hash }}</code>
@@ -242,28 +234,12 @@ onBeforeUnmount(() => {
       </p>
       <p class="text-xs text-subtle mt-0.5">{{ selected.date }}</p>
 
-      <div
-        class="mt-3 p-2 rounded-sm text-sm flex items-center gap-2"
-        :class="statusBgClass(selected.status)"
-      >
-        <span class="text-lg" aria-hidden="true">{{
-          statusGlyph(selected.status)
-        }}</span>
-        <div class="flex-1 min-w-0">
-          <div class="font-medium">{{ statusLabel(selected.status) }}</div>
-          <div
-            v-if="signerFp(selected.status)"
-            class="text-xs text-muted break-all"
-          >
-            {{ signerFp(selected.status) }}
-          </div>
-        </div>
-        <span
-          v-if="selected.ignored"
-          class="text-[0.6rem] text-subtle px-1 rounded-sm bg-edge"
-          >ignored</span
-        >
-      </div>
+      <CommitSigIndicator
+        :status="selected.status"
+        variant="banner"
+        :ignored="selected.ignored"
+        class="mt-3"
+      />
 
       <p
         v-if="selected.status.kind === 'bad_signature'"
@@ -299,15 +275,3 @@ onBeforeUnmount(() => {
     <BaseToast v-if="toast" variant="success">{{ toast }}</BaseToast>
   </main>
 </template>
-
-<style scoped>
-.sig-verified {
-  color: var(--color-success, #3a9);
-}
-.sig-warn {
-  color: var(--color-warning, #c93);
-}
-.sig-bad {
-  color: var(--color-danger, #c66);
-}
-</style>
