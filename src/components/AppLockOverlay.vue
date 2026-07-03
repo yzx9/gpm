@@ -4,17 +4,15 @@
 
 <script setup lang="ts">
 import type { AppLockError } from "@/api";
-import { appUnlock, asAppLockError, resetConfig } from "@/api";
+import { appUnlock, asAppLockError } from "@/api";
 import { useAppLockState } from "@/composables";
 import { LockKeyhole, ScanFace } from "@lucide/vue";
 import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
-const router = useRouter();
 const { setUnlockInFlight } = useAppLockState();
 
 const loading = ref(false);
@@ -42,8 +40,15 @@ async function tryUnlock() {
         // User dismissed the prompt — keep the overlay, offer a retry.
         break;
       case "BIOMETRIC_KEY_INVALIDATED":
+        // The at-rest master key is sealed by the biometric-gated Keystore key,
+        // which Android destroyed when all enrolled biometrics were removed. The
+        // master key is random (not passphrase-derived), so the store is
+        // unrecoverable — and this overlay gates the whole app, so Settings is
+        // unreachable. The only path is to wipe gpm at the OS level and set it
+        // up again. (Uninstall also purges the stale Keystore aliases; "Clear
+        // data" overwrites them on next setup — both work.)
         notice.value =
-          "Biometric was reset (all fingerprints removed?) — the store can no longer be unlocked. Reset to reconfigure.";
+          "All fingerprints were removed, so gpm can no longer unlock its store. Clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again.";
         break;
       default:
         notice.value = err.message || "Unlock failed";
@@ -51,18 +56,6 @@ async function tryUnlock() {
   } finally {
     setUnlockInFlight(false);
     loading.value = false;
-  }
-}
-
-async function onReset() {
-  if (!confirm("Reset gpm? This will remove all local data and configuration."))
-    return;
-  try {
-    await resetConfig();
-    router.push({ name: "setup" });
-  } catch (e) {
-    const err = e as { message?: string };
-    notice.value = err?.message || "Reset failed";
   }
 }
 
@@ -88,13 +81,5 @@ onMounted(() => {
       <BaseIcon v-if="!loading" :icon="ScanFace" />
       <span>{{ loading ? "Unlocking…" : "Unlock with biometric" }}</span>
     </BaseButton>
-
-    <button
-      type="button"
-      class="self-center text-xs text-muted hover:text-danger transition-colors mt-6"
-      @click="onReset"
-    >
-      Reset all data
-    </button>
   </BaseModalShell>
 </template>

@@ -144,22 +144,17 @@ describe("UnlockModal", () => {
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
 
-  it("reset wipes config and navigates to Setup", async () => {
+  it("does not expose a Reset affordance (recovery lives in Settings)", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
-      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce(undefined); // reset_config
+      .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
-    // Trigger the "Reset all data" button (confirm is globally mocked to true).
     const resetBtn = wrapper
       .findAll("button")
-      .find((b) => b.text().includes("Reset all data"))!;
-    await resetBtn.trigger("click");
-    await flushPromises();
-
-    expect(invoke).toHaveBeenCalledWith("reset_config");
-    expect(mockPush).toHaveBeenCalledWith({ name: "setup" });
+      .find((b) => b.text().includes("Reset all data"));
+    expect(resetBtn).toBeUndefined();
+    expect(invoke).not.toHaveBeenCalledWith("reset_config");
   });
 });

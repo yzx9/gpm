@@ -10,12 +10,10 @@ import {
   disableBiometricUnlock,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
-  resetConfig,
   unlock,
 } from "@/api";
 import { LockKeyhole, ScanFace, X } from "@lucide/vue";
 import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
@@ -23,8 +21,6 @@ import BaseInput from "./base/BaseInput.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
 const emit = defineEmits<{ (e: "close"): void }>();
-
-const router = useRouter();
 
 const passphrase = ref("");
 const loading = ref(false);
@@ -94,19 +90,10 @@ async function onUnlock() {
   }
 }
 
-async function onReset() {
-  if (!confirm("Reset gpm? This will remove all local data and configuration."))
-    return;
-  try {
-    await resetConfig();
-    // The backend emits `identity-lock-state { locked: false }` on reset, which
-    // closes this overlay. Then drop the user on Setup to reconfigure.
-    router.push({ name: "setup" });
-  } catch (e) {
-    const appError = e as { message?: string };
-    error.value = appError?.message || "Reset failed";
-  }
-}
+// Reset is intentionally not offered from the unlock dialog: it is too dangerous
+// for a surface users reach often. Recovery lives in Settings → Danger Zone
+// (and, if the device's biometrics are all removed, via clearing app data /
+// reinstalling — see AppLockOverlay for that dead-end guidance).
 
 onMounted(async () => {
   biometricAvailable.value = await isBiometricAvailable();
@@ -197,14 +184,6 @@ onMounted(async () => {
       <BaseButton variant="primary" type="submit" :loading="loading">{{
         loading ? "Decrypting…" : "Unlock"
       }}</BaseButton>
-
-      <button
-        type="button"
-        class="self-center text-xs text-muted hover:text-danger transition-colors"
-        @click="onReset"
-      >
-        Reset all data
-      </button>
     </form>
   </BaseModalShell>
 </template>
