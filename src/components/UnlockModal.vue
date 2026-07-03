@@ -145,7 +145,9 @@ onMounted(async () => {
       >
         <BaseIcon :icon="X" :size="18" />
       </button>
-      <h1 class="text-center text-display flex items-center justify-center gap-2">
+      <h1
+        class="text-center text-display flex items-center justify-center gap-2"
+      >
         <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
         <button
           type="button"

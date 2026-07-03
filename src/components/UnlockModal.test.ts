@@ -168,9 +168,7 @@ describe("UnlockModal", () => {
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
-    expect(wrapper.text()).toContain(
-      "Identity is cleared after every action.",
-    );
+    expect(wrapper.text()).toContain("Identity is cleared after every action.");
   });
 
   it("shows the idle-auto-lock hint for a timed policy", async () => {
@@ -208,9 +206,7 @@ describe("UnlockModal", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("get_config");
-    expect(wrapper.text()).toContain(
-      "Identity is cleared after every action.",
-    );
+    expect(wrapper.text()).toContain("Identity is cleared after every action.");
   });
 
   it("the ? button toggles the passphrase explainer", async () => {
