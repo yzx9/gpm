@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The unlock dialog has a new ? button next to its title that explains what your passphrase is and warns that gpm cannot recover or reset it — lose it and your secrets are gone for good. Tap it again to dismiss the explanation.
 - The unlock dialog now shows your current auto-lock policy — "cleared after every action" (Immediate), "auto-locks after N min of inactivity", or "stays unlocked until you lock manually" (Never) — so it's clear how long the identity stays cached after you unlock.
 - Removed the "Reset all data" button from the unlock and app-lock dialogs — too dangerous for a screen you reach often. Reset now lives only in Settings → Danger Zone. If all your fingerprints are removed and gpm can no longer unlock its store, the app-lock screen tells you to clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again.
 - The unlock dialog can now be dismissed with the × button, a backdrop tap, or the Android back button — even when the app is hard-locked. Dismissing hides the dialog without unlocking: your identity stays locked and secrets stay wiped, but you can read the entry list and open Settings without typing your passphrase first. The next action that needs the identity prompts you again.

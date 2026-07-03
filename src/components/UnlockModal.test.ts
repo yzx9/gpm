@@ -132,13 +132,29 @@ describe("UnlockModal", () => {
   it("the close (×) button emits `close` so the host can dismiss the overlay", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
-      .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
     const closeBtn = wrapper.find('button[aria-label="Close"]');
     expect(closeBtn.exists()).toBe(true);
     await closeBtn.trigger("click");
+
+    expect(wrapper.emitted("close")).toBeTruthy();
+    expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+
+  it("emits `close` on a backdrop tap (the BaseModalShell dismiss path)", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    // BaseModalShell emits `close` on @click.self of its overlay (role=dialog).
+    await wrapper.find('[role="dialog"]').trigger("click");
 
     expect(wrapper.emitted("close")).toBeTruthy();
     expect(wrapper.emitted("close")).toHaveLength(1);
@@ -183,10 +199,46 @@ describe("UnlockModal", () => {
     );
   });
 
+  it("falls back to the Immediate hint when get_config fails", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockRejectedValueOnce(new Error("pre-setup")); // get_config rejects
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("get_config");
+    expect(wrapper.text()).toContain(
+      "Identity is cleared after every action.",
+    );
+  });
+
+  it("the ? button toggles the passphrase explainer", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    const helpBtn = wrapper.find(
+      'button[aria-label="What is this passphrase?"]',
+    );
+    expect(helpBtn.exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("cannot recover or reset it");
+
+    await helpBtn.trigger("click");
+    expect(wrapper.text()).toContain("cannot recover or reset it");
+
+    await helpBtn.trigger("click");
+    expect(wrapper.text()).not.toContain("cannot recover or reset it");
+  });
+
   it("does not expose a Reset affordance (recovery lives in Settings)", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
-      .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 

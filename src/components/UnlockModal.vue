@@ -14,7 +14,7 @@ import {
   unlock,
   type LockMode,
 } from "@/api";
-import { LockKeyhole, ScanFace, X } from "@lucide/vue";
+import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
@@ -27,6 +27,7 @@ const emit = defineEmits<{ (e: "close"): void }>();
 const passphrase = ref("");
 const loading = ref(false);
 const error = ref("");
+const showHelp = ref(false);
 
 // ── Biometric state ───────────────────────────────────────────────────
 const biometricAvailable = ref(false);
@@ -146,10 +147,28 @@ onMounted(async () => {
       </button>
       <h1 class="text-center text-display flex items-center justify-center gap-2">
         <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
+        <button
+          type="button"
+          class="help-btn"
+          :class="{ active: showHelp }"
+          :aria-expanded="showHelp"
+          aria-label="What is this passphrase?"
+          @click="showHelp = !showHelp"
+        >
+          <BaseIcon :icon="HelpCircle" :size="16" />
+        </button>
       </h1>
     </div>
     <p class="text-center text-muted text-sm mb-1">Identity is locked</p>
     <p class="text-center text-subtle text-xs mb-6">{{ lockHint }}</p>
+
+    <!-- What is the passphrase? (toggleable) -->
+    <BaseAlert v-if="showHelp" variant="info" class="mb-4">
+      Your passphrase decrypts the identity that guards your secrets. It lives
+      only on this device — gpm cannot recover or reset it for you. If you lose
+      it, your secrets are permanently lost; you would need to reset gpm
+      (Settings → Danger Zone) and set it up again.
+    </BaseAlert>
 
     <!-- Biometric notice (reset / stale / failure) -->
     <BaseAlert
@@ -232,6 +251,20 @@ onMounted(async () => {
   transition: color 0.15s;
 }
 .close-x:hover {
+  color: var(--color-text);
+}
+.help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--color-muted);
+  transition: color 0.15s;
+}
+.help-btn:hover,
+.help-btn.active {
   color: var(--color-text);
 }
 </style>
