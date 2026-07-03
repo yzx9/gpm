@@ -15,7 +15,6 @@ use nucleo_matcher::{
 use tokio::fs;
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
-use walkdir::WalkDir;
 use zeroize::Zeroizing;
 
 use crate::config::{Config, LockMode, RepoConfig};
@@ -28,6 +27,8 @@ use crate::secret::Secret;
 use crate::signing::{
     self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedKey, VerifyMode,
 };
+use crate::storage::git::passfile_rel;
+use crate::storage::{GitStorage, StorageBackend};
 use crate::{git, template};
 
 /// Default `Idle` auto-lock timeout in seconds (5 minutes). Used as the
@@ -56,6 +57,10 @@ pub use crate::storage::{
     AuthenticityResult, CommitIdentity, DivergenceChoice, SyncDivergence, SyncOutcome, SyncResult,
     WriteOutcome, WriteResult,
 };
+// `list_entries` / `resolve_entry_path` were relocated to `storage::git` (PR2)
+// and are re-exported here so existing integration-test call sites
+// (`store::list_entries`, `store::resolve_entry_path`) keep compiling unchanged.
+pub use crate::storage::git::{list_entries, resolve_entry_path};
 
 /// Password store — aligned with `gopass.Store` interface.
 ///
@@ -68,6 +73,10 @@ pub struct Store {
     /// age library directly (RFC 0033 PR1). `Box<dyn>` so a second backend can
     /// arrive without rewriting the facade.
     crypto: Box<dyn CryptoBackend>,
+    /// The storage backend (git today). The only path to working-tree file ops —
+    /// list/get/set/delete entries, the recipients file, templates (RFC 0033
+    /// PR2). RCS ops still route through `git::` free fns until PR3 folds them in.
+    storage: Box<dyn StorageBackend>,
     config: Config,
     /// Cached decrypted identity (populated after unlock).
     cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
@@ -102,6 +111,7 @@ impl Store {
     pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
         Self {
             crypto: Box::new(AgeBackend),
+            storage: Box::new(GitStorage),
             config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
             write_mu: Mutex::new(()),
@@ -430,7 +440,7 @@ impl Store {
             let repo_dir_init = repo_dir.clone();
             spawn_blocking(move || git::init_repo(&repo_dir_init)).await??;
 
-            self.crypto
+            self.storage
                 .write_recipients(&repo_dir, &[recipient.to_string()])
                 .await?;
 
@@ -474,7 +484,7 @@ impl Store {
     pub async fn list_recipients(&self) -> Result<Vec<Recipient>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        self.crypto.list_recipients(repo_path).await
+        self.storage.list_recipients(repo_path).await
     }
 
     /// Save the age identity.
@@ -649,7 +659,7 @@ impl Store {
     pub async fn list(&self) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        list_entries(repo_path)
+        self.storage.list(repo_path).await
     }
 
     /// Fuzzy-search the configured repository's entries by `query`, ranked by
@@ -667,8 +677,9 @@ impl Store {
     pub async fn search(&self, query: &str) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let entries = self.storage.list(&repo_path).await?;
         let q = query.to_string();
-        spawn_blocking(move || search_entries_in(&repo_path, &q)).await?
+        Ok(spawn_blocking(move || rank_entries(entries, &q)).await?)
     }
 
     /// One page of [`search`](Store::search) results: up to `limit` entries
@@ -690,12 +701,9 @@ impl Store {
     ) -> Result<RankedPage, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let entries = self.storage.list(&repo_path).await?;
         let q = query.to_string();
-        spawn_blocking(move || {
-            let ranked = search_entries_in(&repo_path, &q)?;
-            Ok(slice_page(ranked, offset, limit))
-        })
-        .await?
+        Ok(spawn_blocking(move || slice_page(rank_entries(entries, &q), offset, limit)).await?)
     }
 
     /// One page of [`list`](Store::list) results —
@@ -723,20 +731,11 @@ impl Store {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
 
-        let entry_path = if Path::new(name)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
-        {
-            name.to_string()
-        } else {
-            format!("{name}.age")
-        };
-
-        let file_path = resolve_entry_path(repo_path, &entry_path)?;
+        let encrypted = self.storage.get(repo_path, name).await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let decrypted = self
             .crypto
-            .decrypt_file(&file_path, &identity_bytes, None)
+            .decrypt_bytes(&encrypted, &identity_bytes, None)
             .await?;
         Secret::parse(&decrypted)
     }
@@ -806,22 +805,9 @@ impl Store {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
 
-        // Existence gate: a local typo guard (checked before any mutation).
-        resolve_entry_path(&repo_path, &passfile)?;
-
-        // Remove the worktree file; the index removal is staged in `commit_removal`.
-        let file_path = repo_path.join(&passfile);
-        assert_within_repo(&repo_path, file_path.parent().unwrap_or(Path::new("")))?;
-        match fs::remove_file(&file_path).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(Error::new(
-                    ErrorCode::EntryNotFound,
-                    format!("Entry not found: {name}"),
-                ));
-            }
-            Err(e) => return Err(e.into()),
-        }
+        // Existence + within-repo guard + remove the worktree file. The index
+        // removal is staged in `commit_removal` below.
+        self.storage.delete(&repo_path, name).await?;
 
         let head = self
             .commit_local(
@@ -1064,7 +1050,7 @@ impl Store {
         //    (our_recipient derived once in step 2).
         let repo_path_re = self.repo_path().await?;
         let mut recipients: Vec<String> = self
-            .crypto
+            .storage
             .list_recipients(&repo_path_re)
             .await?
             .into_iter()
@@ -1132,12 +1118,7 @@ impl Store {
     /// Returns an error if the store is not configured.
     pub async fn lookup_template(&self, name: &str) -> Result<Option<String>, Error> {
         let repo_path = self.repo_path().await?;
-        let name_owned = name.to_string();
-        // Filesystem walk; cheap enough to run on a blocking thread.
-        Ok(
-            spawn_blocking(move || template::lookup_template_in_repo(&repo_path, &name_owned))
-                .await?,
-        )
+        self.storage.lookup_template(&repo_path, name).await
     }
 
     /// Create a secret, applying a matching `.pass-template` if one exists
@@ -1259,14 +1240,9 @@ impl Store {
         repo_path: &Path,
     ) -> Result<String, Error> {
         let passfile = passfile_rel(name);
-        let file_path = repo_path.join(&passfile);
-        if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
-        assert_within_repo(repo_path, file_path.parent().unwrap_or(Path::new("")))?;
 
         // Recipients: everyone in the store, plus our own key (ensureOurKeyID).
-        let recipients = self.crypto.list_recipients(repo_path).await?;
+        let recipients = self.storage.list_recipients(repo_path).await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let identity_str = str::from_utf8(&identity_bytes)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
@@ -1282,7 +1258,7 @@ impl Store {
             .encrypt_to_recipients(plaintext, &recipients_str)
             .await?;
 
-        write_atomic(&file_path, &ciphertext).await?;
+        self.storage.set(repo_path, name, &ciphertext).await?;
         Ok(passfile)
     }
 
@@ -2015,48 +1991,6 @@ impl Store {
 // Low-level functions (used by Store, also publicly accessible)
 // ---------------------------------------------------------------------------
 
-/// Walk a gopass store directory and return all `.age` entries.
-///
-/// Skips `.git` directory. Only returns files with `.age` extension.
-///
-/// # Errors
-///
-/// Returns an error if the repository path does not exist.
-pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, Error> {
-    if !repo_path.exists() {
-        return Err(Error::new(
-            ErrorCode::NoRepo,
-            "Repository path does not exist",
-        ));
-    }
-
-    let mut entries: Vec<Entry> = WalkDir::new(repo_path)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .filter(|e| {
-            e.file_name().to_str().is_some_and(|name| {
-                Path::new(name)
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
-            })
-        })
-        .filter(|e| !e.path().components().any(|c| c.as_os_str() == ".git"))
-        .filter_map(|e| {
-            let rel = e.path().strip_prefix(repo_path).ok()?;
-            let rel_str = rel.to_str()?.to_string();
-            let name = rel_str.trim_end_matches(".age").to_string();
-            Some(Entry {
-                path: rel_str,
-                name,
-            })
-        })
-        .collect();
-
-    entries.sort_by_key(|a| a.name.to_lowercase());
-    Ok(entries)
-}
-
 /// Fuzzy-rank `entries` by `query`, best match first.
 ///
 /// Each entry is scored against its `name` and `path` (the higher score wins),
@@ -2137,34 +2071,6 @@ fn fuzzy_score(matcher: &mut Matcher, pattern: &Pattern, haystack: &str) -> Opti
     }
 }
 
-/// Verify an entry file exists within the repo.
-///
-/// # Errors
-///
-/// Returns an error if the entry does not exist or if the resolved path
-/// escapes the repository directory (path traversal guard).
-pub fn resolve_entry_path(repo_path: &Path, entry_path: &str) -> Result<PathBuf, Error> {
-    let full_path = repo_path.join(entry_path);
-
-    if !full_path.exists() {
-        return Err(Error::new(
-            ErrorCode::EntryNotFound,
-            format!("Entry not found: {entry_path}"),
-        ));
-    }
-
-    let canonical_repo = repo_path.canonicalize()?;
-    let canonical_entry = full_path.canonicalize()?;
-    if !canonical_entry.starts_with(&canonical_repo) {
-        return Err(Error::new(
-            ErrorCode::EntryNotFound,
-            "Entry path is outside repository",
-        ));
-    }
-
-    Ok(full_path)
-}
-
 /// Build the [`template::TemplateVars`] for an entry named `name` with the
 /// given content text. All name-derived slices borrow `name`.
 fn template_vars<'a>(name: &'a str, content: &'a str) -> template::TemplateVars<'a> {
@@ -2177,22 +2083,6 @@ fn template_vars<'a>(name: &'a str, content: &'a str) -> template::TemplateVars<
         path: name,
         dir,
         dirname,
-    }
-}
-
-/// The on-disk relative path for a secret named `name` (gopass `passfile`).
-///
-/// A leading `/` is stripped; if the name already ends in `.age` it is kept
-/// as-is, otherwise `.age` is appended. Matches the resolution `get` uses.
-fn passfile_rel(name: &str) -> String {
-    let name = name.trim_start_matches('/');
-    if Path::new(name)
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
-    {
-        name.to_string()
-    } else {
-        format!("{name}.age")
     }
 }
 
@@ -2229,34 +2119,6 @@ fn validate_secret_name(name: &str) -> Result<(), Error> {
             "Secret name must not contain '.' or '..' segments",
         ));
     }
-    Ok(())
-}
-
-/// Defense-in-depth check that `dir` resolves inside `repo_path`.
-///
-/// Used after creating a secret's parent directory: the directory exists, so it
-/// can be canonicalized, and we assert it is contained by the canonical repo
-/// root. Catches any traversal a name-validation gap would otherwise allow.
-fn assert_within_repo(repo_path: &Path, dir: &Path) -> Result<(), Error> {
-    let canonical_repo = repo_path.canonicalize()?;
-    let canonical_dir = dir.canonicalize()?;
-    if !canonical_dir.starts_with(&canonical_repo) {
-        return Err(Error::new(
-            ErrorCode::EntryNotFound,
-            "Entry path is outside repository",
-        ));
-    }
-    Ok(())
-}
-
-/// Atomic write: write to a temp file beside the target, then rename over it.
-///
-/// Mirrors [`Config`'s](crate::config::Config) atomic write so a failed write
-/// can never leave a half-written ciphertext behind.
-async fn write_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
-    let temp_path = path.with_extension("tmp");
-    fs::write(&temp_path, data).await?;
-    fs::rename(&temp_path, path).await?;
     Ok(())
 }
 

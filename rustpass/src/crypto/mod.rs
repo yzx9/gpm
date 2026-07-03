@@ -9,24 +9,18 @@
 //! implementation today is [`AgeBackend`] (in [`age`]); `Store` holds a
 //! `Box<dyn CryptoBackend>` and never touches the age library directly.
 //!
-//! Two trait methods (`list_recipients` / `write_recipients`) are recipients-
-//! *file* ops that belong on the future `StorageBackend` (RFC 0033 decision #9's
-//! recipient-ownership split: storage owns the file, crypto owns the semantics).
-//! They ride this trait temporarily and migrate in PR2 — they're here now only
-//! so PR1 can route every age-touching `Store` call site through the backend in
-//! one move, without first standing up the storage trait.
+//! Recipients *file* I/O (`list_recipients` / `write_recipients`) lives on the
+//! [`StorageBackend`](crate::storage::StorageBackend), not here — crypto owns
+//! recipient *semantics*, storage owns the file (RFC 0033 decision #9).
 //!
 //! For now the age functions are also re-exported here so existing `crypto::`
-//! callers (the Tauri command layer's `generate_age_identity`) keep resolving
-//! unchanged.
-
-use std::path::Path;
+//! callers (the Tauri command layer's `generate_age_identity`, the at-rest
+//! `Config` layer, integration tests) keep resolving unchanged.
 
 use async_trait::async_trait;
 use tokio::task::spawn_blocking;
 
 use crate::error::Error;
-use crate::recipient::Recipient;
 
 /// The age encryption backend (the sole `CryptoBackend` implementation today).
 pub mod age;
@@ -83,18 +77,6 @@ pub trait CryptoBackend: Send + Sync {
         passphrase: Option<&str>,
     ) -> Result<Vec<u8>, Error>;
 
-    /// Read and decrypt the `.age` file at `path` with `identity_bytes`.
-    ///
-    /// # Errors
-    ///
-    /// `IoError` if the file can't be read, otherwise as [`decrypt_bytes`].
-    async fn decrypt_file(
-        &self,
-        path: &Path,
-        identity_bytes: &[u8],
-        passphrase: Option<&str>,
-    ) -> Result<Vec<u8>, Error>;
-
     /// Decrypt a passphrase-encrypted (scrypt) identity blob. The scrypt KDF is
     /// intentionally slow (~100 ms), so this runs on a blocking thread.
     ///
@@ -138,29 +120,6 @@ pub trait CryptoBackend: Send + Sync {
     /// passphrase-encrypted. Pure CPU op — synchronous. See
     /// [`age::is_ssh_identity_encrypted`].
     fn is_ssh_identity_encrypted(&self, identity_bytes: &[u8]) -> bool;
-
-    /// Read the store's recipients file (`.gopass-recipients` / `.age-recipients`)
-    /// from `repo_path`.
-    ///
-    /// **Temporary home:** this is a recipients-*file* op that moves to the
-    /// `StorageBackend` in PR2 (RFC 0033 decision #9). It rides the crypto trait
-    /// now only so PR1 can route every age-touching `Store` call through the
-    /// backend in one move.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file exists but can't be read.
-    async fn list_recipients(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error>;
-
-    /// Write `recipients` to `<repo_path>/.age-recipients` atomically.
-    ///
-    /// **Temporary home:** as above, moves to `StorageBackend` in PR2.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the directory can't be created or the file can't be
-    /// written.
-    async fn write_recipients(&self, repo_path: &Path, recipients: &[String]) -> Result<(), Error>;
 }
 
 /// The age crypto backend — the sole [`CryptoBackend`] implementation.
@@ -179,8 +138,7 @@ impl CryptoBackend for AgeBackend {
     // into this module by `pub use age::*`). A bare call resolves to the free
     // fn, NOT this trait method — methods need a `self.` receiver — so these
     // are plain delegation, not recursion. Sync CPU work is wrapped in
-    // `spawn_blocking`; the already-async free fns (`decrypt_file`,
-    // `list_recipients`, `write_recipients`) are handed straight through.
+    // `spawn_blocking`.
 
     async fn encrypt_to_recipients(
         &self,
@@ -203,17 +161,6 @@ impl CryptoBackend for AgeBackend {
         let passphrase = passphrase.map(str::to_string);
         spawn_blocking(move || decrypt_bytes(&encrypted, &identity_bytes, passphrase.as_deref()))
             .await?
-    }
-
-    async fn decrypt_file(
-        &self,
-        path: &Path,
-        identity_bytes: &[u8],
-        passphrase: Option<&str>,
-    ) -> Result<Vec<u8>, Error> {
-        // decrypt_file is already async (tokio::fs::read + sync decrypt); hand
-        // it through directly.
-        decrypt_file(path, identity_bytes, passphrase).await
     }
 
     async fn decrypt_identity(&self, passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, Error> {
@@ -242,13 +189,5 @@ impl CryptoBackend for AgeBackend {
 
     fn is_ssh_identity_encrypted(&self, identity_bytes: &[u8]) -> bool {
         is_ssh_identity_encrypted(identity_bytes)
-    }
-
-    async fn list_recipients(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error> {
-        crate::recipient::list_recipients(repo_path).await
-    }
-
-    async fn write_recipients(&self, repo_path: &Path, recipients: &[String]) -> Result<(), Error> {
-        crate::recipient::write_recipients(repo_path, recipients).await
     }
 }

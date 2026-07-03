@@ -4,20 +4,111 @@
 
 //! Storage / RCS backend abstraction.
 //!
-//! This module is the future home of the `StorageBackend` trait (mirroring
-//! gopass's `Storage` interface, which embeds RCS). It already owns the shared
-//! sync / write / commit-identity *result* types that the trait will surface,
-//! relocated here from `store` so the upcoming `Store` → `StorageBackend` edge
-//! doesn't form a `store ↔ storage` module cycle: the trait (defined here) must
-//! be able to return `SyncOutcome` without importing `store`, and the git
-//! storage impl must be able to construct it without depending on `store`.
+//! Home of the [`StorageBackend`] trait (mirroring gopass's `Storage` interface,
+//! which embeds RCS). The sole implementation today is [`crate::storage::git::GitStorage`];
+//! `Store` holds a `Box<dyn StorageBackend>` and routes every working-tree file
+//! op through it. RCS methods (clone/pull/push/keep-mine) join the trait in PR3.
+//!
+//! This module also owns the shared sync / write / commit-identity *result*
+//! types that the trait surfaces, relocated here from `store` so the
+//! `Store` → `StorageBackend` edge doesn't form a `store ↔ storage` module cycle:
+//! the trait (defined here) must return `SyncOutcome` without importing `store`,
+//! and the git storage impl must construct it without depending on `store`.
 //!
 //! `GitAuth` and the progress/cancellation types stay in `git` for now and move
-//! here when `git.rs` is folded into `storage/git`.
+//! here when `git.rs` is folded into `storage/git` (PR3).
 
+use std::path::Path;
+
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::entry::Entry;
+use crate::error::Error;
+use crate::recipient::Recipient;
 use crate::signing::{CommitSigInfo, VerifyMode};
+
+/// The git storage backend (the sole `StorageBackend` implementation today).
+pub mod git;
+
+/// Re-entrant access to [`git::GitStorage`].
+pub use git::GitStorage;
+
+/// Swappable storage backend (gopass `internal/backend/storage.go` analogue).
+///
+/// Owns the repo working tree: file ops for secrets, the recipients file, and
+/// template lookups. RCS ops (clone/pull/push/keep-mine) land on this trait in
+/// PR3; today only the file-op surface exists. The trait is `Send + Sync` so
+/// `Box<dyn StorageBackend>` stays `Send + Sync` for `Store`'s `AppState`.
+///
+/// File ops own their within-repo path-traversal guard (`get`/`set`/`delete`
+/// validate the resolved path), so `Store` passes an entry *name* and the
+/// backend maps it to `<repo>/<name>.age`. Lifecycle dir management (creating /
+/// wiping the whole repo dir in `configure`/`reset`) stays in `Store` — it's
+/// setup/teardown, not content access.
+#[async_trait]
+pub trait StorageBackend: Send + Sync {
+    /// List every `.age` entry under `repo_path` (alpha-sorted, `.git` skipped).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::ErrorCode::NoRepo`] if `repo_path` doesn't exist.
+    async fn list(&self, repo_path: &Path) -> Result<Vec<Entry>, Error>;
+
+    /// Read the `.age` bytes for entry `name`.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::ErrorCode::EntryNotFound`] if the entry is missing or the
+    /// resolved path escapes the repo; [`crate::error::ErrorCode::IoError`] on a
+    /// read failure.
+    async fn get(&self, repo_path: &Path, name: &str) -> Result<Vec<u8>, Error>;
+
+    /// Atomically write `ciphertext` to `<repo>/<name>.age`, creating parent
+    /// directories. Temp-file + rename so a failure can't leave a half-written
+    /// secret behind.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::ErrorCode::EntryNotFound`] if the resolved path escapes
+    /// the repo; otherwise an I/O error.
+    async fn set(&self, repo_path: &Path, name: &str, ciphertext: &[u8]) -> Result<(), Error>;
+
+    /// Remove entry `name`'s `.age` file.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::ErrorCode::EntryNotFound`] if missing or the path escapes
+    /// the repo; otherwise an I/O error.
+    async fn delete(&self, repo_path: &Path, name: &str) -> Result<(), Error>;
+
+    /// Read + parse the store's recipients file (`.gopass-recipients` preferred,
+    /// `.age-recipients` fallback). **Temporary surface** — recipients semantics
+    /// stay in `crypto` per RFC 0033 decision #9; this returns the parsed list
+    /// for now and moves to raw bytes when a 2nd backend informs the split.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but can't be read.
+    async fn list_recipients(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error>;
+
+    /// Write `recipients` to `<repo>/.age-recipients` atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory can't be created or the file can't be
+    /// written.
+    async fn write_recipients(&self, repo_path: &Path, recipients: &[String]) -> Result<(), Error>;
+
+    /// Look up the `.pass-template` that applies to `name`, walking up the tree
+    /// (gopass `LookupTemplate`). `Ok(None)` when no template applies.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if `repo_path` can't be resolved; a missing
+    /// template is `Ok(None)`.
+    async fn lookup_template(&self, repo_path: &Path, name: &str) -> Result<Option<String>, Error>;
+}
 
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.
 #[derive(Debug, Clone, Serialize)]
