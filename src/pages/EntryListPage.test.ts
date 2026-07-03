@@ -54,7 +54,8 @@ const defaults: Record<string, unknown> = {
   list_entries: page(sampleEntries),
   search_entries: page(sampleEntries),
   get_authenticity_state: { mode: "off", head_status: { kind: "unsigned" } },
-  pull_repo: {
+  sync_repo: {
+    kind: "fast_forwarded",
     changed: false,
     head: "abc",
     authenticity: {
@@ -343,7 +344,8 @@ describe("EntryListPage", () => {
         page([...sampleEntries, { path: "new.age", name: "new" }]),
       );
       when("search_entries", page([{ path: "new.age", name: "new-git" }]));
-      when("pull_repo", {
+      when("sync_repo", {
+        kind: "fast_forwarded",
         changed: true,
         head: "def456",
         authenticity: {
@@ -353,7 +355,9 @@ describe("EntryListPage", () => {
           blocked: false,
         },
       });
-      await wrapper.find('button[aria-label="Pull updates"]').trigger("click");
+      await wrapper
+        .find('button[aria-label="Sync with remote"]')
+        .trigger("click");
       await flushPromises();
       await flushPromises();
 
@@ -521,9 +525,10 @@ describe("EntryListPage", () => {
     });
   });
 
-  describe("pullRepo", () => {
+  describe("syncRepo", () => {
     it("shows 'Already up to date' when no changes", async () => {
-      when("pull_repo", {
+      when("sync_repo", {
+        kind: "fast_forwarded",
         changed: false,
         head: "abc",
         authenticity: {
@@ -536,7 +541,9 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper.find('button[aria-label="Pull updates"]').trigger("click");
+      await wrapper
+        .find('button[aria-label="Sync with remote"]')
+        .trigger("click");
       await flushPromises();
 
       expect(wrapper.text()).toContain("Already up to date");
@@ -555,8 +562,9 @@ describe("EntryListPage", () => {
             listCall === 1 ? page(sampleEntries) : page(updatedEntries),
           );
         }
-        if (cmd === "pull_repo") {
+        if (cmd === "sync_repo") {
           return Promise.resolve({
+            kind: "fast_forwarded",
             changed: true,
             head: "def456",
             authenticity: {
@@ -577,15 +585,17 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper.find('button[aria-label="Pull updates"]').trigger("click");
+      await wrapper
+        .find('button[aria-label="Sync with remote"]')
+        .trigger("click");
       await flushPromises();
 
       expect(wrapper.text()).toContain("Updated to def456");
       expect(wrapper.text()).toContain("new-entry");
     });
 
-    it("shows the divergence modal when diverged", async () => {
-      when("pull_repo", {
+    it("shows the divergence modal when diverged (two-step, no checkbox)", async () => {
+      when("sync_repo", {
         kind: "diverged",
         local_ahead: 2,
         remote_ahead: 1,
@@ -597,7 +607,9 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper.find('button[aria-label="Pull updates"]').trigger("click");
+      await wrapper
+        .find('button[aria-label="Sync with remote"]')
+        .trigger("click");
       await flushPromises();
 
       // Modal surfaces, listing every local-side change category.
@@ -606,15 +618,21 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).toContain("shared");
       expect(wrapper.text()).toContain("notes.txt");
 
-      // Adopt is gated behind the confirmation checkbox.
-      const checkbox = wrapper.find('input[type="checkbox"]');
-      expect(checkbox.exists()).toBe(true);
-      expect(wrapper.find(".btn-danger").attributes("disabled")).toBeDefined();
+      // No confirm-checkbox anymore — Adopt is immediately enabled.
+      expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+      const adopt = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Adopt remote"))!;
+      expect((adopt.element as HTMLButtonElement).disabled).toBe(false);
 
-      await checkbox.setValue(true);
+      // Tapping it opens the centered confirm (the second step).
+      await adopt.trigger("click");
+      await flushPromises();
       expect(
-        wrapper.find(".btn-danger").attributes("disabled"),
-      ).toBeUndefined();
+        wrapper
+          .findAll("button")
+          .some((b) => b.text().includes("Discard my commit")),
+      ).toBe(true);
     });
   });
 

@@ -41,6 +41,12 @@ Single identity tried against every `.age` file. If decryption fails, return err
 
 Encrypted SSH keys are already supported as identities. Multi-identity must handle both x25519 and SSH key types with their optional passphrases.
 
+### Overwrite-safety gate (deferred until multi-identity)
+
+Once a store can hold entries encrypted to a recipient set that does **not** include us, a "keep mine" resolve (or any push that overwrites a same-name remote entry) can silently destroy ciphertext we cannot read or verify — the remote entry could carry content we're not a recipient of. The write path today has no `remote_decryptable` / overwrite-confirm gate; it doesn't need one because gpm is single-identity (every entry in the store decrypts with our one key, so an overwrite never destroys something we can't read).
+
+When multi-identity lands, add a gate: refuse to overwrite a remote entry whose current ciphertext we can't decrypt, unless the user explicitly confirms (a `keep_mine_force`-class choice). This is a team-store safety item, irrelevant for the single-user MVP; recorded here so it is not silently dropped. (Deferred from the decouple-sync work — the orchestrator that would surface this ships without the gate.)
+
 ## Effort
 
 ~1-2 days (human) / ~45 min (CC)

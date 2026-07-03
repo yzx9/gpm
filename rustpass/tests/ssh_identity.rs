@@ -81,10 +81,7 @@ async fn ssh_identity_unlock_get_set_round_trip() {
         .set("new-secret", b"new-password\n")
         .await
         .expect("set should succeed");
-    assert!(
-        !result.commit.is_empty(),
-        "expected the write to land"
-    );
+    assert!(!result.commit.is_empty(), "expected the write to land");
 
     // Read back what we just wrote — proves the write encrypted to our key.
     let created = store.get("new-secret").await.expect("get new-secret");

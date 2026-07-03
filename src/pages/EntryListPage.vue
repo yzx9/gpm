@@ -19,27 +19,30 @@ import {
   getAuthenticityState,
   ignoreCommitIssue,
   listEntries,
-  pullRepo as pullRepoCmd,
   resolveSyncDivergence,
   searchEntries,
   setVerificationMode,
   subscribeGitProgress,
+  syncRepo as syncRepoCmd,
   trustCommitSigner,
   type AppError,
   type AuthenticityState,
   type CommitSigInfo,
+  type DivergenceChoice,
   type Entry,
   type GitProgressEvent,
   type SyncDivergence,
 } from "@/api";
 import { formatRelativeTime } from "@/utils/format";
 import { statusLabel } from "@/utils/signature";
+import AuthenticityBlockModal from "@/components/AuthenticityBlockModal.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
+import DivergenceModal from "@/components/DivergenceModal.vue";
 import { isAuthCancelled, useLockState } from "@/composables";
 
 const router = useRouter();
@@ -83,12 +86,11 @@ const auditIssues = ref<CommitSigInfo[] | null>(null);
 /** Enforce-block result from the last pull → drives the block modal. */
 const blockIssues = ref<CommitSigInfo[] | null>(null);
 
-// ── Pull divergence (adopt-remote modal) ─────────────────────────────────
-/** Diverged pull → drives the adopt-remote modal. */
+// ── Sync divergence (keep-mine / adopt-remote modal) ─────────────────────
+/** Diverged sync → drives the shared resolve modal. */
 const divergence = ref<SyncDivergence | null>(null);
-const adopting = ref(false);
-const adoptConfirmed = ref(false);
-const adoptError = ref("");
+const resolving = ref(false);
+const divergeError = ref("");
 
 /** The indicator badge for the current authenticity state. */
 const badge = computed<{ glyph: string; cls: string; title: string }>(() => {
@@ -216,40 +218,39 @@ function onPullProgress(p: GitProgressEvent) {
     p.message ?? `${p.received_objects} / ${p.total_objects} objects`;
 }
 
-/** User-initiated cancel of an in-flight pull. */
-async function cancelPull() {
+/** User-initiated cancel of an in-flight sync. */
+async function cancelSync() {
   try {
     await cancelGit();
   } catch {
-    // best-effort — the pull continues if cancel fails
+    // best-effort — the sync continues if cancel fails
   }
 }
 
-/** The header button starts a pull, or cancels one already in flight. */
-function togglePull() {
+/** The header button starts a sync (pull + push), or cancels one in flight. */
+function toggleSync() {
   if (pulling.value) {
-    void cancelPull();
+    void cancelSync();
   } else {
-    void pullRepo();
+    void syncRepo();
   }
 }
 
-async function pullRepo() {
+async function syncRepo() {
   pulling.value = true;
   pullResult.value = "";
   error.value = "";
   auditIssues.value = null;
   blockIssues.value = null;
-  pullProgressText.value = "Pulling…";
+  pullProgressText.value = "Syncing…";
   pullProgressPercent.value = 0;
   pullProgressUnlisten ??= await subscribeGitProgress(onPullProgress);
   try {
-    const result = await pullRepoCmd();
+    const result = await syncRepoCmd();
     if (result.kind === "diverged") {
       // Surface the divergence for resolution instead of erroring.
       divergence.value = result;
-      adoptConfirmed.value = false;
-      adoptError.value = "";
+      divergeError.value = "";
       return;
     }
     if (result.changed) {
@@ -262,7 +263,7 @@ async function pullRepo() {
     // Refresh the badge with the new HEAD state.
     await loadAuthState();
 
-    // Audit mismatch → informational modal (pull already succeeded).
+    // Audit mismatch → informational modal (sync already succeeded).
     if (
       result.authenticity.mode === "audit" &&
       result.authenticity.open_issues.length > 0
@@ -281,12 +282,12 @@ async function pullRepo() {
     const appError = e as AppError;
     if (appError?.code === "CANCELLED") {
       // User-initiated abort — neutral status, not an error.
-      pullResult.value = "Pull cancelled";
+      pullResult.value = "Sync cancelled";
       setTimeout(() => {
         pullResult.value = "";
       }, 3000);
     } else {
-      error.value = appError?.message || "Pull failed";
+      error.value = appError?.message || "Sync failed";
     }
   } finally {
     pullProgressUnlisten?.();
@@ -295,20 +296,27 @@ async function pullRepo() {
   }
 }
 
-/** Resolve a divergence by adopting the reviewed remote tip. */
-async function adoptRemote() {
+/** Resolve a sync divergence per the user's choice. `keep_mine` re-encrypts
+ *  local-only entries onto the reviewed remote tip and pushes — identity-gated
+ *  (runWithAuth). `adopt_remote` is a fast-forward (no identity needed). */
+async function resolveDivergence(choice: DivergenceChoice) {
   if (!divergence.value) return;
-  adopting.value = true;
-  adoptError.value = "";
+  resolving.value = true;
+  divergeError.value = "";
+  const expectedRemoteOid = divergence.value.remote_tip;
   try {
-    const result = await resolveSyncDivergence(divergence.value.remote_tip);
+    const result =
+      choice === "keep_mine"
+        ? await runWithAuth(() =>
+            resolveSyncDivergence(expectedRemoteOid, choice),
+          )
+        : await resolveSyncDivergence(expectedRemoteOid, choice);
     divergence.value = null;
-    adoptConfirmed.value = false;
     pullResult.value = `Updated to ${result.head}`;
     await fetchPage(search.value.trim(), 0, true);
     lastSyncTime.value = Date.now();
     await loadAuthState();
-    // Enforce may refuse the adopt (unverified remote commits) — surface it.
+    // Enforce may refuse the resolve (unverified remote commits) — surface it.
     if (result.authenticity.blocked) {
       blockIssues.value = result.authenticity.open_issues;
     }
@@ -316,27 +324,26 @@ async function adoptRemote() {
       pullResult.value = "";
     }, 3000);
   } catch (e) {
+    if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     if (appError?.code === "PULL_FF_FAILED") {
       // Remote moved since the user reviewed the divergence — recheck.
-      adoptError.value =
-        "The remote changed since you reviewed this. Rechecking…";
+      divergeError.value = "";
       divergence.value = null;
-      adoptConfirmed.value = false;
-      await pullRepo();
+      await syncRepo();
     } else {
-      adoptError.value = appError?.message || "Adopt failed";
+      divergeError.value = appError?.message || "Resolve failed";
     }
   } finally {
-    adopting.value = false;
+    resolving.value = false;
   }
 }
 
-/** Dismiss the divergence modal without changing anything. */
+/** Dismiss the divergence modal without changing anything. Sync-context
+ *  divergences never deferred an identity wipe, so nothing to discard. */
 function cancelDivergence() {
   divergence.value = null;
-  adoptConfirmed.value = false;
-  adoptError.value = "";
+  divergeError.value = "";
 }
 
 function showToast(message: string) {
@@ -490,12 +497,12 @@ onBeforeUnmount(() => {
         </button>
         <BaseButton
           size="sm"
-          :aria-label="pulling ? 'Cancel pull' : 'Pull updates'"
-          :title="pulling ? 'Cancel pull' : 'Pull updates'"
-          @click="togglePull"
+          :aria-label="pulling ? 'Cancel sync' : 'Sync with remote'"
+          :title="pulling ? 'Cancel sync' : 'Sync with remote'"
+          @click="toggleSync"
         >
-          <span aria-hidden="true">{{ pulling ? "✕" : "↓" }}</span>
-          {{ pulling ? "Cancel" : "Pull" }}
+          <span aria-hidden="true">{{ pulling ? "✕" : "↻" }}</span>
+          {{ pulling ? "Cancel" : "Sync" }}
         </BaseButton>
         <BaseButton
           size="sm"
@@ -585,9 +592,7 @@ onBeforeUnmount(() => {
       <template v-else>
         <span class="text-4xl block mb-2">🔒</span>
         <p>No passwords yet</p>
-        <p class="text-xs text-subtle mt-1">
-          Pull updates or check your repository
-        </p>
+        <p class="text-xs text-subtle mt-1">Sync, or check your repository</p>
       </template>
     </div>
 
@@ -681,6 +686,7 @@ onBeforeUnmount(() => {
       </div>
     </BaseModalShell>
 
+    <<<<<<< HEAD
     <!-- Enforce-block modal (HEAD did not advance) -->
     <BaseModalShell
       v-if="blockIssues"
@@ -813,6 +819,25 @@ onBeforeUnmount(() => {
         </BaseButton>
       </div>
     </BaseModalShell>
+    =======
+    <!-- Enforce-block modal (shared component; HEAD did not advance) -->
+    <AuthenticityBlockModal
+      :issues="blockIssues"
+      @trust-signer="trustBlockSigner"
+      @switch-to-audit="switchToAudit"
+      @close="blockIssues = null"
+    />
+    <!-- Divergence modal (shared component, sync context) -->
+    <DivergenceModal
+      context="sync"
+      :divergence="divergence"
+      :resolving="resolving"
+      :error="divergeError"
+      @resolve="resolveDivergence"
+      @close="cancelDivergence"
+    />
+    >>>>>>> 553584e (feat: divergence modal on save, AutoSync toggle, and manual
+    Sync)
   </main>
 </template>
 

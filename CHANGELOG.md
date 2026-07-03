@@ -12,12 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Control screen-capture protection from Settings — a master toggle (on by default) blocks screenshots and screen recording on pages that show secrets: setup, create, generate, entry detail, and settings (including the SSH key export). Turn it off to allow screenshots anywhere. Android only; elsewhere the toggle has no screen effect
 - Cloning a repository and pulling updates now show live progress — how many objects and bytes have transferred — instead of a generic spinner, and either can be cancelled mid-flight with an on-screen Cancel button
 - gpm now recognizes age plugin recipients (such as `age1yubikey1...` from age-plugin-yubikey) and can encrypt secrets to them, so a shared store that includes a teammate's hardware-key recipient keeps working. The matching `age-plugin-<name>` tool must be installed for encryption, which runs on desktop only (Android can't launch it). Decrypting with a plugin identity is not supported yet.
+- When a save collides with a newer remote version, gpm now opens a resolve prompt showing exactly what differs and lets you keep your change or adopt the remote — instead of failing with a generic sync error. The same prompt appears on the Sync button
+- New AutoSync setting (on by default): turn it off to keep saves local — no automatic push — and publish later with the Sync button
+- The Sync button now does both pull and push (not just pull), so an AutoSync-off workflow can publish on demand, and a divergence at either phase opens the same resolve prompt
 
 ### Changed
 
 - Signature status colors are now consistent everywhere they appear: the glyphs in the pull-review modals (shown when a pull brings signature issues) are now colored green/amber/red to match the history page, instead of plain.
 - Screen-capture protection is now per-page instead of app-wide. Previously every screen blocked screenshots; now only pages that show secrets do (when the toggle is on), so you can screenshot the entry list and history. The entry list shows secret names and history shows commit signatures — neither reveals secret content
-- Saving when the remote has moved in a way that can't be merged (a rare divergence) now fails with a sync error instead of opening the in-screen keep-mine / keep-existing picker. The picker moves to the Sync flow in a follow-up. Everyday saves are unchanged — they still publish automatically
+- The resolve prompt only catches the rare case where a save and a remote change directly collide (a push rejection). Editing from an out-of-date view can still overwrite a newer remote change without a prompt — those are recoverable in git history. A note to this effect appears under the AutoSync setting
 
 ### Fixed
 

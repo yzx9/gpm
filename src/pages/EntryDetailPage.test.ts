@@ -297,7 +297,10 @@ describe("EntryDetailPage", () => {
     });
 
     it("on success, toasts and navigates to the list", async () => {
-      vi.mocked(invoke).mockResolvedValue({ commit: "abc1234" });
+      vi.mocked(invoke).mockResolvedValue({
+        kind: "written",
+        commit: "abc1234",
+      });
       const wrapper = mountPage();
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
@@ -306,17 +309,51 @@ describe("EntryDetailPage", () => {
       expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
     });
 
-    it("on PUSH_REJECTED, toasts a sync hint and stays put", async () => {
-      vi.mocked(invoke).mockRejectedValue({
-        code: "PUSH_REJECTED",
-        message: "Remote moved",
-      });
+    it("on delete divergence, surfaces the shared modal and adopt resolves", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce({
+          kind: "needs_divergence_resolve",
+          local_ahead: 1,
+          remote_ahead: 1,
+          remote_tip: "abc123",
+          local_only_entries: [],
+          modified_entries: ["servers/prod"],
+          other_changed_files: [],
+        })
+        .mockResolvedValueOnce({
+          changed: true,
+          head: "def456",
+          authenticity: {
+            mode: "off",
+            new_commits: [],
+            open_issues: [],
+            blocked: false,
+          },
+        });
       const wrapper = mountPage();
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("Remote moved — sync to review");
-      expect(mockPush).not.toHaveBeenCalled();
+      // The shared divergence modal shows (save wording + the modified entry).
+      expect(wrapper.text()).toContain("conflicts with a newer remote");
+      expect(wrapper.text()).toContain("servers/prod");
+
+      const adopt = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Adopt remote"))!;
+      await adopt.trigger("click");
+      await flushPromises();
+
+      const confirmBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Discard my commit"))!;
+      await confirmBtn.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("resolve_sync_divergence", {
+        expectedRemoteOid: "abc123",
+        choice: "adopt_remote",
+      });
     });
 
     it("on a non-PUSH_REJECTED error, shows the error and stays put", async () => {
@@ -475,15 +512,28 @@ describe("EntryDetailPage", () => {
       expect(wrapper.find("#e-password").exists()).toBe(false);
     });
 
-    it("on a conflict, renders the modal and Keep mine resolves → exit + toast", async () => {
+    it("edit divergence: Keep mine resolves, publishes, and exits edit", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce({ password: "s3cret", notes: "" })
         .mockResolvedValueOnce({
-          kind: "conflict",
-          name: "servers/prod",
-          remote_decryptable: true,
+          kind: "needs_divergence_resolve",
+          local_ahead: 1,
+          remote_ahead: 1,
+          remote_tip: "abc123",
+          local_only_entries: ["servers/prod"],
+          modified_entries: [],
+          other_changed_files: [],
         })
-        .mockResolvedValueOnce({ commit: "def5678" });
+        .mockResolvedValueOnce({
+          changed: true,
+          head: "def5678",
+          authenticity: {
+            mode: "off",
+            new_commits: [],
+            open_issues: [],
+            blocked: false,
+          },
+        });
       const wrapper = mountPage();
       await wrapper.find(editBtn()).trigger("click");
       await flushPromises();
@@ -491,18 +541,25 @@ describe("EntryDetailPage", () => {
       await wrapper.find("form").trigger("submit");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("Remote copy exists");
+      expect(wrapper.text()).toContain("conflicts with a newer remote");
 
+      // Keep mine → centered confirm → confirm publishes the local edit.
       const keepMine = wrapper
         .findAll("button")
         .find((b) => b.text().includes("Keep mine"))!;
       await keepMine.trigger("click");
       await flushPromises();
+      const confirmBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Push & overwrite"))!;
+      await confirmBtn.trigger("click");
+      await flushPromises();
 
-      expect(invoke).toHaveBeenCalledWith("resolve_write_conflict", {
+      expect(invoke).toHaveBeenCalledWith("resolve_sync_divergence", {
+        expectedRemoteOid: "abc123",
         choice: "keep_mine",
       });
-      expect(wrapper.text()).toContain("✓ Saved (commit def5678)");
+      expect(wrapper.text()).toContain("✓ Kept mine (commit def5678)");
       expect(wrapper.find("#e-password").exists()).toBe(false);
     });
 
@@ -549,15 +606,28 @@ describe("EntryDetailPage", () => {
       expect(wrapper.find("#e-password").exists()).toBe(false);
     });
 
-    it("conflict 'View existing' reveals the remote version via show_remote_secret", async () => {
+    it("edit divergence surfaces the shared resolve modal and adopt resolves", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce({ password: "s3cret", notes: "" })
         .mockResolvedValueOnce({
-          kind: "conflict",
-          name: "servers/prod",
-          remote_decryptable: true,
+          kind: "needs_divergence_resolve",
+          local_ahead: 1,
+          remote_ahead: 1,
+          remote_tip: "abc123",
+          local_only_entries: [],
+          modified_entries: ["servers/prod"],
+          other_changed_files: [],
         })
-        .mockResolvedValueOnce({ password: "teammate-pw", notes: "theirs" });
+        .mockResolvedValueOnce({
+          changed: true,
+          head: "def456",
+          authenticity: {
+            mode: "off",
+            new_commits: [],
+            open_issues: [],
+            blocked: false,
+          },
+        });
       const wrapper = mountPage();
       await wrapper.find(editBtn()).trigger("click");
       await flushPromises();
@@ -565,17 +635,27 @@ describe("EntryDetailPage", () => {
       await wrapper.find("form").trigger("submit");
       await flushPromises();
 
-      const view = wrapper
+      // The shared divergence modal shows (save wording + the modified entry).
+      expect(wrapper.text()).toContain("conflicts with a newer remote");
+      expect(wrapper.text()).toContain("servers/prod");
+
+      // Pick "Adopt remote" → opens the centered confirm → confirm resolves.
+      const adopt = wrapper
         .findAll("button")
-        .find((b) => b.text().includes("View existing"))!;
-      await view.trigger("click");
+        .find((b) => b.text().includes("Adopt remote"))!;
+      await adopt.trigger("click");
       await flushPromises();
 
-      // The remote (teammate) version — not the local rolled-back copy.
-      expect(invoke).toHaveBeenCalledWith("show_remote_secret", {
-        name: "servers/prod",
+      const confirmBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Discard my commit"))!;
+      await confirmBtn.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("resolve_sync_divergence", {
+        expectedRemoteOid: "abc123",
+        choice: "adopt_remote",
       });
-      expect(wrapper.text()).toContain("teammate-pw");
     });
 
     it("cold-edit fetch failure shows the error and does not enter edit mode", async () => {
@@ -609,15 +689,19 @@ describe("EntryDetailPage", () => {
       expect(wrapper.find("#e-password").exists()).toBe(true);
     });
 
-    it("on PUSH_REJECTED mid-resolve, closes the modal and stays in edit for retry", async () => {
+    it("on PULL_FF_FAILED mid-resolve, toasts the recheck notice and leaves", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce({ password: "s3cret", notes: "" })
         .mockResolvedValueOnce({
-          kind: "conflict",
-          name: "servers/prod",
-          remote_decryptable: true,
+          kind: "needs_divergence_resolve",
+          local_ahead: 1,
+          remote_ahead: 1,
+          remote_tip: "abc123",
+          local_only_entries: ["servers/prod"],
+          modified_entries: [],
+          other_changed_files: [],
         })
-        .mockRejectedValueOnce({ code: "PUSH_REJECTED", message: "moved" });
+        .mockRejectedValueOnce({ code: "PULL_FF_FAILED", message: "moved" });
       const wrapper = mountPage();
       await wrapper.find(editBtn()).trigger("click");
       await flushPromises();
@@ -630,11 +714,17 @@ describe("EntryDetailPage", () => {
         .find((b) => b.text().includes("Keep mine"))!;
       await keepMine.trigger("click");
       await flushPromises();
+      const confirmBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Push & overwrite"))!;
+      await confirmBtn.trigger("click");
+      await flushPromises();
 
-      expect(wrapper.text()).toContain("Remote changed again");
-      // Modal closed, but the edit form + draft remain for retry.
-      expect(wrapper.text()).not.toContain("Remote copy exists");
-      expect(wrapper.find("#e-password").exists()).toBe(true);
+      // The remote moved past the reviewed tip since the modal opened.
+      expect(wrapper.text()).toContain(
+        "remote changed since you reviewed this",
+      );
+      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
     });
   });
 });

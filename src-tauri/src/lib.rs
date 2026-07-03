@@ -62,10 +62,6 @@ pub(crate) struct AppState {
     /// `complete_setup_from_file` saves it. Held only in memory (`Zeroizing` on
     /// drop); never persisted.
     pub(crate) pending_identity: Mutex<Option<setup::PendingIdentity>>,
-    /// A write that collided with a newer remote copy, awaiting the user's
-    /// resolution. Wrapped in `Arc` so the auto-lock timer closure can clear it.
-    /// See `write::PendingWrite` / `write::clear_pending`.
-    pub(crate) pending_write: Arc<Mutex<Option<write::PendingWrite>>>,
     /// Cached effective auto-lock mode (refreshed on unlock + the `set_*`
     /// config commands via `identity::refresh_security_cache`) so the read/write
     /// hot paths branch on a cheap mutex read instead of decrypting `repo.json`
@@ -190,7 +186,6 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         lock_timer: Mutex::new(None),
         lock_generation: Arc::new(AtomicU64::new(0)),
         pending_identity: Mutex::new(None),
-        pending_write: Arc::new(Mutex::new(None)),
         // Defaults until the first unlock/set refreshes them from config;
         // pre-setup no op reads them.
         lock_mode: Mutex::new(rustpass::LockMode::default()),
@@ -249,16 +244,17 @@ pub fn run() {
             read::search_entries,
             read::copy_password,
             read::show_password,
-            read::show_remote_secret,
             clipboard::copy_generated_password,
             // generator
             generator::generate_password,
             generator::generate_password_batch,
             // write / sync
             write::pull_repo,
+            write::sync_repo,
             git::cancel_git,
             write::push_repo,
             write::resolve_sync_divergence,
+            write::discard_divergence,
             write::list_create_presets,
             write::lookup_template,
             write::preview_create,
@@ -266,7 +262,6 @@ pub fn run() {
             write::create_from_preset_secret,
             write::delete_secret,
             write::edit_secret,
-            write::resolve_write_conflict,
             // config
             config::get_config,
             config::set_commit_identity,

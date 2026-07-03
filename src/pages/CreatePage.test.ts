@@ -201,62 +201,108 @@ describe("CreatePage", () => {
     expect(wrapper.text()).not.toContain("Failed to create secret");
   });
 
-  it("on a decryptable conflict, Keep mine resolves and navigates", async () => {
+  it("on divergence, Adopt remote adopts and navigates", async () => {
     const wrapper = await mountPage({
       create_from_preset_secret: () => ({
-        kind: "conflict",
-        name: "websites/example.com/alice",
-        remote_decryptable: true,
+        kind: "needs_divergence_resolve",
+        local_ahead: 1,
+        remote_ahead: 1,
+        remote_tip: "abc123",
+        local_only_entries: [],
+        modified_entries: ["websites/example.com/alice"],
+        other_changed_files: [],
       }),
-      resolve_write_conflict: () => ({ commit: "def5678" }),
+      resolve_sync_divergence: () => ({
+        changed: true,
+        head: "def456",
+        authenticity: {
+          mode: "off",
+          new_commits: [],
+          open_issues: [],
+          blocked: false,
+        },
+      }),
     });
 
     await fillWebsiteForm(wrapper);
     await wrapper.find("form").trigger("submit");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Remote copy exists");
+    expect(wrapper.text()).toContain("conflicts with a newer remote");
+
+    const adopt = findButton(wrapper, "Adopt remote");
+    expect(adopt).toBeTruthy();
+    await adopt!.trigger("click");
+    await flushPromises();
+
+    const confirmBtn = findButton(wrapper, "Discard my commit");
+    expect(confirmBtn).toBeTruthy();
+    await confirmBtn!.trigger("click");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("resolve_sync_divergence", {
+      expectedRemoteOid: "abc123",
+      choice: "adopt_remote",
+    });
+    expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+  });
+
+  it("on divergence, Keep mine publishes and navigates", async () => {
+    const wrapper = await mountPage({
+      create_from_preset_secret: () => ({
+        kind: "needs_divergence_resolve",
+        local_ahead: 1,
+        remote_ahead: 1,
+        remote_tip: "abc123",
+        local_only_entries: ["websites/example.com/alice"],
+        modified_entries: [],
+        other_changed_files: [],
+      }),
+      resolve_sync_divergence: () => ({
+        changed: true,
+        head: "def5678",
+        authenticity: {
+          mode: "off",
+          new_commits: [],
+          open_issues: [],
+          blocked: false,
+        },
+      }),
+    });
+
+    await fillWebsiteForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
 
     const keepMine = findButton(wrapper, "Keep mine");
     expect(keepMine).toBeTruthy();
     await keepMine!.trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("resolve_write_conflict", {
+    const confirmBtn = findButton(wrapper, "Push & overwrite");
+    expect(confirmBtn).toBeTruthy();
+    await confirmBtn!.trigger("click");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("resolve_sync_divergence", {
+      expectedRemoteOid: "abc123",
       choice: "keep_mine",
     });
+    expect(wrapper.text()).toContain("✓ Kept mine (commit def5678)");
     expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
   });
 
-  it("on an undecryptable conflict, force is gated behind explicit confirmation", async () => {
+  it("cancel dismisses the divergence modal without resolving or navigating", async () => {
     const wrapper = await mountPage({
       create_from_preset_secret: () => ({
-        kind: "conflict",
-        name: "websites/example.com/alice",
-        remote_decryptable: false,
+        kind: "needs_divergence_resolve",
+        local_ahead: 1,
+        remote_ahead: 1,
+        remote_tip: "abc123",
+        local_only_entries: ["websites/example.com/alice"],
+        modified_entries: [],
+        other_changed_files: [],
       }),
-    });
-
-    await fillWebsiteForm(wrapper);
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
-
-    const force = findButton(wrapper, "Keep mine anyway");
-    expect(force).toBeTruthy();
-    expect((force!.element as HTMLButtonElement).disabled).toBe(true);
-
-    await wrapper.find('input[type="checkbox"]').setValue(true);
-    expect((force!.element as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("cancel resolves with `cancel` and does not navigate", async () => {
-    const wrapper = await mountPage({
-      create_from_preset_secret: () => ({
-        kind: "conflict",
-        name: "websites/example.com/alice",
-        remote_decryptable: true,
-      }),
-      resolve_write_conflict: () => null,
     });
 
     await fillWebsiteForm(wrapper);
@@ -268,46 +314,14 @@ describe("CreatePage", () => {
     await cancel!.trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("resolve_write_conflict", {
-      choice: "cancel",
-    });
+    // The deferred-wipe runs once (the save kept the identity for a possible
+    // keep-mine), but no resolve call is made and the user stays on the form.
+    expect(invoke).toHaveBeenCalledWith("discard_divergence");
+    expect(invoke).not.toHaveBeenCalledWith(
+      "resolve_sync_divergence",
+      expect.anything(),
+    );
     expect(mockPush).not.toHaveBeenCalled();
-  });
-
-  it("cancel resolves without the cached identity (resolve dropped runWithAuth — regression)", async () => {
-    vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "create_from_preset_secret")
-        return Promise.resolve({
-          kind: "conflict",
-          name: "websites/example.com/alice",
-          remote_decryptable: true,
-        });
-      if (cmd === "resolve_write_conflict") return Promise.resolve(null);
-      if (cmd === "list_create_presets")
-        return Promise.resolve([WEBSITE_PRESET]);
-      return Promise.resolve(undefined);
-    }) as typeof invoke);
-    const { wrapper, lock } = mountWithApp(CreatePage);
-    await flushPromises();
-
-    await fillWebsiteForm(wrapper);
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
-    expect(wrapper.text()).toContain("Remote copy exists");
-
-    // Wipe the cached identity AFTER the conflict is up. `resolve` no longer
-    // wraps in runWithAuth (cancel/keep_remote need no identity), so this still
-    // resolves — previously it would have parked on the auth overlay forever.
-    lock.setLocked(true);
-
-    const cancel = findButton(wrapper, "Cancel");
-    expect(cancel).toBeTruthy();
-    await cancel!.trigger("click");
-    await flushPromises();
-
-    expect(invoke).toHaveBeenCalledWith("resolve_write_conflict", {
-      choice: "cancel",
-    });
   });
 
   it("fills the password field with the generated value", async () => {

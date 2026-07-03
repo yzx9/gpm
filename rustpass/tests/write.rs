@@ -7,7 +7,7 @@ mod common;
 use std::path::Path;
 
 use common::*;
-use rustpass::store::{ConflictChoice, Store, WriteConflict, WriteOutcome, WriteResult};
+use rustpass::store::{Store, WriteOutcome, WriteResult};
 
 /// Count commits reachable from a repo's HEAD.
 fn head_commit_count(repo_path: &Path) -> usize {
@@ -258,11 +258,15 @@ async fn set_overwrites_existing_entry() {
     assert_eq!(secret.password(), "new-password");
 }
 
-/// `WriteOutcome` serializes as a `kind`-tagged object — the IPC contract
-/// the frontend consumes as a discriminated union. (`Conflict` is dead-but-
-/// present until `PR2c`; the serialization shape is pinned here.)
+/// `WriteOutcome` serializes as a `kind`-tagged object — the IPC contract the
+/// frontend consumes as a discriminated union. Each newtype variant flattens its
+/// struct fields alongside the `kind` tag (Verified here for all three variants).
 #[test]
 fn write_outcome_serializes_tagged() {
+    use rustpass::VerifyMode;
+    use rustpass::store::{AuthenticityResult, SyncDivergence};
+
+    // Written flattens WriteResult.commit alongside the kind tag.
     let written = WriteOutcome::Written(WriteResult {
         commit: "abc1234".into(),
     });
@@ -271,28 +275,46 @@ fn write_outcome_serializes_tagged() {
         r#"{"kind":"written","commit":"abc1234"}"#
     );
 
-    let conflict = WriteOutcome::Conflict(WriteConflict {
-        name: "sites/foo".into(),
-        remote_decryptable: true,
+    // NeedsDivergenceResolve flattens the SyncDivergence fields alongside kind.
+    let needs = WriteOutcome::NeedsDivergenceResolve(SyncDivergence {
+        local_ahead: 1,
+        remote_ahead: 2,
+        remote_tip: "tip".into(),
+        local_only_entries: vec!["sites/foo".into()],
+        modified_entries: vec!["pin/atm".into()],
+        other_changed_files: vec![],
     });
-    assert_eq!(
-        serde_json::to_string(&conflict).unwrap(),
-        r#"{"kind":"conflict","name":"sites/foo","remote_decryptable":true}"#
-    );
+    let v: serde_json::Value = serde_json::to_value(&needs).unwrap();
+    assert_eq!(v["kind"], "needs_divergence_resolve");
+    assert_eq!(v["local_ahead"], 1);
+    assert_eq!(v["remote_ahead"], 2);
+    assert_eq!(v["remote_tip"], "tip");
+    assert_eq!(v["local_only_entries"][0], "sites/foo");
+    assert_eq!(v["modified_entries"][0], "pin/atm");
+
+    // AuthenticityBlocked flattens the AuthenticityResult fields alongside kind.
+    let blocked = WriteOutcome::AuthenticityBlocked(AuthenticityResult {
+        mode: VerifyMode::Enforce,
+        new_commits: vec![],
+        open_issues: vec![],
+        blocked: true,
+    });
+    let v: serde_json::Value = serde_json::to_value(&blocked).unwrap();
+    assert_eq!(v["kind"], "authenticity_blocked");
+    assert_eq!(v["blocked"], true);
 }
 
-/// `ConflictChoice` round-trips as snake_case — it crosses IPC as a
-/// `resolve_write_conflict` command argument. (Frozen for `PR2c` retirement.)
+/// `DivergenceChoice` round-trips as snake_case — it crosses IPC as a
+/// `resolve_sync_divergence` command argument.
 #[test]
-fn conflict_choice_round_trips_snake_case() {
+fn divergence_choice_round_trips_snake_case() {
+    use rustpass::store::DivergenceChoice;
     for (choice, s) in [
-        (ConflictChoice::KeepMine, "\"keep_mine\""),
-        (ConflictChoice::KeepMineForce, "\"keep_mine_force\""),
-        (ConflictChoice::KeepRemote, "\"keep_remote\""),
-        (ConflictChoice::Cancel, "\"cancel\""),
+        (DivergenceChoice::AdoptRemote, "\"adopt_remote\""),
+        (DivergenceChoice::KeepMine, "\"keep_mine\""),
     ] {
         assert_eq!(serde_json::to_string(&choice).unwrap(), s);
-        let back: ConflictChoice = serde_json::from_str(s).unwrap();
+        let back: DivergenceChoice = serde_json::from_str(s).unwrap();
         assert_eq!(back, choice);
     }
 }

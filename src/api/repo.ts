@@ -34,10 +34,14 @@ export interface SyncDivergence {
   other_changed_files: string[];
 }
 
-/** Outcome of `pullRepo`: a normal pull, or a divergence to resolve. */
+/** Outcome of `pullRepo`/`syncRepo`: a normal pull, or a divergence to resolve. */
 export type SyncOutcome =
   | ({ kind: "fast_forwarded" } & PullResult)
   | ({ kind: "diverged" } & SyncDivergence);
+
+/** How the user resolves a `diverged` outcome (serde snake_case). "cancel" is
+ *  client-side (the frontend just dismisses the modal), so it is absent here. */
+export type DivergenceChoice = "adopt_remote" | "keep_mine";
 
 /** Real-time git transfer progress, emitted as the `"git-progress"` event during
  *  clone/pull. Mirrors the Rust `GitProgressEvent` (a subset of `GitProgress`). */
@@ -53,6 +57,13 @@ export async function pullRepo(): Promise<SyncOutcome> {
   return invoke<SyncOutcome>("pull_repo");
 }
 
+/** Manual sync (pull + push) — the publish path when autosync is off, and the
+ *  "reconcile both directions" action behind the Sync button. Returns a
+ *  `diverged` outcome (pull-side or push-rejection race) for the resolve modal. */
+export async function syncRepo(): Promise<SyncOutcome> {
+  return invoke<SyncOutcome>("sync_repo");
+}
+
 /** Push the local store to the remote. */
 export async function pushRepo(): Promise<void> {
   await invoke("push_repo");
@@ -63,11 +74,23 @@ export async function cancelGit(): Promise<void> {
   await invoke("cancel_git");
 }
 
-/** Resolve a divergence by adopting the remote tip (`expectedRemoteOid` from the preview). */
+/** Resolve a divergence per `choice` against the reviewed remote tip
+ *  (`expectedRemoteOid` from the preview). `keep_mine` is identity-gated
+ *  backend-side (re-encrypts local-only entries onto the remote tip and pushes). */
 export async function resolveSyncDivergence(
   expectedRemoteOid: string,
+  choice: DivergenceChoice,
 ): Promise<PullResult> {
-  return invoke<PullResult>("resolve_sync_divergence", { expectedRemoteOid });
+  return invoke<PullResult>("resolve_sync_divergence", {
+    expectedRemoteOid,
+    choice,
+  });
+}
+
+/** Abandon a save-triggered divergence without resolving — clears the deferred
+ *  Immediate-mode identity wipe (the save kept it alive for a possible keep-mine). */
+export async function discardDivergence(): Promise<void> {
+  await invoke("discard_divergence");
 }
 
 /** Subscribe to git transfer progress during clone/pull; returns an unlisten handle. */

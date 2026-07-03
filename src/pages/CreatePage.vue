@@ -8,17 +8,18 @@ import { useRouter } from "vue-router";
 import {
   createFromPresetSecret,
   createSecret,
+  discardDivergence,
   generatePassword,
   listCreatePresets,
   lookupTemplate,
   previewCreate,
-  resolveWriteConflict,
+  resolveSyncDivergence,
   type AppError,
-  type ConflictChoice,
   type CreatePreset,
+  type DivergenceChoice,
   type GenerateMode,
   type PresetField,
-  type WriteConflict,
+  type SyncDivergence,
   type WriteOutcome,
 } from "@/api";
 import {
@@ -26,7 +27,7 @@ import {
   useLockState,
   useOverlayBackHandler,
 } from "@/composables";
-import WriteConflictModal from "@/components/WriteConflictModal.vue";
+import DivergenceModal from "@/components/DivergenceModal.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -66,11 +67,12 @@ const error = ref("");
 const toast = ref("");
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-// ── Conflict modal ────────────────────────────────────────────────────────
-// The modal owns its own reveal/confirm state; this page tracks the conflict
-// payload, the resolving flag, and the resolve() outcome handling.
-const conflict = ref<WriteConflict | null>(null);
+// ── Divergence modal (save-triggered) ─────────────────────────────────────
+// The modal owns its own confirm step; this page tracks the divergence payload,
+// the resolving flag, the resolve-error line, and the resolve() handling.
+const divergence = ref<SyncDivergence | null>(null);
 const resolving = ref(false);
+const divergeError = ref("");
 
 // The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
 // secret the moment the identity locks.
@@ -84,16 +86,13 @@ onLock(() => {
   customContent.value = "";
 });
 
-// Android back while the write-conflict modal is up cancels it — same as the
-// modal's Cancel button (clears the backend stash, returns to the form).
-// `resolving` guards against firing mid-resolution. cancel/keep_remote need no
-// identity, so this never raises the auth overlay over the modal.
+// Android back while the divergence modal is up cancels it — same as the modal's
+// Cancel button (drops the modal, returns to the form). `resolving` guards
+// against firing mid-resolution.
 useOverlayBackHandler(
-  computed(() => !!conflict.value),
+  computed(() => !!divergence.value),
   () => {
-    // `resolving` blocks a rapid double-back (or back right after a button
-    // choice) from re-entering resolve once the stash is consumed.
-    if (!resolving.value) resolve("cancel");
+    if (!resolving.value) cancelDivergence();
   },
 );
 
@@ -229,13 +228,19 @@ async function submit() {
     if (outcome.kind === "written") {
       showToast(`✓ Saved (commit ${outcome.commit})`);
       router.push({ name: "entries" });
+    } else if (outcome.kind === "needs_divergence_resolve") {
+      // The push lost a race — surface the divergence for the user to resolve.
+      // The local commit was made; adopt discards it, keep pushes it. Drop the
+      // `kind` tag so the modal gets a plain SyncDivergence.
+      const { kind: _kind, ...preview } = outcome;
+      void _kind;
+      divergence.value = preview;
+      divergeError.value = "";
     } else {
-      // Conflict — the secret is stashed backend-side; the result has no plaintext.
-      // The modal resets its own reveal/confirm state when this becomes non-null.
-      conflict.value = {
-        name: outcome.name,
-        remote_decryptable: outcome.remote_decryptable,
-      };
+      // authenticity_blocked — the pre-write pull was refused under Enforce.
+      // Stay on the form; the user resolves signatures via the Sync screen.
+      error.value =
+        "Save blocked: the remote failed signature verification under Enforce mode. Review via Sync, then retry.";
     }
   } catch (e) {
     if (isAuthCancelled(e)) return;
@@ -246,41 +251,53 @@ async function submit() {
   }
 }
 
-/** Resolve the conflict with the user's choice; the backend consumes the stash. */
-async function resolve(choice: ConflictChoice) {
+/** The user dismissed the save-triggered divergence modal (cancel / back). The
+ *  local commit stays and publishes on the next Sync; clear the identity the
+ *  save path kept alive (deferred wipe) for a possible keep-mine resolve. */
+function cancelDivergence() {
+  // BaseModalShell also emits `close` on unmount, so guard: only wipe when a
+  // divergence is actually active (one deferred-wipe per abandoned resolve).
+  if (!divergence.value) return;
+  divergence.value = null;
+  divergeError.value = "";
+  void discardDivergence().catch(() => {});
+}
+
+/** Resolve the save-triggered divergence per the user's choice. `keep_mine`
+ *  re-encrypts local-only entries onto the reviewed remote tip and pushes —
+ *  that needs the identity, so it's auth-gated (runWithAuth). `adopt_remote`
+ *  is a fast-forward (no identity needed). */
+async function resolveDivergence(choice: DivergenceChoice) {
+  if (!divergence.value) return;
   resolving.value = true;
+  divergeError.value = "";
+  const expectedRemoteOid = divergence.value.remote_tip;
   try {
-    // cancel/keep_remote need no cached identity (store-side). keep_mine/_force
-    // re-encrypt the stashed plaintext — deriving our own recipient + encrypting
-    // requires the identity (store: encrypt_and_write → get_identity_bytes, which
-    // returns IdentityEncrypted when the cache is empty), so those auth-gate.
-    // Back-on-conflict only ever cancels, so the back path stays auth-free (no
-    // stacking); the gate arms only for a deliberate "Keep mine".
-    const needsIdentity =
-      choice === "keep_mine" || choice === "keep_mine_force";
-    const result = needsIdentity
-      ? await runWithAuth(() => resolveWriteConflict(choice))
-      : await resolveWriteConflict(choice);
-    conflict.value = null;
-    if (choice === "keep_remote") {
-      showToast("Kept the existing entry");
-      router.push({ name: "entries" });
-    } else if (choice === "cancel") {
-      // Stash cleared; return to the form so the user can adjust and retry.
-      showToast("Cancelled — nothing saved");
-    } else if (result) {
-      showToast(`✓ Saved (commit ${result.commit})`);
-      router.push({ name: "entries" });
-    }
-  } catch (e) {
-    const appError = e as AppError;
-    if (appError?.code === "PUSH_REJECTED") {
-      // Remote moved again mid-resolution — close the modal, retry from the form.
-      conflict.value = null;
-      showToast("Remote changed again — review and Save again");
+    const result =
+      choice === "keep_mine"
+        ? await runWithAuth(() =>
+            resolveSyncDivergence(expectedRemoteOid, choice),
+          )
+        : await resolveSyncDivergence(expectedRemoteOid, choice);
+    divergence.value = null;
+    if (choice === "adopt_remote") {
+      showToast("Adopted the remote version");
     } else {
-      conflict.value = null;
-      showToast(appError?.message || "Could not resolve the conflict");
+      // keep_mine pushed the local entries — the head is now published.
+      showToast(`✓ Kept mine (commit ${result.head})`);
+    }
+    router.push({ name: "entries" });
+  } catch (e) {
+    if (isAuthCancelled(e)) return;
+    const appError = e as AppError;
+    if (appError?.code === "PULL_FF_FAILED") {
+      // The remote moved since the user reviewed — recheck from the entries list.
+      divergence.value = null;
+      showToast("The remote changed since you reviewed this — rechecking…");
+      router.push({ name: "entries" });
+    } else {
+      divergeError.value =
+        appError?.message || "Could not resolve the divergence";
     }
   } finally {
     resolving.value = false;
@@ -444,11 +461,14 @@ onBeforeUnmount(() => {
       </form>
     </section>
 
-    <!-- Conflict modal (shared with the edit page) -->
-    <WriteConflictModal
-      :conflict="conflict"
+    <!-- Divergence modal (save-triggered — "save" wording) -->
+    <DivergenceModal
+      context="save"
+      :divergence="divergence"
       :resolving="resolving"
-      @resolve="resolve"
+      :error="divergeError"
+      @resolve="resolveDivergence"
+      @close="cancelDivergence"
     />
   </main>
 </template>

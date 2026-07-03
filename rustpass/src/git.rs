@@ -561,13 +561,14 @@ fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(), Error> {
     // No `origin` → a local-only store (created with no remote). Push is a no-op:
     // there is nothing to push to. Mirrors the `pull_repo` no-op.
     //
-    // LOAD-BEARING INVARIANT: this returns `Ok(())`, so `Store::write_commit_push`
-    // returns `Ok(Some(head))` (not `Ok(None)`) for a local-only write. That is
-    // what keeps `Store::set`'s conflict branch — `fetch_remote_blob` /
-    // `fast_forward_to_remote`, both of which also call `find_remote("origin")`
-    // — unreachable by construction for a local-only store: the happy path is
-    // taken, so the conflict/replay branch never runs. Do not change this to
-    // surface "no origin" as a rejection without reworking that branch.
+    // LOAD-BEARING INVARIANT: this returns `Ok(())`, so `Store::push_locked`
+    // (called by `autosync_write` after a local write, and by `sync_repo`) sees
+    // a successful push for a local-only store. That keeps the orchestrator on
+    // its happy path — `autosync_write` returns `Written`, `sync_repo` returns
+    // `FastForwarded` — instead of misreading "no origin" as a rejection and
+    // surfacing a spurious divergence. Do not change this to surface "no origin"
+    // as a rejection without reworking the orchestrator's success/divergence
+    // branching.
     let Ok(mut remote) = repo.find_remote("origin") else {
         return Ok(());
     };
@@ -741,11 +742,6 @@ fn fetch_remote_into_temp(
     Ok((branch, temp_ref, oid))
 }
 
-/// Drop a temp ref if it exists (best-effort cleanup).
-fn delete_temp_ref(repo: &Repository, temp_ref: &str) {
-    drop(repo.find_reference(temp_ref).and_then(|mut r| r.delete()));
-}
-
 /// Read the blob content of `rel_path` at `commit_oid`, or `None` if the path
 /// is absent from that commit's tree.
 fn blob_at_commit(repo: &Repository, commit_oid: git2::Oid, rel_path: &str) -> Option<Vec<u8>> {
@@ -754,49 +750,6 @@ fn blob_at_commit(repo: &Repository, commit_oid: git2::Oid, rel_path: &str) -> O
     let entry = tree.get_path(Path::new(rel_path)).ok()?;
     let blob = repo.find_blob(entry.id()).ok()?;
     Some(blob.content().to_vec())
-}
-
-/// Fetch `origin` and return the content of `rel_path` at the remote branch
-/// tip, or `None` if the remote has no such file.
-///
-/// Used by the write path to detect a same-name remote entry and to assess
-/// whether it is decryptable to us.
-///
-/// # Errors
-///
-/// Returns an error if the repo cannot be opened or the fetch fails.
-pub fn fetch_remote_blob(
-    repo_path: &Path,
-    auth: &GitAuth,
-    rel_path: &str,
-) -> Result<Option<Vec<u8>>, Error> {
-    let repo = Repository::discover(repo_path)
-        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
-    ensure_https_ca_for_origin(&repo)?;
-    let (_branch, temp_ref, tip) = fetch_remote_into_temp(&repo, auth)?;
-    let blob = blob_at_commit(&repo, tip, rel_path);
-    delete_temp_ref(&repo, &temp_ref);
-    Ok(blob)
-}
-
-/// Fast-forward the current branch and worktree to `origin`'s branch tip
-/// (discarding any local-only commits). Used by conflict resolution to adopt
-/// the remote state (`KeepRemote`) or as the base for replaying our write.
-///
-/// # Errors
-///
-/// Returns an error if the repo cannot be opened or the fetch fails.
-pub fn fast_forward_to_remote(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
-    let repo = Repository::discover(repo_path)
-        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
-    ensure_https_ca_for_origin(&repo)?;
-    let (_branch, temp_ref, tip) = fetch_remote_into_temp(&repo, auth)?;
-    let target = repo.find_commit(tip)?;
-    let mut opts = git2::build::CheckoutBuilder::new();
-    opts.force();
-    repo.reset(target.as_object(), git2::ResetType::Hard, Some(&mut opts))?;
-    delete_temp_ref(&repo, &temp_ref);
-    Ok(())
 }
 
 /// Map a libgit2 push error onto an [`Error`]. A non-fast-forward rejection

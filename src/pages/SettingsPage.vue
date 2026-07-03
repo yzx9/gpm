@@ -29,6 +29,7 @@ import {
   setClipboardClearSecs,
   setCommitIdentity,
   setLockMode,
+  setAutosync,
   setPassphrase,
   setVerificationMode,
   setViewClearSecs,
@@ -280,6 +281,23 @@ async function onLockModeChange(mode: LockMode) {
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to set auto-lock mode";
+  } finally {
+    lockLoading.value = false;
+  }
+}
+
+const autosyncEnabled = computed(() => config.value?.autosync ?? true);
+
+async function onAutosyncChange(enabled: boolean) {
+  if (!config.value) return;
+  lockLoading.value = true;
+  error.value = "";
+  try {
+    const updated = await setAutosync(enabled);
+    config.value = updated;
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to set AutoSync";
   } finally {
     lockLoading.value = false;
   }
@@ -960,6 +978,37 @@ onMounted(() => {
                 capturable.</template
               >
               <template v-else>No page blocks screen capture.</template>
+            </p>
+          </template>
+        </BaseSegmentedControl>
+      </BaseCard>
+
+      <!-- AutoSync -->
+      <BaseCard as="section" v-if="config">
+        <h2 class="text-sm font-medium mb-3">AutoSync</h2>
+        <BaseSegmentedControl
+          class="mb-3"
+          name="autosync"
+          legend="Publish on every save"
+          :model-value="autosyncEnabled"
+          :options="[
+            { label: 'On', value: true },
+            { label: 'Off', value: false },
+          ]"
+          :disabled="lockLoading"
+          @change="onAutosyncChange"
+        >
+          <template #hint>
+            <p class="text-xs text-subtle mt-1">
+              <template v-if="autosyncEnabled"
+                >Each save pulls, commits, and pushes automatically.</template
+              >
+              <template v-else
+                >Saves stay local until you Sync. Direct collisions show a
+                resolve prompt; rarely, an edit from an out-of-date view can
+                overwrite a newer change without a prompt — recoverable in git
+                history.</template
+              >
             </p>
           </template>
         </BaseSegmentedControl>

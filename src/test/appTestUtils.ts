@@ -33,7 +33,7 @@ interface MountWithAppOptions<C extends Component> {
  * Mount `comp` with ALL 5 app-shell states provided, fresh per call. Returns the
  * wrapper and every state handle so a test can drive any instance via real
  * methods. Providing all 5 every time covers transitive injection automatically
- * — e.g. `WriteConflictModal` calls `useSecretReveal()` unconditionally at
+ * — e.g. `EntryDetailPage` calls `useSecretReveal()` unconditionally at
  * setup, which injects `useSecuritySettings()` + `useLockState()`, so every
  * CreatePage/EntryDetailPage test needs those keys or setup throws. Fail-loud
  * (`inject` + throw) catches any forgotten key immediately.

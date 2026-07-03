@@ -8,13 +8,15 @@ import { useRoute, useRouter } from "vue-router";
 import {
   copyPassword as copyPasswordCmd,
   deleteSecret as deleteSecretCmd,
+  discardDivergence,
   editSecret,
-  resolveWriteConflict,
+  resolveSyncDivergence,
   showPassword as showPasswordCmd,
-  type ConflictChoice,
-  type WriteConflict,
+  type AppError,
+  type DivergenceChoice,
+  type PullResult,
+  type SyncDivergence,
 } from "@/api";
-import type { AppError } from "@/api";
 import {
   isAuthCancelled,
   useLockState,
@@ -22,7 +24,7 @@ import {
   useSecretReveal,
   useSecuritySettings,
 } from "@/composables";
-import WriteConflictModal from "@/components/WriteConflictModal.vue";
+import DivergenceModal from "@/components/DivergenceModal.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
@@ -63,27 +65,25 @@ const editNotes = ref("");
 // The reassembled body captured at edit-entry, for the no-op-save dirty-check.
 const loadedBody = ref("");
 
-// ── Conflict (edit collides with a newer remote) ────────────────────────────
-const conflict = ref<WriteConflict | null>(null);
+// ── Divergence (edit/delete collides with a newer remote) ─────────────────
+const divergence = ref<SyncDivergence | null>(null);
 const resolving = ref(false);
+const divergeError = ref("");
 
 // Wipe edit plaintext on lock so it doesn't survive the 5-min auto-lock behind a
 // wiped identity (mirrors CreatePage's onLock wipe of the compose buffer).
 onLock(() => {
   exitEdit();
-  conflict.value = null;
+  divergence.value = null;
 });
 
-// Android back while the write-conflict modal is up cancels it — same as the
-// modal's Cancel button (clears the backend stash, keeps the draft). `resolving`
-// guards against firing mid-resolution. cancel/keep_remote need no identity, so
-// this never raises the auth overlay (no stacking).
+// Android back while the divergence modal is up cancels it — same as the modal's
+// Cancel button (drops the modal, keeps the draft). `resolving` guards against
+// firing mid-resolution.
 useOverlayBackHandler(
-  computed(() => !!conflict.value),
+  computed(() => !!divergence.value),
   () => {
-    // `resolving` blocks a rapid double-back (or back right after a button
-    // choice) from re-entering resolveEdit once the stash is consumed.
-    if (!resolving.value) resolveEdit("cancel");
+    if (!resolving.value) cancelDivergence();
   },
 );
 
@@ -138,18 +138,26 @@ async function deleteSecret() {
   deleting.value = true;
   error.value = "";
   try {
-    const result = await deleteSecretCmd(entryName);
-    clear();
-    showToast(`✓ Deleted (commit ${result.commit})`);
-    router.push({ name: "entries" });
+    const outcome = await deleteSecretCmd(entryName);
+    if (outcome.kind === "written") {
+      clear();
+      showToast(`✓ Deleted (commit ${outcome.commit})`);
+      router.push({ name: "entries" });
+    } else if (outcome.kind === "needs_divergence_resolve") {
+      // The delete's push lost a race — surface the divergence. The local delete
+      // was committed; adopt discards it (entry returns), keep pushes it.
+      const { kind: _kind, ...preview } = outcome;
+      void _kind;
+      divergence.value = preview;
+      divergeError.value = "";
+    } else {
+      // authenticity_blocked — pre-write pull refused under Enforce.
+      error.value =
+        "Delete blocked: the remote failed signature verification under Enforce mode. Review via Sync, then retry.";
+    }
   } catch (e) {
     const appError = e as AppError;
-    if (appError?.code === "PUSH_REJECTED") {
-      // Remote diverged — delete was rolled back. Defer to the sync flow.
-      showToast("Remote moved — sync to review and re-delete.");
-    } else {
-      error.value = appError?.message || "Delete failed";
-    }
+    error.value = appError?.message || "Delete failed";
   } finally {
     deleting.value = false;
   }
@@ -232,13 +240,17 @@ async function saveEdit() {
       // Exit to the read-only view; the user can Show to verify. Don't
       // auto-reveal the password post-save.
       exitEdit();
+    } else if (outcome.kind === "needs_divergence_resolve") {
+      // The edit's push lost a race — surface the divergence. The local edit was
+      // committed; adopt discards it, keep pushes it. Stay in edit mode.
+      const { kind: _kind, ...preview } = outcome;
+      void _kind;
+      divergence.value = preview;
+      divergeError.value = "";
     } else {
-      // Conflict — the edited plaintext is stashed backend-side; the modal
-      // resets its own state. Stay in edit mode with the draft intact.
-      conflict.value = {
-        name: outcome.name,
-        remote_decryptable: outcome.remote_decryptable,
-      };
+      // authenticity_blocked — pre-write pull refused under Enforce.
+      error.value =
+        "Save blocked: the remote failed signature verification under Enforce mode. Review via Sync, then retry.";
     }
   } catch (e) {
     const appError = e as AppError;
@@ -248,39 +260,50 @@ async function saveEdit() {
   }
 }
 
-/** Resolve an edit conflict per the user's choice; the backend consumes the
- *  stash. The modal is closed on every outcome; cancel keeps the draft. */
-async function resolveEdit(choice: ConflictChoice) {
+/** The user dismissed the edit/delete divergence modal (cancel / back). The
+ *  local commit (edit or delete) stays and publishes on the next Sync; clear the
+ *  identity the save path kept alive (deferred wipe) for a possible keep-mine
+ *  resolve. Fire-and-forget. */
+function cancelDivergence() {
+  if (!divergence.value) return;
+  divergence.value = null;
+  divergeError.value = "";
+  void discardDivergence().catch(() => {});
+}
+
+/** Resolve the edit/delete divergence per the user's choice. `keep_mine`
+ *  re-encrypts local-only entries onto the reviewed remote tip and pushes —
+ *  needs the identity (runWithAuth). `adopt_remote` is a fast-forward. */
+async function resolveDivergence(choice: DivergenceChoice) {
+  if (!divergence.value) return;
   resolving.value = true;
+  divergeError.value = "";
+  const expectedRemoteOid = divergence.value.remote_tip;
   try {
-    // cancel/keep_remote need no cached identity; keep_mine/_force re-encrypt the
-    // stashed plaintext, which needs the identity (store get_identity_bytes
-    // returns IdentityEncrypted when the cache is empty), so those auth-gate.
-    const needsIdentity =
-      choice === "keep_mine" || choice === "keep_mine_force";
-    const result = needsIdentity
-      ? await runWithAuth(() => resolveWriteConflict(choice))
-      : await resolveWriteConflict(choice);
-    conflict.value = null;
-    if (choice === "keep_remote") {
-      showToast("Kept the existing entry");
-      exitEdit();
-    } else if (choice === "cancel") {
-      // Stash cleared; stay in the edit form so the user can adjust and retry.
-      showToast("Cancelled — nothing saved");
-    } else if (result) {
-      showToast(`✓ Saved (commit ${result.commit})`);
-      exitEdit();
-    }
-  } catch (e) {
-    const appError = e as AppError;
-    if (appError?.code === "PUSH_REJECTED") {
-      // Remote moved again mid-resolution — close the modal, retry from the form.
-      conflict.value = null;
-      showToast("Remote changed again — review and Save again");
+    const result: PullResult =
+      choice === "keep_mine"
+        ? await runWithAuth(() =>
+            resolveSyncDivergence(expectedRemoteOid, choice),
+          )
+        : await resolveSyncDivergence(expectedRemoteOid, choice);
+    divergence.value = null;
+    exitEdit();
+    if (choice === "adopt_remote") {
+      showToast("Adopted the remote version");
     } else {
-      conflict.value = null;
-      showToast(appError?.message || "Could not resolve the conflict");
+      showToast(`✓ Kept mine (commit ${result.head})`);
+    }
+    router.push({ name: "entries" });
+  } catch (e) {
+    if (isAuthCancelled(e)) return;
+    const appError = e as AppError;
+    if (appError?.code === "PULL_FF_FAILED") {
+      divergence.value = null;
+      showToast("The remote changed since you reviewed this — rechecking…");
+      router.push({ name: "entries" });
+    } else {
+      divergeError.value =
+        appError?.message || "Could not resolve the divergence";
     }
   } finally {
     resolving.value = false;
@@ -475,11 +498,14 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
     </form>
 
-    <!-- Conflict modal (shared with the create page) -->
-    <WriteConflictModal
-      :conflict="conflict"
+    <!-- Divergence modal (save-triggered — "save" wording) -->
+    <DivergenceModal
+      context="save"
+      :divergence="divergence"
       :resolving="resolving"
-      @resolve="resolveEdit"
+      :error="divergeError"
+      @resolve="resolveDivergence"
+      @close="cancelDivergence"
     />
   </main>
 </template>

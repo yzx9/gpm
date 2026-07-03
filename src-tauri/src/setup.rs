@@ -621,7 +621,6 @@ mod tests {
             lock_timer: Mutex::new(None),
             lock_generation: Arc::new(AtomicU64::new(0)),
             pending_identity: Mutex::new(None),
-            pending_write: Arc::new(Mutex::new(None)),
             lock_mode: Mutex::new(rustpass::LockMode::default()),
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
             app_lock_enabled: std::sync::atomic::AtomicBool::new(false),

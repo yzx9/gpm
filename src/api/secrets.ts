@@ -3,13 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
-import type { ConflictChoice, WriteOutcome } from "./common";
+import type { AuthenticityResult } from "./common";
+import type { SyncDivergence } from "./repo";
 
 /**
  * Secret read/create/edit IPC — folds together the backend `read`, `clipboard`,
- * `generator`, and secret-write half of `write` modules, plus the conflict arm
- * of the write path. All decrypted content is {@link SensitiveContent}
- * (password + notes); the backend auto-clears clipboard/view timers.
+ * `generator`, and secret-write half of `write` modules. All decrypted content
+ * is {@link SensitiveContent} (password + notes); the backend auto-clears
+ * clipboard/view timers.
  */
 
 /** A secret entry: its `.age` path and the display name (`.age` stripped). */
@@ -76,12 +77,15 @@ export interface WriteResult {
   commit: string;
 }
 
-/** A write-path conflict on a same-name remote entry. Carries NO plaintext. */
-export interface WriteConflict {
-  name: string;
-  /** Whether the remote version decrypts with our key. */
-  remote_decryptable: boolean;
-}
+/** Outcome of a create/edit/delete (serde tagged by `kind`, snake_case). A
+ *  normal save is `written`; `needs_divergence_resolve` means the push was
+ *  rejected (a race with a newer remote) and the carried {@link SyncDivergence}
+ *  lets the UI show the resolve modal without a second round-trip;
+ *  `authenticity_blocked` means the pre-write pull was refused under Enforce. */
+export type WriteOutcome =
+  | ({ kind: "written" } & WriteResult)
+  | ({ kind: "needs_divergence_resolve" } & SyncDivergence)
+  | ({ kind: "authenticity_blocked" } & AuthenticityResult);
 
 /** List one page of entries (no query). */
 export async function listEntries(
@@ -110,13 +114,6 @@ export async function showPassword(
   entryPath: string,
 ): Promise<SensitiveContent> {
   return invoke<SensitiveContent>("show_password", { entryPath });
-}
-
-/** Decrypt + return the REMOTE copy of a conflicted entry (origin tip); null if unavailable. */
-export async function showRemoteSecret(
-  name: string,
-): Promise<SensitiveContent | null> {
-  return invoke<SensitiveContent | null>("show_remote_secret", { name });
 }
 
 /** Copy an already-generated password string; clipboard auto-clears after 30s. */
@@ -165,7 +162,7 @@ export async function previewCreate(
   return invoke<string | null>("preview_create", { name, content });
 }
 
-/** Create a secret from a preset; returns the write outcome (written or conflict). */
+/** Create a secret from a preset; returns the write outcome. */
 export async function createFromPresetSecret(
   presetId: string,
   fields: Record<string, string>,
@@ -176,7 +173,7 @@ export async function createFromPresetSecret(
   });
 }
 
-/** Create a custom secret; returns the write outcome (written or conflict). */
+/** Create a custom secret; returns the write outcome. */
 export async function createSecret(
   name: string,
   content: string,
@@ -184,7 +181,7 @@ export async function createSecret(
   return invoke<WriteOutcome>("create_secret", { name, content });
 }
 
-/** Edit an existing secret; returns the write outcome (written or conflict). */
+/** Edit an existing secret; returns the write outcome. */
 export async function editSecret(
   name: string,
   content: string,
@@ -192,14 +189,8 @@ export async function editSecret(
   return invoke<WriteOutcome>("edit_secret", { name, content });
 }
 
-/** Delete a secret; returns the recording commit hash. */
-export async function deleteSecret(name: string): Promise<WriteResult> {
-  return invoke<WriteResult>("delete_secret", { name });
-}
-
-/** Resolve a write conflict per `choice`; returns the commit if one was made. */
-export async function resolveWriteConflict(
-  choice: ConflictChoice,
-): Promise<WriteResult | null> {
-  return invoke<WriteResult | null>("resolve_write_conflict", { choice });
+/** Delete a secret; returns the write outcome (usually `written`, or
+ *  `needs_divergence_resolve` when the delete's push lost a race). */
+export async function deleteSecret(name: string): Promise<WriteOutcome> {
+  return invoke<WriteOutcome>("delete_secret", { name });
 }

@@ -32,7 +32,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_biometric_keystore::KeystoreExt;
 
-use crate::{AppState, write};
+use crate::AppState;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -117,15 +117,12 @@ pub(crate) async fn lock(state: State<'_, AppState>, app: AppHandle) -> Result<(
 /// fire path. Runtime-generic so tests can drive it with the mock runtime.
 ///
 /// Cancels the auto-lock timer, disarms any racing in-flight timer task, wipes
-/// the cached identity, drops any stashed conflict plaintext (it would be
-/// undecryptable behind the wiped identity), and emits the new lock state.
+/// the cached identity, and emits the new lock state.
 pub(crate) async fn do_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
     // Cancel the armed timer + bump the generation so any in-flight timer task
     // self-disarms (shared with the soft-wipe / reset paths).
     disarm_lock(state);
     state.store.lock();
-    // A conflict left pending would be undecryptable behind the wiped identity.
-    write::clear_pending(&state.pending_write);
     // Emit the current lock state — same path the auto-lock timer takes.
     emit_lock_state(app, &state.store, false).await;
 }
@@ -288,9 +285,10 @@ pub(crate) fn disarm_lock(state: &State<'_, AppState>) {
 /// the frontend knows the next op needs re-auth, but **without** raising the
 /// unlock overlay or clearing a revealed secret. Only the hard lock (manual /
 /// idle) does those; a soft wipe leaves the UI exactly as it is. The caller
-/// ([`maybe_soft_wipe`]) guarantees no conflict is pending first — a stashed
-/// conflict plaintext is replayed by `resolve_write_conflict`, which needs the
-/// identity, so it must never be left behind a wiped cache.
+/// ([`maybe_soft_wipe`]) decides when to invoke this — a save that returned
+/// [`rustpass::WriteOutcome::NeedsDivergenceResolve`] skips it so a keep-mine
+/// resolve can reuse the cached identity, then performs the wipe itself once the
+/// resolve settles.
 pub(crate) async fn soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
     disarm_lock(state);
     state.store.lock();
@@ -301,21 +299,16 @@ pub(crate) async fn soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &App
 /// identity so the next op re-authenticates. No-op for `Idle`/`Never` (the
 /// session stays).
 ///
-/// The `no_pending` guard once held back the wipe for the whole window a write
-/// conflict was unresolved — the stashed plaintext was replayed by
-/// `resolve_write_conflict`, which needs the identity, so wiping was suppressed
-/// until resolve/cancel. The autosync write path never produces a `Conflict`, so
-/// the stash is never populated and this guard is now always true; it stays as
-/// defense-in-depth until the stash machinery is retired in `PR2c`. (The old
-/// tradeoff — a lingering conflict caching the identity past `Immediate`'s
-/// per-op intent — no longer applies.)
+/// Callers decide whether to invoke this on a given outcome — a save that
+/// returned `NeedsDivergenceResolve` skips it (`resolve_sync_divergence` still
+/// needs the identity for a keep-mine resolve) and `resolve_sync_divergence`
+/// does the wipe after it settles.
 pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
     let immediate = state
         .lock_mode
         .lock()
         .is_ok_and(|m| matches!(*m, rustpass::LockMode::Immediate));
-    let no_pending = state.pending_write.lock().is_ok_and(|p| p.is_none());
-    if immediate && no_pending {
+    if immediate {
         soft_wipe(state, app).await;
     }
 }
@@ -343,7 +336,6 @@ pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<
     // Spawn new timer
     let app_handle = app.clone();
     let store = state.store.clone();
-    let pending = state.pending_write.clone();
     let generation_cell = state.lock_generation.clone();
 
     let handle = tokio::spawn(async move {
@@ -355,10 +347,6 @@ pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<
         if generation_cell.load(Ordering::SeqCst) != generation {
             return;
         }
-
-        // Clear any stashed conflict plaintext before wiping the identity —
-        // otherwise it would be undecryptable and linger in memory.
-        write::clear_pending(&pending);
 
         // Lock the real store (clears cached identity + passphrase)
         store.lock();

@@ -50,6 +50,9 @@ export interface RepoConfig {
   unlock_identity_with_app?: boolean;
   /** Repository authenticity config. Absent when Off/empty. */
   authenticity?: AuthenticityConfig;
+  /** Per-device autosync: when on (absent ⇒ true), every save pull-write-pushes
+   *  automatically; when off, saves stay local until a manual Sync publishes. */
+  autosync?: boolean;
 }
 
 /** How the app auto-locks the identity cache (mirrors Rust `LockMode`). */
@@ -69,18 +72,6 @@ export interface AuthState {
   /** Identity type: "x25519", "ssh_ed25519", "ssh_rsa", "age_encrypted", "plugin", "post_quantum", "unknown". */
   identity_type: string;
 }
-
-/** Outcome of a create attempt (serde tagged by `kind`, snake_case). */
-export type WriteOutcome =
-  | { kind: "written"; commit: string }
-  | { kind: "conflict"; name: string; remote_decryptable: boolean };
-
-/** How the user chose to resolve a `WriteOutcome` conflict (serde snake_case). */
-export type ConflictChoice =
-  | "keep_mine"
-  | "keep_mine_force"
-  | "keep_remote"
-  | "cancel";
 
 // ── Repository authenticity ────────────────────────────────────────────────
 

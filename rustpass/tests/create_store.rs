@@ -85,10 +85,7 @@ mod tests {
             .set("test/entry", b"super-secret\nuser: alice")
             .await
             .expect("set on a local-only store");
-        assert!(
-            !result.commit.is_empty(),
-            "local-only write should succeed"
-        );
+        assert!(!result.commit.is_empty(), "local-only write should succeed");
 
         let secret = store.get("test/entry").await.expect("get");
         assert_eq!(secret.password(), "super-secret");

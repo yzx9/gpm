@@ -39,6 +39,15 @@ fn local_head_oid(repo_path: &Path) -> String {
         .to_string()
 }
 
+/// Unwrap a `WriteOutcome::Written`'s commit hash, panicking on any other
+/// variant — the autosync success-path tests all expect `Written`.
+fn written_commit(outcome: rustpass::WriteOutcome) -> String {
+    match outcome {
+        rustpass::WriteOutcome::Written(w) => w.commit,
+        other => panic!("expected WriteOutcome::Written, got {other:?}"),
+    }
+}
+
 /// "Keep mine" replays local-only secrets onto the reviewed remote tip: both the
 /// local secrets and the remote's unrelated file survive, are readable, and the
 /// result is pushed (the bare tip advances to the new commit).
@@ -411,7 +420,7 @@ async fn autosync_off_skips_network() {
     let bare_before = bare_head_oid(bare_dir.path());
 
     let s = store.clone();
-    let result = store
+    let outcome = store
         .autosync_write(None, move || {
             let s = s.clone();
             async move { s.set("offline-entry", b"local-only").await }
@@ -419,7 +428,7 @@ async fn autosync_off_skips_network() {
         .await
         .expect("autosync-off write");
 
-    assert!(!result.commit.is_empty(), "local commit was made");
+    assert!(!written_commit(outcome).is_empty(), "local commit was made");
     assert_eq!(
         store.get("offline-entry").await.expect("get").password(),
         "local-only"
@@ -440,19 +449,20 @@ async fn autosync_on_publishes_via_pull_write_push() {
     let bare_before = bare_head_oid(bare_dir.path());
 
     let s = store.clone();
-    let result = store
+    let outcome = store
         .autosync_write(None, move || {
             let s = s.clone();
             async move { s.set("published", b"via-orchestrator").await }
         })
         .await
         .expect("autosync-on write");
+    let commit = written_commit(outcome);
 
-    assert!(!result.commit.is_empty(), "commit was made");
+    assert!(!commit.is_empty(), "commit was made");
     // The push published: the bare tip advanced to our commit.
     assert_ne!(bare_head_oid(bare_dir.path()), bare_before);
     assert!(
-        bare_head_oid(bare_dir.path()).starts_with(&result.commit),
+        bare_head_oid(bare_dir.path()).starts_with(&commit),
         "bare tip is the orchestrator's pushed commit"
     );
     assert_eq!(
@@ -461,10 +471,14 @@ async fn autosync_on_publishes_via_pull_write_push() {
     );
 }
 
-/// Autosync ON with a divergent remote: the push is rejected and surfaces as
-/// `Err(PUSH_REJECTED)` (the context-aware divergence modal lands in `PR2c`).
+/// Autosync ON with a divergent remote: the orchestrator's pull sees divergence
+/// (benign — it proceeds), the local write commits on the diverged HEAD, and the
+/// push is rejected — surfacing as `WriteOutcome::NeedsDivergenceResolve` with a
+/// populated preview (no second round-trip). This is the push-rejection race the
+/// divergence modal catches (NOT the stale-read clobber — see
+/// `autosync_silently_clobbers_remote_same_name_change`).
 #[tokio::test]
-async fn autosync_on_push_rejected_returns_err() {
+async fn autosync_on_push_rejected_returns_needs_divergence_resolve() {
     let (bare_dir, _cfg, store, recipient) = store_with_base(vec![]).await;
     let repo_path = store.config().await.expect("config").local_path;
     let store = Arc::new(store);
@@ -485,17 +499,30 @@ async fn autosync_on_push_rejected_returns_err() {
     );
 
     let s = store.clone();
-    let err = store
+    let outcome = store
         .autosync_write(None, move || {
             let s = s.clone();
             async move { s.set("new", b"v").await }
         })
         .await
-        .expect_err("a divergent push should be rejected");
-    assert_eq!(
-        err.code, "PUSH_REJECTED",
-        "divergence surfaces as PUSH_REJECTED until the PR2c modal"
-    );
+        .expect("a divergent push surfaces as NeedsDivergenceResolve");
+    match outcome {
+        rustpass::WriteOutcome::NeedsDivergenceResolve(div) => {
+            assert!(
+                !div.remote_tip.is_empty(),
+                "carries a populated divergence preview"
+            );
+            assert!(
+                div.local_ahead >= 1,
+                "local is ahead by the just-made commit(s)"
+            );
+            assert!(
+                div.remote_ahead >= 1,
+                "remote is ahead — the cause of the push rejection"
+            );
+        }
+        other => panic!("expected NeedsDivergenceResolve, got {other:?}"),
+    }
 }
 
 /// Two `autosync_write` calls in parallel both complete and both entries land —
@@ -568,7 +595,7 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
 
     // The user, editing from the stale v1 snapshot, saves via the orchestrator.
     let s = store.clone();
-    let result = store
+    let outcome = store
         .autosync_write(None, move || {
             let s = s.clone();
             async move { s.set("entry", b"stale-edit").await }
@@ -576,8 +603,8 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
         .await
         .expect("autosync write");
     assert!(
-        !result.commit.is_empty(),
-        "no divergence → fast-forward → Ok (the silent clobber)"
+        !written_commit(outcome).is_empty(),
+        "no divergence → fast-forward → Ok Written (the silent clobber)"
     );
 
     // The teammate's newer version was silently overwritten by the stale edit.
@@ -590,5 +617,88 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
         crypto::decrypt_bytes(&blob, identity.as_bytes(), None).unwrap(),
         b"stale-edit",
         "remote HEAD has the stale edit, not the teammate's newer version — the clobber"
+    );
+}
+
+// ── Store::sync_repo — manual pull → push (the Sync button) ──────────────────
+
+/// `sync_repo` publishes unpushed local commits when autosync is off: a local
+/// write commits, then `sync_repo` advances the bare tip to it (FastForwarded).
+#[tokio::test]
+async fn sync_repo_publishes_local_commits() {
+    let (bare_dir, _cfg, store, _recipient) = store_with_base(vec![]).await;
+    let store = Arc::new(store);
+    store.set_autosync(false).await.expect("autosync off");
+    store
+        .set("offline", b"local-then-sync")
+        .await
+        .expect("local write");
+    let bare_before = bare_head_oid(bare_dir.path());
+
+    let outcome = store.sync_repo(None, None).await.expect("sync_repo");
+    match outcome {
+        SyncOutcome::FastForwarded(r) => {
+            assert!(
+                !r.head.is_empty(),
+                "FastForwarded carries the post-push head"
+            );
+            assert_ne!(
+                bare_head_oid(bare_dir.path()),
+                bare_before,
+                "the push published — the bare tip advanced"
+            );
+        }
+        other => panic!("expected FastForwarded, got {other:?}"),
+    }
+    assert_eq!(
+        store.get("offline").await.expect("get").password(),
+        "local-then-sync"
+    );
+}
+
+/// `sync_repo` with a pull-side divergence returns `Diverged` without pushing —
+/// the bare tip is unchanged; the UI shows the resolve modal. (A push-rejection
+/// race within `sync_repo` would surface the same `Diverged` outcome; that path
+/// is exercised deterministically for the write orchestrator in
+/// `autosync_on_push_rejected_returns_needs_divergence_resolve` — orchestrating
+/// a mid-flight remote commit between pull and push isn't reliably raceable.)
+#[tokio::test]
+async fn sync_repo_pull_diverged_returns_diverged() {
+    let (bare_dir, _cfg, store, recipient) = store_with_base(vec![]).await;
+    let repo_path = store.config().await.expect("config").local_path;
+    let store = Arc::new(store);
+
+    // Diverge: an unpushed local commit AND a remote advance on another file.
+    local_commit_files(
+        Path::new(&repo_path),
+        &[("local-only.txt", b"x")],
+        "local-only",
+    );
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("remote.age", b"r".as_slice())],
+        &recipient,
+        "remote advance",
+    );
+    let bare_after_advance = bare_head_oid(bare_dir.path());
+
+    let outcome = store.sync_repo(None, None).await.expect("sync_repo");
+    match outcome {
+        SyncOutcome::Diverged(div) => {
+            assert!(
+                !div.remote_tip.is_empty(),
+                "carries the reviewed remote tip"
+            );
+            assert!(div.local_ahead >= 1, "local is ahead");
+            assert!(div.remote_ahead >= 1, "remote is ahead");
+        }
+        other => panic!("expected Diverged, got {other:?}"),
+    }
+    // sync_repo returned Diverged WITHOUT pushing — the bare tip is still the
+    // post-advance tip (sync_repo added nothing).
+    assert_eq!(
+        bare_head_oid(bare_dir.path()),
+        bare_after_advance,
+        "sync_repo must not push when the pull diverged"
     );
 }

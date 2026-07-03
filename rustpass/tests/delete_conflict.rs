@@ -18,13 +18,7 @@ use rustpass::store::Store;
 
 /// Configure a store against a fresh bare repo carrying a recipients file with
 /// the store's own key. (Mirrors `write_conflict.rs`.)
-async fn store_with_recipients() -> (
-    tempfile::TempDir,
-    tempfile::TempDir,
-    Store,
-    String,
-    String,
-) {
+async fn store_with_recipients() -> (tempfile::TempDir, tempfile::TempDir, Store, String, String) {
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo_with(

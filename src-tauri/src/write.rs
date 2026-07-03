@@ -12,125 +12,50 @@
 //! slot (mirroring `pull_repo`); the push is not yet cancellable (see
 //! `.plans/0032-cancellable-saves.md`).
 //!
-//! ## Outcome shape (frozen for the frontend until `PR2c`)
+//! ## Outcome shape
 //!
-//! A rejected push surfaces as `Err(PUSH_REJECTED)` (the frontend's generic
-//! error path) — the context-aware divergence modal that routes a save-triggered
-//! divergence to `resolve_sync_divergence` lands in `PR2c`. So the write commands
-//! still return [`WriteOutcome`], but only ever `Written`; the `Conflict` variant
-//! is dead-but-present until `PR2c` retires it.
+//! The orchestrator returns a [`WriteOutcome`]: [`WriteOutcome::Written`] on a
+//! normal save, [`WriteOutcome::NeedsDivergenceResolve`] when the push was
+//! rejected (a race — the remote moved during the write; the carried
+//! `SyncDivergence` lets the UI show the resolve modal without a second
+//! round-trip), or [`WriteOutcome::AuthenticityBlocked`] when the pre-write pull
+//! was refused under Enforce signature verification. The frontend's shared
+//! divergence modal routes a `NeedsDivergenceResolve` to [`resolve_sync_divergence`].
 //!
-//! ## Conflict stash (consume-side retained, frozen ABI)
+//! ## Immediate-mode wipe (D3)
 //!
-//! The `(name, plaintext)` stash ([`PendingWrite`]) carried a write collision's
-//! plaintext across `resolve_write_conflict` so it didn't re-cross IPC. The
-//! autosync path never produces a `Conflict`, so nothing populates the stash
-//! anymore — but [`resolve_pending`], [`stash_pending`], [`clear_pending`], the
-//! [`resolve_write_conflict`] command, and the `pending_write` field stay (kept
-//! alive by their unit tests + the lock handler's defense-in-depth clear) until
-//! `PR2c` retires them alongside the frontend modal. A plaintext is still never
-//! left behind a wiped identity cache: `resolve_pending` consumes on every call
-//! and `clear_pending` runs on lock.
+//! `do_save`/`delete_secret` reset the auto-lock timer on every attempt, but
+//! wipe the identity only on **terminal** outcomes — a `NeedsDivergenceResolve`
+//! still needs the cached identity for a keep-mine resolve (`resolve_keep_mine`
+//! re-encrypts local blobs), so wiping it before the user picks would force a
+//! second unlock. The deferred wipe runs in [`resolve_sync_divergence`] once the
+//! resolve settles.
 //!
 //! [`Store::autosync_write`]: rustpass::Store::autosync_write
-//! [`Store::resolve_write_conflict`]: rustpass::Store::resolve_write_conflict
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
 
 use rustpass::template::{self, CreatePreset};
 use rustpass::{
-    ConflictChoice, DivergenceChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome,
-    WriteResult,
+    DivergenceChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
 };
 use tauri::{AppHandle, Runtime, State};
-use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::identity::{maybe_soft_wipe, reset_lock_timer};
 
-/// A write that collided with a newer remote copy and is awaiting the user's
-/// resolution. Held only in memory; `plaintext` is [`Zeroizing`] and the struct
-/// intentionally does not derive `Debug`.
-pub(crate) struct PendingWrite {
-    /// The entry name that collided (passed back to `resolve_write_conflict`).
-    name: String,
-    /// The plaintext we tried to write, replayed when the user picks
-    /// `keep_mine` / `keep_mine_force`.
-    plaintext: Zeroizing<Vec<u8>>,
-}
-
-/// Drop any stashed pending write.
-///
-/// Called on lock so a conflict modal left open across an auto-lock
-/// can't leave a plaintext behind a wiped identity cache (which would also make
-/// a later resolve fail confusingly).
-pub(crate) fn clear_pending(pending: &Arc<Mutex<Option<PendingWrite>>>) {
-    if let Ok(mut pw) = pending.lock() {
-        pw.take();
-    }
-}
-
-/// Stash the `(name, plaintext)` of a write that collided, so
-/// [`resolve_pending`] can replay it without the frontend re-sending the secret
-/// across IPC a second time. Pure (no `AppHandle`), so the stash lifecycle is
-/// directly unit-testable.
-///
-/// Test-only now: the autosync write path never produces a `Conflict`, so
-/// nothing populates the stash in production. Kept under `cfg(test)` as the
-/// helper the stash-lifecycle unit tests build the slot with; the consume-side
-/// ([`resolve_pending`] / [`clear_pending`]) stays production-live for the
-/// frozen `resolve_write_conflict` command and the lock handler.
-#[cfg(test)]
-pub(crate) fn stash_pending(pending: &Arc<Mutex<Option<PendingWrite>>>, name: &str, body: Vec<u8>) {
-    let mut pw = pending.lock().expect("pending_write mutex poisoned");
-    *pw = Some(PendingWrite {
-        name: name.to_string(),
-        plaintext: Zeroizing::new(body),
-    });
-}
-
-/// Consume the stashed pending write and resolve the conflict per `choice`. The
-/// stash is always taken (cleared) — even on error — so a plaintext never lingers
-/// awaiting a retry that re-stashes fresh. Pure core (no `AppHandle`): directly
-/// unit-testable, and the consume path the (frozen) `resolve_write_conflict`
-/// command still calls.
-pub(crate) async fn resolve_pending(
-    state: &AppState,
-    choice: ConflictChoice,
-) -> Result<Option<WriteResult>, Error> {
-    let pending = {
-        let mut pw = state
-            .pending_write
-            .lock()
-            .expect("pending_write mutex poisoned");
-        pw.take()
-    };
-    let Some(pending) = pending else {
-        return Err(Error::new(
-            ErrorCode::StoreError,
-            "no pending write to resolve",
-        ));
-    };
-    state
-        .store
-        .resolve_write_conflict(&pending.name, &pending.plaintext, choice)
-        .await
-}
-
 /// Run a local-only write under the autosync orchestrator, with the pull phase
 /// cancellable via the global cancel slot (mirrors `pull_repo`). Returns the
-/// write result; the caller decides the IPC shape (`WriteOutcome::Written` for
-/// create/edit, raw `WriteResult` for delete). The closure runs inside the
-/// orchestrator's `write_mu` critical section and must be one of the local-only
-/// primitives (`Store::create`/`update`/`delete`) — it must NOT re-acquire the
-/// Store lock.
+/// orchestrator's [`WriteOutcome`] directly; the caller adds the auto-lock side
+/// effects. The closure runs inside the orchestrator's `write_mu` critical
+/// section and must be one of the local-only primitives (`Store::create`/
+/// `update`/`delete`) — it must NOT re-acquire the Store lock.
 async fn autosync_write_command<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
     local_write: F,
-) -> Result<WriteResult, Error>
+) -> Result<WriteOutcome, Error>
 where
     R: Runtime,
     F: FnOnce() -> Fut + Send + 'static,
@@ -145,9 +70,10 @@ where
 }
 
 /// Wrap a local-only save in autosync + the auto-lock side effects (reset the
-/// idle timer; soft-wipe the identity under Immediate). Maps the orchestrator's
-/// `Ok(WriteResult)` to [`WriteOutcome::Written`] so the create/edit IPC shape
-/// is unchanged for the frozen frontend.
+/// idle timer; soft-wipe the identity under Immediate — but only on terminal
+/// outcomes, per D3). The orchestrator's [`WriteOutcome`] is passed through
+/// unchanged so the frontend can route `NeedsDivergenceResolve` /
+/// `AuthenticityBlocked` to their modals.
 async fn do_save<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
@@ -159,15 +85,18 @@ where
     Fut: Future<Output = Result<WriteResult, Error>> + Send + 'static,
 {
     // Run the write first so a FAILED save still counts as a secret access: under
-    // Immediate we reset the timer + wipe on both paths (an errored save must
-    // not leave the identity cached with no idle timer to eventually clear it).
-    let result = autosync_write_command(state, app, local_write).await;
+    // Immediate we reset the timer + wipe on the terminal paths (an errored save
+    // must not leave the identity cached with no idle timer to eventually clear
+    // it).
+    let outcome = autosync_write_command(state, app, local_write).await;
     reset_lock_timer(state, app);
-    // No Conflict is ever produced now (autosync surfaces a rejected push as
-    // Err), so there is never a pending stash gating the wipe — maybe_soft_wipe
-    // proceeds whenever Immediate is in effect.
-    maybe_soft_wipe(state, app).await;
-    Ok(WriteOutcome::Written(result?))
+    // D3: a NeedsDivergenceResolve still needs the cached identity for a keep-mine
+    // resolve, so defer the wipe to resolve_sync_divergence. Every other outcome
+    // (Written / AuthenticityBlocked / Err) is terminal — wipe now.
+    if !matches!(&outcome, Ok(WriteOutcome::NeedsDivergenceResolve(_))) {
+        maybe_soft_wipe(state, app).await;
+    }
+    outcome
 }
 
 /// List the built-in secret-creation presets (Website login, PIN code) — the
@@ -213,14 +142,10 @@ pub(crate) async fn create_secret(
 ) -> Result<WriteOutcome, Error> {
     let store = state.store.clone();
     let body = content.into_bytes();
-    do_save(
-        &state,
-        &app,
-        move || {
-            let store = store.clone();
-            async move { store.create(&name, &body).await }
-        },
-    )
+    do_save(&state, &app, move || {
+        let store = store.clone();
+        async move { store.create(&name, &body).await }
+    })
     .await
 }
 
@@ -250,43 +175,37 @@ pub(crate) async fn create_from_preset_secret(
     let name = template::preset_name(preset, &fields_ref)?;
     let body = template::preset_body(preset, &fields_ref)?;
     let store = state.store.clone();
-    do_save(
-        &state,
-        &app,
-        move || {
-            let store = store.clone();
-            async move { store.create(&name, &body).await }
-        },
-    )
+    do_save(&state, &app, move || {
+        let store = store.clone();
+        async move { store.create(&name, &body).await }
+    })
     .await
 }
 
 /// Delete a secret at an explicit path. The entry is removed and the removal is
 /// committed locally, then published by the autosync orchestrator (pull →
 /// delete → push when autosync is on; local-only when off). Returns the
-/// `WriteResult` (unchanged IPC shape for the frozen frontend).
+/// [`WriteOutcome`] — usually `Written`, or `NeedsDivergenceResolve` when the
+/// delete's push lost a race (the frontend routes that to the shared modal).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn delete_secret(
     state: State<'_, AppState>,
     app: AppHandle,
     name: String,
-) -> Result<WriteResult, Error> {
+) -> Result<WriteOutcome, Error> {
     let store = state.store.clone();
-    let result = autosync_write_command(
-        &state,
-        &app,
-        move || {
-            let store = store.clone();
-            async move { store.delete(&name).await }
-        },
-    )
+    let outcome = autosync_write_command(&state, &app, move || {
+        let store = store.clone();
+        async move { store.delete(&name).await }
+    })
     .await;
     // Reset the auto-lock timer on the user's activity whether or not the delete
-    // succeeded (mirrors the save path). Delete carries no plaintext, so no
-    // maybe_soft_wipe coupling.
+    // succeeded (mirrors the save path). Delete carries no plaintext and doesn't
+    // cache the identity, so no maybe_soft_wipe coupling here — a keep-mine
+    // resolve after a delete-triggered divergence re-auths via runWithAuth.
     reset_lock_timer(&state, &app);
-    result
+    outcome
 }
 
 /// Edit a secret at an explicit path from its raw content (first line is the
@@ -304,37 +223,11 @@ pub(crate) async fn edit_secret(
 ) -> Result<WriteOutcome, Error> {
     let store = state.store.clone();
     let body = content.into_bytes();
-    do_save(
-        &state,
-        &app,
-        move || {
-            let store = store.clone();
-            async move { store.update(&name, &body).await }
-        },
-    )
+    do_save(&state, &app, move || {
+        let store = store.clone();
+        async move { store.update(&name, &body).await }
+    })
     .await
-}
-
-/// Resolve a write conflict ([`WriteOutcome::Conflict`]) per the user's
-/// `choice`. Replays the stashed plaintext for `keep_mine` / `keep_mine_force`;
-/// `keep_remote` fast-forwards to the remote, `cancel` leaves the pre-write
-/// state. The stash is always consumed (cleared) on return.
-///
-/// Frozen frontend ABI: the command stays registered, but the autosync write
-/// path never produces a `Conflict`, so the stash is never populated and this
-/// returns `Err` ("no pending write to resolve") if ever called. It is retired
-/// alongside the frontend modal in `PR2c`.
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn resolve_write_conflict(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    choice: ConflictChoice,
-) -> Result<Option<WriteResult>, Error> {
-    let result = resolve_pending(&state, choice).await;
-    reset_lock_timer(&state, &app);
-    maybe_soft_wipe(&state, &app).await;
-    result
 }
 
 /// Pull latest changes from the remote. Returns a `SyncOutcome`: a normal
@@ -354,6 +247,24 @@ pub(crate) async fn pull_repo(
     .await
 }
 
+/// Manual sync (pull → push) — the Sync button. Reconciles both directions in
+/// one cancellable, progress-reporting op: surfaces `SyncOutcome::Diverged`
+/// (from a pull-side divergence, or a push-rejection race) for the resolve
+/// modal, or an Enforce block; otherwise the push publishes any local commits.
+/// A missing `origin` is a no-op at both phases (local-only store).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn sync_repo(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<SyncOutcome, Error> {
+    let store = state.store.clone();
+    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
+        store.sync_repo(Some(cancel), Some(tx)).await
+    })
+    .await
+}
+
 /// Push the current branch to `origin`. Used by the create flow's deferred first
 /// push — called after `create_store` + `complete_setup` so the remote only
 /// receives the store once its identity is durable. A missing `origin` is a
@@ -364,51 +275,47 @@ pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
     state.store.push().await
 }
 
-/// Resolve a pull/sync divergence by adopting the remote tip the user reviewed
-/// (`expected_remote_oid`). "Cancel" is client-side — the frontend just doesn't
-/// call this. Returns the post-adopt result so the badge can refresh.
-///
-/// (PR1 keeps the adopt-remote behavior; PR2 lets the frontend pass a
-/// [`DivergenceChoice`] so "keep mine" is reachable from the context-aware modal.)
+/// Resolve a pull/sync/save divergence by applying the user's `choice` against
+/// the reviewed remote tip (`expected_remote_oid`). "Cancel" is client-side —
+/// the frontend just doesn't call this. Returns the post-resolve result so the
+/// badge can refresh. Also performs the auto-lock side effects (this is the
+/// terminal step for a deferred save-divergence, so the Immediate wipe the save
+/// path skipped runs here).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn resolve_sync_divergence(
     state: State<'_, AppState>,
+    app: AppHandle,
     expected_remote_oid: String,
+    choice: DivergenceChoice,
 ) -> Result<SyncResult, Error> {
-    state
+    let result = state
         .store
-        .resolve_sync_divergence(&expected_remote_oid, DivergenceChoice::AdoptRemote)
-        .await
+        .resolve_sync_divergence(&expected_remote_oid, choice)
+        .await;
+    reset_lock_timer(&state, &app);
+    // D3: terminal step for a deferred save-divergence — do the wipe the save
+    // path skipped (no-op under Idle/Never; under Immediate it clears the
+    // identity kept alive across the modal for keep-mine).
+    maybe_soft_wipe(&state, &app).await;
+    result
 }
 
-#[cfg(test)]
-mod tests {
-    //! The lock-clearing invariant is the security-critical piece of the conflict
-    //! stash: a plaintext must not survive a lock. The stash utility lifecycle
-    //! (stash → clear → resolve-consumes) is covered here; the rustpass write +
-    //! autosync flows are covered end-to-end by the `rustpass` integration tests.
-
-    use super::*;
-
-    fn stashed(name: &str) -> Arc<Mutex<Option<PendingWrite>>> {
-        Arc::new(Mutex::new(Some(PendingWrite {
-            name: name.to_string(),
-            plaintext: Zeroizing::new(b"s3kr3t".to_vec()),
-        })))
-    }
-
-    #[test]
-    fn clear_pending_drops_a_stashed_write() {
-        let pending = stashed("sites/foo");
-        clear_pending(&pending);
-        assert!(pending.lock().unwrap().is_none());
-    }
-
-    #[test]
-    fn clear_pending_is_a_noop_when_empty() {
-        let pending: Arc<Mutex<Option<PendingWrite>>> = Arc::new(Mutex::new(None));
-        clear_pending(&pending);
-        assert!(pending.lock().unwrap().is_none());
-    }
+/// Abandon a save-triggered divergence without resolving — the user dismissed
+/// the resolve modal (cancel / back). Performs the Immediate-mode wipe the save
+/// path deferred ([`do_save`] skips [`maybe_soft_wipe`] on a
+/// [`WriteOutcome::NeedsDivergenceResolve`] so a keep-mine resolve can reuse the
+/// cached identity without a second unlock): with the resolve abandoned, nothing
+/// needs the identity anymore, so clear it now rather than leaving it cached
+/// until the next op or an app lock. No-op under `Idle`/`Never`. A
+/// sync-triggered divergence never deferred a wipe, so its cancel path does not
+/// call this.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn discard_divergence(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), Error> {
+    maybe_soft_wipe(&state, &app).await;
+    Ok(())
 }

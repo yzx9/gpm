@@ -37,6 +37,12 @@ export async function setLockMode(mode: LockMode): Promise<RepoConfig> {
   return invoke<RepoConfig>("set_lock_mode", { mode });
 }
 
+/** Toggle per-device autosync (on ⇒ every save pull-write-pushes; off ⇒ saves
+ *  stay local until a manual Sync). Returns the updated config. */
+export async function setAutosync(enabled: boolean): Promise<RepoConfig> {
+  return invoke<RepoConfig>("set_autosync", { enabled });
+}
+
 /** Set the password-view auto-clear seconds (`null` ⇒ default, `0` ⇒ never). */
 export async function setViewClearSecs(
   secs: number | null,
