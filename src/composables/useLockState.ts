@@ -45,7 +45,9 @@ export function isAuthCancelled(e: unknown): boolean {
  * `overlayUp` is what the UI gates the modal on: `locked || authPrompted`
  * (the latter is a per-operation auth prompt, which also shows the modal but
  * must NOT fire `onLock` — clearing the page mid-op would lose a draft or the
- * reveal being authenticated for).
+ * reveal being authenticated for), suppressed only while a hard-lock overlay
+ * the user dismissed stays hidden (`overlayDismissed`) — the identity stays
+ * locked, but the underlying (secret-free) page is reachable.
  *
  * Provided app-wide via `LOCK_KEY` (see `main.ts`): one instance, one event
  * listener. Tests construct their own via `createLockState()` so they never
@@ -56,7 +58,8 @@ export function isAuthCancelled(e: unknown): boolean {
 export interface LockState {
   /** Hard-lock flag — fail-closed `true` until `init()` reconciles with the backend. */
   readonly locked: Readonly<Ref<boolean>>;
-  /** Whether the unlock overlay should be shown (hard lock OR per-op auth). */
+  /** Whether the unlock overlay should be shown (hard lock or per-op auth,
+   *  unless a hard-lock overlay was dismissed and stays hidden). */
   readonly overlayUp: ComputedRef<boolean>;
   /** Whether the decrypted identity is in the backend cache (next op needs no auth). */
   readonly identityCached: Readonly<Ref<boolean>>;
@@ -72,6 +75,9 @@ export interface LockState {
   runWithAuth: <T>(op: () => Promise<T>) => Promise<T>;
   /** Dismiss the per-op auth overlay as cancelled (rejects parked callers with AUTH_CANCELLED). */
   cancelAuth: () => void;
+  /** Dismiss the unlock overlay: cancels a per-op auth, or hides a hard-lock
+   *  overlay WITHOUT unlocking (identity stays locked; next secret op re-prompts). */
+  dismissOverlay: () => void;
 }
 
 /** Seed options for `createLockState` (test/seed only; production passes none). */
@@ -108,6 +114,12 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
   // Overlay is up specifically for a per-operation auth (Immediate mode), not a
   // hard lock. Drives `overlayUp` without firing `onLock`.
   const authPrompted = ref(false);
+  // True after the user dismissed a HARD-lock overlay (× / backdrop / back).
+  // The identity stays locked — this only suppresses `overlayUp` until the next
+  // secret op re-raises it as a per-op auth (ensureUnlocked resets it) or a
+  // fresh hard lock re-shows it (setLocked(true) resets it). Per-op auth never
+  // sets this; cancelAuth handles its own dismiss.
+  const overlayDismissed = ref(false);
 
   /// The shared promise awaiting op callers park on while the per-op auth overlay
   /// is up. All concurrent callers await the same one (single-flight: one prompt,
@@ -122,8 +134,13 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
   const listeners = new Set<() => void>();
   let unlisten: UnlistenFn | null = null;
 
-  /** Whether the unlock overlay should be shown (hard lock OR per-op auth). */
-  const overlayUp = computed(() => locked.value || authPrompted.value);
+  /** Whether the unlock overlay should be shown: a hard lock or per-op auth,
+   *  unless the user dismissed a hard-lock overlay (× / backdrop / back) — the
+   *  identity stays locked, but the overlay stays hidden until the next secret
+   *  op (per-op auth) or a fresh hard lock re-shows it. */
+  const overlayUp = computed(
+    () => (locked.value || authPrompted.value) && !overlayDismissed.value,
+  );
 
   /**
    * Register a callback to run whenever the identity becomes _hard_-locked (manual
@@ -174,6 +191,11 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
       // Couldn't read auth state — stay fail-closed.
       setLocked(true);
     }
+    // init() is the boundary between the speculative boot state (locked=true,
+    // ready=false) and the real backend state. A dismiss during that boot
+    // window would strand `overlayDismissed=true`; clear it now that the real
+    // state is known so a genuine hard lock shows its overlay.
+    overlayDismissed.value = false;
     ready.value = true;
   }
 
@@ -213,6 +235,9 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
     if (locked.value === v) return;
     locked.value = v;
     if (v) {
+      // A fresh hard lock re-shows the overlay even if the user had dismissed
+      // a previous one.
+      overlayDismissed.value = false;
       for (const cb of [...listeners]) {
         try {
           cb();
@@ -255,6 +280,8 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
   async function ensureUnlocked() {
     if (identityCached.value) return;
     if (!authPromise) {
+      // A dismissed hard lock must re-show for this per-op auth.
+      overlayDismissed.value = false;
       authPrompted.value = true;
       authPromise = new Promise<void>((resolve, reject) => {
         resolveAuth = resolve;
@@ -291,6 +318,24 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
     reject?.({ code: AUTH_CANCELLED });
   }
 
+  /**
+   * Dismiss the unlock overlay (× / backdrop / back). A per-op auth in flight
+   * delegates to `cancelAuth` (rejecting parked callers with AUTH_CANCELLED);
+   * a hard lock hides the overlay WITHOUT unlocking — the identity stays
+   * locked, secrets stay wiped, and the next secret op re-prompts via per-op
+   * auth. No-op when neither is up, so it is safe to wire unconditionally as a
+   * close / back-press handler.
+   */
+  function dismissOverlay() {
+    if (authPromise) {
+      cancelAuth();
+      return;
+    }
+    if (locked.value) {
+      overlayDismissed.value = true;
+    }
+  }
+
   return {
     locked,
     overlayUp,
@@ -301,6 +346,7 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
     onLock,
     runWithAuth,
     cancelAuth,
+    dismissOverlay,
   };
 }
 

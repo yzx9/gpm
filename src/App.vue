@@ -17,7 +17,7 @@ import {
 } from "./composables";
 import { applySafeAreaInsets } from "./utils/safe-area";
 
-const { overlayUp, ready, init, cancelAuth } = useLockState();
+const { overlayUp, ready, init, dismissOverlay } = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
 const { loadSecuritySettings } = useSecuritySettings();
 const { initSecureScreen, setSecureOverlay } = useSecureScreen();
@@ -30,13 +30,13 @@ watch(overlayUp, (up) => {
   void setSecureOverlay(up);
 });
 
-// Capture the Android back button while the unlock overlay is up: back cancels a
-// per-op auth prompt (cancelAuth dismisses it) or is consumed by a hard lock
-// (cancelAuth is a no-op there, so the overlay stays and back can't escape).
-// Mirrors the `v-if` source exactly so the handler is armed only while the
-// overlay is actually rendered.
+// Capture the Android back button while the unlock overlay is up: back dismisses
+// it — a per-op auth is cancelled (rejecting parked callers), and a hard lock is
+// hidden WITHOUT unlocking (the identity stays locked; the next secret op
+// re-prompts). Mirrors the `v-if` source exactly so the handler is armed only
+// while the overlay is actually rendered.
 const overlayShown = computed(() => ready.value && overlayUp.value);
-useOverlayBackHandler(overlayShown, cancelAuth);
+useOverlayBackHandler(overlayShown, dismissOverlay);
 
 onMounted(() => {
   applySafeAreaInsets();
@@ -71,7 +71,10 @@ onMounted(() => {
       both; `ready` suppresses it during the boot window; `!appLocked` suppresses
       it while the app-launch gate overlay is up.
     -->
-    <UnlockModal v-if="ready && overlayUp && !appLocked" />
+    <UnlockModal
+      v-if="ready && overlayUp && !appLocked"
+      @close="dismissOverlay"
+    />
     <!-- Global toast: app-shell messages (e.g. a screen-secure abort). -->
     <BaseToast v-if="toast" variant="danger">{{ toast }}</BaseToast>
   </div>

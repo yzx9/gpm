@@ -285,6 +285,97 @@ describe("useLockState", () => {
     expect(op).not.toHaveBeenCalled();
   });
 
+  // ── dismissOverlay: × / backdrop / back closes the overlay ────────────────
+
+  it("dismissOverlay hides a hard-lock overlay without unlocking", () => {
+    s.setLocked(false);
+    s.setLocked(true);
+    expect(s.overlayUp.value).toBe(true);
+
+    s.dismissOverlay();
+
+    expect(s.overlayUp.value).toBe(false); // overlay hidden
+    expect(s.locked.value).toBe(true); // still hard-locked
+    expect(s.identityCached.value).toBe(false); // identity still not cached
+  });
+
+  it("a dismissed hard lock re-shows for the next secret op", async () => {
+    s.setLocked(false);
+    s.setLocked(true);
+    s.dismissOverlay();
+    expect(s.overlayUp.value).toBe(false);
+
+    const op = vi.fn().mockResolvedValue("done");
+    const p = s.runWithAuth(op);
+    // Re-raised as a per-op auth: overlayUp is true again, op has not run.
+    expect(s.overlayUp.value).toBe(true);
+    expect(op).not.toHaveBeenCalled();
+
+    s.cancelAuth(); // release the parked caller
+    await expect(p).rejects.toMatchObject({ code: AUTH_CANCELLED });
+  });
+
+  it("a fresh hard lock re-shows a dismissed overlay", () => {
+    s.setLocked(false);
+    s.setLocked(true);
+    s.dismissOverlay();
+    expect(s.overlayUp.value).toBe(false);
+
+    s.setLocked(false);
+    s.setLocked(true); // fresh hard lock clears overlayDismissed
+    expect(s.overlayUp.value).toBe(true);
+  });
+
+  it("dismissOverlay on a per-op auth cancels it and rejects parked callers", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: true,
+      identity_type: "x25519",
+    });
+    await s.init();
+    const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
+      payload: { locked: boolean; soft?: boolean };
+    }) => void;
+    handler({ payload: { locked: true, soft: true } }); // soft wipe: cache empty
+    expect(s.identityCached.value).toBe(false);
+
+    const op = vi.fn().mockResolvedValue("done");
+    const p = s.runWithAuth(op);
+    expect(s.overlayUp.value).toBe(true); // per-op auth raised
+
+    s.dismissOverlay(); // delegates to cancelAuth
+    await expect(p).rejects.toMatchObject({ code: AUTH_CANCELLED });
+    expect(op).not.toHaveBeenCalled();
+    expect(s.overlayUp.value).toBe(false);
+
+    // Per-op dismiss must not leak `overlayDismissed`: a later hard lock re-shows.
+    handler({ payload: { locked: true } });
+    expect(s.overlayUp.value).toBe(true);
+  });
+
+  it("dismissOverlay is a no-op when neither a hard lock nor per-op auth is up", () => {
+    s.setLocked(false);
+    expect(() => s.dismissOverlay()).not.toThrow();
+    expect(s.overlayUp.value).toBe(false);
+  });
+
+  it("a dismiss during the boot window does not strand a later hard lock", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: false,
+      identity_type: "x25519",
+    });
+    // Boot window: fail-closed locked=true, ready=false. A speculative dismiss
+    // here must not suppress the overlay once init() reconciles a real hard lock.
+    expect(s.locked.value).toBe(true);
+    s.dismissOverlay();
+    await s.init();
+    expect(s.locked.value).toBe(true);
+    expect(s.overlayUp.value).toBe(true);
+  });
+
   it("isAuthCancelled recognizes only the AUTH_CANCELLED code", () => {
     expect(isAuthCancelled({ code: AUTH_CANCELLED })).toBe(true);
     expect(isAuthCancelled({ code: "WRONG_PASSPHRASE" })).toBe(false);

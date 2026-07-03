@@ -13,7 +13,7 @@ import {
   resetConfig,
   unlock,
 } from "@/api";
-import { LockKeyhole, ScanFace } from "@lucide/vue";
+import { LockKeyhole, ScanFace, X } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import BaseAlert from "./base/BaseAlert.vue";
@@ -21,6 +21,8 @@ import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
 import BaseInput from "./base/BaseInput.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
+
+const emit = defineEmits<{ (e: "close"): void }>();
 
 const router = useRouter();
 
@@ -117,12 +119,25 @@ onMounted(async () => {
 </script>
 
 <template>
-  <BaseModalShell variant="center" :z="60" aria-label="Unlock identity">
-    <h1
-      class="text-center text-display mb-1 flex items-center justify-center gap-2"
-    >
-      <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
-    </h1>
+  <BaseModalShell
+    variant="center"
+    :z="60"
+    aria-label="Unlock identity"
+    @close="emit('close')"
+  >
+    <div class="title-row relative mb-1">
+      <button
+        type="button"
+        class="close-x"
+        aria-label="Close"
+        @click="emit('close')"
+      >
+        <BaseIcon :icon="X" :size="18" />
+      </button>
+      <h1 class="text-center text-display flex items-center justify-center gap-2">
+        <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
+      </h1>
+    </div>
     <p class="text-center text-muted text-sm mb-6">Identity is locked</p>
 
     <!-- Biometric notice (reset / stale / failure) -->
@@ -199,5 +214,21 @@ onMounted(async () => {
   flex: 1;
   height: 1px;
   background: var(--color-edge);
+}
+.close-x {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--color-muted);
+  transition: color 0.15s;
+}
+.close-x:hover {
+  color: var(--color-text);
 }
 </style>

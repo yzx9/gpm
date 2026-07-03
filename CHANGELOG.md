@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The unlock dialog can now be dismissed with the × button, a backdrop tap, or the Android back button — even when the app is hard-locked. Dismissing hides the dialog without unlocking: your identity stays locked and secrets stay wiped, but you can read the entry list and open Settings without typing your passphrase first. The next action that needs the identity prompts you again.
 - gpm's buttons, status indicators, and empty states now use clean vector icons instead of emoji, so they render consistently and sharply on every device instead of varying with the platform's emoji set (Android vs desktop).
 
 ## [v0.8.0] - 2026-07-03

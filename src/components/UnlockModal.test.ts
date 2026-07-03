@@ -129,6 +129,21 @@ describe("UnlockModal", () => {
     expect(invoke).toHaveBeenCalledWith("biometric_unlock");
   });
 
+  it("the close (×) button emits `close` so the host can dismiss the overlay", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    const closeBtn = wrapper.find('button[aria-label="Close"]');
+    expect(closeBtn.exists()).toBe(true);
+    await closeBtn.trigger("click");
+
+    expect(wrapper.emitted("close")).toBeTruthy();
+    expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+
   it("reset wipes config and navigates to Setup", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
