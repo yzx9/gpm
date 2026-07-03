@@ -18,6 +18,7 @@ import {
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
@@ -28,6 +29,7 @@ import {
   useSecretReveal,
   useSecuritySettings,
 } from "@/composables";
+import { ArrowLeft, Copy, Eye } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -333,10 +335,10 @@ function handleKeydown(e: KeyboardEvent) {
     <header class="flex items-center gap-3 mb-6" role="banner">
       <button
         @click="goBack"
-        class="bg-transparent border-none text-base cursor-pointer text-accent p-1 min-w-12 min-h-12"
+        class="bg-transparent border-none text-base cursor-pointer text-accent p-1 min-w-12 min-h-12 inline-flex items-center gap-1"
         aria-label="Back to entry list"
       >
-        ← Back
+        <BaseIcon :icon="ArrowLeft" /> Back
       </button>
       <h1
         class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
@@ -368,7 +370,7 @@ function handleKeydown(e: KeyboardEvent) {
           aria-label="Copy password to clipboard"
           @click="copyPassword"
         >
-          <span aria-hidden="true">📋</span> Copy Password
+          <BaseIcon :icon="Copy" /> Copy Password
         </BaseButton>
         <BaseButton
           variant="outline"
@@ -377,7 +379,7 @@ function handleKeydown(e: KeyboardEvent) {
           :aria-label="revealed ? 'Password is showing' : 'Show password'"
           @click="showPassword"
         >
-          <span aria-hidden="true">👁</span>
+          <BaseIcon :icon="Eye" />
           {{ revealed ? "Showing..." : "Show Password" }}
         </BaseButton>
       </div>

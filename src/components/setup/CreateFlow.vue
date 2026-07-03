@@ -15,7 +15,9 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
+import { CircleCheck, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref } from "vue";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
@@ -242,21 +244,24 @@ async function onCreate() {
       :disabled="loading"
       @click="generate"
     >
+      <BaseIcon v-if="!generating" :icon="KeyRound" />
       {{
         generating
           ? "Generating…"
           : identityKind === "ssh"
-            ? "🔑 Generate SSH key"
-            : "🔑 Generate identity"
+            ? "Generate SSH key"
+            : "Generate identity"
       }}
     </BaseButton>
 
     <!-- Recipient (public key) — shown once generated. The secret identity is
          never rendered. -->
     <div v-if="recipient" class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-success"
-        >✓ Recipient (public key)</span
+      <span
+        class="text-sm font-medium text-success inline-flex items-center gap-1"
       >
+        <BaseIcon :icon="CircleCheck" :size="14" /> Recipient (public key)
+      </span>
       <code class="public-key-display">{{ truncateKey(recipient) }}</code>
       <small class="text-xs text-muted"
         >This seeds your store's recipients file.</small

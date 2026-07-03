@@ -21,38 +21,30 @@ const UNSUPPORTED: CommitSigStatus = {
 const UNKNOWN: CommitSigStatus = { kind: "unknown" };
 
 describe("CommitSigIndicator — glyph variant (default)", () => {
-  it("renders ✓ with the success tone for verified", () => {
+  it("renders an icon with the success tone for verified", () => {
     const w = mount(CommitSigIndicator, { props: { status: VERIFIED } });
-    expect(w.text()).toBe("✓");
+    expect(w.find("svg").exists()).toBe(true);
     expect(w.classes()).toContain("text-success");
   });
 
-  it("renders ⛔ with the danger tone for bad_signature", () => {
+  it("renders an icon with the danger tone for bad_signature", () => {
     const w = mount(CommitSigIndicator, { props: { status: BAD } });
-    expect(w.text()).toBe("⛔");
+    expect(w.find("svg").exists()).toBe(true);
     expect(w.classes()).toContain("text-danger");
   });
 
   it("uses the warning tone for unsigned / untrusted / unsupported / unknown", () => {
     for (const status of [UNSIGNED, UNTRUSTED, UNSUPPORTED, UNKNOWN]) {
       const w = mount(CommitSigIndicator, { props: { status } });
+      expect(w.find("svg").exists()).toBe(true);
       expect(w.classes()).toContain("text-warning");
       expect(w.classes()).not.toContain("text-success");
       expect(w.classes()).not.toContain("text-danger");
     }
   });
 
-  it("renders ? for unsupported_format and unknown", () => {
-    expect(
-      mount(CommitSigIndicator, { props: { status: UNSUPPORTED } }).text(),
-    ).toBe("?");
-    expect(
-      mount(CommitSigIndicator, { props: { status: UNKNOWN } }).text(),
-    ).toBe("?");
-  });
-
   it("falls caller-supplied classes onto the glyph root (attribute fallthrough)", () => {
-    // HistoryPage's list row depends on these landing on the rendered span.
+    // HistoryPage's list row depends on these landing on the rendered svg.
     const w = mount(CommitSigIndicator, {
       props: { status: VERIFIED },
       attrs: { class: "w-6 text-center shrink-0" },
@@ -62,7 +54,7 @@ describe("CommitSigIndicator — glyph variant (default)", () => {
     expect(w.classes()).toContain("shrink-0");
   });
 
-  it("hides the glyph from screen readers (aria-hidden)", () => {
+  it("hides the icon from screen readers (aria-hidden)", () => {
     const w = mount(CommitSigIndicator, { props: { status: VERIFIED } });
     expect(w.attributes("aria-hidden")).toBe("true");
   });

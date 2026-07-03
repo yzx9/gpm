@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** Pure helpers for mapping [`CommitSigStatus`] to display text and domain
- * predicates. Rendering — glyph colours and the detail banner — lives in
- * `src/components/CommitSigIndicator.vue`, which owns the kind→tone→class
+ * predicates. Rendering — icons, colours, and the detail banner — lives in
+ * `src/components/CommitSigIndicator.vue`, which owns the kind→icon→tone→class
  * mapping so consumers no longer reimplement matching CSS classes. */
 import type { CommitSigStatus } from "@/api";
 
@@ -23,24 +23,6 @@ export function statusLabel(status: CommitSigStatus): string {
       return `Unsupported (${status.format})`;
     case "unknown":
       return "Unknown";
-  }
-}
-
-/** A single glyph for compact display (badge, history row). */
-export function statusGlyph(status: CommitSigStatus): string {
-  switch (status.kind) {
-    case "verified":
-      return "✓";
-    case "untrusted_key":
-      return "⚠";
-    case "unsigned":
-      return "—";
-    case "bad_signature":
-      return "⛔";
-    case "unsupported_format":
-      return "?";
-    case "unknown":
-      return "?";
   }
 }
 

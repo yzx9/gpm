@@ -23,6 +23,7 @@ import {
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
@@ -31,6 +32,7 @@ import {
   useLockState,
   useOverlayBackHandler,
 } from "@/composables";
+import { ArrowLeft, Dices, Eye, EyeOff } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
@@ -319,7 +321,13 @@ onBeforeUnmount(() => {
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex items-center gap-3 mb-6" role="banner">
-      <button @click="goBack" class="back-btn" aria-label="Back">← Back</button>
+      <button
+        @click="goBack"
+        class="back-btn inline-flex items-center gap-1"
+        aria-label="Back"
+      >
+        <BaseIcon :icon="ArrowLeft" /> Back
+      </button>
       <h1 class="text-lg flex-1">New secret</h1>
     </header>
 
@@ -401,7 +409,7 @@ onBeforeUnmount(() => {
               :aria-label="revealed[f.key] ? 'Hide' : 'Show'"
               @click="revealed[f.key] = !revealed[f.key]"
             >
-              {{ revealed[f.key] ? "🙈" : "👁" }}
+              <BaseIcon :icon="revealed[f.key] ? EyeOff : Eye" />
             </button>
             <button
               v-if="f.type === 'password'"
@@ -411,7 +419,7 @@ onBeforeUnmount(() => {
               aria-label="Generate password"
               @click="onGeneratePassword(f)"
             >
-              🎲
+              <BaseIcon :icon="Dices" />
             </button>
           </div>
         </div>

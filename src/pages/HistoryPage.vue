@@ -12,12 +12,21 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseToast from "@/components/base/BaseToast.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import { formatRelativeTime } from "@/utils/format";
 import { isIgnorable, signerFp } from "@/utils/signature";
+import {
+  GitCommitHorizontal,
+  History,
+  RefreshCw,
+  Settings,
+  TriangleAlert,
+  X,
+} from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -132,7 +141,9 @@ onBeforeUnmount(() => {
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-4" role="banner">
-      <h1 class="text-xl">📜 History</h1>
+      <h1 class="text-xl flex items-center gap-1">
+        <BaseIcon :icon="History" :size="24" /> History
+      </h1>
       <div class="flex gap-2">
         <BaseButton
           size="sm"
@@ -141,10 +152,10 @@ onBeforeUnmount(() => {
           aria-label="Re-check signatures"
           title="Re-check signatures"
         >
-          ⟳ Re-check
+          <BaseIcon :icon="RefreshCw" /> Re-check
         </BaseButton>
         <BaseButton size="sm" @click="openSettings" aria-label="Settings">
-          ⚙
+          <BaseIcon :icon="Settings" />
         </BaseButton>
       </div>
     </header>
@@ -169,7 +180,11 @@ onBeforeUnmount(() => {
       v-else-if="commits.length === 0 && !error"
       class="text-center text-muted py-8"
     >
-      <span class="text-4xl block mb-2">📭</span>
+      <BaseIcon
+        :icon="GitCommitHorizontal"
+        :size="40"
+        class="block mb-2 mx-auto text-subtle"
+      />
       <p>No commits found</p>
     </div>
 
@@ -222,7 +237,7 @@ onBeforeUnmount(() => {
       <div class="flex justify-between items-start mb-2">
         <code class="text-xs text-muted">{{ selected.short_hash }}</code>
         <button class="btn-copy" @click="closeDetail" aria-label="Close">
-          ✕
+          <BaseIcon :icon="X" />
         </button>
       </div>
 
@@ -243,10 +258,14 @@ onBeforeUnmount(() => {
 
       <p
         v-if="selected.status.kind === 'bad_signature'"
-        class="text-xs text-danger mt-2"
+        class="text-xs text-danger mt-2 flex gap-1"
       >
-        ⚠ This commit's signature does not validate — the commit object may have
-        been altered after signing. It cannot be ignored in Enforce mode.
+        <BaseIcon :icon="TriangleAlert" :size="14" class="shrink-0 mt-px" />
+        <span
+          >This commit's signature does not validate — the commit object may
+          have been altered after signing. It cannot be ignored in Enforce
+          mode.</span
+        >
       </p>
 
       <div class="flex flex-col gap-2 mt-4">

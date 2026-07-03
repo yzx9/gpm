@@ -26,6 +26,7 @@ import {
 import AuthenticityBlockModal from "@/components/AuthenticityBlockModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
@@ -34,6 +35,22 @@ import DivergenceModal from "@/components/DivergenceModal.vue";
 import { isAuthCancelled, useLockState } from "@/composables";
 import { formatRelativeTime } from "@/utils/format";
 import { statusLabel } from "@/utils/signature";
+import type { LucideIcon } from "@lucide/vue";
+import {
+  Circle,
+  CircleAlert,
+  CircleCheck,
+  CircleDashed,
+  Copy,
+  Dices,
+  Lock,
+  LockKeyhole,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  X,
+} from "@lucide/vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   computed,
@@ -93,11 +110,11 @@ const resolving = ref(false);
 const divergeError = ref("");
 
 /** The indicator badge for the current authenticity state. */
-const badge = computed<{ glyph: string; cls: string; title: string }>(() => {
+const badge = computed<{ icon: LucideIcon; cls: string; title: string }>(() => {
   const s = authState.value;
   if (!s || s.mode === "off") {
     return {
-      glyph: "⚪",
+      icon: Circle,
       cls: "badge-off",
       title: "Signature verification off",
     };
@@ -105,19 +122,19 @@ const badge = computed<{ glyph: string; cls: string; title: string }>(() => {
   switch (s.head_status.kind) {
     case "verified":
       return {
-        glyph: "✓",
+        icon: CircleCheck,
         cls: "badge-ok",
         title: "HEAD signed by a trusted key",
       };
     case "unknown":
       return {
-        glyph: "—",
+        icon: CircleDashed,
         cls: "badge-none",
         title: "Signature not checked yet",
       };
     default:
       return {
-        glyph: "⚠",
+        icon: CircleAlert,
         cls: "badge-warn",
         title: `${statusLabel(s.head_status)} — tap to review`,
       };
@@ -476,7 +493,9 @@ onBeforeUnmount(() => {
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-4" role="banner">
-      <h1 class="text-xl">🔐 gpm</h1>
+      <h1 class="text-xl flex items-center gap-1">
+        <BaseIcon :icon="LockKeyhole" :size="24" /> gpm
+      </h1>
       <div class="flex gap-2 items-center">
         <BaseButton
           size="sm"
@@ -484,7 +503,7 @@ onBeforeUnmount(() => {
           title="Create a new secret"
           @click="openCreate"
         >
-          <span aria-hidden="true">＋</span>
+          <BaseIcon :icon="Plus" />
         </BaseButton>
         <button
           @click="openHistory"
@@ -493,7 +512,7 @@ onBeforeUnmount(() => {
           :aria-label="badge.title"
           :title="badge.title"
         >
-          <span aria-hidden="true">{{ badge.glyph }}</span>
+          <BaseIcon :icon="badge.icon" />
         </button>
         <BaseButton
           size="sm"
@@ -501,7 +520,7 @@ onBeforeUnmount(() => {
           :title="pulling ? 'Cancel sync' : 'Sync with remote'"
           @click="toggleSync"
         >
-          <span aria-hidden="true">{{ pulling ? "✕" : "↻" }}</span>
+          <BaseIcon :icon="pulling ? X : RefreshCw" />
           {{ pulling ? "Cancel" : "Sync" }}
         </BaseButton>
         <BaseButton
@@ -510,7 +529,7 @@ onBeforeUnmount(() => {
           title="Generate passwords"
           @click="openGenerate"
         >
-          <span aria-hidden="true">🎲</span>
+          <BaseIcon :icon="Dices" />
         </BaseButton>
         <BaseButton
           size="sm"
@@ -518,7 +537,7 @@ onBeforeUnmount(() => {
           title="Settings"
           @click="openSettings"
         >
-          <span aria-hidden="true">⚙</span>
+          <BaseIcon :icon="Settings" />
         </BaseButton>
       </div>
     </header>
@@ -586,11 +605,19 @@ onBeforeUnmount(() => {
       class="text-center text-muted py-8"
     >
       <template v-if="search.trim() && !searchError">
-        <span class="text-4xl block mb-2">🔍</span>
+        <BaseIcon
+          :icon="Search"
+          :size="40"
+          class="block mb-2 mx-auto text-subtle"
+        />
         <p>No matches for "{{ search }}"</p>
       </template>
       <template v-else>
-        <span class="text-4xl block mb-2">🔒</span>
+        <BaseIcon
+          :icon="Lock"
+          :size="40"
+          class="block mb-2 mx-auto text-subtle"
+        />
         <p>No passwords yet</p>
         <p class="text-xs text-subtle mt-1">Sync, or check your repository</p>
       </template>
@@ -624,7 +651,7 @@ onBeforeUnmount(() => {
           aria-label="Copy password"
           title="Copy password"
         >
-          <span aria-hidden="true">📋</span>
+          <BaseIcon :icon="Copy" />
         </button>
       </li>
     </ul>

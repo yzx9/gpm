@@ -11,8 +11,10 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import { useLockState } from "@/composables";
+import { ArrowLeft, Copy, Dices } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -126,7 +128,13 @@ onBeforeUnmount(() => {
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex items-center gap-3 mb-6" role="banner">
-      <button @click="goBack" class="back-btn" aria-label="Back">← Back</button>
+      <button
+        @click="goBack"
+        class="back-btn inline-flex items-center gap-1"
+        aria-label="Back"
+      >
+        <BaseIcon :icon="ArrowLeft" /> Back
+      </button>
       <h1 class="text-lg flex-1">Generate password</h1>
     </header>
 
@@ -181,9 +189,10 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <BaseButton variant="primary" type="submit" :disabled="generating">{{
-        generating ? "Generating…" : "🎲 Generate"
-      }}</BaseButton>
+      <BaseButton variant="primary" type="submit" :disabled="generating">
+        <BaseIcon v-if="!generating" :icon="Dices" />
+        {{ generating ? "Generating…" : "Generate" }}
+      </BaseButton>
     </form>
 
     <ul v-if="generated.length" class="result-list" role="list">
@@ -195,7 +204,7 @@ onBeforeUnmount(() => {
           aria-label="Copy"
           @click="onCopyRow(pw)"
         >
-          📋
+          <BaseIcon :icon="Copy" />
         </button>
       </li>
     </ul>

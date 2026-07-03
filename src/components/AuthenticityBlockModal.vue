@@ -9,10 +9,11 @@
 
 <script setup lang="ts">
 import type { CommitSigInfo } from "@/api";
-import { statusGlyph, statusLabel } from "@/utils/signature";
+import { statusLabel } from "@/utils/signature";
 import { computed } from "vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
+import CommitSigIndicator from "./CommitSigIndicator.vue";
 
 const props = defineProps<{
   /** Non-null shows the modal. */
@@ -50,9 +51,7 @@ const untrustedIssue = computed(() =>
         :key="c.hash"
         class="flex items-center gap-2 text-sm"
       >
-        <span class="text-lg" aria-hidden="true">{{
-          statusGlyph(c.status)
-        }}</span>
+        <CommitSigIndicator :status="c.status" class="shrink-0" />
         <code class="text-xs text-muted">{{ c.short_hash }}</code>
         <span class="flex-1 truncate">{{ c.subject }}</span>
         <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>

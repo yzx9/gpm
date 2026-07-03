@@ -46,6 +46,7 @@ import {
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
@@ -55,6 +56,19 @@ import {
   useSecureScreen,
   useSecuritySettings,
 } from "@/composables";
+import {
+  ArrowLeft,
+  CircleCheck,
+  Copy,
+  History,
+  KeyRound,
+  Lock,
+  LockOpen,
+  Plus,
+  Settings,
+  Trash2,
+  TriangleAlert,
+} from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -641,9 +655,11 @@ onMounted(() => {
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-6" role="banner">
-      <h1 class="text-xl">⚙ Settings</h1>
+      <h1 class="text-xl flex items-center gap-1">
+        <BaseIcon :icon="Settings" :size="24" /> Settings
+      </h1>
       <BaseButton size="sm" aria-label="Back to entries" @click="goBack">
-        ← Back
+        <BaseIcon :icon="ArrowLeft" /> Back
       </BaseButton>
     </header>
 
@@ -710,14 +726,14 @@ onMounted(() => {
         <!-- Show public key -->
         <div class="flex flex-col gap-2">
           <BaseButton variant="action" @click="showPublicKey">
-            🔑 Show Public Key
+            <BaseIcon :icon="KeyRound" /> Show Public Key
           </BaseButton>
 
           <div v-if="showPublic" class="mt-2 flex flex-col gap-2">
             <div class="flex justify-between items-center">
               <span class="text-xs text-muted">Public key</span>
               <button class="btn-copy" @click="copyText(publicKey)">
-                📋 Copy
+                <BaseIcon :icon="Copy" /> Copy
               </button>
             </div>
             <pre class="key-display">{{ publicKey }}</pre>
@@ -727,17 +743,22 @@ onMounted(() => {
         <!-- Export private key -->
         <div class="flex flex-col gap-2 mt-3">
           <BaseButton variant="action-danger" @click="exportPrivateKey">
-            🔓 Export Private Key
+            <BaseIcon :icon="LockOpen" /> Export Private Key
           </BaseButton>
 
           <div v-if="showPrivate" class="mt-2 flex flex-col gap-2">
             <BaseAlert variant="danger">
-              ⚠ Private key is now visible. Copy it to a safe place and close
-              this screen.
+              <BaseIcon
+                :icon="TriangleAlert"
+                :size="14"
+                class="inline-block align-middle"
+              />
+              Private key is now visible. Copy it to a safe place and close this
+              screen.
             </BaseAlert>
             <div class="flex justify-end">
               <button class="btn-copy" @click="copyText(privateKey)">
-                📋 Copy
+                <BaseIcon :icon="Copy" /> Copy
               </button>
             </div>
             <pre class="key-display private-key-display">{{ privateKey }}</pre>
@@ -770,7 +791,7 @@ onMounted(() => {
             variant="action"
             @click="showSetPassphrase = true"
           >
-            🔒 Set Passphrase
+            <BaseIcon :icon="Lock" /> Set Passphrase
           </BaseButton>
           <div v-if="showSetPassphrase" class="flex flex-col gap-2">
             <BaseInput
@@ -792,15 +813,16 @@ onMounted(() => {
 
         <!-- Encrypted: change passphrase -->
         <template v-else>
-          <p class="text-xs text-muted mb-2">
-            ✓ Identity is passphrase-encrypted.
+          <p class="text-xs text-muted mb-2 flex items-center gap-1">
+            <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
+            Identity is passphrase-encrypted.
           </p>
           <BaseButton
             v-if="!showChangePassphrase"
             variant="action"
             @click="showChangePassphrase = true"
           >
-            🔑 Change Passphrase
+            <BaseIcon :icon="KeyRound" /> Change Passphrase
           </BaseButton>
           <div v-if="showChangePassphrase" class="flex flex-col gap-2">
             <BaseInput
@@ -893,12 +915,15 @@ onMounted(() => {
             :loading="appLockLoading"
             @click="onEnableAppLock"
           >
-            🔒 Enable App Lock
+            <BaseIcon :icon="Lock" /> Enable App Lock
           </BaseButton>
         </template>
 
         <template v-else>
-          <p class="text-xs text-muted mb-2">✓ App lock is enabled.</p>
+          <p class="text-xs text-muted mb-2 flex items-center gap-1">
+            <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
+            App lock is enabled.
+          </p>
           <BaseButton
             variant="action-danger"
             :disabled="appLockLoading"
@@ -1140,14 +1165,14 @@ onMounted(() => {
             variant="action"
             @click="onTrustHead"
           >
-            🔑 Trust this repo's signer (HEAD)
+            <BaseIcon :icon="KeyRound" /> Trust this repo's signer (HEAD)
           </BaseButton>
           <BaseButton
             v-if="!showAddKey"
             variant="action"
             @click="showAddKey = true"
           >
-            + Add a signing public key
+            <BaseIcon :icon="Plus" /> Add a signing public key
           </BaseButton>
           <div v-if="showAddKey" class="flex flex-col gap-2">
             <BaseTextarea
@@ -1184,7 +1209,7 @@ onMounted(() => {
             </div>
           </div>
           <BaseButton variant="action" @click="openHistory">
-            📜 View commit history &amp; signatures
+            <BaseIcon :icon="History" /> View commit history &amp; signatures
           </BaseButton>
         </div>
       </BaseCard>
@@ -1193,7 +1218,7 @@ onMounted(() => {
       <BaseCard as="section" border="danger">
         <h2 class="text-sm font-medium mb-2 text-danger">Danger Zone</h2>
         <BaseButton variant="action-danger" @click="resetConfig">
-          🗑 Reset All Data
+          <BaseIcon :icon="Trash2" /> Reset All Data
         </BaseButton>
         <p class="text-xs text-subtle mt-1">
           Remove all local data and configuration.

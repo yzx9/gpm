@@ -17,8 +17,10 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import { ArrowLeft, FileText, KeyRound, TriangleAlert } from "@lucide/vue";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { truncateKey } from "./url";
 
@@ -243,10 +245,10 @@ watch(identity, async (val) => {
          (the back-navigation test relies on this ordering). -->
     <button
       type="button"
-      class="self-start text-sm text-muted hover:text-accent transition-colors"
+      class="self-start text-sm text-muted hover:text-accent transition-colors inline-flex items-center gap-1"
       @click="goBack"
     >
-      ← Back
+      <BaseIcon :icon="ArrowLeft" /> Back
     </button>
 
     <h2 class="text-lg font-semibold">Select Recipient</h2>
@@ -317,7 +319,7 @@ watch(identity, async (val) => {
       size="sm"
       @click="useSshKeyForIdentity"
     >
-      🔑 Use my SSH key for decryption
+      <BaseIcon :icon="KeyRound" /> Use my SSH key for decryption
     </BaseButton>
 
     <div class="flex flex-col gap-1">
@@ -339,7 +341,12 @@ watch(identity, async (val) => {
       >
         <div class="flex items-center justify-between gap-2">
           <span class="min-w-0 truncate">
-            📄 {{ pickedFile.filename || "identity file" }} ·
+            <BaseIcon
+              :icon="FileText"
+              :size="14"
+              class="inline-block align-middle shrink-0"
+            />
+            {{ pickedFile.filename || "identity file" }} ·
             {{ pickedFile.key_type
             }}<span v-if="pickedFile.encrypted"> · encrypted</span>
           </span>
@@ -441,7 +448,12 @@ watch(identity, async (val) => {
         >Encrypts the identity file at rest. Recommended for Android.</small
       >
       <BaseAlert v-if="!passphrase.trim()" variant="warning">
-        ⚠ Without a passphrase, the identity is stored in plaintext.
+        <BaseIcon
+          :icon="TriangleAlert"
+          :size="14"
+          class="inline-block align-middle"
+        />
+        Without a passphrase, the identity is stored in plaintext.
       </BaseAlert>
     </div>
 

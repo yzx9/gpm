@@ -4,14 +4,23 @@
 
 <script setup lang="ts">
 import type { CommitSigStatus } from "@/api";
-import { signerFp, statusGlyph, statusLabel } from "@/utils/signature";
+import BaseIcon from "@/components/base/BaseIcon.vue";
+import { signerFp, statusLabel } from "@/utils/signature";
+import type { LucideIcon } from "@lucide/vue";
+import {
+  CircleAlert,
+  CircleCheck,
+  CircleDashed,
+  CircleQuestionMark,
+  CircleX,
+} from "@lucide/vue";
 
 type Tone = "success" | "warning" | "danger";
 
 const props = withDefaults(
   defineProps<{
     status: CommitSigStatus;
-    /** glyph: a coloured status glyph (default). banner: the full detail box
+    /** glyph: a coloured status icon (default). banner: the full detail box
      * with label + signer fingerprint. Layout classes (e.g. `mt-3`) can be
      * added by the caller via attribute fallthrough. */
     variant?: "glyph" | "banner";
@@ -21,12 +30,25 @@ const props = withDefaults(
   { variant: "glyph", ignored: false },
 );
 
-/** Map a status to the semantic tone that colours both the glyph and the banner.
+/** kind → icon. Circle set keeps the row of status indicators visually
+ * consistent. Every kind is listed explicitly so a future `CommitSigStatus`
+ * variant forces a compile error here, matching the exhaustive `tone()` switch
+ * and `statusLabel`. */
+const ICON: Record<CommitSigStatus["kind"], LucideIcon> = {
+  verified: CircleCheck,
+  untrusted_key: CircleAlert,
+  unsigned: CircleDashed,
+  bad_signature: CircleX,
+  unsupported_format: CircleQuestionMark,
+  unknown: CircleQuestionMark,
+};
+
+/** Map a status to the semantic tone that colours both the icon and the banner.
  * This is the single source of truth that used to be spread across the removed
  * `statusClass`/`statusBgClass` helpers (verified→green, bad_signature→red,
  * everything else→amber). Every kind is listed explicitly (no `default`) so a
  * future `CommitSigStatus` variant forces a compile error here, matching the
- * exhaustive switches in `statusGlyph`/`statusLabel`. */
+ * exhaustive `ICON` map and `statusLabel` switch. */
 function tone(status: CommitSigStatus): Tone {
   switch (status.kind) {
     case "verified":
@@ -55,21 +77,17 @@ const BANNER_TONE: Record<Tone, string> = {
 </script>
 
 <template>
-  <span
+  <BaseIcon
     v-if="props.variant === 'glyph'"
-    class="text-lg"
+    :icon="ICON[props.status.kind]"
     :class="GLYPH_TONE[tone(props.status)]"
-    aria-hidden="true"
-    >{{ statusGlyph(props.status) }}</span
-  >
+  />
   <div
     v-else
     class="p-2 rounded-sm text-sm flex items-center gap-2"
     :class="BANNER_TONE[tone(props.status)]"
   >
-    <span class="text-lg" aria-hidden="true">{{
-      statusGlyph(props.status)
-    }}</span>
+    <BaseIcon :icon="ICON[props.status.kind]" :size="18" />
     <div class="flex-1 min-w-0">
       <div class="font-medium">{{ statusLabel(props.status) }}</div>
       <div v-if="signerFp(props.status)" class="text-xs text-muted break-all">

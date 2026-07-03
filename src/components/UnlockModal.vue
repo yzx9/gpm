@@ -13,10 +13,12 @@ import {
   resetConfig,
   unlock,
 } from "@/api";
+import { LockKeyhole, ScanFace } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
+import BaseIcon from "./base/BaseIcon.vue";
 import BaseInput from "./base/BaseInput.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
@@ -116,7 +118,11 @@ onMounted(async () => {
 
 <template>
   <BaseModalShell variant="center" :z="60" aria-label="Unlock identity">
-    <h1 class="text-center text-display mb-1">🔐 gpm</h1>
+    <h1
+      class="text-center text-display mb-1 flex items-center justify-center gap-2"
+    >
+      <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
+    </h1>
     <p class="text-center text-muted text-sm mb-6">Identity is locked</p>
 
     <!-- Biometric notice (reset / stale / failure) -->
@@ -137,7 +143,7 @@ onMounted(async () => {
       :disabled="loading"
       @click="tryBiometricUnlock"
     >
-      <span v-if="!biometricLoading">👁</span>
+      <BaseIcon v-if="!biometricLoading" :icon="ScanFace" />
       <span>{{
         biometricLoading ? "Unlocking…" : "Unlock with biometric"
       }}</span>

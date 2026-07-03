@@ -3,13 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import {
-  isIgnorable,
-  isIssue,
-  signerFp,
-  statusGlyph,
-  statusLabel,
-} from "./signature";
+import { isIgnorable, isIssue, signerFp, statusLabel } from "./signature";
 
 describe("statusLabel", () => {
   it("labels each kind, interpolating format for unsupported_format", () => {
@@ -23,19 +17,6 @@ describe("statusLabel", () => {
       "Unsupported (x509)",
     );
     expect(statusLabel({ kind: "unknown" })).toBe("Unknown");
-  });
-});
-
-describe("statusGlyph", () => {
-  it("returns a glyph per kind", () => {
-    expect(statusGlyph({ kind: "verified", signer_fp: "fp" })).toBe("✓");
-    expect(statusGlyph({ kind: "untrusted_key", signer_fp: "fp" })).toBe("⚠");
-    expect(statusGlyph({ kind: "unsigned" })).toBe("—");
-    expect(statusGlyph({ kind: "bad_signature" })).toBe("⛔");
-    expect(statusGlyph({ kind: "unsupported_format", format: "x509" })).toBe(
-      "?",
-    );
-    expect(statusGlyph({ kind: "unknown" })).toBe("?");
   });
 });
 

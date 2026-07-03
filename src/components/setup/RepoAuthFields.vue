@@ -6,8 +6,10 @@
 import type { AppError } from "@/api";
 import { generateSshKey } from "@/api";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import { CircleCheck, Copy, KeyRound } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
 
@@ -182,15 +184,20 @@ async function copyPublicKey() {
         :disabled="disabled"
         @click="generateKey"
       >
-        {{ generating ? "Generating..." : "🔑 Generate SSH Key" }}
+        <BaseIcon v-if="!generating" :icon="KeyRound" />
+        {{ generating ? "Generating..." : "Generate SSH Key" }}
       </BaseButton>
 
       <!-- Public key display after generation -->
       <div v-if="generatedPublicKey" class="flex flex-col gap-2">
         <div class="flex items-center justify-between">
-          <span class="text-sm font-medium text-success">✓ Public Key</span>
+          <span
+            class="text-sm font-medium text-success inline-flex items-center gap-1"
+          >
+            <BaseIcon :icon="CircleCheck" :size="14" /> Public Key
+          </span>
           <button type="button" class="btn-copy" @click="copyPublicKey">
-            📋 Copy
+            <BaseIcon :icon="Copy" /> Copy
           </button>
         </div>
         <pre class="public-key-display" @click="copyPublicKey">{{

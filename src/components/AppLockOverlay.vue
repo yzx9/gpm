@@ -6,10 +6,12 @@
 import type { AppLockError } from "@/api";
 import { appUnlock, asAppLockError, resetConfig } from "@/api";
 import { useAppLockState } from "@/composables";
+import { LockKeyhole, ScanFace } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
+import BaseIcon from "./base/BaseIcon.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
 const router = useRouter();
@@ -71,7 +73,11 @@ onMounted(() => {
 
 <template>
   <BaseModalShell variant="center" :z="70" aria-label="App locked">
-    <h1 class="text-center text-display mb-1">🔐 gpm</h1>
+    <h1
+      class="text-center text-display mb-1 flex items-center justify-center gap-2"
+    >
+      <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
+    </h1>
     <p class="text-center text-muted text-sm mb-6">App is locked</p>
 
     <BaseAlert v-if="notice" variant="danger" role="status" class="mb-4">
@@ -79,7 +85,7 @@ onMounted(() => {
     </BaseAlert>
 
     <BaseButton variant="primary" :loading="loading" @click="tryUnlock">
-      <span v-if="!loading">👁</span>
+      <BaseIcon v-if="!loading" :icon="ScanFace" />
       <span>{{ loading ? "Unlocking…" : "Unlock with biometric" }}</span>
     </BaseButton>
 
