@@ -28,6 +28,7 @@ import {
   useOverlayBackHandler,
   useSecretReveal,
   useSecuritySettings,
+  useToast,
 } from "@/composables";
 import { ArrowLeft, Copy, Eye } from "@lucide/vue";
 import { computed, ref } from "vue";
@@ -36,6 +37,7 @@ import { useRoute, useRouter } from "vue-router";
 const route = useRoute();
 const router = useRouter();
 const { onLock, runWithAuth } = useLockState();
+const { toast } = useToast();
 
 const entryPath = decodeURIComponent(
   Array.isArray(route.params.pathMatch)
@@ -51,9 +53,7 @@ const { password, notes, revealed, reveal, clear } = useSecretReveal();
 const { viewClearSecs } = useSecuritySettings();
 const loading = ref(false);
 const error = ref("");
-const toast = ref("");
 const deleting = ref(false);
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Edit mode ──────────────────────────────────────────────────────────────
 // Edit holds the working plaintext in plain refs (not the reveal composable) so
@@ -89,15 +89,6 @@ useOverlayBackHandler(
   },
 );
 
-function showToast(message: string) {
-  toast.value = message;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-    toastTimer = null;
-  }, 3000);
-}
-
 async function showPassword() {
   loading.value = true;
   error.value = "";
@@ -118,7 +109,7 @@ async function copyPassword() {
   try {
     const result = await runWithAuth(() => copyPasswordCmd(entryPath));
     clear();
-    showToast(
+    toast.success(
       `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
     );
   } catch (e) {
@@ -143,7 +134,7 @@ async function deleteSecret() {
     const outcome = await deleteSecretCmd(entryName);
     if (outcome.kind === "written") {
       clear();
-      showToast(`✓ Deleted (commit ${outcome.commit})`);
+      toast.success(`✓ Deleted (commit ${outcome.commit})`);
       router.push({ name: "entries" });
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The delete's push lost a race — surface the divergence. The local delete
@@ -238,7 +229,7 @@ async function saveEdit() {
   try {
     const outcome = await editSecret(entryName, editBody.value);
     if (outcome.kind === "written") {
-      showToast(`✓ Saved (commit ${outcome.commit})`);
+      toast.success(`✓ Saved (commit ${outcome.commit})`);
       // Exit to the read-only view; the user can Show to verify. Don't
       // auto-reveal the password post-save.
       exitEdit();
@@ -291,9 +282,9 @@ async function resolveDivergence(choice: DivergenceChoice) {
     divergence.value = null;
     exitEdit();
     if (choice === "adopt_remote") {
-      showToast("Adopted the remote version");
+      toast.info("Adopted the remote version");
     } else {
-      showToast(`✓ Kept mine (commit ${result.head})`);
+      toast.success(`✓ Kept mine (commit ${result.head})`);
     }
     router.push({ name: "entries" });
   } catch (e) {
@@ -301,7 +292,7 @@ async function resolveDivergence(choice: DivergenceChoice) {
     const appError = e as AppError;
     if (appError?.code === "PULL_FF_FAILED") {
       divergence.value = null;
-      showToast("The remote changed since you reviewed this — rechecking…");
+      toast.info("The remote changed since you reviewed this — rechecking…");
       router.push({ name: "entries" });
     } else {
       divergeError.value =
@@ -356,10 +347,6 @@ function handleKeydown(e: KeyboardEvent) {
         Check your age identity and try again
       </span>
     </BaseAlert>
-    <BaseAlert v-if="toast" variant="success" class="mb-4">
-      {{ toast }}
-    </BaseAlert>
-
     <!-- Read-only view -->
     <div v-if="!editing">
       <div class="flex gap-3 mb-6">

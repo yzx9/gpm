@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the "Reset all data" button from the unlock and app-lock dialogs — too dangerous for a screen you reach often. Reset now lives only in Settings → Danger Zone. If all your fingerprints are removed and gpm can no longer unlock its store, the app-lock screen tells you to clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again.
 - The unlock dialog can now be dismissed with the × button, a backdrop tap, or the Android back button — even when the app is hard-locked. Dismissing hides the dialog without unlocking: your identity stays locked and secrets stay wiped, but you can read the entry list and open Settings without typing your passphrase first. The next action that needs the identity prompts you again.
 - gpm's buttons, status indicators, and empty states now use clean vector icons instead of emoji, so they render consistently and sharply on every device instead of varying with the platform's emoji set (Android vs desktop).
+- Transient messages — "✓ Copied", save/delete results, copy failures — now appear in one consistent style at the top of the screen. Several can stack up instead of a new one replacing the last, and errors are now visually distinct from successes.
 
 ## [v0.8.0] - 2026-07-03
 

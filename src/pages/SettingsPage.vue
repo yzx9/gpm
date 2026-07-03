@@ -51,11 +51,11 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import BaseToast from "@/components/base/BaseToast.vue";
 import {
   useLockState,
   useSecureScreen,
   useSecuritySettings,
+  useToast,
 } from "@/composables";
 import {
   ArrowLeft,
@@ -75,6 +75,7 @@ import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock } = useLockState();
+const { toast } = useToast();
 
 const config = ref<RepoConfig | null>(null);
 const loading = ref(false);
@@ -83,8 +84,6 @@ const publicKey = ref("");
 const showPublic = ref(false);
 const privateKey = ref("");
 const showPrivate = ref(false);
-const toast = ref("");
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 const isSsh = ref(false);
 
@@ -209,15 +208,6 @@ onLock(() => {
   appLockPassphrase.value = "";
 });
 
-function showToast(message: string) {
-  toast.value = message;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-    toastTimer = null;
-  }, 3000);
-}
-
 async function loadConfig() {
   loading.value = true;
   error.value = "";
@@ -256,7 +246,7 @@ async function onSaveCommitIdentity() {
     config.value = updated;
     commitName.value = updated.commit_user_name ?? "";
     commitEmail.value = updated.commit_user_email ?? "";
-    showToast("Commit identity saved");
+    toast.success("Commit identity saved");
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to save commit identity";
@@ -268,7 +258,7 @@ async function onSaveCommitIdentity() {
 async function onSecureScreenChange(enabled: boolean) {
   const ok = await setSecureScreen(enabled);
   if (!ok) {
-    showToast("Couldn't save screen-capture setting — try again");
+    toast.danger("Couldn't save screen-capture setting — try again");
     return;
   }
   // Disarming protection while a secret is still on screen would expose it, so
@@ -279,7 +269,7 @@ async function onSecureScreenChange(enabled: boolean) {
     showPublic.value = false;
     showPrivate.value = false;
   }
-  showToast(
+  toast.success(
     enabled
       ? "Screen capture blocked on sensitive pages"
       : "Screen capture allowed",
@@ -382,9 +372,9 @@ async function exportPrivateKey() {
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
-    showToast("✓ Copied to clipboard");
+    toast.success("✓ Copied to clipboard");
   } catch {
-    showToast("Copy failed");
+    toast.danger("Copy failed");
   }
 }
 
@@ -400,7 +390,7 @@ async function onSetPassphrase() {
     isIdentityEncrypted.value = true;
     showSetPassphrase.value = false;
     newPassphrase.value = "";
-    showToast("✓ Passphrase set — identity is now encrypted");
+    toast.success("✓ Passphrase set — identity is now encrypted");
     // Setting a passphrase invalidates any sealed biometric passphrase.
     biometricEnabled.value = await isBiometricUnlockEnabled();
   } catch (e) {
@@ -423,7 +413,7 @@ async function onChangePassphrase() {
     showChangePassphrase.value = false;
     oldPassphrase.value = "";
     newPassphrase.value = "";
-    showToast("✓ Passphrase changed");
+    toast.success("✓ Passphrase changed");
     // Changing the passphrase invalidates any sealed biometric passphrase.
     biometricEnabled.value = await isBiometricUnlockEnabled();
   } catch (e) {
@@ -445,7 +435,7 @@ async function onEnableBiometric() {
     await enableBiometricUnlock(biometricPassphrase.value);
     biometricEnabled.value = true;
     biometricPassphrase.value = "";
-    showToast("✓ Biometric unlock enabled");
+    toast.success("✓ Biometric unlock enabled");
   } catch (e) {
     const err = e as BiometricError;
     if (err.code === "WRONG_PASSPHRASE") {
@@ -463,7 +453,7 @@ async function onEnableBiometric() {
 async function onDisableBiometric() {
   await disableBiometricUnlock();
   biometricEnabled.value = false;
-  showToast("Biometric unlock disabled");
+  toast.success("Biometric unlock disabled");
 }
 
 // ── App-launch biometric gate (RFC 0028) ─────────────────────────────────
@@ -473,7 +463,7 @@ async function onEnableAppLock() {
   try {
     await enableBiometricAppLock();
     appLockEnabled.value = true;
-    showToast("✓ App lock enabled");
+    toast.success("✓ App lock enabled");
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
     if (err.code === "BIOMETRIC_CANCELLED") {
@@ -494,7 +484,7 @@ async function onDisableAppLock() {
     appLockEnabled.value = false;
     // Disabling the gate makes identity auto-unlock moot.
     identityAutoUnlockEnabled.value = false;
-    showToast("App lock disabled");
+    toast.success("App lock disabled");
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
     if (err.code === "BIOMETRIC_CANCELLED") {
@@ -518,7 +508,7 @@ async function onEnableIdentityAutoUnlock() {
     await enableIdentityAutoUnlock(appLockPassphrase.value);
     identityAutoUnlockEnabled.value = true;
     appLockPassphrase.value = "";
-    showToast("✓ Identity auto-unlock enabled");
+    toast.success("✓ Identity auto-unlock enabled");
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
     if (err.code === "WRONG_PASSPHRASE") {
@@ -534,7 +524,7 @@ async function onEnableIdentityAutoUnlock() {
 async function onDisableIdentityAutoUnlock() {
   await disableIdentityAutoUnlock();
   identityAutoUnlockEnabled.value = false;
-  showToast("Identity auto-unlock disabled");
+  toast.success("Identity auto-unlock disabled");
 }
 
 // ── Repository authenticity ──────────────────────────────────────────────
@@ -582,7 +572,7 @@ async function onAddKey() {
     newPublicKey.value = "";
     newKeyLabel.value = "";
     showAddKey.value = false;
-    showToast("✓ Trusted signing key added");
+    toast.success("✓ Trusted signing key added");
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
@@ -597,7 +587,7 @@ async function onRemoveKey(fingerprint: string) {
   authLoading.value = true;
   try {
     await removeTrustedKey(fingerprint);
-    showToast("Trusted key removed");
+    toast.success("Trusted key removed");
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
@@ -616,7 +606,7 @@ async function onTrustHead() {
   authLoading.value = true;
   try {
     await trustHeadSigner(label.trim() || "signer");
-    showToast("✓ HEAD signer trusted");
+    toast.success("✓ HEAD signer trusted");
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
@@ -637,8 +627,8 @@ function openHistory() {
 const RESET_CONFIRM_WORD = "RESET";
 const resetOpen = ref(false);
 const resetConfirmText = ref("");
-const resetReady = computed(() =>
-  resetConfirmText.value.trim().toUpperCase() === RESET_CONFIRM_WORD,
+const resetReady = computed(
+  () => resetConfirmText.value.trim().toUpperCase() === RESET_CONFIRM_WORD,
 );
 
 function resetConfig() {
@@ -1242,9 +1232,6 @@ onMounted(() => {
         </p>
       </BaseCard>
     </div>
-
-    <!-- Toast -->
-    <BaseToast v-if="toast" variant="success">{{ toast }}</BaseToast>
 
     <!-- Reset confirmation: type RESET to confirm (z=80 stacks above UnlockModal). -->
     <BaseModalShell

@@ -13,13 +13,14 @@ import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
-import { useLockState } from "@/composables";
+import { useLockState, useToast } from "@/composables";
 import { ArrowLeft, Copy, Dices } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock } = useLockState();
+const { toast } = useToast();
 
 // ── Generator options ─────────────────────────────────────────────────────
 const mode = ref<GenerateMode>("random");
@@ -30,8 +31,6 @@ const count = ref(10);
 const generated = ref<string[]>([]);
 const generating = ref(false);
 const error = ref("");
-const toast = ref("");
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
 // Bumped on every generate and on lock; an in-flight generate whose token no
 // longer matches is stale and must not write its result into the list.
 let generateToken = 0;
@@ -57,15 +56,6 @@ const lenPayload = computed(() => {
 
 function goBack() {
   router.push({ name: "entries" });
-}
-
-function showToast(message: string) {
-  toast.value = message;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-    toastTimer = null;
-  }, 3000);
 }
 
 /** Generate a batch of passwords via the backend (CSPRNG). */
@@ -100,10 +90,10 @@ async function onGenerate() {
 async function onCopyRow(pw: string) {
   try {
     await copyGeneratedPassword(pw);
-    showToast("Copied — clipboard clears in 30s");
+    toast.success("Copied — clipboard clears in 30s");
   } catch (e) {
     const appError = e as AppError;
-    showToast(appError?.message || "Could not copy");
+    toast.danger(appError?.message || "Could not copy");
   }
 }
 
@@ -117,10 +107,9 @@ onLock(() => {
 
 onBeforeUnmount(() => {
   // Invalidate any in-flight generate so a late resolve can't repopulate the
-  // batch after unmount (mirrors onLock), then clear timers + the batch.
+  // batch after unmount (mirrors onLock).
   generateToken++;
   generating.value = false;
-  if (toastTimer) clearTimeout(toastTimer);
   generated.value = [];
 });
 </script>
@@ -141,9 +130,6 @@ onBeforeUnmount(() => {
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
       error
     }}</BaseAlert>
-    <BaseAlert v-if="toast" variant="success" class="mb-3">
-      {{ toast }}
-    </BaseAlert>
 
     <form class="controls" @submit.prevent="onGenerate">
       <div class="flex flex-col gap-1">

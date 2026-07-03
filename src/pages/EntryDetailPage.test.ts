@@ -148,7 +148,7 @@ describe("EntryDetailPage", () => {
         entry_name: "prod",
         cleared_after_secs: 45,
       });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper
         .find('button[aria-label="Copy password to clipboard"]')
         .trigger("click");
@@ -157,7 +157,11 @@ describe("EntryDetailPage", () => {
       expect(invoke).toHaveBeenCalledWith("copy_password", {
         entryPath: "servers/prod.age",
       });
-      expect(wrapper.text()).toContain("✓ Copied prod (45s auto-clear)");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("✓ Copied prod (45s auto-clear)"),
+        ),
+      ).toBe(true);
     });
 
     it("swallows AUTH_CANCELLED silently on copyPassword when the auth overlay is dismissed", async () => {
@@ -203,18 +207,20 @@ describe("EntryDetailPage", () => {
         entry_name: "prod",
         cleared_after_secs: 45,
       });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper
         .find('button[aria-label="Copy password to clipboard"]')
         .trigger("click");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("✓ Copied prod");
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("✓ Copied prod")),
+      ).toBe(true);
 
       vi.advanceTimersByTime(3000);
       await flushPromises();
 
-      expect(wrapper.text()).not.toContain("✓ Copied prod");
+      expect(toast.toasts.value).toHaveLength(0);
     });
   });
 
@@ -301,11 +307,15 @@ describe("EntryDetailPage", () => {
         kind: "written",
         commit: "abc1234",
       });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("✓ Deleted (commit abc1234)");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("✓ Deleted (commit abc1234)"),
+        ),
+      ).toBe(true);
       expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
     });
 
@@ -499,14 +509,18 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce({ password: "s3cret", notes: "" })
         .mockResolvedValueOnce({ kind: "written", commit: "abc1234" });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper.find(editBtn()).trigger("click");
       await flushPromises();
       await wrapper.find("#e-password").setValue("newpass");
       await wrapper.find("form").trigger("submit");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("✓ Saved (commit abc1234)");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("✓ Saved (commit abc1234)"),
+        ),
+      ).toBe(true);
       expect(mockPush).not.toHaveBeenCalled();
       // Exited edit mode — the edit form is gone.
       expect(wrapper.find("#e-password").exists()).toBe(false);
@@ -534,7 +548,7 @@ describe("EntryDetailPage", () => {
             blocked: false,
           },
         });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper.find(editBtn()).trigger("click");
       await flushPromises();
       await wrapper.find("#e-password").setValue("newpass");
@@ -559,7 +573,11 @@ describe("EntryDetailPage", () => {
         expectedRemoteOid: "abc123",
         choice: "keep_mine",
       });
-      expect(wrapper.text()).toContain("✓ Kept mine (commit def5678)");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("✓ Kept mine (commit def5678)"),
+        ),
+      ).toBe(true);
       expect(wrapper.find("#e-password").exists()).toBe(false);
     });
 
@@ -702,7 +720,7 @@ describe("EntryDetailPage", () => {
           other_changed_files: [],
         })
         .mockRejectedValueOnce({ code: "PULL_FF_FAILED", message: "moved" });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper.find(editBtn()).trigger("click");
       await flushPromises();
       await wrapper.find("#e-password").setValue("newpass");
@@ -721,9 +739,11 @@ describe("EntryDetailPage", () => {
       await flushPromises();
 
       // The remote moved past the reviewed tip since the modal opened.
-      expect(wrapper.text()).toContain(
-        "remote changed since you reviewed this",
-      );
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("remote changed since you reviewed this"),
+        ),
+      ).toBe(true);
       expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
     });
   });

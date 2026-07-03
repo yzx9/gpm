@@ -25,9 +25,9 @@ async function mountPage(handlers: Record<string, () => unknown>) {
     if (h) return Promise.resolve(h());
     return Promise.resolve(undefined);
   }) as typeof invoke);
-  const { wrapper } = mountWithApp(GeneratePasswordPage);
+  const app = mountWithApp(GeneratePasswordPage);
   await flushPromises();
-  return wrapper;
+  return app;
 }
 
 describe("GeneratePasswordPage", () => {
@@ -36,7 +36,9 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("generates 10 passwords by default", async () => {
-    const wrapper = await mountPage({ generate_password_batch: () => ["a"] });
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => ["a"],
+    });
     await wrapper.find("form").trigger("submit");
     await flushPromises();
 
@@ -47,7 +49,7 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("renders one row per generated password", async () => {
-    const wrapper = await mountPage({
+    const { wrapper } = await mountPage({
       generate_password_batch: () => ["aa", "bb", "cc"],
     });
     await wrapper.find("#g-count").setValue("3");
@@ -62,7 +64,9 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("the style selector changes which generator runs", async () => {
-    const wrapper = await mountPage({ generate_password_batch: () => ["x"] });
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => ["x"],
+    });
     await wrapper.find('select[aria-label="Password style"]').setValue("xkcd");
     await wrapper.find("form").trigger("submit");
     await flushPromises();
@@ -74,7 +78,9 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("random mode pins an exact length via min == max", async () => {
-    const wrapper = await mountPage({ generate_password_batch: () => ["x"] });
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => ["x"],
+    });
     // Defaults: mode random, length 24.
     await wrapper.find("form").trigger("submit");
     await flushPromises();
@@ -86,7 +92,9 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("a chosen length flows through to the request", async () => {
-    const wrapper = await mountPage({ generate_password_batch: () => ["x"] });
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => ["x"],
+    });
     await wrapper.find("#g-length").setValue("32");
     await wrapper.find("form").trigger("submit");
     await flushPromises();
@@ -98,7 +106,9 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("xkcd hides the length control and sends no length", async () => {
-    const wrapper = await mountPage({ generate_password_batch: () => ["x"] });
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => ["x"],
+    });
     await wrapper.find('select[aria-label="Password style"]').setValue("xkcd");
     await flushPromises();
 
@@ -114,7 +124,7 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("copying a row invokes copy_generated_password and toasts", async () => {
-    const wrapper = await mountPage({
+    const { wrapper, toast } = await mountPage({
       generate_password_batch: () => ["topsecret"],
       copy_generated_password: () => undefined,
     });
@@ -127,7 +137,9 @@ describe("GeneratePasswordPage", () => {
     expect(invoke).toHaveBeenCalledWith("copy_generated_password", {
       text: "topsecret",
     });
-    expect(wrapper.text()).toContain("Copied");
+    expect(toast.toasts.value.some((t) => t.message.includes("Copied"))).toBe(
+      true,
+    );
   });
 
   it("a generate error shows the message and renders no rows", async () => {
@@ -196,7 +208,7 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("Back returns to the entry list", async () => {
-    const wrapper = await mountPage({});
+    const { wrapper } = await mountPage({});
     await wrapper.find('button[aria-label="Back"]').trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
   });

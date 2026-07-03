@@ -319,7 +319,7 @@ describe("SettingsPage", () => {
     it("copies public key to clipboard", async () => {
       when("get_config", sshConfig);
       when("get_ssh_public_key", { public_key: "ssh-ed25519 AAAAtest" });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(SettingsPage);
       await flushPromises();
 
       const showPublicBtn = wrapper
@@ -335,13 +335,17 @@ describe("SettingsPage", () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
         "ssh-ed25519 AAAAtest",
       );
-      expect(wrapper.text()).toContain("✓ Copied to clipboard");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("✓ Copied to clipboard"),
+        ),
+      ).toBe(true);
     });
 
     it("auto-clears toast after 3 seconds", async () => {
       when("get_config", sshConfig);
       when("get_ssh_public_key", { public_key: "ssh-ed25519 AAAAtest" });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(SettingsPage);
       await flushPromises();
 
       const showPublicBtn = wrapper
@@ -354,12 +358,14 @@ describe("SettingsPage", () => {
       await copyButtons[0].trigger("click");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("✓ Copied");
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("✓ Copied")),
+      ).toBe(true);
 
       vi.advanceTimersByTime(3000);
       await flushPromises();
 
-      expect(wrapper.text()).not.toContain("✓ Copied");
+      expect(toast.toasts.value).toHaveLength(0);
     });
   });
 
@@ -514,7 +520,7 @@ describe("SettingsPage", () => {
       when("is_biometric_available", true);
       when("is_biometric_unlock_enabled", false);
       when("enable_biometric_unlock", undefined);
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(SettingsPage);
       await flushPromises();
 
       const bioInput = wrapper.find('input[type="password"]');
@@ -529,7 +535,11 @@ describe("SettingsPage", () => {
       expect(invoke).toHaveBeenCalledWith("enable_biometric_unlock", {
         passphrase: "my-pass",
       });
-      expect(wrapper.text()).toContain("Biometric unlock enabled");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("Biometric unlock enabled"),
+        ),
+      ).toBe(true);
     });
 
     it("shows an error on a wrong passphrase when enabling", async () => {

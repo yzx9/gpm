@@ -113,7 +113,7 @@ router.beforeEach(async (to, from) => {
   const cover = !!(to.meta?.secure || from.meta?.secure);
   const secureOk = await secureScreenState.raiseSecureForRoute(cover);
   if (to.meta?.secure && !secureOk) {
-    toastState.globalToast("Couldn't secure screen — try again");
+    toastState.toast.danger("Couldn't secure screen — try again");
     return false;
   }
   return true;

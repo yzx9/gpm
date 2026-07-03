@@ -121,9 +121,9 @@ async function mountPage(
     if (cmd === "list_create_presets") return Promise.resolve(presets);
     return Promise.resolve(undefined);
   }) as typeof invoke);
-  const { wrapper } = mountWithApp(CreatePage);
+  const app = mountWithApp(CreatePage);
   await flushPromises(); // loadPresets on mount
-  return wrapper;
+  return app;
 }
 
 async function fillWebsiteForm(wrapper: ReturnType<typeof mount>) {
@@ -144,7 +144,7 @@ describe("CreatePage", () => {
   });
 
   it("creates a secret from a preset and navigates to the list", async () => {
-    const wrapper = await mountPage({
+    const { wrapper } = await mountPage({
       create_from_preset_secret: () => ({ kind: "written", commit: "abc1234" }),
     });
 
@@ -160,7 +160,7 @@ describe("CreatePage", () => {
   });
 
   it("creates a custom secret via create_secret", async () => {
-    const wrapper = await mountPage({
+    const { wrapper } = await mountPage({
       create_secret: () => ({ kind: "written", commit: "c1" }),
     });
 
@@ -202,7 +202,7 @@ describe("CreatePage", () => {
   });
 
   it("on divergence, Adopt remote adopts and navigates", async () => {
-    const wrapper = await mountPage({
+    const { wrapper } = await mountPage({
       create_from_preset_secret: () => ({
         kind: "needs_divergence_resolve",
         local_ahead: 1,
@@ -248,7 +248,7 @@ describe("CreatePage", () => {
   });
 
   it("on divergence, Keep mine publishes and navigates", async () => {
-    const wrapper = await mountPage({
+    const { wrapper, toast } = await mountPage({
       create_from_preset_secret: () => ({
         kind: "needs_divergence_resolve",
         local_ahead: 1,
@@ -288,12 +288,16 @@ describe("CreatePage", () => {
       expectedRemoteOid: "abc123",
       choice: "keep_mine",
     });
-    expect(wrapper.text()).toContain("✓ Kept mine (commit def5678)");
+    expect(
+      toast.toasts.value.some((t) =>
+        t.message.includes("✓ Kept mine (commit def5678)"),
+      ),
+    ).toBe(true);
     expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
   });
 
   it("cancel dismisses the divergence modal without resolving or navigating", async () => {
-    const wrapper = await mountPage({
+    const { wrapper } = await mountPage({
       create_from_preset_secret: () => ({
         kind: "needs_divergence_resolve",
         local_ahead: 1,
@@ -325,7 +329,9 @@ describe("CreatePage", () => {
   });
 
   it("fills the password field with the generated value", async () => {
-    const wrapper = await mountPage({ generate_password: () => "GENPW123" });
+    const { wrapper } = await mountPage({
+      generate_password: () => "GENPW123",
+    });
     await wrapper.findAll(".type-card")[0]!.trigger("click"); // Website
     await wrapper
       .find('button[aria-label="Generate password"]')
@@ -345,7 +351,7 @@ describe("CreatePage", () => {
   });
 
   it("a PIN field has no mode selector and generates over its digit charset", async () => {
-    const wrapper = await mountPage({ generate_password: () => "428917" }, [
+    const { wrapper } = await mountPage({ generate_password: () => "428917" }, [
       PIN_PRESET,
     ]);
     await wrapper.findAll(".type-card")[0]!.trigger("click"); // PIN
@@ -373,7 +379,7 @@ describe("CreatePage", () => {
   });
 
   it("the mode selector changes which generator runs", async () => {
-    const wrapper = await mountPage({
+    const { wrapper } = await mountPage({
       generate_password: () => "correct horse battery staple",
     });
     await wrapper.findAll(".type-card")[0]!.trigger("click");
@@ -399,7 +405,7 @@ describe("CreatePage", () => {
       }
       return Promise.resolve(undefined);
     }) as typeof invoke);
-    const { wrapper } = mountWithApp(CreatePage);
+    const { wrapper, toast } = mountWithApp(CreatePage);
     await flushPromises();
 
     await wrapper.findAll(".type-card")[0]!.trigger("click");
@@ -409,7 +415,9 @@ describe("CreatePage", () => {
       .trigger("click");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("RNG down");
+    expect(toast.toasts.value.some((t) => t.message.includes("RNG down"))).toBe(
+      true,
+    );
     expect(
       (wrapper.find("#f-password").element as HTMLInputElement).value,
     ).toBe("keepme");
@@ -420,7 +428,9 @@ describe("CreatePage", () => {
     const genPromise = new Promise<string>((r) => {
       resolveGen = r;
     });
-    const wrapper = await mountPage({ generate_password: () => genPromise });
+    const { wrapper } = await mountPage({
+      generate_password: () => genPromise,
+    });
     await fillWebsiteForm(wrapper); // makes canSubmit true
     const submit = () => wrapper.find('form button[type="submit"]');
 
@@ -438,7 +448,7 @@ describe("CreatePage", () => {
   });
 
   it("toggles a password field between masked and revealed", async () => {
-    const wrapper = await mountPage({ generate_password: () => "s3cr3t" });
+    const { wrapper } = await mountPage({ generate_password: () => "s3cr3t" });
     await wrapper.findAll(".type-card")[0]!.trigger("click"); // Website
     const input = wrapper.find("#f-password");
 

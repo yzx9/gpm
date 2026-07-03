@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from "vue";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
-import BaseToast from "./components/base/BaseToast.vue";
+import ToastHost from "./components/ToastHost.vue";
 import UnlockModal from "./components/UnlockModal.vue";
 import {
   useAppLockState,
@@ -13,7 +13,6 @@ import {
   useOverlayBackHandler,
   useSecureScreen,
   useSecuritySettings,
-  useToast,
 } from "./composables";
 import { applySafeAreaInsets } from "./utils/safe-area";
 
@@ -21,7 +20,6 @@ const { overlayUp, ready, init, dismissOverlay } = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
 const { loadSecuritySettings } = useSecuritySettings();
 const { initSecureScreen, setSecureOverlay } = useSecureScreen();
-const { toast } = useToast();
 
 // The global unlock overlay collects the identity passphrase — a credential.
 // Force FLAG_SECURE on whenever it's up, even on an otherwise-capturable route
@@ -55,6 +53,9 @@ onMounted(() => {
 
 <template>
   <div class="app-shell">
+    <!-- Unified toast host: top-of-shell, in-flow. Renders the useToast queue
+         once for every caller (pages + app-shell code like the router guard). -->
+    <ToastHost />
     <router-view />
     <!--
       App-launch biometric gate overlay: shown over everything while the
@@ -75,7 +76,5 @@ onMounted(() => {
       v-if="ready && overlayUp && !appLocked"
       @close="dismissOverlay"
     />
-    <!-- Global toast: app-shell messages (e.g. a screen-secure abort). -->
-    <BaseToast v-if="toast" variant="danger">{{ toast }}</BaseToast>
   </div>
 </template>

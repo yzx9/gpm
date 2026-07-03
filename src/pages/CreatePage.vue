@@ -31,6 +31,7 @@ import {
   isAuthCancelled,
   useLockState,
   useOverlayBackHandler,
+  useToast,
 } from "@/composables";
 import { ArrowLeft, Dices, Eye, EyeOff } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -38,6 +39,7 @@ import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock, runWithAuth } = useLockState();
+const { toast } = useToast();
 
 // ── Presets + step ────────────────────────────────────────────────────────
 const presets = ref<CreatePreset[]>([]);
@@ -66,8 +68,6 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 // ── Submission state ──────────────────────────────────────────────────────
 const submitting = ref(false);
 const error = ref("");
-const toast = ref("");
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Divergence modal (save-triggered) ─────────────────────────────────────
 // The modal owns its own confirm step; this page tracks the divergence payload,
@@ -98,15 +98,6 @@ useOverlayBackHandler(
   },
 );
 
-function showToast(message: string) {
-  toast.value = message;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-    toastTimer = null;
-  }, 3000);
-}
-
 /** Generate a password for a generatable field via the backend (CSPRNG). */
 async function onGeneratePassword(f: PresetField) {
   const myToken = ++generateToken;
@@ -125,7 +116,7 @@ async function onGeneratePassword(f: PresetField) {
   } catch (e) {
     if (myToken !== generateToken) return;
     const appError = e as AppError;
-    showToast(appError?.message || "Could not generate a password");
+    toast.danger(appError?.message || "Could not generate a password");
   } finally {
     if (myToken === generateToken) generating.value = false;
   }
@@ -228,7 +219,7 @@ async function submit() {
     );
 
     if (outcome.kind === "written") {
-      showToast(`✓ Saved (commit ${outcome.commit})`);
+      toast.success(`✓ Saved (commit ${outcome.commit})`);
       router.push({ name: "entries" });
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The push lost a race — surface the divergence for the user to resolve.
@@ -283,10 +274,10 @@ async function resolveDivergence(choice: DivergenceChoice) {
         : await resolveSyncDivergence(expectedRemoteOid, choice);
     divergence.value = null;
     if (choice === "adopt_remote") {
-      showToast("Adopted the remote version");
+      toast.info("Adopted the remote version");
     } else {
       // keep_mine pushed the local entries — the head is now published.
-      showToast(`✓ Kept mine (commit ${result.head})`);
+      toast.success(`✓ Kept mine (commit ${result.head})`);
     }
     router.push({ name: "entries" });
   } catch (e) {
@@ -295,7 +286,7 @@ async function resolveDivergence(choice: DivergenceChoice) {
     if (appError?.code === "PULL_FF_FAILED") {
       // The remote moved since the user reviewed — recheck from the entries list.
       divergence.value = null;
-      showToast("The remote changed since you reviewed this — rechecking…");
+      toast.info("The remote changed since you reviewed this — rechecking…");
       router.push({ name: "entries" });
     } else {
       divergeError.value =
@@ -310,7 +301,6 @@ onMounted(loadPresets);
 
 onBeforeUnmount(() => {
   if (previewTimer) clearTimeout(previewTimer);
-  if (toastTimer) clearTimeout(toastTimer);
   // Wipe any in-form secret values (e.g. an auto-lock redirect mid-create).
   fields.value = {};
   revealed.value = {};
@@ -334,9 +324,6 @@ onBeforeUnmount(() => {
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
       error
     }}</BaseAlert>
-    <BaseAlert v-if="toast" variant="success" class="mb-3">
-      {{ toast }}
-    </BaseAlert>
 
     <!-- Step 1: pick a type -->
     <section v-if="mode === 'pick'">

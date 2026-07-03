@@ -15,8 +15,8 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import BaseToast from "@/components/base/BaseToast.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
+import { useToast } from "@/composables";
 import { formatRelativeTime } from "@/utils/format";
 import { isIgnorable, signerFp } from "@/utils/signature";
 import {
@@ -31,12 +31,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const { toast } = useToast();
 
 const commits = ref<CommitSigInfo[]>([]);
 const loading = ref(false);
 const error = ref("");
-const toast = ref("");
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 const selected = ref<CommitSigInfo | null>(null);
 const actionLoading = ref(false);
@@ -45,15 +44,6 @@ const now = ref(Date.now());
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
 const relativeNow = computed(() => now.value);
-
-function showToast(message: string) {
-  toast.value = message;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-    toastTimer = null;
-  }, 3000);
-}
 
 async function loadHistory() {
   loading.value = true;
@@ -84,12 +74,12 @@ async function onTrust(commit: CommitSigInfo) {
   actionLoading.value = true;
   try {
     await trustCommitSigner(commit.hash, label.trim() || suggested);
-    showToast(`✓ Trusted ${label || suggested}`);
+    toast.success(`✓ Trusted ${label || suggested}`);
     await loadHistory();
     selected.value = null;
   } catch (e) {
     const appError = e as AppError;
-    showToast(appError?.message || "Failed to trust signer");
+    toast.danger(appError?.message || "Failed to trust signer");
   } finally {
     actionLoading.value = false;
   }
@@ -99,12 +89,12 @@ async function onIgnore(commit: CommitSigInfo) {
   actionLoading.value = true;
   try {
     await ignoreCommitIssue(commit.hash);
-    showToast("Issue ignored for this commit");
+    toast.success("Issue ignored for this commit");
     await loadHistory();
     selected.value = null;
   } catch (e) {
     const appError = e as AppError;
-    showToast(appError?.message || "Failed to ignore");
+    toast.danger(appError?.message || "Failed to ignore");
   } finally {
     actionLoading.value = false;
   }
@@ -113,9 +103,9 @@ async function onIgnore(commit: CommitSigInfo) {
 async function copyHash(commit: CommitSigInfo) {
   try {
     await navigator.clipboard.writeText(commit.hash);
-    showToast("✓ Hash copied");
+    toast.success("✓ Hash copied");
   } catch {
-    showToast("Copy failed");
+    toast.danger("Copy failed");
   }
 }
 
@@ -290,7 +280,5 @@ onBeforeUnmount(() => {
         </BaseButton>
       </div>
     </BaseModalShell>
-
-    <BaseToast v-if="toast" variant="success">{{ toast }}</BaseToast>
   </main>
 </template>

@@ -190,7 +190,7 @@ describe("EntryListPage", () => {
       when("list_entries", page(sampleEntries));
       // unlocked:false → identity NOT cached → copy's runWithAuth parks on the
       // auth overlay (no singleton to wipe mid-test).
-      const { wrapper, lock } = mountWithApp(EntryListPage, {
+      const { wrapper, lock, toast } = mountWithApp(EntryListPage, {
         unlocked: false,
       });
       await flushPromises();
@@ -202,7 +202,7 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       // No failure toast — the catch swallowed AUTH_CANCELLED; copy never ran.
-      expect(wrapper.text()).not.toContain("Failed:");
+      expect(toast.toasts.value).toHaveLength(0);
     });
   });
 
@@ -280,7 +280,7 @@ describe("EntryListPage", () => {
     it("falls back to browse page 0 + toast on search failure (not 'No matches')", async () => {
       when("list_entries", page(sampleEntries));
       reject("search_entries", { code: "StoreError", message: "boom" });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryListPage);
       await flushPromises();
 
       await wrapper.find('input[type="search"]').setValue("git");
@@ -289,7 +289,9 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(wrapper.text()).toContain("github-token"); // browse fallback, not blanked
-      expect(wrapper.text()).toContain("boom"); // error toast surfaced
+      expect(toast.toasts.value.some((t) => t.message.includes("boom"))).toBe(
+        true,
+      ); // error toast surfaced
       expect(wrapper.text()).not.toContain("No matches"); // not a misleading empty
     });
 
@@ -480,7 +482,7 @@ describe("EntryListPage", () => {
         entry_name: "github-token",
         cleared_after_secs: 45,
       });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryListPage);
       await flushPromises();
 
       await wrapper.find('button[aria-label="Copy password"]').trigger("click");
@@ -489,7 +491,11 @@ describe("EntryListPage", () => {
       expect(invoke).toHaveBeenCalledWith("copy_password", {
         entryPath: "github.com/token.age",
       });
-      expect(wrapper.text()).toContain("✓ Copied github-token");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("✓ Copied github-token"),
+        ),
+      ).toBe(true);
     });
 
     it("auto-clears toast after 3 seconds", async () => {
@@ -498,30 +504,36 @@ describe("EntryListPage", () => {
         entry_name: "github-token",
         cleared_after_secs: 45,
       });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryListPage);
       await flushPromises();
 
       await wrapper.find('button[aria-label="Copy password"]').trigger("click");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("✓ Copied");
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("✓ Copied")),
+      ).toBe(true);
 
       vi.advanceTimersByTime(3000);
       await flushPromises();
 
-      expect(wrapper.text()).not.toContain("✓ Copied");
+      expect(toast.toasts.value).toHaveLength(0);
     });
 
     it("shows error toast on copy failure", async () => {
       when("list_entries", page(sampleEntries));
       reject("copy_password", { code: "Err", message: "Copy failed" });
-      const wrapper = mountPage();
+      const { wrapper, toast } = mountWithApp(EntryListPage);
       await flushPromises();
 
       await wrapper.find('button[aria-label="Copy password"]').trigger("click");
       await flushPromises();
 
-      expect(wrapper.text()).toContain("Failed: Copy failed");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("Failed: Copy failed"),
+        ),
+      ).toBe(true);
     });
   });
 

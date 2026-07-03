@@ -32,7 +32,7 @@ import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
-import { isAuthCancelled, useLockState } from "@/composables";
+import { isAuthCancelled, useLockState, useToast } from "@/composables";
 import { formatRelativeTime } from "@/utils/format";
 import { statusLabel } from "@/utils/signature";
 import type { LucideIcon } from "@lucide/vue";
@@ -64,6 +64,7 @@ import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { runWithAuth } = useLockState();
+const { toast } = useToast();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
 // not the whole store. `displayedEntries` accumulates appended pages; `total`
@@ -85,8 +86,6 @@ const pullResult = ref("");
 const pullProgressText = ref("");
 const pullProgressPercent = ref(0);
 let pullProgressUnlisten: UnlistenFn | null = null;
-const toast = ref("");
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 const lastSyncTime = ref<number | null>(null);
 const now = ref(Date.now());
@@ -178,7 +177,7 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
     const msg = (e as AppError)?.message || "Failed to load entries";
     if (replace && q.trim()) {
       searchError.value = true;
-      showToast(msg);
+      toast.danger(msg);
       void fetchPage("", 0, true); // fall back to browse page 0
     } else if (replace) {
       displayedEntries.value = [];
@@ -186,7 +185,7 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
       hasMore.value = false;
       error.value = msg;
     } else {
-      showToast(msg); // load-more: keep the already-loaded pages
+      toast.danger(msg); // load-more: keep the already-loaded pages
     }
   } finally {
     if (myId === reqId) loading.value = false;
@@ -363,19 +362,10 @@ function cancelDivergence() {
   divergeError.value = "";
 }
 
-function showToast(message: string) {
-  toast.value = message;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-    toastTimer = null;
-  }, 3000);
-}
-
 async function ignoreIssue(commit: CommitSigInfo) {
   try {
     await ignoreCommitIssue(commit.hash);
-    showToast("Ignored this commit's issue");
+    toast.success("Ignored this commit's issue");
     // Remove it from the modal list.
     if (auditIssues.value) {
       auditIssues.value = auditIssues.value.filter(
@@ -385,7 +375,7 @@ async function ignoreIssue(commit: CommitSigInfo) {
     }
   } catch (e) {
     const appError = e as AppError;
-    showToast(appError?.message || "Failed to ignore");
+    toast.danger(appError?.message || "Failed to ignore");
   }
 }
 
@@ -397,37 +387,37 @@ async function trustBlockSigner(commit: CommitSigInfo) {
   if (label === null) return;
   try {
     await trustCommitSigner(commit.hash, label.trim() || commit.short_hash);
-    showToast("✓ Signer trusted — pull again");
+    toast.success("✓ Signer trusted — pull again");
     blockIssues.value = null;
     await loadAuthState();
   } catch (e) {
     const appError = e as AppError;
-    showToast(appError?.message || "Failed to trust signer");
+    toast.danger(appError?.message || "Failed to trust signer");
   }
 }
 
 async function switchToAudit() {
   try {
     await setVerificationMode("audit");
-    showToast("Switched to Audit — pull again");
+    toast.info("Switched to Audit — pull again");
     blockIssues.value = null;
     await loadAuthState();
   } catch (e) {
     const appError = e as AppError;
-    showToast(appError?.message || "Failed to switch mode");
+    toast.danger(appError?.message || "Failed to switch mode");
   }
 }
 
 async function copyPassword(entry: Entry) {
   try {
     const result = await runWithAuth(() => copyPasswordCmd(entry.path));
-    showToast(
+    toast.success(
       `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
     );
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
-    showToast(`Failed: ${appError?.message || "Copy failed"}`);
+    toast.danger(`Failed: ${appError?.message || "Copy failed"}`);
   }
 }
 
@@ -588,9 +578,6 @@ onBeforeUnmount(() => {
     </BaseAlert>
     <BaseAlert v-if="pullResult" variant="info" class="mb-3">
       {{ pullResult }}
-    </BaseAlert>
-    <BaseAlert v-if="toast" variant="success" class="mb-3">
-      {{ toast }}
     </BaseAlert>
 
     <div
