@@ -5,7 +5,6 @@
 <script setup lang="ts">
 import {
   cancelGit,
-  copyPassword as copyPasswordCmd,
   getAuthenticityState,
   ignoreCommitIssue,
   listEntries,
@@ -37,11 +36,11 @@ import { formatRelativeTime } from "@/utils/format";
 import { statusLabel } from "@/utils/signature";
 import type { LucideIcon } from "@lucide/vue";
 import {
+  ChevronRight,
   Circle,
   CircleAlert,
   CircleCheck,
   CircleDashed,
-  Copy,
   Dices,
   Lock,
   LockKeyhole,
@@ -408,19 +407,6 @@ async function switchToAudit() {
   }
 }
 
-async function copyPassword(entry: Entry) {
-  try {
-    const result = await runWithAuth(() => copyPasswordCmd(entry.path));
-    toast.success(
-      `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
-    );
-  } catch (e) {
-    if (isAuthCancelled(e)) return;
-    const appError = e as AppError;
-    toast.danger(`Failed: ${appError?.message || "Copy failed"}`);
-  }
-}
-
 function openEntry(entry: Entry) {
   router.push({ name: "entry", params: { pathMatch: entry.path } });
 }
@@ -611,35 +597,32 @@ onBeforeUnmount(() => {
     </div>
 
     <ul v-else class="list-none flex flex-col gap-0.5" role="list">
-      <li
-        v-for="entry in displayedEntries"
-        :key="entry.path"
-        class="flex items-center justify-between p-[0.6rem_0.75rem] md:p-[0.8rem_1rem] bg-surface rounded-md transition-colors duration-150 min-h-12 hover:bg-hover"
-      >
+      <li v-for="entry in displayedEntries" :key="entry.path">
         <div
-          class="flex-1 cursor-pointer min-w-0"
+          class="flex items-center gap-2 p-[0.6rem_0.75rem] md:p-[0.8rem_1rem] bg-surface rounded-md transition-colors duration-150 min-h-12 hover:bg-hover cursor-pointer"
           tabindex="0"
           role="button"
+          :aria-label="`Open ${entry.name}`"
           @click="openEntry(entry)"
           @keydown.enter="openEntry(entry)"
+          @keydown.space.prevent="openEntry(entry)"
         >
-          <span
-            class="block font-medium whitespace-nowrap overflow-hidden text-ellipsis"
-            >{{ entry.name }}</span
-          >
-          <span
-            class="block text-xs text-muted whitespace-nowrap overflow-hidden text-ellipsis"
-            >{{ entry.path }}</span
-          >
+          <div class="flex-1 min-w-0">
+            <span
+              class="block font-medium whitespace-nowrap overflow-hidden text-ellipsis"
+              >{{ entry.name }}</span
+            >
+            <span
+              class="block text-xs text-muted whitespace-nowrap overflow-hidden text-ellipsis"
+              >{{ entry.path }}</span
+            >
+          </div>
+          <BaseIcon
+            :icon="ChevronRight"
+            :size="20"
+            class="text-subtle shrink-0"
+          />
         </div>
-        <button
-          @click.stop="copyPassword(entry)"
-          class="bg-transparent border-none text-lg cursor-pointer p-1 px-[0.4rem] rounded-sm transition-colors duration-150 shrink-0 min-w-12 min-h-12 flex items-center justify-center hover:bg-[rgba(0,0,0,0.05)]"
-          aria-label="Copy password"
-          title="Copy password"
-        >
-          <BaseIcon :icon="Copy" />
-        </button>
       </li>
     </ul>
 

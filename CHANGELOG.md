@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The entry list no longer shows a copy button on each row. Tapping anywhere on a row now opens that entry's detail page, where you can copy the password — a small arrow on each row marks it as tappable. Copying from the list was rarely useful, and this makes the whole row the tap target instead of a small button.
 - Setting or changing your passphrase, and entering it to enable biometric unlock or identity auto-unlock, now happens in a focused prompt instead of an inline form. A successful submit makes it obvious the change was saved; closing or backing out of the prompt discards what you typed.
 - Editing your commit identity or pasting a new trusted signing key in Settings now marks that card with an "Unsaved changes" highlight, and leaving Settings with uncommitted edits asks whether to save, discard, or keep editing — so a stray back-tap no longer silently throws away what you typed.
 - Tapping Cancel while cloning a repository now shows a disabled "Cancelling…" state on the button right away, so it's clear the cancel was received instead of looking like the tap did nothing. If the cancel request itself fails, you now see a message instead of a silent failure. A clone that's still connecting — handshaking, authenticating — may take a moment to actually stop.

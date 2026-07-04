@@ -65,7 +65,6 @@ const defaults: Record<string, unknown> = {
       blocked: false,
     },
   },
-  copy_password: { entry_name: "x", cleared_after_secs: 30 },
 };
 
 describe("EntryListPage", () => {
@@ -182,27 +181,6 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(wrapper.text()).toContain("Loading entries...");
-    });
-  });
-
-  describe("copyPassword", () => {
-    it("swallows AUTH_CANCELLED silently when the auth overlay is dismissed during copy", async () => {
-      when("list_entries", page(sampleEntries));
-      // unlocked:false → identity NOT cached → copy's runWithAuth parks on the
-      // auth overlay (no singleton to wipe mid-test).
-      const { wrapper, lock, toast } = mountWithApp(EntryListPage, {
-        unlocked: false,
-      });
-      await flushPromises();
-
-      await wrapper.find('button[aria-label="Copy password"]').trigger("click");
-      await flushPromises(); // parked awaiting auth
-
-      lock.cancelAuth(); // user dismissed the overlay (back)
-      await flushPromises();
-
-      // No failure toast — the catch swallowed AUTH_CANCELLED; copy never ran.
-      expect(toast.toasts.value).toHaveLength(0);
     });
   });
 
@@ -475,68 +453,6 @@ describe("EntryListPage", () => {
     });
   });
 
-  describe("copyPassword", () => {
-    it("calls copy_password and shows success toast", async () => {
-      when("list_entries", page(sampleEntries));
-      when("copy_password", {
-        entry_name: "github-token",
-        cleared_after_secs: 45,
-      });
-      const { wrapper, toast } = mountWithApp(EntryListPage);
-      await flushPromises();
-
-      await wrapper.find('button[aria-label="Copy password"]').trigger("click");
-      await flushPromises();
-
-      expect(invoke).toHaveBeenCalledWith("copy_password", {
-        entryPath: "github.com/token.age",
-      });
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("✓ Copied github-token"),
-        ),
-      ).toBe(true);
-    });
-
-    it("auto-clears toast after 3 seconds", async () => {
-      when("list_entries", page(sampleEntries));
-      when("copy_password", {
-        entry_name: "github-token",
-        cleared_after_secs: 45,
-      });
-      const { wrapper, toast } = mountWithApp(EntryListPage);
-      await flushPromises();
-
-      await wrapper.find('button[aria-label="Copy password"]').trigger("click");
-      await flushPromises();
-
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("✓ Copied")),
-      ).toBe(true);
-
-      vi.advanceTimersByTime(3000);
-      await flushPromises();
-
-      expect(toast.toasts.value).toHaveLength(0);
-    });
-
-    it("shows error toast on copy failure", async () => {
-      when("list_entries", page(sampleEntries));
-      reject("copy_password", { code: "Err", message: "Copy failed" });
-      const { wrapper, toast } = mountWithApp(EntryListPage);
-      await flushPromises();
-
-      await wrapper.find('button[aria-label="Copy password"]').trigger("click");
-      await flushPromises();
-
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("Failed: Copy failed"),
-        ),
-      ).toBe(true);
-    });
-  });
-
   describe("syncRepo", () => {
     it("shows 'Already up to date' when no changes", async () => {
       when("sync_repo", {
@@ -657,6 +573,56 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(mockPush).toHaveBeenCalledWith({ name: "settings" });
+    });
+  });
+
+  describe("entry navigation", () => {
+    it("opens the detail page when a row is tapped", async () => {
+      when("list_entries", page(sampleEntries));
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper
+        .find('[role="button"][aria-label="Open github-token"]')
+        .trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({
+        name: "entry",
+        params: { pathMatch: "github.com/token.age" },
+      });
+    });
+
+    it("opens the detail page on Enter for keyboard users", async () => {
+      when("list_entries", page(sampleEntries));
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper
+        .find('[role="button"][aria-label="Open github-token"]')
+        .trigger("keydown", { key: "Enter" });
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({
+        name: "entry",
+        params: { pathMatch: "github.com/token.age" },
+      });
+    });
+
+    it("opens the detail page on Space for keyboard users", async () => {
+      when("list_entries", page(sampleEntries));
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper
+        .find('[role="button"][aria-label="Open github-token"]')
+        .trigger("keydown", { key: "Space" });
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({
+        name: "entry",
+        params: { pathMatch: "github.com/token.age" },
+      });
     });
   });
 
