@@ -57,7 +57,7 @@ pub use crate::storage::{
     AuthenticityResult, CommitIdentity, DivergenceChoice, SyncDivergence, SyncOutcome, SyncResult,
     WriteOutcome, WriteResult,
 };
-// `list_entries` / `resolve_entry_path` were relocated to `storage::git` (PR2)
+// `list_entries` / `resolve_entry_path` were relocated to `storage::git`
 // and are re-exported here so existing integration-test call sites
 // (`store::list_entries`, `store::resolve_entry_path`) keep compiling unchanged.
 pub use crate::storage::git::{list_entries, resolve_entry_path};
@@ -70,12 +70,12 @@ pub use crate::storage::git::{list_entries, resolve_entry_path};
 pub struct Store {
     /// The crypto backend (age today). The only path to encrypt/decrypt,
     /// recipient derivation, and identity management — `Store` never touches the
-    /// age library directly (RFC 0033 PR1). `Box<dyn>` so a second backend can
+    /// age library directly. `Box<dyn>` so a second backend can
     /// arrive without rewriting the facade.
     crypto: Box<dyn CryptoBackend>,
     /// The storage backend (git today). The only path to working-tree file ops —
-    /// list/get/set/delete entries, the recipients file, templates (RFC 0033
-    /// PR2). RCS ops still route through `git::` free fns until PR3 folds them in.
+    /// list/get/set/delete entries, the recipients file, templates. RCS ops still
+    /// route through `git::` free fns until they fold into the storage backend.
     storage: Box<dyn StorageBackend>,
     config: Config,
     /// Cached decrypted identity (populated after unlock).
@@ -1047,7 +1047,7 @@ impl Store {
         spawn_blocking(move || git::keep_local_advance(&repo_path_adv, &fetched)).await??;
 
         // 4. Re-encrypt to the CURRENT (remote-tip) recipients + our own key
-        //    (our_recipient derived once in step 2).
+        //    (our_recipient derived once during decrypt, above).
         let repo_path_re = self.repo_path().await?;
         let mut recipients: Vec<String> = self
             .storage

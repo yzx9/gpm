@@ -7,7 +7,8 @@
 //! Home of the [`StorageBackend`] trait (mirroring gopass's `Storage` interface,
 //! which embeds RCS). The sole implementation today is [`crate::storage::git::GitStorage`];
 //! `Store` holds a `Box<dyn StorageBackend>` and routes every working-tree file
-//! op through it. RCS methods (clone/pull/push/keep-mine) join the trait in PR3.
+//! op through it. RCS methods (clone/pull/push/keep-mine) join the trait as the
+//! git module is consolidated into `storage/git`.
 //!
 //! This module also owns the shared sync / write / commit-identity *result*
 //! types that the trait surfaces, relocated here from `store` so the
@@ -15,10 +16,13 @@
 //! the trait (defined here) must return `SyncOutcome` without importing `store`,
 //! and the git storage impl must construct it without depending on `store`.
 //!
-//! `GitAuth` and the progress/cancellation types stay in `git` for now and move
-//! here when `git.rs` is folded into `storage/git` (PR3).
+//! `GitAuth`, the progress/cancellation types, and the keep-mine plan/outcome
+//! types also live here (relocated from `git.rs`) so the RCS trait methods can
+//! name them without a `storage → git` dependency.
 
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -26,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use crate::entry::Entry;
 use crate::error::Error;
 use crate::recipient::Recipient;
-use crate::signing::{CommitSigInfo, VerifyMode};
+use crate::signing::{AuthenticityConfig, CommitSigInfo, VerifyMode};
 
 /// The git storage backend (the sole `StorageBackend` implementation today).
 pub mod git;
@@ -34,11 +38,156 @@ pub mod git;
 /// Re-entrant access to [`git::GitStorage`].
 pub use git::GitStorage;
 
+// ── Auth / progress / keep-mine types (relocated from `git.rs`) ─────────────
+//
+// These are the storage layer's transport + resolution types. They live here
+// (not in `git.rs`) so the `StorageBackend` trait can name them in its method
+// signatures without a `storage → git` dependency. `git.rs` re-exports them
+// until its RCS bodies fold into `storage/git` and the `git` module disappears.
+
+/// Credentials for Git remote authentication.
+#[derive(Debug, Clone)]
+pub enum GitAuth {
+    /// No authentication (public repo).
+    None,
+    /// HTTPS PAT (personal access token).
+    Pat(String),
+    /// SSH key from memory.
+    Ssh {
+        /// SSH username (typically `"git"`).
+        username: String,
+        /// PEM or OpenSSH private key.
+        private_key: String,
+        /// Optional passphrase for encrypted key.
+        passphrase: Option<String>,
+    },
+}
+
+/// Shared cancellation token. Set to `true` to abort an in-progress git
+/// operation (clone/pull): the `transfer_progress` callback returns `false`,
+/// libgit2 aborts the transfer, and the caller maps the result to
+/// [`ErrorCode::Cancelled`](crate::ErrorCode::Cancelled).
+pub type CancelToken = Arc<AtomicBool>;
+
+/// Progress data reported by git2 during a transfer. Sent over a synchronous
+/// [`ProgressSender`] from inside git2's C callbacks (which run on the blocking
+/// thread), so the channel is `std::sync::mpsc` — not async — keeping the
+/// library runtime-free.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct GitProgress {
+    /// Total objects the remote advertised.
+    pub total_objects: usize,
+    /// Objects received so far.
+    pub received_objects: usize,
+    /// Objects indexed so far.
+    pub indexed_objects: usize,
+    /// Raw bytes received so far.
+    pub received_bytes: usize,
+    /// Total deltas the remote advertised.
+    pub total_deltas: usize,
+    /// Deltas indexed so far.
+    pub indexed_deltas: usize,
+    /// Textual sideband message (e.g. "Counting objects"). `None` for pure
+    /// transfer-stat updates.
+    pub message: Option<String>,
+}
+
+/// Synchronous sender for [`GitProgress`], safe to call from git2's C callbacks
+/// running on the blocking thread.
+pub type ProgressSender = std::sync::mpsc::Sender<GitProgress>;
+
+/// A local-side `.age` entry to replay onto the remote tip during a "keep mine"
+/// divergence resolution: its worktree-relative path plus its ciphertext blob at
+/// the local HEAD. The caller decrypts + re-encrypts the blob — git has no
+/// identity, so the crypto stays in `Store`.
+///
+/// Plaintext **never** enters the storage layer: this is the type-system half of
+/// the no-rebase keep-mine contract (plaintext never enters the storage
+/// layer). `Store` decrypts the
+/// `blob`, re-encrypts with the current recipient set, and hands the new
+/// ciphertext back to `keep_local_finalize`.
+#[derive(Debug, Clone)]
+pub struct KeepLocalReplay {
+    /// Worktree-relative path, e.g. `servers/db.age`.
+    pub rel_path: String,
+    /// The entry's ciphertext at the local HEAD, to decrypt + re-encrypt.
+    pub blob: Vec<u8>,
+}
+
+/// What a "keep mine" resolution must replay onto the reviewed remote tip.
+#[derive(Debug, Clone)]
+pub struct KeepLocalPlan {
+    /// Full hash of the fetched remote tip the plan was computed against. Passed
+    /// to `keep_local_advance` so the adopt reuses the SAME tip (no second fetch
+    /// — a second fetch could race past the reviewed tip and bypass the
+    /// authenticity check under Enforce).
+    pub fetched_oid: String,
+    /// Local-side `.age` entries to re-encrypt + write onto the tip.
+    pub replays: Vec<KeepLocalReplay>,
+    /// Local-side `.age` entries to re-delete on the tip (local deletions that
+    /// "keep mine" preserves).
+    pub deletes: Vec<String>,
+    /// Authenticity outcome for the returned [`SyncResult`] (the remote-only
+    /// range's verification). `blocked` is false here — a block is returned as
+    /// [`KeepLocalOutcome::Blocked`].
+    pub authenticity: AuthenticityResult,
+}
+
+/// Outcome of `keep_local_plan`: proceed with a plan, or stop because Enforce
+/// refused the remote-only range (HEAD left unchanged).
+#[derive(Debug, Clone)]
+pub enum KeepLocalOutcome {
+    /// Enforce blocked the adopt — HEAD unchanged; surface this result.
+    Blocked(SyncResult),
+    /// Proceed: replay the plan onto the reviewed remote tip.
+    Plan(KeepLocalPlan),
+}
+
+/// Configuration an RCS operation needs from `Store`, built fresh from
+/// `RepoConfig` per op — the backend is stateless (config is user-mutable and
+/// unknown at construction time).
+///
+/// `GitStorage` is stateless — the real durable state is git's on-disk index,
+/// re-attached each op via `Repository::discover` — so auth/policy/commit-
+/// identity are passed in here rather than held at backend construction.
+/// `RepoConfig` is user-mutable within the Store's lifetime (Settings edits),
+/// so holding these at construction would go stale on the next edit;
+/// `Store::new` also runs before any repo is configured, so there'd be nothing
+/// to hold. File-op methods (`get`/`set`/…) keep their per-call `repo_path` and
+/// don't take a `StorageCtx` — they need no auth/policy.
+#[derive(Debug, Clone, Copy)]
+pub struct StorageCtx<'a> {
+    /// The repo working-tree root (`RepoConfig::local_path`).
+    pub repo_path: &'a Path,
+    /// Git remote credentials (`RepoConfig::to_git_auth`).
+    pub auth: &'a GitAuth,
+    /// Repository authenticity policy (`RepoConfig::authenticity`).
+    pub policy: &'a AuthenticityConfig,
+    /// Commit author name; `None` ⇒ the backend's app default.
+    pub commit_name: Option<&'a str>,
+    /// Commit author email; `None` ⇒ the backend's app default.
+    pub commit_email: Option<&'a str>,
+}
+
+/// How [`StorageBackend::commit`] stages `paths`. Replaces the `CommitFn`
+/// fn-pointer indirection `Store` used to pick `git::commit` vs
+/// `git::commit_removal` — trait methods can't be passed as fn pointers, so the
+/// kind is data instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitKind {
+    /// Stage `paths` (add/modify) — `git add`.
+    Add,
+    /// Stage the removal of `paths` (the worktree files are already gone) —
+    /// `git rm`.
+    Remove,
+}
+
 /// Swappable storage backend (gopass `internal/backend/storage.go` analogue).
 ///
 /// Owns the repo working tree: file ops for secrets, the recipients file, and
-/// template lookups. RCS ops (clone/pull/push/keep-mine) land on this trait in
-/// PR3; today only the file-op surface exists. The trait is `Send + Sync` so
+/// template lookups. RCS ops (clone/pull/push/keep-mine) land on this trait as
+/// the git module is consolidated; today only the file-op surface exists. The
+/// trait is `Send + Sync` so
 /// `Box<dyn StorageBackend>` stays `Send + Sync` for `Store`'s `AppState`.
 ///
 /// File ops own their within-repo path-traversal guard (`get`/`set`/`delete`
@@ -84,8 +233,9 @@ pub trait StorageBackend: Send + Sync {
 
     /// Read + parse the store's recipients file (`.gopass-recipients` preferred,
     /// `.age-recipients` fallback). **Temporary surface** — recipients semantics
-    /// stay in `crypto` per RFC 0033 decision #9; this returns the parsed list
-    /// for now and moves to raw bytes when a 2nd backend informs the split.
+    /// stay in `crypto` (crypto owns the semantics; storage owns the file);
+    /// this returns the parsed list for now and moves to raw bytes when a second
+    /// backend informs the split.
     ///
     /// # Errors
     ///

@@ -13,8 +13,8 @@
 //!
 //! This module is pure: it reads from a [`git2::Repository`] and a trust set
 //! and produces [`CommitSigStatus`] values. It does **not** know what "Enforce
-//! blocks a pull" means as UI — that policy lives in [`crate::git`] and
-//! [`crate::store`].
+//! blocks a pull" means as UI — that policy lives in [`crate::storage`] (the RCS
+//! backend that runs verification under `StorageCtx::policy`) and [`crate::store`].
 //!
 //! Verification reuses the already-present `ssh-key` crate (gpm uses it for
 //! SSH-identity key generation and SSH git auth). `ssh_key::PublicKey::verify`

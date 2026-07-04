@@ -11,7 +11,7 @@
 //!
 //! Recipients *file* I/O (`list_recipients` / `write_recipients`) lives on the
 //! [`StorageBackend`](crate::storage::StorageBackend), not here — crypto owns
-//! recipient *semantics*, storage owns the file (RFC 0033 decision #9).
+//! recipient *semantics*, storage owns the recipients file.
 //!
 //! For now the age functions are also re-exported here so existing `crypto::`
 //! callers (the Tauri command layer's `generate_age_identity`, the at-rest
@@ -19,6 +19,7 @@
 
 use async_trait::async_trait;
 use tokio::task::spawn_blocking;
+use zeroize::Zeroizing;
 
 use crate::error::Error;
 
@@ -145,7 +146,10 @@ impl CryptoBackend for AgeBackend {
         plaintext: &[u8],
         recipients: &[String],
     ) -> Result<Vec<u8>, Error> {
-        let plaintext = plaintext.to_vec();
+        // Wrap secret copies in `Zeroizing` so they're scrubbed on drop after the
+        // blocking op (CLAUDE.md: "All decrypted content uses Zeroizing and is
+        // wiped after use"). Deref-coercion hands `&[u8]` / `&str` to the free fn.
+        let plaintext = Zeroizing::new(plaintext.to_vec());
         let recipients = recipients.to_vec();
         spawn_blocking(move || encrypt_to_recipients(&plaintext, &recipients)).await?
     }
@@ -157,14 +161,20 @@ impl CryptoBackend for AgeBackend {
         passphrase: Option<&str>,
     ) -> Result<Vec<u8>, Error> {
         let encrypted = encrypted.to_vec();
-        let identity_bytes = identity_bytes.to_vec();
-        let passphrase = passphrase.map(str::to_string);
-        spawn_blocking(move || decrypt_bytes(&encrypted, &identity_bytes, passphrase.as_deref()))
-            .await?
+        let identity_bytes = Zeroizing::new(identity_bytes.to_vec());
+        let passphrase = passphrase.map(|p| Zeroizing::new(p.to_string()));
+        spawn_blocking(move || {
+            decrypt_bytes(
+                &encrypted,
+                &identity_bytes,
+                passphrase.as_deref().map(String::as_str),
+            )
+        })
+        .await?
     }
 
     async fn decrypt_identity(&self, passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, Error> {
-        let passphrase = passphrase.to_string();
+        let passphrase = Zeroizing::new(passphrase.to_string());
         let encrypted = encrypted.to_vec();
         spawn_blocking(move || decrypt_identity(&passphrase, &encrypted)).await?
     }
@@ -174,8 +184,8 @@ impl CryptoBackend for AgeBackend {
         identity_bytes: &[u8],
         passphrase: &str,
     ) -> Result<(), Error> {
-        let identity_bytes = identity_bytes.to_vec();
-        let passphrase = passphrase.to_string();
+        let identity_bytes = Zeroizing::new(identity_bytes.to_vec());
+        let passphrase = Zeroizing::new(passphrase.to_string());
         spawn_blocking(move || validate_ssh_key_passphrase(&identity_bytes, &passphrase)).await?
     }
 

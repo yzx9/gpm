@@ -6,8 +6,7 @@ use std::collections::HashMap;
 #[cfg(target_os = "android")]
 use std::ffi::c_int;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "android")]
 use foreign_types::ForeignType;
@@ -17,6 +16,15 @@ use crate::config::{DEFAULT_COMMIT_EMAIL, DEFAULT_COMMIT_NAME};
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
 use crate::storage::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
+// The auth/progress/keep-mine TYPES now live in `crate::storage` (so the
+// `StorageBackend` trait can name them). Re-exported here so existing
+// `rustpass::git::<Type>` callers (store.rs, tests, lib.rs, config.rs) keep
+// resolving until the RCS bodies fold into `storage/git` and `git.rs` is
+// deleted, at which point those callers repoint to `storage::`.
+pub use crate::storage::{
+    CancelToken, GitAuth, GitProgress, KeepLocalOutcome, KeepLocalPlan, KeepLocalReplay,
+    ProgressSender,
+};
 
 /// Mozilla (curl) root CA bundle, embedded so the libgit2 OpenSSL backend has a
 /// trust anchor on targets with no discoverable system CA store — notably
@@ -172,56 +180,9 @@ fn add_certs_from_pem(pem: &[u8]) -> Result<usize, Error> {
     })
 }
 
-/// Credentials for Git remote authentication.
-#[derive(Debug, Clone)]
-pub enum GitAuth {
-    /// No authentication (public repo).
-    None,
-    /// HTTPS PAT (personal access token).
-    Pat(String),
-    /// SSH key from memory.
-    Ssh {
-        /// SSH username (typically `"git"`).
-        username: String,
-        /// PEM or OpenSSH private key.
-        private_key: String,
-        /// Optional passphrase for encrypted key.
-        passphrase: Option<String>,
-    },
-}
-
-/// Shared cancellation token. Set to `true` to abort an in-progress git
-/// operation (clone/pull): the `transfer_progress` callback returns `false`,
-/// libgit2 aborts the transfer, and the caller maps the result to
-/// [`ErrorCode::Cancelled`].
-pub type CancelToken = Arc<AtomicBool>;
-
-/// Progress data reported by git2 during a transfer. Sent over a synchronous
-/// [`ProgressSender`] from inside git2's C callbacks (which run on the blocking
-/// thread), so the channel is `std::sync::mpsc` — not async — keeping the
-/// library runtime-free.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct GitProgress {
-    /// Total objects the remote advertised.
-    pub total_objects: usize,
-    /// Objects received so far.
-    pub received_objects: usize,
-    /// Objects indexed so far.
-    pub indexed_objects: usize,
-    /// Raw bytes received so far.
-    pub received_bytes: usize,
-    /// Total deltas the remote advertised.
-    pub total_deltas: usize,
-    /// Deltas indexed so far.
-    pub indexed_deltas: usize,
-    /// Textual sideband message (e.g. "Counting objects"). `None` for pure
-    /// transfer-stat updates.
-    pub message: Option<String>,
-}
-
-/// Synchronous sender for [`GitProgress`], safe to call from git2's C callbacks
-/// running on the blocking thread.
-pub type ProgressSender = std::sync::mpsc::Sender<GitProgress>;
+// `GitAuth`, `CancelToken`, `GitProgress`, `ProgressSender` were relocated to
+// `crate::storage` (they appear in the `StorageBackend` trait surface).
+// Re-exported at the top of this file via `pub use crate::storage::{...}`.
 
 /// `true` if `cancel` is set, signalling the running git operation to abort.
 fn cancelled(cancel: Option<&CancelToken>) -> bool {
@@ -1233,46 +1194,9 @@ pub fn adopt_remote(
     })
 }
 
-/// A local-side `.age` entry to replay onto the remote tip during a "keep mine"
-/// divergence resolution: its worktree-relative path plus its ciphertext blob at
-/// the local HEAD. The caller decrypts + re-encrypts the blob — git has no
-/// identity, so the crypto stays in `Store` (matching `encrypt_and_write`).
-#[derive(Debug, Clone)]
-pub(crate) struct KeepLocalReplay {
-    /// Worktree-relative path, e.g. `servers/db.age`.
-    pub rel_path: String,
-    /// The entry's ciphertext at the local HEAD, to decrypt + re-encrypt.
-    pub blob: Vec<u8>,
-}
-
-/// What a "keep mine" resolution must replay onto the reviewed remote tip.
-#[derive(Debug, Clone)]
-pub(crate) struct KeepLocalPlan {
-    /// Full hash of the fetched remote tip the plan was computed against. Passed
-    /// to [`keep_local_advance`] so the adopt reuses the SAME tip (no second
-    /// fetch — a second fetch could race past the reviewed tip and bypass the
-    /// authenticity check under Enforce).
-    pub fetched_oid: String,
-    /// Local-side `.age` entries to re-encrypt + write onto the tip.
-    pub replays: Vec<KeepLocalReplay>,
-    /// Local-side `.age` entries to re-delete on the tip (local deletions that
-    /// "keep mine" preserves).
-    pub deletes: Vec<String>,
-    /// Authenticity outcome for the returned [`SyncResult`] (the remote-only
-    /// range's verification). `blocked` is false here — a block is returned as
-    /// [`KeepLocalOutcome::Blocked`].
-    pub authenticity: AuthenticityResult,
-}
-
-/// Outcome of [`keep_local_plan`]: proceed with a plan, or stop because Enforce
-/// refused the remote-only range (HEAD left unchanged).
-#[derive(Debug, Clone)]
-pub(crate) enum KeepLocalOutcome {
-    /// Enforce blocked the adopt — HEAD unchanged; surface this result.
-    Blocked(SyncResult),
-    /// Proceed: replay the plan onto the reviewed remote tip.
-    Plan(KeepLocalPlan),
-}
+// `KeepLocalReplay`, `KeepLocalPlan`, `KeepLocalOutcome` were relocated to
+// `crate::storage` (they appear in the `StorageBackend` trait surface).
+// Re-exported at the top of this file via `pub use crate::storage::{...}`.
 
 /// Whether `path` is an `.age` secret (case-insensitive suffix).
 fn is_age_entry(path: &Path) -> bool {
@@ -1677,6 +1601,8 @@ fn short_hash(oid: &git2::Oid) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     /// Shared test signature used across tests.
     fn test_signature() -> git2::Signature<'static> {

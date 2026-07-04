@@ -10,11 +10,11 @@
 //! so `Store` hands the backend an entry *name* and the backend maps it to
 //! `<repo>/<name>.age` and validates the resolved path.
 //!
-//! PR2 scope: file ops only. RCS ops (clone/pull/push/keep-mine) still live in
-//! `crate::git` as free functions and fold into this backend in PR3, at which
-//! point `GitStorage` gains durable auth/policy config (RFC 0033 decision #10).
-//! Today the struct is stateless — `repo_path` is passed per call, matching how
-//! `Store` re-reads `RepoConfig` per op anyway.
+//! Today this backend implements the working-tree file ops. RCS ops
+//! (clone/pull/push/keep-mine) are still free functions in `crate::git` and fold
+//! into this backend as the git module is consolidated; `GitStorage` is stateless
+//! — auth/policy are passed per-op, not held at construction (the real durable
+//! state is git's on-disk index, re-attached each op via `Repository::discover`).
 
 use std::path::{Path, PathBuf};
 
@@ -29,7 +29,7 @@ use crate::recipient;
 use crate::storage::StorageBackend;
 use crate::template;
 
-/// The git storage backend (stateless in PR2 — `repo_path` passed per call).
+/// The git storage backend (stateless — `repo_path` passed per call).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitStorage;
 
@@ -106,7 +106,8 @@ impl StorageBackend for GitStorage {
 // ── Relocated working-tree helpers (were free fns in `store.rs`) ────────────
 //
 // These moved here so `storage::git` doesn't depend on `store` (which would
-// reopen the module cycle decision #11 closed). `list_entries` and
+// reopen the `store` ↔ `storage` module cycle the relocation avoided).
+// `list_entries` and
 // `resolve_entry_path` stay `pub` and are re-exported from `store` so existing
 // integration-test call sites (`store::list_entries`, `store::resolve_entry_path`)
 // keep compiling unchanged.
