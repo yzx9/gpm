@@ -54,6 +54,7 @@ import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import {
   useLockState,
+  useOverlayBackHandler,
   useSecureScreen,
   useSecuritySettings,
   useToast,
@@ -72,7 +73,7 @@ import {
   TriangleAlert,
 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock } = useLockState();
@@ -91,26 +92,71 @@ const isSsh = ref(false);
 // ── Passphrase management state ──────────────────────────────────────────
 const isIdentityEncrypted = ref(false);
 const identityType = ref("");
-const showSetPassphrase = ref(false);
-const showChangePassphrase = ref(false);
-const newPassphrase = ref("");
-const oldPassphrase = ref("");
+
+// Shared passphrase modal — one prompt for set / change / enable-biometric /
+// enable-auto-unlock. The modal is the commit boundary: submit saves+closes,
+// cancel / backdrop / Android-back wipes the inputs and closes.
+type PassphraseMode =
+  | "set"
+  | "change"
+  | "enable-biometric"
+  | "enable-auto-unlock";
+const passphraseModal = ref<PassphraseMode | null>(null);
+const ppCurrent = ref("");
+const ppNew = ref("");
 const passphraseLoading = ref(false);
-// Confirm-field controllers for set / change new-passphrase (validate/reset).
-const pfSet = ref<InstanceType<typeof PassphraseField> | null>(null);
-const pfChange = ref<InstanceType<typeof PassphraseField> | null>(null);
+// PassphraseField instance for the modal's set/change new-passphrase (gives
+// the confirm box + validate() so setting a passphrase asks you to type it
+// twice and checks the two match before submitting).
+const ppField = ref<InstanceType<typeof PassphraseField> | null>(null);
+
+const ppModalTitle = computed(() => {
+  switch (passphraseModal.value) {
+    case "set":
+      return "Set Passphrase";
+    case "change":
+      return "Change Passphrase";
+    case "enable-biometric":
+      return "Enable Biometric Unlock";
+    case "enable-auto-unlock":
+      return "Enable Identity Auto-Unlock";
+    default:
+      return "";
+  }
+});
+const ppSubmitLabel = computed(() => {
+  switch (passphraseModal.value) {
+    case "set":
+      return "Encrypt Identity";
+    case "change":
+      return "Change Passphrase";
+    case "enable-biometric":
+      return "Enable Biometric";
+    case "enable-auto-unlock":
+      return "Enable";
+    default:
+      return "";
+  }
+});
+const ppShowCurrent = computed(
+  () =>
+    passphraseModal.value === "change" ||
+    passphraseModal.value === "enable-biometric" ||
+    passphraseModal.value === "enable-auto-unlock",
+);
+const ppShowNew = computed(
+  () => passphraseModal.value === "set" || passphraseModal.value === "change",
+);
 
 // ── Biometric unlock state ──────────────────────────────────────────────
 const biometricAvailable = ref(false);
 const biometricEnabled = ref(false);
-const biometricPassphrase = ref("");
 const biometricLoading = ref(false);
 
 // ── App-launch biometric gate (RFC 0028) state ──────────────────────────
 const appLockAvailable = ref(false);
 const appLockEnabled = ref(false);
 const identityAutoUnlockEnabled = ref(false);
-const appLockPassphrase = ref("");
 const appLockLoading = ref(false);
 
 // ── Repository authenticity state ────────────────────────────────────────
@@ -204,12 +250,11 @@ onLock(() => {
   privateKey.value = "";
   showPublic.value = false;
   showPrivate.value = false;
-  showSetPassphrase.value = false;
-  showChangePassphrase.value = false;
-  newPassphrase.value = "";
-  oldPassphrase.value = "";
-  biometricPassphrase.value = "";
-  appLockPassphrase.value = "";
+  // Wipe any in-flight passphrase-modal input as defense-in-depth; the modal
+  // sits below the lock overlay and should not retain a typed secret.
+  ppCurrent.value = "";
+  ppNew.value = "";
+  passphraseModal.value = null;
 });
 
 async function loadConfig() {
@@ -239,7 +284,7 @@ async function loadConfig() {
   }
 }
 
-async function onSaveCommitIdentity() {
+async function onSaveCommitIdentity(): Promise<boolean> {
   error.value = "";
   commitLoading.value = true;
   try {
@@ -248,12 +293,15 @@ async function onSaveCommitIdentity() {
       commitEmail.value.trim() || null,
     );
     config.value = updated;
+    // Re-sync from the response (trimmed) so a successful Save clears dirty.
     commitName.value = updated.commit_user_name ?? "";
     commitEmail.value = updated.commit_user_email ?? "";
     toast.success("Commit identity saved");
+    return true;
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to save commit identity";
+    return false;
   } finally {
     commitLoading.value = false;
   }
@@ -382,81 +430,91 @@ async function copyText(text: string) {
   }
 }
 
-async function onSetPassphrase() {
+function openPassphraseModal(mode: PassphraseMode) {
+  ppCurrent.value = "";
+  ppNew.value = "";
   error.value = "";
-  const passphraseError = pfSet.value?.validate() ?? null;
-  if (passphraseError) {
-    error.value = passphraseError;
-    return;
-  }
-  passphraseLoading.value = true;
-  try {
-    await setPassphrase(newPassphrase.value);
-    isIdentityEncrypted.value = true;
-    showSetPassphrase.value = false;
-    newPassphrase.value = "";
-    toast.success("✓ Passphrase set — identity is now encrypted");
-    // Setting a passphrase invalidates any sealed biometric passphrase.
-    biometricEnabled.value = await isBiometricUnlockEnabled();
-  } catch (e) {
-    const appError = e as AppError;
-    error.value = appError?.message || "Failed to set passphrase";
-  } finally {
-    passphraseLoading.value = false;
-  }
+  passphraseModal.value = mode;
 }
 
-async function onChangePassphrase() {
+function closePassphraseModal() {
+  ppCurrent.value = "";
+  ppNew.value = "";
+  passphraseModal.value = null;
+}
+
+// One commit boundary for every passphrase operation. Submit dispatches to
+// the relevant API with the mode's error mapping; success wipes + closes,
+// failure keeps the modal open so the user can correct and retry.
+async function onPassphraseSubmit() {
+  const mode = passphraseModal.value;
+  if (!mode) return;
   error.value = "";
-  if (!oldPassphrase.value) {
+  if (mode === "change" && !ppCurrent.value) {
     error.value = "Current passphrase is required";
     return;
   }
-  const passphraseError = pfChange.value?.validate() ?? null;
-  if (passphraseError) {
-    error.value = passphraseError;
-    return;
-  }
-  passphraseLoading.value = true;
-  try {
-    await changePassphrase(oldPassphrase.value, newPassphrase.value);
-    showChangePassphrase.value = false;
-    oldPassphrase.value = "";
-    newPassphrase.value = "";
-    toast.success("✓ Passphrase changed");
-    // Changing the passphrase invalidates any sealed biometric passphrase.
-    biometricEnabled.value = await isBiometricUnlockEnabled();
-  } catch (e) {
-    const appError = e as AppError;
-    error.value = appError?.message || "Failed to change passphrase";
-  } finally {
-    passphraseLoading.value = false;
-  }
-}
-
-async function onEnableBiometric() {
-  error.value = "";
-  if (!biometricPassphrase.value) {
+  if (ppShowCurrent.value && !ppCurrent.value) {
     error.value = "Passphrase is required";
     return;
   }
-  biometricLoading.value = true;
+  // set / change enter the new passphrase via PassphraseField (with a confirm
+  // box); validate the two match before dispatching.
+  if (ppShowNew.value) {
+    const passphraseError = ppField.value?.validate() ?? null;
+    if (passphraseError) {
+      error.value = passphraseError;
+      return;
+    }
+  }
+  passphraseLoading.value = true;
   try {
-    await enableBiometricUnlock(biometricPassphrase.value);
-    biometricEnabled.value = true;
-    biometricPassphrase.value = "";
-    toast.success("✓ Biometric unlock enabled");
-  } catch (e) {
-    const err = e as BiometricError;
-    if (err.code === "WRONG_PASSPHRASE") {
-      error.value = "Wrong passphrase";
-    } else if (err.code === "BIOMETRIC_CANCELLED") {
-      // User cancelled the enable prompt — no error toast.
+    if (mode === "set") {
+      await setPassphrase(ppNew.value);
+      isIdentityEncrypted.value = true;
+      // Setting a passphrase can invalidate a previously-sealed biometric unlock.
+      biometricEnabled.value = await isBiometricUnlockEnabled();
+      toast.success("✓ Passphrase set — identity is now encrypted");
+    } else if (mode === "change") {
+      await changePassphrase(ppCurrent.value, ppNew.value);
+      biometricEnabled.value = await isBiometricUnlockEnabled();
+      toast.success("✓ Passphrase changed");
+    } else if (mode === "enable-biometric") {
+      await enableBiometricUnlock(ppCurrent.value);
+      biometricEnabled.value = true;
+      toast.success("✓ Biometric unlock enabled");
     } else {
-      error.value = err.message || "Failed to enable biometric";
+      await enableIdentityAutoUnlock(ppCurrent.value);
+      identityAutoUnlockEnabled.value = true;
+      toast.success("✓ Identity auto-unlock enabled");
+    }
+    closePassphraseModal();
+  } catch (e) {
+    if (mode === "enable-biometric") {
+      const err = e as BiometricError;
+      if (err.code === "BIOMETRIC_CANCELLED") {
+        // User cancelled the biometric prompt — keep the modal open for retry.
+      } else if (err.code === "WRONG_PASSPHRASE") {
+        error.value = "Wrong passphrase";
+      } else {
+        error.value = err.message || "Failed to enable biometric";
+      }
+    } else if (mode === "enable-auto-unlock") {
+      const err = asAppLockError(e) as AppLockError;
+      error.value =
+        err.code === "WRONG_PASSPHRASE"
+          ? "Wrong passphrase"
+          : err.message || "Failed to enable identity auto-unlock";
+    } else {
+      const appError = e as AppError;
+      error.value =
+        appError?.message ||
+        (mode === "set"
+          ? "Failed to set passphrase"
+          : "Failed to change passphrase");
     }
   } finally {
-    biometricLoading.value = false;
+    passphraseLoading.value = false;
   }
 }
 
@@ -507,30 +565,6 @@ async function onDisableAppLock() {
   }
 }
 
-async function onEnableIdentityAutoUnlock() {
-  error.value = "";
-  if (!appLockPassphrase.value) {
-    error.value = "Passphrase is required";
-    return;
-  }
-  appLockLoading.value = true;
-  try {
-    await enableIdentityAutoUnlock(appLockPassphrase.value);
-    identityAutoUnlockEnabled.value = true;
-    appLockPassphrase.value = "";
-    toast.success("✓ Identity auto-unlock enabled");
-  } catch (e) {
-    const err = asAppLockError(e) as AppLockError;
-    if (err.code === "WRONG_PASSPHRASE") {
-      error.value = "Wrong passphrase";
-    } else {
-      error.value = err.message || "Failed to enable identity auto-unlock";
-    }
-  } finally {
-    appLockLoading.value = false;
-  }
-}
-
 async function onDisableIdentityAutoUnlock() {
   await disableIdentityAutoUnlock();
   identityAutoUnlockEnabled.value = false;
@@ -569,12 +603,12 @@ async function onModeChange(mode: VerifyMode) {
   }
 }
 
-async function onAddKey() {
+async function onAddKey(): Promise<boolean> {
   error.value = "";
   const key = newPublicKey.value.trim();
   if (!key) {
     error.value = "Paste an SSH signing public key";
-    return;
+    return false;
   }
   authLoading.value = true;
   try {
@@ -584,9 +618,11 @@ async function onAddKey() {
     showAddKey.value = false;
     toast.success("✓ Trusted signing key added");
     await loadAuthConfig();
+    return true;
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to add key";
+    return false;
   } finally {
     authLoading.value = false;
   }
@@ -663,6 +699,81 @@ function goBack() {
   router.push({ name: "entries" });
 }
 
+// ── Deferred-save dirty tracking + leave guard (Commit Identity, Add Key) ──
+// These two text forms stage edits in refs and only commit on their own Save
+// button. Leaving the page with uncommitted edits prompts Discard / Save /
+// Keep editing, so a stray back-tap never silently throws away typed input.
+const commitDirty = computed(() => {
+  const name = config.value?.commit_user_name ?? "";
+  const email = config.value?.commit_user_email ?? "";
+  return commitName.value.trim() !== name || commitEmail.value.trim() !== email;
+});
+const addKeyDirty = computed(
+  () =>
+    showAddKey.value &&
+    (newPublicKey.value.trim() !== "" || newKeyLabel.value.trim() !== ""),
+);
+const hasUnsavedChanges = computed(
+  () => commitDirty.value || addKeyDirty.value,
+);
+
+// Commit every dirty form. Returns false on any failure so the leave guard
+// can keep the user on the page to see the error; each handler already sets
+// `error` and leaves the form dirty on failure.
+async function commitAllPending(): Promise<boolean> {
+  let ok = true;
+  if (commitDirty.value) ok = (await onSaveCommitIdentity()) && ok;
+  if (addKeyDirty.value) ok = (await onAddKey()) && ok;
+  return ok;
+}
+
+type UnsavedChoice = "discard" | "save" | "cancel";
+const unsavedOpen = ref(false);
+let pendingResolve: ((c: UnsavedChoice) => void) | null = null;
+// Re-entrancy guard: if a second navigation supersedes the guarded one while
+// the modal is open, only the latest token's resolver runs; older ones no-op.
+let promptToken = 0;
+
+function promptUnsaved(): Promise<UnsavedChoice> {
+  const token = ++promptToken;
+  unsavedOpen.value = true;
+  return new Promise<UnsavedChoice>((resolve) => {
+    pendingResolve = (c) => {
+      if (token === promptToken) resolve(c);
+    };
+  });
+}
+
+function resolveUnsaved(c: UnsavedChoice) {
+  const r = pendingResolve;
+  pendingResolve = null;
+  unsavedOpen.value = false;
+  r?.(c);
+}
+
+onBeforeRouteLeave(async () => {
+  if (!hasUnsavedChanges.value) return true;
+  const choice = await promptUnsaved();
+  if (choice === "cancel") return false;
+  if (choice === "save") {
+    const ok = await commitAllPending();
+    if (!ok) return false; // keep the user on the page so the error is visible
+  }
+  return true; // discard, or save succeeded
+});
+
+// Android back inside either modal dismisses it (= cancel), mirroring the
+// UnlockModal / AppLockOverlay pattern. Both register concurrently; only one
+// is shown at a time, so two idle listeners are benign.
+useOverlayBackHandler(
+  computed(() => passphraseModal.value !== null),
+  () => closePassphraseModal(),
+);
+useOverlayBackHandler(
+  computed(() => unsavedOpen.value),
+  () => resolveUnsaved("cancel"),
+);
+
 onMounted(() => {
   loadConfig();
   loadAuthConfig();
@@ -697,8 +808,16 @@ onMounted(() => {
       </BaseCard>
 
       <!-- Commit identity -->
-      <BaseCard as="section">
-        <h2 class="text-sm font-medium mb-2">Commit Identity</h2>
+      <BaseCard as="section" :border="commitDirty ? 'accent' : 'edge'">
+        <h2 class="text-sm font-medium mb-2">
+          Commit Identity
+          <span
+            v-if="commitDirty"
+            class="ml-1 text-xs font-normal"
+            style="color: var(--color-accent)"
+            >Unsaved changes</span
+          >
+        </h2>
         <p class="text-xs text-muted mb-3">
           Name and email written to each git commit. Leave blank to use the
           default<span v-if="commitDefault">
@@ -794,7 +913,8 @@ onMounted(() => {
       </BaseCard>
 
       <!-- Passphrase management (x25519 identities only — SSH keys rely on
-           their own native passphrase protection) -->
+           their own native passphrase protection). Set / change run in the
+           shared passphrase modal, which is the commit boundary. -->
       <BaseCard as="section" v-if="!isSshIdentity">
         <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
 
@@ -803,31 +923,9 @@ onMounted(() => {
           <p class="text-xs text-muted mb-2">
             The identity is stored in plaintext. Set a passphrase to encrypt it.
           </p>
-          <BaseButton
-            v-if="!showSetPassphrase"
-            variant="action"
-            @click="showSetPassphrase = true"
-          >
+          <BaseButton variant="action" @click="openPassphraseModal('set')">
             <BaseIcon :icon="Lock" /> Set Passphrase
           </BaseButton>
-          <div v-if="showSetPassphrase" class="flex flex-col gap-2">
-            <PassphraseField
-              ref="pfSet"
-              id="settings-set-passphrase"
-              v-model="newPassphrase"
-              label="New passphrase"
-              placeholder="New passphrase"
-              :optional="false"
-              :disabled="passphraseLoading"
-            />
-            <BaseButton
-              variant="action"
-              :loading="passphraseLoading"
-              @click="onSetPassphrase"
-            >
-              Encrypt Identity
-            </BaseButton>
-          </div>
         </template>
 
         <!-- Encrypted: change passphrase -->
@@ -836,38 +934,9 @@ onMounted(() => {
             <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
             Identity is passphrase-encrypted.
           </p>
-          <BaseButton
-            v-if="!showChangePassphrase"
-            variant="action"
-            @click="showChangePassphrase = true"
-          >
+          <BaseButton variant="action" @click="openPassphraseModal('change')">
             <BaseIcon :icon="KeyRound" /> Change Passphrase
           </BaseButton>
-          <div v-if="showChangePassphrase" class="flex flex-col gap-2">
-            <BaseInput
-              v-model="oldPassphrase"
-              type="password"
-              placeholder="Current passphrase"
-              autocomplete="current-password"
-              :disabled="passphraseLoading"
-            />
-            <PassphraseField
-              ref="pfChange"
-              id="settings-change-passphrase"
-              v-model="newPassphrase"
-              label="New passphrase"
-              placeholder="New passphrase"
-              :optional="false"
-              :disabled="passphraseLoading"
-            />
-            <BaseButton
-              variant="action"
-              :loading="passphraseLoading"
-              @click="onChangePassphrase"
-            >
-              Change Passphrase
-            </BaseButton>
-          </div>
         </template>
       </BaseCard>
 
@@ -894,22 +963,13 @@ onMounted(() => {
             Unlock with fingerprint or face instead of typing your passphrase on
             every launch.
           </p>
-          <div class="flex flex-col gap-2">
-            <BaseInput
-              v-model="biometricPassphrase"
-              type="password"
-              placeholder="Current passphrase"
-              autocomplete="current-password"
-              :disabled="biometricLoading"
-            />
-            <BaseButton
-              variant="action"
-              :loading="biometricLoading"
-              @click="onEnableBiometric"
-            >
-              Enable Biometric
-            </BaseButton>
-          </div>
+          <BaseButton
+            variant="action"
+            :disabled="biometricLoading"
+            @click="openPassphraseModal('enable-biometric')"
+          >
+            Enable Biometric
+          </BaseButton>
         </template>
 
         <template v-else>
@@ -966,22 +1026,13 @@ onMounted(() => {
               prompt does both. Optional and off by default.
             </p>
             <template v-if="!identityAutoUnlockEnabled">
-              <div class="flex flex-col gap-2">
-                <BaseInput
-                  v-model="appLockPassphrase"
-                  type="password"
-                  placeholder="Current passphrase"
-                  autocomplete="current-password"
-                  :disabled="appLockLoading"
-                />
-                <BaseButton
-                  variant="action"
-                  :loading="appLockLoading"
-                  @click="onEnableIdentityAutoUnlock"
-                >
-                  Enable Auto-Unlock
-                </BaseButton>
-              </div>
+              <BaseButton
+                variant="action"
+                :disabled="appLockLoading"
+                @click="openPassphraseModal('enable-auto-unlock')"
+              >
+                Enable Auto-Unlock
+              </BaseButton>
             </template>
             <template v-else>
               <p class="text-xs text-muted mb-2">
@@ -1122,8 +1173,20 @@ onMounted(() => {
       </BaseCard>
 
       <!-- Repository authenticity -->
-      <BaseCard as="section" v-if="authConfig">
-        <h2 class="text-sm font-medium mb-3">Repository Authenticity</h2>
+      <BaseCard
+        as="section"
+        v-if="authConfig"
+        :border="addKeyDirty ? 'accent' : 'edge'"
+      >
+        <h2 class="text-sm font-medium mb-3">
+          Repository Authenticity
+          <span
+            v-if="addKeyDirty"
+            class="ml-1 text-xs font-normal"
+            style="color: var(--color-accent)"
+            >Unsaved changes</span
+          >
+        </h2>
         <p class="text-xs text-muted mb-3">
           Verify SSH-signed commits on every pull to detect a compromised remote
           feeding validly encrypted but wrong entries.
@@ -1280,6 +1343,85 @@ onMounted(() => {
         <BaseButton variant="danger" :disabled="!resetReady" @click="doReset">
           <BaseIcon :icon="Trash2" /> Reset all data
         </BaseButton>
+      </div>
+    </BaseModalShell>
+
+    <!-- Shared passphrase modal (set / change / enable-biometric /
+         enable-auto-unlock). z=50 sits below the z=60/70 lock overlays so an
+         auto-lock while it's open stacks UnlockModal / AppLockOverlay above. -->
+    <BaseModalShell
+      v-if="passphraseModal"
+      variant="sheet"
+      :z="50"
+      role="dialog"
+      :aria-label="ppModalTitle"
+      @close="closePassphraseModal"
+    >
+      <h2 class="text-lg font-medium mb-3">{{ ppModalTitle }}</h2>
+      <div v-if="ppShowCurrent" class="flex flex-col gap-1 mb-3">
+        <label for="pp-current" class="text-xs text-muted"
+          >Current passphrase</label
+        >
+        <BaseInput
+          id="pp-current"
+          v-model="ppCurrent"
+          type="password"
+          autocomplete="current-password"
+          :disabled="passphraseLoading"
+        />
+      </div>
+      <PassphraseField
+        v-if="ppShowNew"
+        ref="ppField"
+        id="pp-new"
+        v-model="ppNew"
+        :label="passphraseModal === 'change' ? 'New passphrase' : 'Passphrase'"
+        placeholder="New passphrase"
+        :optional="false"
+        :disabled="passphraseLoading"
+        class="mb-3"
+      />
+      <div class="flex gap-2 justify-end">
+        <BaseButton
+          variant="secondary"
+          :disabled="passphraseLoading"
+          @click="closePassphraseModal"
+          >Cancel</BaseButton
+        >
+        <BaseButton
+          variant="action"
+          :loading="passphraseLoading"
+          @click="onPassphraseSubmit"
+          >{{ ppSubmitLabel }}</BaseButton
+        >
+      </div>
+    </BaseModalShell>
+
+    <!-- Unsaved-changes leave guard. Same z=50 layering as the passphrase
+         modal; backdrop or Android-back = Keep editing. -->
+    <BaseModalShell
+      v-if="unsavedOpen"
+      variant="sheet"
+      :z="50"
+      role="alertdialog"
+      aria-label="Unsaved changes"
+      @close="resolveUnsaved('cancel')"
+    >
+      <h2 class="text-lg font-medium mb-2">Unsaved changes</h2>
+      <p class="text-sm text-muted mb-4">
+        You have edits that haven't been saved. Save them before leaving, or
+        discard and leave.
+      </p>
+      <div class="flex flex-col gap-2">
+        <BaseButton variant="action" @click="resolveUnsaved('save')"
+          >Save and leave</BaseButton
+        >
+        <BaseButton variant="secondary" @click="resolveUnsaved('cancel')"
+          >Keep editing</BaseButton
+        >
+        <BaseButton variant="action-danger" @click="resolveUnsaved('discard')"
+          >Discard and leave</BaseButton
+        >
       </div>
     </BaseModalShell>
   </main>

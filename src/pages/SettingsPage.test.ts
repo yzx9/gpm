@@ -8,14 +8,16 @@ import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "./SettingsPage.vue";
 
-const { mockPush } = vi.hoisted(() => ({
+const { mockPush, mockOnBeforeRouteLeave } = vi.hoisted(() => ({
   mockPush: vi.fn(),
+  mockOnBeforeRouteLeave: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core");
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),
   createWebHashHistory: vi.fn(),
+  onBeforeRouteLeave: mockOnBeforeRouteLeave,
   useRouter: () => ({
     push: mockPush,
     replace: vi.fn(),
@@ -182,12 +184,8 @@ describe("SettingsPage", () => {
       await button("Set Passphrase").trigger("click");
       await flushPromises();
 
-      await wrapper
-        .find('input[id="settings-set-passphrase"]')
-        .setValue("secret");
-      await wrapper
-        .find('input[id="settings-set-passphrase-confirm"]')
-        .setValue("different");
+      await wrapper.find('input[id="pp-new"]').setValue("secret");
+      await wrapper.find('input[id="pp-new-confirm"]').setValue("different");
       await button("Encrypt Identity").trigger("click");
       await flushPromises();
 
@@ -551,13 +549,20 @@ describe("SettingsPage", () => {
       const { wrapper, toast } = mountWithApp(SettingsPage);
       await flushPromises();
 
-      const bioInput = wrapper.find('input[type="password"]');
-      await bioInput.setValue("my-pass");
+      // Card trigger opens the shared passphrase modal.
       const enableBtn = wrapper
         .findAll("button")
         .find((b) => b.text().includes("Enable Biometric"));
-      expect(enableBtn).toBeDefined();
       await enableBtn!.trigger("click");
+      await flushPromises();
+
+      const modal = wrapper.find('[role="dialog"]');
+      expect(modal.exists()).toBe(true);
+      await modal.find("#pp-current").setValue("my-pass");
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Enable Biometric"))!
+        .trigger("click");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("enable_biometric_unlock", {
@@ -581,14 +586,22 @@ describe("SettingsPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const bioInput = wrapper.find('input[type="password"]');
-      await bioInput.setValue("bad");
       const enableBtn = wrapper
         .findAll("button")
         .find((b) => b.text().includes("Enable Biometric"));
       await enableBtn!.trigger("click");
       await flushPromises();
 
+      const modal = wrapper.find('[role="dialog"]');
+      await modal.find("#pp-current").setValue("bad");
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Enable Biometric"))!
+        .trigger("click");
+      await flushPromises();
+
+      // Wrong passphrase keeps the modal open with the error visible.
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
       expect(wrapper.find("[role='alert']").text()).toContain(
         "Wrong passphrase",
       );
@@ -707,6 +720,233 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       expect(mockPush).toHaveBeenCalledWith({ name: "history" });
+    });
+  });
+
+  describe("passphrase modal", () => {
+    it("cancel wipes the typed passphrase", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Default auth is unencrypted, so the Set Passphrase trigger is visible.
+      const setBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Set Passphrase"));
+      await setBtn!.trigger("click");
+      await flushPromises();
+
+      const modal = wrapper.find('[role="dialog"]');
+      expect(modal.exists()).toBe(true);
+      await modal.find("#pp-new").setValue("secret");
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Cancel"))!
+        .trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_passphrase",
+        expect.anything(),
+      );
+
+      // Re-open: the field was wiped on close, not retained.
+      await setBtn!.trigger("click");
+      await flushPromises();
+      expect((wrapper.find("#pp-new").element as HTMLInputElement).value).toBe(
+        "",
+      );
+    });
+
+    it("backdrop dismisses without invoking", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const setBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Set Passphrase"));
+      await setBtn!.trigger("click");
+      await flushPromises();
+
+      // BaseModalShell emits `close` on a backdrop (click.self) click.
+      await wrapper.find('[role="dialog"]').trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_passphrase",
+        expect.anything(),
+      );
+    });
+  });
+
+  describe("dirty tracking", () => {
+    it("marks Commit Identity dirty on edit and clears on Save", async () => {
+      when("set_commit_identity", {
+        ...httpsConfig,
+        commit_user_name: "Alice",
+        commit_user_email: "",
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("Unsaved changes");
+
+      await wrapper.find("#commit-name").setValue("Alice");
+      expect(wrapper.text()).toContain("Unsaved changes");
+
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Save"))!
+        .trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("Unsaved changes");
+      expect(invoke).toHaveBeenCalledWith("set_commit_identity", {
+        name: "Alice",
+        email: null,
+      });
+    });
+  });
+
+  describe("leave guard", () => {
+    function leaveGuard() {
+      return mockOnBeforeRouteLeave.mock.calls[0][0] as () => Promise<
+        boolean | void
+      >;
+    }
+
+    it("leaves freely when nothing is dirty", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await expect(leaveGuard()()).resolves.toBe(true);
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
+        false,
+      );
+    });
+
+    it("discard drops changes and leaves", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find("#commit-name").setValue("Alice");
+
+      const p = leaveGuard()();
+      await flushPromises();
+
+      const modal = wrapper.find('[aria-label="Unsaved changes"]');
+      expect(modal.exists()).toBe(true);
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Discard"))!
+        .trigger("click");
+
+      await expect(p).resolves.toBe(true);
+    });
+
+    it("save commits and leaves", async () => {
+      when("set_commit_identity", {
+        ...httpsConfig,
+        commit_user_name: "Alice",
+        commit_user_email: "",
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find("#commit-name").setValue("Alice");
+
+      const p = leaveGuard()();
+      await flushPromises();
+
+      const modal = wrapper.find('[aria-label="Unsaved changes"]');
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Save and leave"))!
+        .trigger("click");
+
+      await expect(p).resolves.toBe(true);
+      expect(invoke).toHaveBeenCalledWith(
+        "set_commit_identity",
+        expect.objectContaining({ name: "Alice" }),
+      );
+    });
+
+    it("save failure keeps the user on the page", async () => {
+      reject("set_commit_identity", { code: "Err", message: "nope" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find("#commit-name").setValue("Alice");
+
+      const p = leaveGuard()();
+      await flushPromises();
+
+      const modal = wrapper.find('[aria-label="Unsaved changes"]');
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Save and leave"))!
+        .trigger("click");
+
+      await expect(p).resolves.toBe(false);
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
+        false,
+      );
+      expect(wrapper.find("[role='alert']").text()).toContain("nope");
+    });
+
+    it("keep editing cancels the navigation", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper.find("#commit-name").setValue("Alice");
+
+      const p = leaveGuard()();
+      await flushPromises();
+
+      const modal = wrapper.find('[aria-label="Unsaved changes"]');
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Keep editing"))!
+        .trigger("click");
+
+      await expect(p).resolves.toBe(false);
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
+        false,
+      );
+    });
+
+    it("save with only add-key dirty adds the key, not commit identity", async () => {
+      when("add_trusted_key", undefined);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Open the add-key form and type a key; leave commit identity untouched.
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Add a signing public key"))!
+        .trigger("click");
+      await flushPromises();
+      await wrapper.find("textarea").setValue("ssh-ed25519 AAAA key");
+
+      const p = leaveGuard()();
+      await flushPromises();
+
+      const modal = wrapper.find('[aria-label="Unsaved changes"]');
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Save and leave"))!
+        .trigger("click");
+
+      await expect(p).resolves.toBe(true);
+      expect(invoke).toHaveBeenCalledWith("add_trusted_key", {
+        publicKey: "ssh-ed25519 AAAA key",
+        label: "signer",
+      });
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_commit_identity",
+        expect.anything(),
+      );
     });
   });
 });

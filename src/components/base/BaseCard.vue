@@ -9,8 +9,8 @@ withDefaults(
     variant?: "flat" | "raised";
     /** Polymorphic root tag (e.g. "section" for settings sections). */
     as?: string;
-    /** Flat-card border tone; `danger` for the Danger Zone. */
-    border?: "edge" | "danger";
+    /** Flat-card border tone: `danger` (Danger Zone), `accent` (pending/unsaved). */
+    border?: "edge" | "danger" | "accent";
   }>(),
   { variant: "flat", as: "div", border: "edge" },
 );
@@ -20,7 +20,13 @@ withDefaults(
   <component
     :is="as"
     class="card"
-    :class="[variant, { 'danger-border': border === 'danger' }]"
+    :class="[
+      variant,
+      {
+        'danger-border': border === 'danger',
+        'accent-border': border === 'accent',
+      },
+    ]"
   >
     <slot />
   </component>
@@ -44,5 +50,10 @@ withDefaults(
 }
 .flat.danger-border {
   border-color: var(--color-danger-edge, var(--color-danger, #c66));
+}
+/* Pending/unsaved-changes tone — mirrors the accent focus ring on inputs. */
+.flat.accent-border {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 </style>
