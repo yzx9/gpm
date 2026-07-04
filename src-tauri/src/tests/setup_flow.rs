@@ -162,8 +162,7 @@ async fn verify_picked_wrong_ssh_passphrase_abandons() {
 /// purpose). Mirrors the x25519 rejection test so the arm stays honest.
 #[tokio::test]
 async fn verify_pasted_unencrypted_ssh_errors() {
-    let pair = rustpass::ssh::generate_keypair(None)
-        .expect("generate unencrypted SSH keypair");
+    let pair = rustpass::ssh::generate_keypair(None).expect("generate unencrypted SSH keypair");
     let err = setup::verify_pasted(pair.private_key.to_string(), "any".to_string())
         .await
         .expect_err("unencrypted SSH has nothing to verify");

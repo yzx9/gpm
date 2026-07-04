@@ -96,11 +96,9 @@ const identityType = ref("");
 // Shared passphrase modal — one prompt for set / change / enable-biometric /
 // enable-auto-unlock. The modal is the commit boundary: submit saves+closes,
 // cancel / backdrop / Android-back wipes the inputs and closes.
+// prettier-ignore
 type PassphraseMode =
-  | "set"
-  | "change"
-  | "enable-biometric"
-  | "enable-auto-unlock";
+  "set" | "change" | "enable-biometric" | "enable-auto-unlock";
 const passphraseModal = ref<PassphraseMode | null>(null);
 const ppCurrent = ref("");
 const ppNew = ref("");
