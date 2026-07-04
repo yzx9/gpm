@@ -90,6 +90,12 @@ useOverlayBackHandler(
 );
 
 async function showPassword() {
+  // Toggle off: if already revealed, hide (and wipe the plaintext) instead of
+  // re-running auth + decrypt. clear() cancels the auto-clear timer too.
+  if (revealed.value) {
+    clear();
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {

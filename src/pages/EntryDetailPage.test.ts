@@ -78,6 +78,33 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("some notes");
     });
 
+    it("toggles off when clicked while already revealed (no re-auth, no re-decrypt)", async () => {
+      // Regression: clicking the "Showing..." button used to re-run auth +
+      // show_password instead of hiding. It must now clear in place.
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "some notes",
+      });
+      const wrapper = mountPage();
+      // First click reveals.
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises();
+      expect(wrapper.text()).toContain("s3cret");
+
+      // Second click toggles off — the aria-label flips to "Password is showing".
+      await wrapper
+        .find('button[aria-label="Password is showing"]')
+        .trigger("click");
+      await flushPromises();
+
+      // Password is hidden again...
+      expect(wrapper.text()).not.toContain("s3cret");
+      // ...and show_password was NOT invoked a second time.
+      expect(
+        vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "show_password"),
+      ).toHaveLength(1);
+    });
+
     it("auto-clears sensitive data after the default view-clear window", async () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
