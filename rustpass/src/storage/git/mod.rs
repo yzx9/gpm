@@ -26,7 +26,10 @@ use walkdir::WalkDir;
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::recipient;
-use crate::storage::StorageBackend;
+use crate::storage::{
+    CancelToken, CommitKind, GitAuth, KeepLocalOutcome, ProgressSender, StorageBackend, StorageCtx,
+    SyncDivergence, SyncOutcome, SyncResult,
+};
 use crate::template;
 
 /// The git storage backend (stateless — `repo_path` passed per call).
@@ -100,6 +103,193 @@ impl StorageBackend for GitStorage {
             spawn_blocking(move || template::lookup_template_in_repo(&repo_path, &name_owned))
                 .await?,
         )
+    }
+
+    // ── RCS ops ─────────────────────────────────────────────────────────────
+    //
+    // Each method adapts the blocking `crate::git` free function to the async
+    // trait: move owned args into a `spawn_blocking` closure and pass `&StorageCtx`
+    // fields by value (cloning the cheap ones — `GitAuth`/`AuthenticityConfig` —
+    // since the closure must be `'static`). When the git module is consolidated
+    // into `storage/git`, these flip from `crate::git::<fn>` to local `rcs::<fn>`.
+
+    async fn clone(
+        &self,
+        auth: &GitAuth,
+        url: &str,
+        dest: &Path,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
+    ) -> Result<(), Error> {
+        let auth = auth.clone();
+        let url = url.to_string();
+        let dest = dest.to_path_buf();
+        spawn_blocking(move || {
+            crate::git::clone_repo(&url, &dest, &auth, cancel.as_ref(), progress.as_ref())
+        })
+        .await?
+    }
+
+    async fn init_repo(&self, repo_path: &Path) -> Result<(), Error> {
+        let repo_path = repo_path.to_path_buf();
+        spawn_blocking(move || crate::git::init_repo(&repo_path)).await?
+    }
+
+    async fn remote_add(&self, repo_path: &Path, name: &str, url: &str) -> Result<(), Error> {
+        let repo_path = repo_path.to_path_buf();
+        let name = name.to_string();
+        let url = url.to_string();
+        spawn_blocking(move || crate::git::remote_add(&repo_path, &name, &url)).await?
+    }
+
+    async fn commit(
+        &self,
+        ctx: &StorageCtx<'_>,
+        kind: CommitKind,
+        paths: &[String],
+        message: &str,
+    ) -> Result<String, Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let name = ctx.commit_name.map(str::to_string);
+        let email = ctx.commit_email.map(str::to_string);
+        let paths = paths.to_vec();
+        let message = message.to_string();
+        spawn_blocking(move || match kind {
+            CommitKind::Add => crate::git::commit(
+                &repo_path,
+                &paths,
+                &message,
+                name.as_deref(),
+                email.as_deref(),
+            ),
+            CommitKind::Remove => crate::git::commit_removal(
+                &repo_path,
+                &paths,
+                &message,
+                name.as_deref(),
+                email.as_deref(),
+            ),
+        })
+        .await?
+    }
+
+    async fn commit_initial(
+        &self,
+        repo_path: &Path,
+        paths: &[String],
+        message: &str,
+    ) -> Result<String, Error> {
+        let repo_path = repo_path.to_path_buf();
+        let paths = paths.to_vec();
+        let message = message.to_string();
+        spawn_blocking(move || crate::git::commit_initial(&repo_path, &paths, &message)).await?
+    }
+
+    async fn push(&self, ctx: &StorageCtx<'_>) -> Result<(), Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let auth = ctx.auth.clone();
+        spawn_blocking(move || crate::git::push(&repo_path, &auth)).await?
+    }
+
+    async fn pull(
+        &self,
+        ctx: &StorageCtx<'_>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
+    ) -> Result<SyncOutcome, Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let auth = ctx.auth.clone();
+        let policy = ctx.policy.clone();
+        spawn_blocking(move || {
+            crate::git::pull_repo(
+                &repo_path,
+                &auth,
+                &policy,
+                cancel.as_ref(),
+                progress.as_ref(),
+            )
+        })
+        .await?
+    }
+
+    async fn adopt_remote(
+        &self,
+        ctx: &StorageCtx<'_>,
+        expected_remote_oid: &str,
+    ) -> Result<SyncResult, Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let auth = ctx.auth.clone();
+        let policy = ctx.policy.clone();
+        let expected = expected_remote_oid.to_string();
+        spawn_blocking(move || crate::git::adopt_remote(&repo_path, &auth, &policy, &expected))
+            .await?
+    }
+
+    async fn preview_divergence(&self, ctx: &StorageCtx<'_>) -> Result<SyncDivergence, Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let auth = ctx.auth.clone();
+        spawn_blocking(move || crate::git::preview_divergence(&repo_path, &auth)).await?
+    }
+
+    async fn keep_local_plan(
+        &self,
+        ctx: &StorageCtx<'_>,
+        expected_remote_oid: &str,
+    ) -> Result<KeepLocalOutcome, Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let auth = ctx.auth.clone();
+        let policy = ctx.policy.clone();
+        let expected = expected_remote_oid.to_string();
+        spawn_blocking(move || crate::git::keep_local_plan(&repo_path, &auth, &policy, &expected))
+            .await?
+    }
+
+    async fn keep_local_advance(&self, repo_path: &Path, fetched_oid: &str) -> Result<(), Error> {
+        let repo_path = repo_path.to_path_buf();
+        let fetched = fetched_oid.to_string();
+        spawn_blocking(move || crate::git::keep_local_advance(&repo_path, &fetched)).await?
+    }
+
+    async fn keep_local_finalize(
+        &self,
+        ctx: &StorageCtx<'_>,
+        ciphertexts: &[(String, Vec<u8>)],
+        deletes: &[String],
+    ) -> Result<String, Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let auth = ctx.auth.clone();
+        let name = ctx.commit_name.map(str::to_string);
+        let email = ctx.commit_email.map(str::to_string);
+        let entries = ciphertexts.to_vec();
+        let deletes = deletes.to_vec();
+        spawn_blocking(move || {
+            crate::git::keep_local_finalize(
+                &repo_path,
+                &auth,
+                &entries,
+                &deletes,
+                name.as_deref(),
+                email.as_deref(),
+            )
+        })
+        .await?
+    }
+
+    async fn current_head(&self, repo_path: &Path) -> Result<String, Error> {
+        let repo_path = repo_path.to_path_buf();
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)
+                .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+            let head = repo
+                .head()
+                .map_err(|e| {
+                    Error::new(ErrorCode::StoreError, format!("Failed to read HEAD: {e}"))
+                })?
+                .target()
+                .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit"))?;
+            Ok(head.to_string())
+        })
+        .await?
     }
 }
 

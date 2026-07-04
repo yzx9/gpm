@@ -258,6 +258,154 @@ pub trait StorageBackend: Send + Sync {
     /// Returns an error only if `repo_path` can't be resolved; a missing
     /// template is `Ok(None)`.
     async fn lookup_template(&self, repo_path: &Path, name: &str) -> Result<Option<String>, Error>;
+
+    /// Clone `url` to `dest` over HTTPS/SSH with `auth`. Setup-time op — no
+    /// [`StorageCtx`] (there is no `RepoConfig` to build one from yet). An
+    /// existing `dest` is removed first.
+    ///
+    /// # Errors
+    ///
+    /// `CloneFailed`/`NetworkError` on auth/network/filesystem failure;
+    /// `Cancelled` if the cancel token is set mid-clone.
+    async fn clone(
+        &self,
+        auth: &GitAuth,
+        url: &str,
+        dest: &Path,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
+    ) -> Result<(), Error>;
+
+    /// Initialize a new git repo at `repo_path` (no commits, no remote).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `Repository::init` fails.
+    async fn init_repo(&self, repo_path: &Path) -> Result<(), Error>;
+
+    /// Add a remote `name` → `url` locally (no network contact).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo can't be opened or the remote already exists.
+    async fn remote_add(&self, repo_path: &Path, name: &str, url: &str) -> Result<(), Error>;
+
+    /// Stage `paths` and commit on HEAD. `kind` selects `git add` vs `git rm`;
+    /// the commit identity comes from `ctx`. Returns the new HEAD short hash.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo can't be opened or staging/committing fails.
+    async fn commit(
+        &self,
+        ctx: &StorageCtx<'_>,
+        kind: CommitKind,
+        paths: &[String],
+        message: &str,
+    ) -> Result<String, Error>;
+
+    /// Create the initial (no-parent) commit — gopass's "Initialized Store".
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo can't be opened or the commit fails.
+    async fn commit_initial(
+        &self,
+        repo_path: &Path,
+        paths: &[String],
+        message: &str,
+    ) -> Result<String, Error>;
+
+    /// Push the current branch to `origin`.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::PushRejected`] when the remote diverged; otherwise a
+    /// network/auth error.
+    async fn push(&self, ctx: &StorageCtx<'_>) -> Result<(), Error>;
+
+    /// Pull (fetch + fast-forward) from `origin` under `ctx`'s authenticity
+    /// policy. Returns [`SyncOutcome::FastForwarded`] for a normal pull or
+    /// [`SyncOutcome::Diverged`] when the branches have split.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo/remote can't be opened or the fetch fails.
+    async fn pull(
+        &self,
+        ctx: &StorageCtx<'_>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
+    ) -> Result<SyncOutcome, Error>;
+
+    /// Adopt the reviewed remote tip exactly (`expected_remote_oid`): re-fetch,
+    /// refuse if the remote moved past it, verify the remote-only range under
+    /// `ctx`'s policy, then hard-advance the branch. Divergence resolution.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::PullFfFailed`] if the remote advanced since review;
+    /// otherwise a git/signing error.
+    async fn adopt_remote(
+        &self,
+        ctx: &StorageCtx<'_>,
+        expected_remote_oid: &str,
+    ) -> Result<SyncResult, Error>;
+
+    /// Fetch the remote tip and compute the local-vs-remote divergence preview
+    /// without moving HEAD. Called after a push rejection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo/remote can't be opened or the fetch fails.
+    async fn preview_divergence(&self, ctx: &StorageCtx<'_>) -> Result<SyncDivergence, Error>;
+
+    /// Compute the "keep mine" replay plan: which local `.age` entries to
+    /// re-encrypt onto the reviewed remote tip. Returns CIPHERTEXT blobs —
+    /// plaintext never enters the storage layer — or [`KeepLocalOutcome::Blocked`]
+    /// if Enforce refused the remote-only range.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::PushRejected`] for an irreconcilable same-secret conflict;
+    /// otherwise a git/signing error.
+    async fn keep_local_plan(
+        &self,
+        ctx: &StorageCtx<'_>,
+        expected_remote_oid: &str,
+    ) -> Result<KeepLocalOutcome, Error>;
+
+    /// Advance HEAD + worktree to the already-fetched `fetched_oid` (no re-fetch
+    /// — the plan captured the reviewed tip).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo can't be opened or the ref move fails.
+    async fn keep_local_advance(&self, repo_path: &Path, fetched_oid: &str) -> Result<(), Error>;
+
+    /// Apply a keep-mine plan onto the (already-advanced) tip: write
+    /// `ciphertexts`, apply `deletes`, commit, and push. Receives CIPHERTEXT —
+    /// `Store` did the decrypt + re-encrypt to the current recipients, so
+    /// plaintext never enters the storage layer. Returns the new HEAD short hash.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::PushRejected`] if the push races a newer remote; otherwise a
+    /// git/IO error.
+    async fn keep_local_finalize(
+        &self,
+        ctx: &StorageCtx<'_>,
+        ciphertexts: &[(String, Vec<u8>)],
+        deletes: &[String],
+    ) -> Result<String, Error>;
+
+    /// Full hash of the current HEAD commit.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::NoRepo`] if no repo at `repo_path`;
+    /// [`ErrorCode::PullFfFailed`] if HEAD is unborn.
+    async fn current_head(&self, repo_path: &Path) -> Result<String, Error>;
 }
 
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.
