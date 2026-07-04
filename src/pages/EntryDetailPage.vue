@@ -198,16 +198,17 @@ async function enterEdit() {
     // Cold edit — the page never revealed; fetch so the form can prefill.
     loading.value = true;
     try {
-      const result = await showPasswordCmd(entryPath);
+      const result = await runWithAuth(() => showPasswordCmd(entryPath));
       pw = result.password;
       nt = result.notes;
     } catch (e) {
+      if (isAuthCancelled(e)) return;
       const appError = e as AppError;
       error.value = appError?.message || "Decryption failed";
-      loading.value = false;
       return;
+    } finally {
+      loading.value = false;
     }
-    loading.value = false;
   }
   editPassword.value = pw ?? "";
   editNotes.value = nt ?? "";

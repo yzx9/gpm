@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Tapping the "Showing" button while a password is already revealed now hides it, instead of asking you to unlock again and decrypting it a second time. The reveal button now works as a toggle: tap to show, tap again to hide.
+- Tapping Edit on an entry now prompts for your passphrase when the identity is locked, instead of showing an "Identity is encrypted — unlock with passphrase first" error. You no longer have to reveal or copy a secret first just to edit it.
 
 ## [v0.8.1] - 2026-07-03
 

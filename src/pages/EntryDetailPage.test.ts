@@ -465,6 +465,30 @@ describe("EntryDetailPage", () => {
       ).toBe("notes here");
     });
 
+    it("cold edit parks on the auth overlay when the identity is not cached", async () => {
+      // unlocked:false → identity NOT cached → enterEdit's runWithAuth parks on
+      // the auth overlay instead of calling show_password immediately. Without
+      // runWithAuth, the cold-edit fetch hit the backend's "Identity is
+      // encrypted — unlock with passphrase first" error instead of prompting.
+      const { wrapper, lock } = mountWithApp(EntryDetailPage, {
+        unlocked: false,
+      });
+      await wrapper.find(editBtn()).trigger("click");
+      await flushPromises(); // parked awaiting auth
+
+      // The op never ran while locked — show_password was not invoked.
+      expect(invoke).not.toHaveBeenCalledWith("show_password", {
+        entryPath: "servers/prod.age",
+      });
+
+      lock.cancelAuth(); // user dismissed the overlay (back)
+      await flushPromises(); // rejection propagates to the catch
+
+      // No error UI — the catch swallowed AUTH_CANCELLED; edit mode never entered.
+      expect(wrapper.find("[role='alert']").exists()).toBe(false);
+      expect(wrapper.find("#e-password").exists()).toBe(false);
+    });
+
     it("save reassembles the body losslessly (no trim; newline-joined) and invokes edit_secret", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce({ password: "orig", notes: "line1\nline2" })
