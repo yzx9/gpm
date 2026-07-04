@@ -405,6 +405,9 @@ describe("CreateFlow", () => {
     // Editable before generation.
     expect(passInput.attributes("disabled")).toBeUndefined();
     await passInput.setValue("original-pass");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("original-pass");
     await clickButton(wrapper, "Generate SSH key");
 
     // Locked after generation — for SSH the passphrase is fixed at mint time.
@@ -417,6 +420,28 @@ describe("CreateFlow", () => {
     await submit(wrapper);
 
     expect(completeArgs).toEqual({ passphrase: "original-pass" });
+  });
+
+  it("rejects an SSH generate when the passphrase and confirm do not match", async () => {
+    mockInvoke({ generate_identity: () => "ssh-ed25519 AAAApub" });
+
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "SSH (ed25519)");
+    await wrapper.find('input[id="create-passphrase"]').setValue("secret");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("different");
+    await clickButton(wrapper, "Generate SSH key");
+
+    // The passphrase is baked into the SSH key at mint time, so a mismatch must
+    // block the mint entirely — the key must not be generated with a typo.
+    expect(invoke).not.toHaveBeenCalledWith(
+      "generate_identity",
+      expect.anything(),
+    );
+    expect(wrapper.text()).toContain("Passphrases do not match");
+    expect(wrapper.text()).not.toContain("ssh-ed25519");
   });
 
   // ── retry after a non-fatal push failure ───────────────────────────────

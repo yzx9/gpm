@@ -20,6 +20,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import PassphraseField from "@/components/PassphraseField.vue";
 import { ArrowLeft, FileText, KeyRound, TriangleAlert } from "@lucide/vue";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { truncateKey } from "./url";
@@ -43,6 +44,8 @@ const recipients = ref<RecipientInfo[]>([]);
 const selectedRecipient = ref("");
 const identity = ref("");
 const passphrase = ref("");
+// Confirm-field controller for the x25519 at-rest passphrase (validate/reset).
+const pf = ref<InstanceType<typeof PassphraseField> | null>(null);
 const identityType = ref<string>("");
 const isIdentityEncrypted = ref(false);
 const loadingRecipients = ref(false);
@@ -108,6 +111,12 @@ function validateStep2(): string | null {
     return "Please select a recipient";
   if (isSshIdentity.value && isIdentityEncrypted.value && !passphrase.value)
     return "SSH key passphrase is required";
+  // pf is null on the SSH-paste and file paths — those enter an EXISTING key's
+  // passphrase, not a new one to confirm, so `?? null` is the intended skip.
+  // SAFETY: any future NEW-passphrase field must mount a PassphraseField so this
+  // confirm check isn't silently bypassed.
+  const passphraseError = pf.value?.validate() ?? null;
+  if (passphraseError) return passphraseError;
   return null;
 }
 
@@ -429,33 +438,30 @@ watch(identity, async (val) => {
     </div>
 
     <!-- Optional at-rest encryption (paste path; x25519 keys only) -->
-    <div
+    <PassphraseField
       v-else-if="identitySource === 'paste' && identityType === 'x25519'"
-      class="flex flex-col gap-1"
+      ref="pf"
+      id="identity-passphrase"
+      v-model="passphrase"
+      label="Passphrase (optional)"
+      placeholder="Leave empty for plaintext storage"
+      :optional="true"
+      :disabled="loadingIdentity"
     >
-      <label for="passphrase" class="text-sm font-medium"
-        >Passphrase (optional)</label
-      >
-      <BaseInput
-        id="passphrase"
-        v-model="passphrase"
-        type="password"
-        placeholder="Leave empty for plaintext storage"
-        autocomplete="new-password"
-        :disabled="loadingIdentity"
-      />
-      <small class="text-xs text-muted"
-        >Encrypts the identity file at rest. Recommended for Android.</small
-      >
-      <BaseAlert v-if="!passphrase.trim()" variant="warning">
-        <BaseIcon
-          :icon="TriangleAlert"
-          :size="14"
-          class="inline-block align-middle"
-        />
-        Without a passphrase, the identity is stored in plaintext.
-      </BaseAlert>
-    </div>
+      <template #help>
+        <small class="text-xs text-muted"
+          >Encrypts the identity file at rest. Recommended for Android.</small
+        >
+        <BaseAlert v-if="!passphrase.trim()" variant="warning">
+          <BaseIcon
+            :icon="TriangleAlert"
+            :size="14"
+            class="inline-block align-middle"
+          />
+          Without a passphrase, the identity is stored in plaintext.
+        </BaseAlert>
+      </template>
+    </PassphraseField>
 
     <BaseAlert variant="info" class="text-center">
       Stored locally. Nothing leaves your device.

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Setting or changing a passphrase now asks you to type it twice, and gpm checks the two entries match before continuing, so a single typo can't silently become the passphrase that locks your identity (gpm cannot recover a lost passphrase). Each box has a show/hide toggle so you can also verify what you typed. This applies everywhere you set a new passphrase: initial setup, SSH key generation, and Settings.
+
 ### Changed
 
 - Tapping Cancel while cloning a repository now shows a disabled "Cancelling…" state on the button right away, so it's clear the cancel was received instead of looking like the tap did nothing. If the cancel request itself fails, you now see a message instead of a silent failure. A clone that's still connecting — handshaking, authenticating — may take a moment to actually stop.

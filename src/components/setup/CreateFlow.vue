@@ -16,7 +16,7 @@ import {
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
-import BaseInput from "@/components/base/BaseInput.vue";
+import PassphraseField from "@/components/PassphraseField.vue";
 import { CircleCheck, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref } from "vue";
 import RepoAuthFields from "./RepoAuthFields.vue";
@@ -30,6 +30,9 @@ const recipient = ref("");
 
 const identityKind = ref<CreateIdentityKind>("age");
 const passphrase = ref("");
+// Confirm-field controller — exposes validate()/reset() for the set-new-
+// passphrase check at generate (SSH) and at create (age at-rest).
+const pf = ref<InstanceType<typeof PassphraseField> | null>(null);
 // The passphrase that minted the SSH key (snapshot at generate time). SSH
 // derives its recipient from the passphrase-encrypted PEM, so complete must
 // reuse exactly this value — not the live field, which is locked after generate
@@ -57,6 +60,9 @@ function selectKind(kind: CreateIdentityKind) {
   // — drop both so stale values can't be saved, and force a re-generate.
   recipient.value = "";
   mintedSshPassphrase.value = null;
+  // The confirm field was given in the previous kind's context — clear it so a
+  // stale confirm can't silently match under the new semantics.
+  pf.value?.reset();
   clearPendingIdentity().catch(() => {});
 }
 
@@ -67,8 +73,17 @@ onUnmounted(() => {
 });
 
 async function generate() {
-  generating.value = true;
   error.value = "";
+  // SSH bakes the passphrase into the key at mint time — a typo there can't be
+  // caught later, so require a matching confirm before minting anything.
+  if (identityKind.value === "ssh") {
+    const passphraseError = pf.value?.validate() ?? null;
+    if (passphraseError) {
+      error.value = passphraseError;
+      return;
+    }
+  }
+  generating.value = true;
   try {
     // The backend mints + stages the secret; only the recipient comes back.
     if (identityKind.value === "ssh") {
@@ -111,6 +126,8 @@ function validate(): string | null {
       return "SSH private key is required for SSH remote URLs";
     }
   }
+  const passphraseError = pf.value?.validate() ?? null;
+  if (passphraseError) return passphraseError;
   return null;
 }
 
@@ -218,24 +235,23 @@ async function onCreate() {
     </div>
 
     <!-- Passphrase (applied at generate for SSH, at-rest for age) -->
-    <div class="flex flex-col gap-1">
-      <label for="create-passphrase" class="text-sm font-medium"
-        >Passphrase (optional)</label
-      >
-      <BaseInput
-        id="create-passphrase"
-        v-model="passphrase"
-        type="password"
-        placeholder="Leave empty for plaintext storage"
-        autocomplete="new-password"
-        :disabled="loading || (identityKind === 'ssh' && !!recipient)"
-      />
-      <small class="text-xs text-muted">{{
-        identityKind === "ssh"
-          ? "Encrypts the generated SSH key — set this before generating."
-          : "Encrypts the identity at rest. Recommended for Android."
-      }}</small>
-    </div>
+    <PassphraseField
+      ref="pf"
+      id="create-passphrase"
+      v-model="passphrase"
+      label="Passphrase (optional)"
+      placeholder="Leave empty for plaintext storage"
+      :optional="true"
+      :disabled="loading || (identityKind === 'ssh' && !!recipient)"
+    >
+      <template #help>
+        <small class="text-xs text-muted">{{
+          identityKind === "ssh"
+            ? "Encrypts the generated SSH key — set this before generating."
+            : "Encrypts the identity at rest. Recommended for Android."
+        }}</small>
+      </template>
+    </PassphraseField>
 
     <!-- Generate -->
     <BaseButton

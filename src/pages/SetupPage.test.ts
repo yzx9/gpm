@@ -307,6 +307,36 @@ describe("SetupPage", () => {
       });
     });
 
+    it("blocks complete_setup when the at-rest passphrase and confirm do not match", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready → skip to step 2
+        .mockResolvedValueOnce([]); // list_recipients
+
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Pasting an x25519 key reveals the optional at-rest PassphraseField.
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await flushPromises();
+
+      await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
+      await wrapper
+        .find('input[id="identity-passphrase-confirm"]')
+        .setValue("different");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      // Mismatch must block the save — the identity must not be persisted with a
+      // passphrase the user can't reproduce (gpm can't recover it).
+      expect(invoke).not.toHaveBeenCalledWith(
+        "complete_setup",
+        expect.anything(),
+      );
+      expect(wrapper.text()).toContain("Passphrases do not match");
+    });
+
     it("navigates to entries on success", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready

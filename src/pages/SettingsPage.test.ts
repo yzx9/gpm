@@ -171,6 +171,34 @@ describe("SettingsPage", () => {
     });
   });
 
+  describe("identity passphrase", () => {
+    it("set passphrase: blocks encrypt when the confirm does not match", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Identity is unencrypted by default → the "Set Passphrase" affordance.
+      const button = (text: string) =>
+        wrapper.findAll("button").find((b) => b.text().includes(text))!;
+      await button("Set Passphrase").trigger("click");
+      await flushPromises();
+
+      await wrapper
+        .find('input[id="settings-set-passphrase"]')
+        .setValue("secret");
+      await wrapper
+        .find('input[id="settings-set-passphrase-confirm"]')
+        .setValue("different");
+      await button("Encrypt Identity").trigger("click");
+      await flushPromises();
+
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_passphrase",
+        expect.anything(),
+      );
+      expect(wrapper.text()).toContain("Passphrases do not match");
+    });
+  });
+
   describe("SSH key management", () => {
     it("shows SSH Key section when SSH is configured", async () => {
       when("get_config", sshConfig);

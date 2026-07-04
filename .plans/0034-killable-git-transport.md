@@ -6,7 +6,7 @@
 
 ## What
 
-User-initiated cancel can abort only the *transfer* phase of a clone or pull today. The cancel token is polled from inside libgit2's progress callbacks, which do not run during connection and authentication negotiation — DNS resolution, the TCP connect, the TLS handshake, and SSH key exchange / authentication. For a small store (the common gpm case) that pre-transfer phase dominates wall-time, so a cancel clicked "while still connecting" sets the token but the transport never checks it until data starts flowing or the network operation times out. This RFC proposes running git network transports as a killable subprocess (or an equally interruptible transport) so a cancel can terminate the handshake immediately, in any phase.
+User-initiated cancel can abort only the _transfer_ phase of a clone or pull today. The cancel token is polled from inside libgit2's progress callbacks, which do not run during connection and authentication negotiation — DNS resolution, the TCP connect, the TLS handshake, and SSH key exchange / authentication. For a small store (the common gpm case) that pre-transfer phase dominates wall-time, so a cancel clicked "while still connecting" sets the token but the transport never checks it until data starts flowing or the network operation times out. This RFC proposes running git network transports as a killable subprocess (or an equally interruptible transport) so a cancel can terminate the handshake immediately, in any phase.
 
 ## Why
 

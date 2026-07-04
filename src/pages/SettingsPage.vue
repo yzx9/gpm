@@ -51,6 +51,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import PassphraseField from "@/components/PassphraseField.vue";
 import {
   useLockState,
   useSecureScreen,
@@ -95,6 +96,9 @@ const showChangePassphrase = ref(false);
 const newPassphrase = ref("");
 const oldPassphrase = ref("");
 const passphraseLoading = ref(false);
+// Confirm-field controllers for set / change new-passphrase (validate/reset).
+const pfSet = ref<InstanceType<typeof PassphraseField> | null>(null);
+const pfChange = ref<InstanceType<typeof PassphraseField> | null>(null);
 
 // ── Biometric unlock state ──────────────────────────────────────────────
 const biometricAvailable = ref(false);
@@ -380,8 +384,9 @@ async function copyText(text: string) {
 
 async function onSetPassphrase() {
   error.value = "";
-  if (!newPassphrase.value) {
-    error.value = "Passphrase must not be empty";
+  const passphraseError = pfSet.value?.validate() ?? null;
+  if (passphraseError) {
+    error.value = passphraseError;
     return;
   }
   passphraseLoading.value = true;
@@ -403,8 +408,13 @@ async function onSetPassphrase() {
 
 async function onChangePassphrase() {
   error.value = "";
-  if (!oldPassphrase.value || !newPassphrase.value) {
-    error.value = "Both passphrases are required";
+  if (!oldPassphrase.value) {
+    error.value = "Current passphrase is required";
+    return;
+  }
+  const passphraseError = pfChange.value?.validate() ?? null;
+  if (passphraseError) {
+    error.value = passphraseError;
     return;
   }
   passphraseLoading.value = true;
@@ -801,11 +811,13 @@ onMounted(() => {
             <BaseIcon :icon="Lock" /> Set Passphrase
           </BaseButton>
           <div v-if="showSetPassphrase" class="flex flex-col gap-2">
-            <BaseInput
+            <PassphraseField
+              ref="pfSet"
+              id="settings-set-passphrase"
               v-model="newPassphrase"
-              type="password"
+              label="New passphrase"
               placeholder="New passphrase"
-              autocomplete="new-password"
+              :optional="false"
               :disabled="passphraseLoading"
             />
             <BaseButton
@@ -839,11 +851,13 @@ onMounted(() => {
               autocomplete="current-password"
               :disabled="passphraseLoading"
             />
-            <BaseInput
+            <PassphraseField
+              ref="pfChange"
+              id="settings-change-passphrase"
               v-model="newPassphrase"
-              type="password"
+              label="New passphrase"
               placeholder="New passphrase"
-              autocomplete="new-password"
+              :optional="false"
               :disabled="passphraseLoading"
             />
             <BaseButton

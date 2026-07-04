@@ -9,6 +9,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import PassphraseField from "@/components/PassphraseField.vue";
 import { CircleCheck, Copy, KeyRound } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
@@ -42,10 +43,19 @@ const isSshUrl = computed(() => isSshRepoUrl(repoUrl.value));
 const sshKeySource = ref<"paste" | "generate">("paste");
 const generatedPublicKey = ref("");
 const generating = ref(false);
+// Confirm-field controller for the generated-key passphrase (validate/reset).
+const pf = ref<InstanceType<typeof PassphraseField> | null>(null);
 
 async function generateKey() {
-  generating.value = true;
   error.value = "";
+  // The passphrase encrypts the freshly generated key — a typo can't be
+  // recovered, so require a matching confirm before generating.
+  const passphraseError = pf.value?.validate() ?? null;
+  if (passphraseError) {
+    error.value = passphraseError;
+    return;
+  }
+  generating.value = true;
   try {
     const result = await generateSshKey(sshPassphrase.value || null);
     sshKey.value = result.private_key;
@@ -165,19 +175,15 @@ async function copyPublicKey() {
 
     <!-- Generate key -->
     <template v-if="showKeygen && sshKeySource === 'generate'">
-      <div class="flex flex-col gap-1">
-        <label for="ssh-gen-passphrase" class="text-sm font-medium"
-          >Key Passphrase (optional)</label
-        >
-        <BaseInput
-          id="ssh-gen-passphrase"
-          v-model="sshPassphrase"
-          type="password"
-          placeholder="Optional — encrypt the generated key"
-          autocomplete="off"
-          :disabled="disabled || generating"
-        />
-      </div>
+      <PassphraseField
+        ref="pf"
+        id="ssh-gen-passphrase"
+        v-model="sshPassphrase"
+        label="Key Passphrase (optional)"
+        placeholder="Optional — encrypt the generated key"
+        :optional="true"
+        :disabled="disabled || generating"
+      />
       <BaseButton
         variant="secondary"
         :loading="generating"
