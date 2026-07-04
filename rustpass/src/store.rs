@@ -28,8 +28,11 @@ use crate::signing::{
     self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedKey, VerifyMode,
 };
 use crate::storage::git::passfile_rel;
-use crate::storage::{GitStorage, StorageBackend};
-use crate::{git, template};
+use crate::storage::{
+    CancelToken, CommitKind, GitAuth, GitStorage, KeepLocalOutcome, KeepLocalPlan, ProgressSender,
+    StorageBackend, StorageCtx,
+};
+use crate::template;
 
 /// Default `Idle` auto-lock timeout in seconds (5 minutes). Used as the
 /// `Idle` preset's fallback and the fail-safe when the lock-mode cache can't be
@@ -73,9 +76,9 @@ pub struct Store {
     /// age library directly. `Box<dyn>` so a second backend can
     /// arrive without rewriting the facade.
     crypto: Box<dyn CryptoBackend>,
-    /// The storage backend (git today). The only path to working-tree file ops —
-    /// list/get/set/delete entries, the recipients file, templates. RCS ops still
-    /// route through `git::` free fns until they fold into the storage backend.
+    /// The storage backend (git today). The only path to working-tree file ops
+    /// AND RCS ops (clone/pull/push/keep-mine) — list/get/set/delete entries, the
+    /// recipients file, templates.
     storage: Box<dyn StorageBackend>,
     config: Config,
     /// Cached decrypted identity (populated after unlock).
@@ -100,10 +103,35 @@ impl fmt::Debug for Store {
     }
 }
 
-/// The signature shared by [`git::commit`] (write) and [`git::commit_removal`]
-/// (delete). Used by [`Store::commit_local`] to shell the shared commit path for
-/// both write kinds.
-type CommitFn = fn(&Path, &[String], &str, Option<&str>, Option<&str>) -> Result<String, Error>;
+/// Owned per-op RCS context bundle. `Store` builds one from `RepoConfig` at the
+/// start of an RCS op and lends a borrowing [`StorageCtx`] (via [`RcsCtx::ctx`])
+/// to each storage-backend call. Owning the fields here lets the borrowed ctx
+/// stay alive across the op's `await`s.
+struct RcsCtx {
+    /// Repo working-tree root.
+    repo_path: PathBuf,
+    /// Git remote credentials.
+    auth: GitAuth,
+    /// Repository authenticity policy.
+    policy: AuthenticityConfig,
+    /// Commit author name (app default if `None`).
+    commit_name: Option<String>,
+    /// Commit author email (app default if `None`).
+    commit_email: Option<String>,
+}
+
+impl RcsCtx {
+    /// The borrowing view the storage-backend trait methods take.
+    fn ctx(&self) -> StorageCtx<'_> {
+        StorageCtx {
+            repo_path: &self.repo_path,
+            auth: &self.auth,
+            policy: &self.policy,
+            commit_name: self.commit_name.as_deref(),
+            commit_email: self.commit_email.as_deref(),
+        }
+    }
+}
 
 impl Store {
     /// Create a new `Store` backed by the given config directory.
@@ -319,7 +347,7 @@ impl Store {
     /// Cancellable, progress-reporting variant of [`clone_only`](Store::clone_only).
     ///
     /// `cancel` aborts the in-progress clone (mapped to [`ErrorCode::Cancelled`]
-    /// by `git::clone_repo`); `progress` receives transfer stats. Both are `None`
+    /// by the storage backend); `progress` receives transfer stats. Both are `None`
     /// on the plain [`clone_only`](Store::clone_only) path, which is used outside
     /// the user-initiated UI clone.
     ///
@@ -332,17 +360,17 @@ impl Store {
         pat: Option<&str>,
         ssh_key: Option<&str>,
         ssh_passphrase: Option<&str>,
-        cancel: Option<git::CancelToken>,
-        progress: Option<git::ProgressSender>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
     ) -> Result<(), Error> {
         let auth = match (ssh_key, pat) {
-            (Some(key), _) => git::GitAuth::Ssh {
+            (Some(key), _) => GitAuth::Ssh {
                 username: "git".to_string(),
                 private_key: key.to_string(),
                 passphrase: ssh_passphrase.map(String::from),
             },
-            (_, Some(token)) => git::GitAuth::Pat(token.to_string()),
-            _ => git::GitAuth::None,
+            (_, Some(token)) => GitAuth::Pat(token.to_string()),
+            _ => GitAuth::None,
         };
 
         let repo_dir = self.config.config_dir().join("repo");
@@ -352,18 +380,9 @@ impl Store {
             fs::remove_dir_all(&repo_dir).await?;
         }
 
-        let repo_url_owned = repo_url.to_string();
-        let repo_dir_clone = repo_dir.clone();
-        spawn_blocking(move || {
-            git::clone_repo(
-                &repo_url_owned,
-                &repo_dir_clone,
-                &auth,
-                cancel.as_ref(),
-                progress.as_ref(),
-            )
-        })
-        .await??;
+        self.storage
+            .clone(&auth, repo_url, &repo_dir, cancel, progress)
+            .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
@@ -437,24 +456,20 @@ impl Store {
         self.config.clear_all().await?;
 
         let bootstrap = async {
-            let repo_dir_init = repo_dir.clone();
-            spawn_blocking(move || git::init_repo(&repo_dir_init)).await??;
+            self.storage.init_repo(&repo_dir).await?;
 
             self.storage
                 .write_recipients(&repo_dir, &[recipient.to_string()])
                 .await?;
 
             let message = format!("Initialized Store for {recipient}");
-            let repo_dir_commit = repo_dir.clone();
             let rel_paths = vec![".age-recipients".to_string()];
-            spawn_blocking(move || git::commit_initial(&repo_dir_commit, &rel_paths, &message))
-                .await??;
+            self.storage
+                .commit_initial(&repo_dir, &rel_paths, &message)
+                .await?;
 
             if has_url {
-                let repo_dir_remote = repo_dir.clone();
-                let url_owned = url.to_string();
-                spawn_blocking(move || git::remote_add(&repo_dir_remote, "origin", &url_owned))
-                    .await??;
+                self.storage.remote_add(&repo_dir, "origin", url).await?;
             }
 
             let local_path = repo_dir.to_string_lossy().to_string();
@@ -596,8 +611,8 @@ impl Store {
         ssh_passphrase: Option<&str>,
         identity: &str,
         identity_passphrase: Option<&str>,
-        cancel: Option<git::CancelToken>,
-        progress: Option<git::ProgressSender>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
     ) -> Result<(), Error> {
         // age-keygen writes # comment lines before the key; keep only the key
         // so it is parsed and stored consistently with the paste path.
@@ -611,13 +626,13 @@ impl Store {
             .identity_to_recipient(identity, identity_passphrase)?;
 
         let auth = match (ssh_key, pat) {
-            (Some(key), _) => git::GitAuth::Ssh {
+            (Some(key), _) => GitAuth::Ssh {
                 username: "git".to_string(),
                 private_key: key.to_string(),
                 passphrase: ssh_passphrase.map(String::from),
             },
-            (_, Some(token)) => git::GitAuth::Pat(token.to_string()),
-            _ => git::GitAuth::None,
+            (_, Some(token)) => GitAuth::Pat(token.to_string()),
+            _ => GitAuth::None,
         };
 
         let repo_dir = self.config.config_dir().join("repo");
@@ -629,18 +644,9 @@ impl Store {
 
         self.config.save_identity(identity_bytes, None).await?;
 
-        let repo_url_owned = repo_url.to_string();
-        let repo_dir_clone = repo_dir.clone();
-        spawn_blocking(move || {
-            git::clone_repo(
-                &repo_url_owned,
-                &repo_dir_clone,
-                &auth,
-                cancel.as_ref(),
-                progress.as_ref(),
-            )
-        })
-        .await??;
+        self.storage
+            .clone(&auth, repo_url, &repo_dir, cancel, progress)
+            .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
@@ -767,19 +773,16 @@ impl Store {
     /// staging or committing fails.
     pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let passfile = self.encrypt_and_write(name, plaintext, &repo_path).await?;
+        let rcs = self.rcs_ctx().await?;
+        let passfile = self
+            .encrypt_and_write(name, plaintext, &rcs.repo_path)
+            .await?;
         let head = self
             .commit_local(
-                repo_path,
+                &rcs,
+                CommitKind::Add,
                 passfile,
                 format!("Save secret: {name}"),
-                (
-                    repo_config.commit_user_name.clone(),
-                    repo_config.commit_user_email.clone(),
-                ),
-                git::commit,
             )
             .await?;
         Ok(WriteResult { commit: head })
@@ -802,23 +805,18 @@ impl Store {
     pub async fn delete(&self, name: &str) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
         let passfile = passfile_rel(name);
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
+        let rcs = self.rcs_ctx().await?;
 
         // Existence + within-repo guard + remove the worktree file. The index
-        // removal is staged in `commit_removal` below.
-        self.storage.delete(&repo_path, name).await?;
+        // removal is staged in the commit below.
+        self.storage.delete(&rcs.repo_path, name).await?;
 
         let head = self
             .commit_local(
-                repo_path,
+                &rcs,
+                CommitKind::Remove,
                 passfile,
                 format!("Delete secret: {name}"),
-                (
-                    repo_config.commit_user_name.clone(),
-                    repo_config.commit_user_email.clone(),
-                ),
-                git::commit_removal,
             )
             .await?;
         Ok(WriteResult { commit: head })
@@ -857,7 +855,7 @@ impl Store {
     /// returns. [`WriteOutcome::Written`] is the normal success.
     pub async fn autosync_write<F, Fut>(
         &self,
-        cancel: Option<git::CancelToken>,
+        cancel: Option<CancelToken>,
         local_write: F,
     ) -> Result<WriteOutcome, Error>
     where
@@ -927,7 +925,7 @@ impl Store {
     /// Resolve a [`SyncOutcome::Diverged`] with the user's [`DivergenceChoice`].
     ///
     /// - [`DivergenceChoice::AdoptRemote`] adopts the reviewed remote tip exactly
-    ///   (delegating to [`git::adopt_remote`]).
+    ///   (delegating to the storage backend).
     /// - [`DivergenceChoice::KeepMine`] re-encrypts the local-only `.age` entries
     ///   onto the reviewed remote tip (with the current recipient set) and pushes
     ///   (see [`Self::resolve_keep_mine`]).
@@ -961,13 +959,9 @@ impl Store {
     ) -> Result<SyncResult, Error> {
         match choice {
             DivergenceChoice::AdoptRemote => {
-                let repo_config = self.config.load_repo_config().await?;
-                let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-                let auth = repo_config.to_git_auth();
-                let policy = repo_config.authenticity;
+                let rcs = self.rcs_ctx().await?;
                 let expected = expected_remote_oid.to_string();
-                spawn_blocking(move || git::adopt_remote(&repo_path, &auth, &policy, &expected))
-                    .await?
+                self.storage.adopt_remote(&rcs.ctx(), &expected).await
             }
             DivergenceChoice::KeepMine => self.resolve_keep_mine(expected_remote_oid).await,
         }
@@ -983,27 +977,16 @@ impl Store {
     /// → decrypt local blobs → advance to the reviewed tip (no second fetch)
     /// → re-encrypt to current recipients → write + commit + push.
     async fn resolve_keep_mine(&self, expected_remote_oid: &str) -> Result<SyncResult, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let auth = repo_config.to_git_auth();
-        let policy = repo_config.authenticity;
-        let commit_identity = (
-            repo_config.commit_user_name.clone(),
-            repo_config.commit_user_email.clone(),
-        );
+        let rcs = self.rcs_ctx().await?;
         let expected = expected_remote_oid.to_string();
 
         // 1. Plan: fetch once, stale-guard, authenticity-verify, compute the
         //    replay set + conflict detection. Does NOT move HEAD.
-        let plan = match spawn_blocking(move || {
-            git::keep_local_plan(&repo_path, &auth, &policy, &expected)
-        })
-        .await??
-        {
-            git::KeepLocalOutcome::Blocked(result) => return Ok(result),
-            git::KeepLocalOutcome::Plan(p) => p,
+        let plan = match self.storage.keep_local_plan(&rcs.ctx(), &expected).await? {
+            KeepLocalOutcome::Blocked(result) => return Ok(result),
+            KeepLocalOutcome::Plan(p) => p,
         };
-        let git::KeepLocalPlan {
+        let KeepLocalPlan {
             fetched_oid,
             replays,
             deletes,
@@ -1043,15 +1026,15 @@ impl Store {
         //    (objects still in the DB), so no second fetch can race past the
         //    reviewed tip and bypass the authenticity check under Enforce.
         let fetched = fetched_oid.clone();
-        let repo_path_adv = self.repo_path().await?;
-        spawn_blocking(move || git::keep_local_advance(&repo_path_adv, &fetched)).await??;
+        self.storage
+            .keep_local_advance(&rcs.repo_path, &fetched)
+            .await?;
 
         // 4. Re-encrypt to the CURRENT (remote-tip) recipients + our own key
         //    (our_recipient derived once during decrypt, above).
-        let repo_path_re = self.repo_path().await?;
         let mut recipients: Vec<String> = self
             .storage
-            .list_recipients(&repo_path_re)
+            .list_recipients(&rcs.repo_path)
             .await?
             .into_iter()
             .map(|r| r.public_key)
@@ -1069,21 +1052,11 @@ impl Store {
         }
 
         // 5. Write the re-encrypted entries, apply local deletes, commit, push.
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path_fin = Path::new(&repo_config.local_path).to_path_buf();
-        let auth_fin = repo_config.to_git_auth();
         let deletes = deletes.clone();
-        let head = spawn_blocking(move || {
-            git::keep_local_finalize(
-                &repo_path_fin,
-                &auth_fin,
-                &ciphertexts,
-                &deletes,
-                commit_identity.0.as_deref(),
-                commit_identity.1.as_deref(),
-            )
-        })
-        .await??;
+        let head = self
+            .storage
+            .keep_local_finalize(&rcs.ctx(), &ciphertexts, &deletes)
+            .await?;
 
         Ok(SyncResult {
             changed: true,
@@ -1101,10 +1074,8 @@ impl Store {
     ///
     /// Returns an error if the store is not configured or the fetch fails.
     pub async fn sync_divergence_preview(&self) -> Result<SyncDivergence, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let auth = repo_config.to_git_auth();
-        spawn_blocking(move || git::preview_divergence(&repo_path, &auth)).await?
+        let rcs = self.rcs_ctx().await?;
+        self.storage.preview_divergence(&rcs.ctx()).await
     }
 
     /// Look up the content template (`.pass-template`) that applies to `name`,
@@ -1206,28 +1177,19 @@ impl Store {
     }
 
     /// Commit `passfile` (the caller has already mutated the worktree) locally,
-    /// with **no push**. `commit_fn` is [`git::commit`] for a save or
-    /// [`git::commit_removal`] for a delete. This is the local-only commit half
-    /// shared by the local-only write primitives ([`Store::set`] / [`Store::delete`]).
+    /// with **no push**. `kind` is `Add` for a save or `Remove` for a delete.
+    /// This is the local-only commit half shared by the local-only write
+    /// primitives ([`Store::set`] / [`Store::delete`]).
     async fn commit_local(
         &self,
-        repo_path: PathBuf,
+        rcs: &RcsCtx,
+        kind: CommitKind,
         passfile: String,
         message: String,
-        commit_identity: (Option<String>, Option<String>),
-        commit_fn: CommitFn,
     ) -> Result<String, Error> {
-        spawn_blocking(move || {
-            let paths = vec![passfile];
-            commit_fn(
-                &repo_path,
-                &paths,
-                &message,
-                commit_identity.0.as_deref(),
-                commit_identity.1.as_deref(),
-            )
-        })
-        .await?
+        self.storage
+            .commit(&rcs.ctx(), kind, &[passfile], &message)
+            .await
     }
 
     /// Encrypt `plaintext` to the store recipients (ensuring our own key is
@@ -1404,8 +1366,8 @@ impl Store {
     /// pull.
     pub async fn sync_with(
         &self,
-        cancel: Option<git::CancelToken>,
-        progress: Option<git::ProgressSender>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
         self.sync_with_locked(cancel, progress).await
@@ -1417,23 +1379,11 @@ impl Store {
     /// push and calls this directly.
     async fn sync_with_locked(
         &self,
-        cancel: Option<git::CancelToken>,
-        progress: Option<git::ProgressSender>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let auth = repo_config.to_git_auth();
-        let policy = repo_config.authenticity;
-        spawn_blocking(move || {
-            git::pull_repo(
-                &repo_path,
-                &auth,
-                &policy,
-                cancel.as_ref(),
-                progress.as_ref(),
-            )
-        })
-        .await?
+        let rcs = self.rcs_ctx().await?;
+        self.storage.pull(&rcs.ctx(), cancel, progress).await
     }
 
     /// Push the current branch to `origin`.
@@ -1454,10 +1404,8 @@ impl Store {
 
     /// Lock-free inner of [`push`] (see [`sync_with_locked`]).
     async fn push_locked(&self) -> Result<(), Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let auth = repo_config.to_git_auth();
-        spawn_blocking(move || git::push(&repo_path, &auth)).await?
+        let rcs = self.rcs_ctx().await?;
+        self.storage.push(&rcs.ctx()).await
     }
 
     /// Manual sync (pull → push) — the publish path when autosync is off, and the
@@ -1478,8 +1426,8 @@ impl Store {
     /// to sync later), or whatever [`sync_with_locked`] returns.
     pub async fn sync_repo(
         &self,
-        cancel: Option<git::CancelToken>,
-        progress: Option<git::ProgressSender>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
 
@@ -1513,6 +1461,21 @@ impl Store {
     async fn repo_path(&self) -> Result<PathBuf, Error> {
         let repo_config = self.config.load_repo_config().await?;
         Ok(Path::new(&repo_config.local_path).to_path_buf())
+    }
+
+    /// Load the current `RepoConfig` and build the per-op RCS context (repo
+    /// path, auth, policy, commit identity). `RepoConfig` is stable for the op's
+    /// duration — every caller runs under `write_mu` (or is a setup path with no
+    /// concurrency).
+    async fn rcs_ctx(&self) -> Result<RcsCtx, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        Ok(RcsCtx {
+            repo_path: Path::new(&repo_config.local_path).to_path_buf(),
+            auth: repo_config.to_git_auth(),
+            policy: repo_config.authenticity,
+            commit_name: repo_config.commit_user_name,
+            commit_email: repo_config.commit_user_email,
+        })
     }
 
     /// Load the persisted authenticity config (the `authenticity` field of
@@ -1893,15 +1856,7 @@ impl Store {
     /// The full hash of the current HEAD commit, for provenance fields.
     async fn current_head_hash(&self) -> Result<String, Error> {
         let repo_path = self.repo_path().await?;
-        spawn_blocking(move || {
-            let repo = git2::Repository::discover(&repo_path)?;
-            let head = repo
-                .head()?
-                .target()
-                .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit"))?;
-            Ok(head.to_string())
-        })
-        .await?
+        self.storage.current_head(&repo_path).await
     }
 
     /// Verify every commit in the half-open range `(from, to]` (newest first)
