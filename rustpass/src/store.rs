@@ -381,7 +381,7 @@ impl Store {
         }
 
         self.storage
-            .clone(&auth, repo_url, &repo_dir, cancel, progress)
+            .clone_repo(&auth, repo_url, &repo_dir, cancel, progress)
             .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();
@@ -645,7 +645,7 @@ impl Store {
         self.config.save_identity(identity_bytes, None).await?;
 
         self.storage
-            .clone(&auth, repo_url, &repo_dir, cancel, progress)
+            .clone_repo(&auth, repo_url, &repo_dir, cancel, progress)
             .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();

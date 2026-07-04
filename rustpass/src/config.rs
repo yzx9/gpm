@@ -10,9 +10,9 @@ use tokio::fs;
 use crate::atrest::AtRest;
 use crate::crypto;
 use crate::error::{Error, ErrorCode};
-use crate::git::GitAuth;
 use crate::identity::{IdentityType, classify_identity};
 use crate::signing::AuthenticityConfig;
+use crate::storage::GitAuth;
 
 /// Default commit author name used when none is configured. Single source of
 /// the value — read by the commit fallback and surfaced to the UI for display.
@@ -491,7 +491,7 @@ pub struct RepoConfig {
 }
 
 impl RepoConfig {
-    /// Build a [`GitAuth`](crate::git::GitAuth) from stored credentials.
+    /// Build a [`GitAuth`](crate::storage::GitAuth) from stored credentials.
     ///
     /// SSH key takes priority if both PAT and SSH key are present.
     #[must_use]

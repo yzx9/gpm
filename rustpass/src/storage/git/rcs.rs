@@ -2,6 +2,40 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+//! Blocking RCS operations for the git storage backend: clone/init/commit/push
+//! and the sync/conflict machinery (3-way pull classification, `adopt_remote`,
+//! keep-mine plan/advance/finalize, divergence preview). The async
+//! [`StorageBackend`](super::StorageBackend) methods on
+//! [`GitStorage`](super::GitStorage) adapt these via `spawn_blocking`; the
+//! platform transport (HTTPS CA bundle, credential/progress callbacks) lives
+//! here too, co-located with the only `git2` call sites.
+//!
+//! Crypto-fused, intentionally: keep-mine hands back ciphertext blobs (never
+//! plaintext) for `Store` to decrypt + re-encrypt to the current recipients, and
+//! the authenticity checks interleave with git object access mid-plan. A future
+//! non-libgit2 backend would rework this wholesale.
+//!
+//! Keep-mine resolution — `Store::resolve_keep_mine` orchestrates, this module
+//! provides the git halves. The boundary carries ciphertext only (plaintext
+//! lives in `Store` between decrypt and re-encrypt):
+//!
+//! ```text
+//!   Store                            storage::git::rcs
+//!   -----                            -----------------
+//!   resolve_keep_mine ──── plan ───▶ keep_local_plan       (fetch the reviewed
+//!   ◀── KeepLocalPlan {               tip, verify its commit
+//!         replays: [ciphertext          range, classify the local-
+//!         blobs], deletes, … }          only .age set; return
+//!   decrypt each blob (crypto)          CIPHERTEXT blobs + deletes)
+//!   re-encrypt to CURRENT recipients
+//!   ──── advance ─────────────────▶ keep_local_advance     (move HEAD to the
+//!                                                          reviewed tip; no
+//!   ──── finalize(ciphertexts, ───▶                         second fetch)
+//!         deletes)                  keep_local_finalize    (write the re-encrypted
+//!   ◀── new HEAD                                            blobs, apply deletes,
+//!                                                           commit, push)
+//! ```
+
 use std::collections::HashMap;
 #[cfg(target_os = "android")]
 use std::ffi::c_int;
@@ -15,15 +49,9 @@ use git2::{FetchOptions, RemoteCallbacks, Repository};
 use crate::config::{DEFAULT_COMMIT_EMAIL, DEFAULT_COMMIT_NAME};
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
-use crate::storage::{AuthenticityResult, SyncDivergence, SyncOutcome, SyncResult};
-// The auth/progress/keep-mine TYPES now live in `crate::storage` (so the
-// `StorageBackend` trait can name them). Re-exported here so existing
-// `rustpass::git::<Type>` callers (store.rs, tests, lib.rs, config.rs) keep
-// resolving until the RCS bodies fold into `storage/git` and `git.rs` is
-// deleted, at which point those callers repoint to `storage::`.
-pub use crate::storage::{
-    CancelToken, GitAuth, GitProgress, KeepLocalOutcome, KeepLocalPlan, KeepLocalReplay,
-    ProgressSender,
+use crate::storage::{
+    AuthenticityResult, CancelToken, GitAuth, GitProgress, KeepLocalOutcome, KeepLocalPlan,
+    KeepLocalReplay, ProgressSender, SyncDivergence, SyncOutcome, SyncResult,
 };
 
 /// Mozilla (curl) root CA bundle, embedded so the libgit2 OpenSSL backend has a
@@ -32,7 +60,8 @@ pub use crate::storage::{
 /// HTTPS git otherwise fails with `SSL certificate is invalid`. Refreshed via
 /// the `refresh-ca` just recipe; a unit test guards against a truncated/corrupt
 /// bundle shipping.
-pub const EMBEDDED_CA_BUNDLE: &str = include_str!("../data/cacert.pem");
+#[cfg(any(target_os = "android", test))]
+pub const EMBEDDED_CA_BUNDLE: &str = include_str!("../../../data/cacert.pem");
 
 /// Before an HTTPS git op on Android, load the embedded Mozilla roots into
 /// libgit2's OpenSSL trust store. No-op on non-Android targets and on non-HTTPS
@@ -629,26 +658,6 @@ pub fn push(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
     ensure_https_ca_for_origin(&repo)?;
     push_current_branch(&repo, auth)
-}
-
-/// Stage, commit, and push in one shot. Returns the new HEAD short hash.
-/// Convenience wrapper kept for the simple write paths.
-///
-/// # Errors
-///
-/// Returns an error if the repo cannot be opened, staging/committing fails, or
-/// the push is rejected.
-pub fn commit_and_push(
-    repo_path: &Path,
-    auth: &GitAuth,
-    rel_paths: &[String],
-    message: &str,
-    name: Option<&str>,
-    email: Option<&str>,
-) -> Result<String, Error> {
-    let head = commit(repo_path, rel_paths, message, name, email)?;
-    push(repo_path, auth)?;
-    Ok(head)
 }
 
 /// Add a remote named `name` pointing at `url` (gopass's `addRemote`). This is

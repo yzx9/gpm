@@ -10,11 +10,11 @@
 //! so `Store` hands the backend an entry *name* and the backend maps it to
 //! `<repo>/<name>.age` and validates the resolved path.
 //!
-//! Today this backend implements the working-tree file ops. RCS ops
-//! (clone/pull/push/keep-mine) are still free functions in `crate::git` and fold
-//! into this backend as the git module is consolidated; `GitStorage` is stateless
-//! — auth/policy are passed per-op, not held at construction (the real durable
-//! state is git's on-disk index, re-attached each op via `Repository::discover`).
+//! RCS ops (clone/pull/push/keep-mine) live in [`rcs`] as blocking free
+//! functions, adapted to this trait via `spawn_blocking`. `GitStorage` is
+//! stateless — auth/policy are passed per-op, not held at construction (the real
+//! durable state is git's on-disk index, re-attached each op via
+//! `Repository::discover`).
 
 use std::path::{Path, PathBuf};
 
@@ -31,6 +31,10 @@ use crate::storage::{
     SyncDivergence, SyncOutcome, SyncResult,
 };
 use crate::template;
+
+/// Blocking RCS + transport free functions (`clone_repo`, `pull_repo`, keep-mine,
+/// CA-bundle, …). Adapted to the async trait below via `spawn_blocking`.
+mod rcs;
 
 /// The git storage backend (stateless — `repo_path` passed per call).
 #[derive(Debug, Default, Clone, Copy)]
@@ -107,13 +111,12 @@ impl StorageBackend for GitStorage {
 
     // ── RCS ops ─────────────────────────────────────────────────────────────
     //
-    // Each method adapts the blocking `crate::git` free function to the async
-    // trait: move owned args into a `spawn_blocking` closure and pass `&StorageCtx`
+    // Each method adapts a blocking free function in `rcs` to the async trait:
+    // move owned args into a `spawn_blocking` closure and pass the `&StorageCtx`
     // fields by value (cloning the cheap ones — `GitAuth`/`AuthenticityConfig` —
-    // since the closure must be `'static`). When the git module is consolidated
-    // into `storage/git`, these flip from `crate::git::<fn>` to local `rcs::<fn>`.
+    // since the closure must be `'static`).
 
-    async fn clone(
+    async fn clone_repo(
         &self,
         auth: &GitAuth,
         url: &str,
@@ -125,21 +128,21 @@ impl StorageBackend for GitStorage {
         let url = url.to_string();
         let dest = dest.to_path_buf();
         spawn_blocking(move || {
-            crate::git::clone_repo(&url, &dest, &auth, cancel.as_ref(), progress.as_ref())
+            rcs::clone_repo(&url, &dest, &auth, cancel.as_ref(), progress.as_ref())
         })
         .await?
     }
 
     async fn init_repo(&self, repo_path: &Path) -> Result<(), Error> {
         let repo_path = repo_path.to_path_buf();
-        spawn_blocking(move || crate::git::init_repo(&repo_path)).await?
+        spawn_blocking(move || rcs::init_repo(&repo_path)).await?
     }
 
     async fn remote_add(&self, repo_path: &Path, name: &str, url: &str) -> Result<(), Error> {
         let repo_path = repo_path.to_path_buf();
         let name = name.to_string();
         let url = url.to_string();
-        spawn_blocking(move || crate::git::remote_add(&repo_path, &name, &url)).await?
+        spawn_blocking(move || rcs::remote_add(&repo_path, &name, &url)).await?
     }
 
     async fn commit(
@@ -155,14 +158,14 @@ impl StorageBackend for GitStorage {
         let paths = paths.to_vec();
         let message = message.to_string();
         spawn_blocking(move || match kind {
-            CommitKind::Add => crate::git::commit(
+            CommitKind::Add => rcs::commit(
                 &repo_path,
                 &paths,
                 &message,
                 name.as_deref(),
                 email.as_deref(),
             ),
-            CommitKind::Remove => crate::git::commit_removal(
+            CommitKind::Remove => rcs::commit_removal(
                 &repo_path,
                 &paths,
                 &message,
@@ -182,13 +185,13 @@ impl StorageBackend for GitStorage {
         let repo_path = repo_path.to_path_buf();
         let paths = paths.to_vec();
         let message = message.to_string();
-        spawn_blocking(move || crate::git::commit_initial(&repo_path, &paths, &message)).await?
+        spawn_blocking(move || rcs::commit_initial(&repo_path, &paths, &message)).await?
     }
 
     async fn push(&self, ctx: &StorageCtx<'_>) -> Result<(), Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
-        spawn_blocking(move || crate::git::push(&repo_path, &auth)).await?
+        spawn_blocking(move || rcs::push(&repo_path, &auth)).await?
     }
 
     async fn pull(
@@ -201,7 +204,7 @@ impl StorageBackend for GitStorage {
         let auth = ctx.auth.clone();
         let policy = ctx.policy.clone();
         spawn_blocking(move || {
-            crate::git::pull_repo(
+            rcs::pull_repo(
                 &repo_path,
                 &auth,
                 &policy,
@@ -221,14 +224,13 @@ impl StorageBackend for GitStorage {
         let auth = ctx.auth.clone();
         let policy = ctx.policy.clone();
         let expected = expected_remote_oid.to_string();
-        spawn_blocking(move || crate::git::adopt_remote(&repo_path, &auth, &policy, &expected))
-            .await?
+        spawn_blocking(move || rcs::adopt_remote(&repo_path, &auth, &policy, &expected)).await?
     }
 
     async fn preview_divergence(&self, ctx: &StorageCtx<'_>) -> Result<SyncDivergence, Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
-        spawn_blocking(move || crate::git::preview_divergence(&repo_path, &auth)).await?
+        spawn_blocking(move || rcs::preview_divergence(&repo_path, &auth)).await?
     }
 
     async fn keep_local_plan(
@@ -240,14 +242,13 @@ impl StorageBackend for GitStorage {
         let auth = ctx.auth.clone();
         let policy = ctx.policy.clone();
         let expected = expected_remote_oid.to_string();
-        spawn_blocking(move || crate::git::keep_local_plan(&repo_path, &auth, &policy, &expected))
-            .await?
+        spawn_blocking(move || rcs::keep_local_plan(&repo_path, &auth, &policy, &expected)).await?
     }
 
     async fn keep_local_advance(&self, repo_path: &Path, fetched_oid: &str) -> Result<(), Error> {
         let repo_path = repo_path.to_path_buf();
         let fetched = fetched_oid.to_string();
-        spawn_blocking(move || crate::git::keep_local_advance(&repo_path, &fetched)).await?
+        spawn_blocking(move || rcs::keep_local_advance(&repo_path, &fetched)).await?
     }
 
     async fn keep_local_finalize(
@@ -263,7 +264,7 @@ impl StorageBackend for GitStorage {
         let entries = ciphertexts.to_vec();
         let deletes = deletes.to_vec();
         spawn_blocking(move || {
-            crate::git::keep_local_finalize(
+            rcs::keep_local_finalize(
                 &repo_path,
                 &auth,
                 &entries,

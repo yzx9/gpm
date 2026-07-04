@@ -169,10 +169,10 @@ pub struct StorageCtx<'a> {
     pub commit_email: Option<&'a str>,
 }
 
-/// How [`StorageBackend::commit`] stages `paths`. Replaces the `CommitFn`
-/// fn-pointer indirection `Store` used to pick `git::commit` vs
-/// `git::commit_removal` — trait methods can't be passed as fn pointers, so the
-/// kind is data instead.
+/// How [`StorageBackend::commit`] stages `paths` — `Add` (stage content) or
+/// `Remove` (stage deletion). Carried as data because trait methods can't be
+/// passed as fn pointers, so `Store::commit_local` picks the kind instead of
+/// selecting `commit` vs `commit_removal` by function pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommitKind {
     /// Stage `paths` (add/modify) — `git add`.
@@ -267,7 +267,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// `CloneFailed`/`NetworkError` on auth/network/filesystem failure;
     /// `Cancelled` if the cancel token is set mid-clone.
-    async fn clone(
+    async fn clone_repo(
         &self,
         auth: &GitAuth,
         url: &str,

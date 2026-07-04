@@ -55,8 +55,6 @@ pub mod entry;
 pub mod error;
 /// Password generator (gopass `pkg/pwgen` analogue).
 pub mod generator;
-/// Git clone and pull operations.
-pub mod git;
 /// Identity type classification.
 pub mod identity;
 /// Recipient discovery and identity validation.
@@ -82,13 +80,13 @@ pub use config::{Config, LockMode, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
 pub use generator::{GenerateMode, GenerateOptions, generate_password};
-pub use git::{CancelToken, GitProgress, ProgressSender};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use secret::Secret;
 pub use signing::{
     AuthenticityConfig, CommitSigInfo, CommitSigStatus, IgnoredIssue, TrustedKey, VerifyMode,
     fingerprint_of_public_key,
 };
+pub use storage::{CancelToken, GitProgress, ProgressSender};
 pub use store::{
     CommitIdentity, DivergenceChoice, RankedPage, Store, SyncDivergence, SyncOutcome, SyncResult,
     WriteOutcome, WriteResult,

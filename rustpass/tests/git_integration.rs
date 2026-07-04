@@ -6,17 +6,17 @@ mod common;
 
 use common::*;
 use rustpass::crypto;
-use rustpass::git;
 use rustpass::secret::Secret;
 use rustpass::signing::AuthenticityConfig;
+use rustpass::storage::{GitAuth, GitStorage, StorageBackend, StorageCtx};
 use rustpass::store;
 
 // -----------------------------------------------------------------------
-// clone_repo tests
+// clone tests
 // -----------------------------------------------------------------------
 
-#[test]
-fn clone_local_bare_repo() {
+#[tokio::test]
+async fn clone_local_bare_repo() {
     let (_identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) =
         create_test_git_repo(vec![("example.age", b"password123")], &recipient);
@@ -25,14 +25,16 @@ fn clone_local_bare_repo() {
     let dest_path = dest.path().to_path_buf();
     drop(dest);
 
-    git::clone_repo(
-        bare_dir.path().to_str().expect("bare path is valid utf-8"),
-        &dest_path,
-        &git::GitAuth::None,
-        None,
-        None,
-    )
-    .expect("clone should succeed");
+    GitStorage
+        .clone_repo(
+            &GitAuth::None,
+            bare_dir.path().to_str().expect("bare path is valid utf-8"),
+            &dest_path,
+            None,
+            None,
+        )
+        .await
+        .expect("clone should succeed");
 
     assert!(
         dest_path.join(".git").is_dir(),
@@ -40,8 +42,8 @@ fn clone_local_bare_repo() {
     );
 }
 
-#[test]
-fn clone_removes_existing_dest() {
+#[tokio::test]
+async fn clone_removes_existing_dest() {
     let (_identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("real.age", b"secret")], &recipient);
 
@@ -54,14 +56,16 @@ fn clone_removes_existing_dest() {
         "precondition: stale file must exist before clone"
     );
 
-    git::clone_repo(
-        bare_dir.path().to_str().expect("bare path is valid utf-8"),
-        dest.path(),
-        &git::GitAuth::None,
-        None,
-        None,
-    )
-    .expect("clone should succeed");
+    GitStorage
+        .clone_repo(
+            &GitAuth::None,
+            bare_dir.path().to_str().expect("bare path is valid utf-8"),
+            dest.path(),
+            None,
+            None,
+        )
+        .await
+        .expect("clone should succeed");
 
     assert!(
         !dest.path().join("stale-file.txt").exists(),
@@ -74,11 +78,11 @@ fn clone_removes_existing_dest() {
 }
 
 // -----------------------------------------------------------------------
-// pull_repo tests
+// pull tests
 // -----------------------------------------------------------------------
 
-#[test]
-fn pull_fast_forward_succeeds() {
+#[tokio::test]
+async fn pull_fast_forward_succeeds() {
     let (_identity, recipient) = generate_test_keypair();
     let (bare_dir, clone_dir) =
         create_test_git_repo(vec![("initial.age", b"first-password")], &recipient);
@@ -98,15 +102,20 @@ fn pull_fast_forward_succeeds() {
         "add second entry",
     );
 
+    let auth = GitAuth::None;
+    let policy = AuthenticityConfig::default();
+    let ctx = StorageCtx {
+        repo_path: clone_dir.path(),
+        auth: &auth,
+        policy: &policy,
+        commit_name: None,
+        commit_email: None,
+    };
     let result = expect_fast_forwarded(
-        git::pull_repo(
-            clone_dir.path(),
-            &git::GitAuth::None,
-            &AuthenticityConfig::default(),
-            None,
-            None,
-        )
-        .expect("pull should succeed"),
+        GitStorage
+            .pull(&ctx, None, None)
+            .await
+            .expect("pull should succeed"),
     );
 
     assert_ne!(
@@ -121,21 +130,26 @@ fn pull_fast_forward_succeeds() {
     );
 }
 
-#[test]
-fn pull_no_changes() {
+#[tokio::test]
+async fn pull_no_changes() {
     let (_identity, recipient) = generate_test_keypair();
     let (_bare_dir, clone_dir) =
         create_test_git_repo(vec![("sole.age", b"only-password")], &recipient);
 
+    let auth = GitAuth::None;
+    let policy = AuthenticityConfig::default();
+    let ctx = StorageCtx {
+        repo_path: clone_dir.path(),
+        auth: &auth,
+        policy: &policy,
+        commit_name: None,
+        commit_email: None,
+    };
     let result = expect_fast_forwarded(
-        git::pull_repo(
-            clone_dir.path(),
-            &git::GitAuth::None,
-            &AuthenticityConfig::default(),
-            None,
-            None,
-        )
-        .expect("pull should succeed"),
+        GitStorage
+            .pull(&ctx, None, None)
+            .await
+            .expect("pull should succeed"),
     );
     assert!(
         !result.changed,
@@ -143,17 +157,20 @@ fn pull_no_changes() {
     );
 }
 
-#[test]
-fn pull_nonexistent_repo_errors() {
+#[tokio::test]
+async fn pull_nonexistent_repo_errors() {
     let nowhere = tempfile::tempdir().expect("failed to create temp dir");
 
-    let result = git::pull_repo(
-        nowhere.path(),
-        &git::GitAuth::None,
-        &AuthenticityConfig::default(),
-        None,
-        None,
-    );
+    let auth = GitAuth::None;
+    let policy = AuthenticityConfig::default();
+    let ctx = StorageCtx {
+        repo_path: nowhere.path(),
+        auth: &auth,
+        policy: &policy,
+        commit_name: None,
+        commit_email: None,
+    };
+    let result = GitStorage.pull(&ctx, None, None).await;
     let err = result.expect_err("pull on non-repo dir should fail");
     assert_eq!(
         err.code, "NO_REPO",
@@ -161,20 +178,22 @@ fn pull_nonexistent_repo_errors() {
     );
 }
 
-#[test]
-fn clone_nonexistent_remote_errors() {
+#[tokio::test]
+async fn clone_nonexistent_remote_errors() {
     let nowhere = tempfile::tempdir().expect("failed to create temp dir");
     let fake_url = nowhere.path().join("no-such-repo.git");
     assert!(!fake_url.exists(), "precondition: path must not exist");
 
     let dest = tempfile::tempdir().expect("failed to create dest dir");
-    let result = git::clone_repo(
-        fake_url.to_str().expect("path is valid utf-8"),
-        dest.path(),
-        &git::GitAuth::None,
-        None,
-        None,
-    );
+    let result = GitStorage
+        .clone_repo(
+            &GitAuth::None,
+            fake_url.to_str().expect("path is valid utf-8"),
+            dest.path(),
+            None,
+            None,
+        )
+        .await;
     let err = result.expect_err("clone from nonexistent remote should fail");
     assert_eq!(
         err.code, "CLONE_FAILED",
@@ -205,14 +224,16 @@ async fn full_workflow_clone_list_decrypt() {
     let (bare_dir, _clone_dir) = create_test_git_repo(entries.clone(), &recipient);
 
     let dest = tempfile::tempdir().expect("failed to create dest dir");
-    git::clone_repo(
-        bare_dir.path().to_str().expect("bare path is valid utf-8"),
-        dest.path(),
-        &git::GitAuth::None,
-        None,
-        None,
-    )
-    .expect("clone should succeed");
+    GitStorage
+        .clone_repo(
+            &GitAuth::None,
+            bare_dir.path().to_str().expect("bare path is valid utf-8"),
+            dest.path(),
+            None,
+            None,
+        )
+        .await
+        .expect("clone should succeed");
 
     let found = store::list_entries(dest.path()).expect("list_entries should succeed");
     assert_eq!(
