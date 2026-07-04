@@ -16,6 +16,7 @@ import {
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
+import { useToast } from "@/composables";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { computed, onBeforeUnmount, ref } from "vue";
 import RepoAuthFields from "./RepoAuthFields.vue";
@@ -32,8 +33,14 @@ const pat = defineModel<string>("pat", { required: true });
 const sshKey = defineModel<string>("sshKey", { required: true });
 const sshPassphrase = defineModel<string>("sshPassphrase", { required: true });
 
+const { toast } = useToast();
+
 const loading = ref(false);
 const error = ref("");
+/** Set while the cancel request is in flight / awaiting the clone's abort —
+ * drives the "Cancelling…" label and disables re-clicks. Cleared when the
+ * clone settles (success, abort, or error). */
+const cancelling = ref(false);
 /** Set when the user cancelled the clone — shown as a neutral status, not a
  * red error. Cleared on the next clone attempt. */
 const cancelled = ref(false);
@@ -70,12 +77,25 @@ function onProgress(p: GitProgressEvent) {
     p.message ?? `${p.received_objects} / ${p.total_objects} objects`;
 }
 
-/** User-initiated cancel: flip the backend token so git2 aborts the transfer. */
+/** User-initiated cancel: flip the backend token so git2 aborts the transfer.
+ *
+ * The token is only polled from inside git2's transfer/sideband callbacks, so a
+ * clone stuck in connection/auth negotiation (DNS/TCP/TLS/SSH handshake) can't
+ * be interrupted — the token is set, just not checked, until data flows or the
+ * transport times out. "Cancelling…" is honest about that: the request was
+ * sent, but the abort may lag. Closing that gap would mean running git as a
+ * killable subprocess instead of in-process libgit2. */
 async function cancelClone() {
+  cancelling.value = true;
   try {
     await cancelGit();
-  } catch {
-    // best-effort — the clone simply continues if cancel fails
+  } catch (e) {
+    // The cancel request itself failed — surface it so the silence isn't
+    // mistaken for a successful abort. Best-effort: the clone keeps running, so
+    // re-enable the button for a retry.
+    cancelling.value = false;
+    const appError = e as AppError;
+    toast.danger(appError?.message || "Could not cancel the clone");
   }
 }
 
@@ -157,6 +177,7 @@ async function onClone() {
     progressUnlisten?.();
     progressUnlisten = null;
     loading.value = false;
+    cancelling.value = false;
   }
 }
 </script>
@@ -214,8 +235,13 @@ async function onClone() {
     <div v-if="loading" class="flex flex-col gap-1">
       <div class="flex justify-between items-center text-xs text-muted">
         <span aria-live="polite">{{ progressText }}</span>
-        <button type="button" class="cancel-link" @click="cancelClone">
-          Cancel
+        <button
+          type="button"
+          class="cancel-link"
+          :disabled="cancelling"
+          @click="cancelClone"
+        >
+          {{ cancelling ? "Cancelling…" : "Cancel" }}
         </button>
       </div>
       <div
@@ -267,5 +293,9 @@ async function onClone() {
   font: inherit;
   color: var(--color-accent);
   cursor: pointer;
+}
+.cancel-link:disabled {
+  color: var(--color-muted);
+  cursor: default;
 }
 </style>

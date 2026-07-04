@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Tapping Cancel while cloning a repository now shows a disabled "Cancelling…" state on the button right away, so it's clear the cancel was received instead of looking like the tap did nothing. If the cancel request itself fails, you now see a message instead of a silent failure. A clone that's still connecting — handshaking, authenticating — may take a moment to actually stop.
+
 ## [v0.8.1] - 2026-07-03
 
 ### Added

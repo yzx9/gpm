@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import { createToast, TOAST_KEY } from "@/composables";
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,6 +41,14 @@ describe("SetupPage", () => {
   });
 
   // ── Step 1: Clone ──────────────────────────────────────────────────────
+
+  // RepoCloneForm uses the toast queue (main.ts provides TOAST_KEY app-wide);
+  // mount through this so every test has it without repeating the provider.
+  function mountPage() {
+    return mount(SetupPage, {
+      global: { provide: { [TOAST_KEY]: createToast() } },
+    });
+  }
 
   async function fillStep1(
     wrapper: ReturnType<typeof mount>,
@@ -86,7 +95,7 @@ describe("SetupPage", () => {
 
   describe("step 1 validation", () => {
     it("shows error when repo URL is empty", async () => {
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, { repoUrl: "" });
       await submitStep1(wrapper);
@@ -98,7 +107,7 @@ describe("SetupPage", () => {
     });
 
     it("shows error for non-HTTPS URL", async () => {
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, {
         repoUrl: "http://github.com/user/repo.git",
@@ -121,7 +130,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce(false) // is_repo_ready
         .mockResolvedValueOnce(undefined); // clone_repo
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, {
         repoUrl: "https://github.com/user/repo.git",
@@ -142,7 +151,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce(false) // is_repo_ready
         .mockResolvedValueOnce(undefined); // clone_repo
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, { pat: "" });
       await submitStep1(wrapper);
@@ -158,7 +167,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce(false) // is_repo_ready
         .mockResolvedValueOnce(undefined); // clone_repo
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper);
       await submitStep1(wrapper);
@@ -168,7 +177,7 @@ describe("SetupPage", () => {
     });
 
     it("saves a custom commit identity from Advanced during clone", async () => {
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, { repoUrl: "https://github.com/user/repo.git" });
       await wrapper.find('input[id="su-commit-name"]').setValue("Alice");
@@ -184,7 +193,7 @@ describe("SetupPage", () => {
     });
 
     it("does not save a commit identity when Advanced is left blank", async () => {
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, { repoUrl: "https://github.com/user/repo.git" });
       await submitStep1(wrapper);
@@ -203,7 +212,7 @@ describe("SetupPage", () => {
           message: "Clone failed",
         });
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper);
       await submitStep1(wrapper);
@@ -220,7 +229,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce(recipientsList); // list_recipients
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       return wrapper;
     }
@@ -283,7 +292,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce([]) // list_recipients
         .mockResolvedValueOnce(undefined); // complete_setup
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
 
       await wrapper
@@ -304,7 +313,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce([]) // list_recipients
         .mockResolvedValueOnce(undefined); // complete_setup
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
 
       await wrapper
@@ -367,7 +376,7 @@ describe("SetupPage", () => {
           message: "Identity does not match any recipient",
         });
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
 
       await wrapper
@@ -391,7 +400,7 @@ describe("SetupPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce([]); // list_recipients
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       const pickBtn = wrapper
         .findAll("button")
@@ -410,7 +419,7 @@ describe("SetupPage", () => {
           recipient: "age1abc1234567890",
         }); // pick_identity_file
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
 
       const pickBtn = wrapper
@@ -436,7 +445,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce([]) // list_recipients
         .mockRejectedValueOnce({ code: "CANCELLED", message: "cancelled" });
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       const pickBtn = wrapper
         .findAll("button")
@@ -456,7 +465,7 @@ describe("SetupPage", () => {
           message: "Not a key",
         });
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       const pickBtn = wrapper
         .findAll("button")
@@ -479,7 +488,7 @@ describe("SetupPage", () => {
         }) // pick_identity_file
         .mockResolvedValueOnce(undefined); // complete_setup_from_file
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await wrapper
         .findAll("button")
@@ -506,7 +515,7 @@ describe("SetupPage", () => {
           recipient: null,
         }); // pick_identity_file — encrypted, no recipient yet
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await wrapper
         .findAll("button")
@@ -549,7 +558,7 @@ describe("SetupPage", () => {
           message: "wrong",
         }); // verify_picked_identity
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await wrapper
         .findAll("button")
@@ -608,7 +617,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce([]); // list_recipients
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
 
       // Should be on step 2
@@ -630,7 +639,7 @@ describe("SetupPage", () => {
     it("shows SSH key field for git@ URL", async () => {
       vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
@@ -645,7 +654,7 @@ describe("SetupPage", () => {
     it("shows SSH key field for ssh:// URL", async () => {
       vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
@@ -658,7 +667,7 @@ describe("SetupPage", () => {
     it("shows error when SSH key is empty for SSH URL", async () => {
       vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, {
         repoUrl: "git@github.com:user/repo.git",
@@ -676,7 +685,7 @@ describe("SetupPage", () => {
         .mockResolvedValueOnce(false) // is_repo_ready
         .mockResolvedValueOnce(undefined); // clone_repo
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await fillStep1(wrapper, {
         repoUrl: "git@github.com:user/repo.git",
@@ -700,7 +709,7 @@ describe("SetupPage", () => {
     it("shows generate tab when SSH URL and generate tab selected", async () => {
       vi.mocked(invoke).mockResolvedValueOnce(false); // is_repo_ready
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
@@ -727,7 +736,7 @@ describe("SetupPage", () => {
             "-----BEGIN OPENSSH PRIVATE KEY-----\ngen\n-----END OPENSSH PRIVATE KEY-----",
         });
 
-      const wrapper = mount(SetupPage);
+      const wrapper = mountPage();
       await flushPromises();
       await wrapper
         .find('input[id="repo-url"]')
