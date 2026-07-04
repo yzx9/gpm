@@ -47,8 +47,12 @@ pub(crate) struct AuthState {
 /// Returned by `validate_identity` — identity type and encryption status.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct IdentityInfoResult {
-    key_type: String,
-    encrypted: bool,
+    pub(crate) key_type: String,
+    pub(crate) encrypted: bool,
+    /// Derived public recipient (`Some` when derivation needs no passphrase;
+    /// `None` for encrypted SSH awaiting unlock). Lets setup match against
+    /// `.age-recipients` live, before "Complete Setup".
+    pub(crate) recipient: Option<String>,
 }
 
 /// Returned by `pick_identity_file` — identity metadata only. The file contents
@@ -67,7 +71,7 @@ pub(crate) struct PickedIdentityResult {
 /// identity has been unlocked.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct VerifiedIdentityResult {
-    recipient: String,
+    pub(crate) recipient: String,
 }
 
 /// Which kind of identity [`generate_identity`] should mint for the create flow.
@@ -201,10 +205,11 @@ pub(crate) fn generate_identity_core(
             let generated = rustpass::crypto::generate_age_identity();
             (
                 generated.identity,
-                generated.recipient,
+                generated.recipient.clone(),
                 IdentityInfo {
                     key_type: KeyType::X25519,
                     encrypted: false,
+                    recipient: Some(generated.recipient),
                 },
             )
         }
@@ -213,10 +218,11 @@ pub(crate) fn generate_identity_core(
             let encrypted = passphrase.is_some_and(|p| !p.is_empty());
             (
                 pair.private_key,
-                pair.public_key,
+                pair.public_key.clone(),
                 IdentityInfo {
                     key_type: KeyType::SshEd25519,
                     encrypted,
+                    recipient: Some(pair.public_key),
                 },
             )
         }
@@ -283,6 +289,7 @@ pub(crate) fn validate_identity(identity: String) -> Result<IdentityInfoResult, 
     Ok(IdentityInfoResult {
         key_type: key_type_string(info.key_type).to_string(),
         encrypted: info.encrypted,
+        recipient: info.recipient,
     })
 }
 
@@ -337,12 +344,9 @@ pub(crate) async fn pick_identity_file(
     let (info, recipient) = match classify_identity(&picked.bytes) {
         IdentityType::X25519 | IdentityType::SshEd25519 | IdentityType::SshRsa => {
             let info = rustpass::recipient::validate_identity(text)?;
-            // Derive the public key immediately when no passphrase is needed.
-            let recipient = if info.encrypted {
-                None
-            } else {
-                Some(rustpass::recipient::identity_to_recipient(text, None)?)
-            };
+            // validate_identity already derives the recipient when no passphrase
+            // is needed; reuse it instead of deriving a second time.
+            let recipient = info.recipient.clone();
             (info, recipient)
         }
         IdentityType::AgeEncrypted => {
@@ -352,6 +356,7 @@ pub(crate) async fn pick_identity_file(
                 IdentityInfo {
                     key_type: KeyType::X25519,
                     encrypted: true,
+                    recipient: None,
                 },
                 None,
             )
@@ -439,13 +444,12 @@ pub(crate) async fn verify_picked(
         // Encrypted SSH: validate the passphrase, then derive the recipient.
         (KeyType::SshEd25519 | KeyType::SshRsa, true) => {
             let pw = passphrase.clone();
-            let bytes: Vec<u8> = pending.identity.as_bytes().to_vec();
+            let identity_text = pending.identity.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                rustpass::crypto::validate_ssh_key_passphrase(&bytes, &pw)
+                rustpass::recipient::derive_ssh_recipient(&identity_text, &pw)
             })
             .await
-            .map_err(|e| Error::new(ErrorCode::StoreError, e.to_string()))??;
-            rustpass::recipient::identity_to_recipient(&pending.identity, Some(&passphrase))?
+            .map_err(|e| Error::new(ErrorCode::StoreError, e.to_string()))??
         }
         // Age-encrypted x25519: decrypt to the bare key, then derive.
         (KeyType::X25519, true) => {
@@ -463,11 +467,12 @@ pub(crate) async fn verify_picked(
                 )
             })?;
             let bare_info = rustpass::recipient::validate_identity(bare_str)?;
-            let recipient = rustpass::recipient::identity_to_recipient(bare_str, None)?;
+            // validate_identity already derives the bare key's recipient.
+            let recipient = bare_info.recipient.clone();
             // The pending identity is now the decrypted bare key.
             pending.identity = Zeroizing::new(bare_str.to_string());
             pending.info = bare_info;
-            recipient
+            recipient.expect("a bare x25519 identity always derives a recipient")
         }
         _ => {
             return Err(Error::new(
@@ -486,6 +491,47 @@ pub(crate) async fn verify_picked(
         *guard = Some(pending);
     }
     Ok(VerifiedIdentityResult { recipient })
+}
+
+/// Verify the passphrase for a pasted encrypted SSH identity and derive its
+/// public recipient. Unlike [`verify_picked_identity`], the paste identity
+/// lives in the `WebView` (the user typed/pasted it), so there is no pending
+/// state to manage — this is a stateless check that gives live match feedback
+/// before "Complete Setup".
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn verify_pasted_identity(
+    identity: String,
+    passphrase: String,
+) -> Result<VerifiedIdentityResult, Error> {
+    verify_pasted(identity, passphrase).await
+}
+
+/// Testable core of [`verify_pasted_identity`]: classify, then (for encrypted
+/// SSH) validate the passphrase and derive the recipient. Returns
+/// [`ErrorCode::IdentityNotEncrypted`] for anything that doesn't need a
+/// passphrase to derive.
+pub(crate) async fn verify_pasted(
+    identity: String,
+    passphrase: String,
+) -> Result<VerifiedIdentityResult, Error> {
+    let info = rustpass::recipient::validate_identity(&identity)?;
+    match (info.key_type, info.encrypted) {
+        (KeyType::SshEd25519 | KeyType::SshRsa, true) => {
+            let pw = passphrase;
+            let identity_text = identity;
+            let recipient = tauri::async_runtime::spawn_blocking(move || {
+                rustpass::recipient::derive_ssh_recipient(&identity_text, &pw)
+            })
+            .await
+            .map_err(|e| Error::new(ErrorCode::StoreError, e.to_string()))??;
+            Ok(VerifiedIdentityResult { recipient })
+        }
+        _ => Err(Error::new(
+            ErrorCode::IdentityNotEncrypted,
+            "Only encrypted SSH keys need a passphrase to verify",
+        )),
+    }
 }
 
 /// Step 2 (file path): save the previously picked (and, if encrypted, verified)

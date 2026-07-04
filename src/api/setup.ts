@@ -30,6 +30,8 @@ export interface RecipientInfo {
 export interface IdentityInfoResult {
   key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
   encrypted: boolean;
+  /** Derived public recipient (`null` for encrypted SSH awaiting unlock). */
+  recipient: string | null;
 }
 
 /** Identity metadata from `pick_identity_file` — bytes stay backend-side. */
@@ -141,6 +143,19 @@ export async function verifyPickedIdentity(
   passphrase: string,
 ): Promise<VerifiedIdentityResult> {
   return invoke<VerifiedIdentityResult>("verify_picked_identity", {
+    passphrase,
+  });
+}
+
+/** Verify a pasted encrypted SSH identity's passphrase; on success reveals its
+ *  public recipient. Stateless (no pending file) — for live match feedback
+ *  before "Complete Setup". */
+export async function verifyPastedIdentity(
+  identity: string,
+  passphrase: string,
+): Promise<VerifiedIdentityResult> {
+  return invoke<VerifiedIdentityResult>("verify_pasted_identity", {
+    identity,
     passphrase,
   });
 }

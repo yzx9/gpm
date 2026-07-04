@@ -243,8 +243,8 @@ describe("SetupPage", () => {
 
     it("fetches and displays recipients", async () => {
       const recipients: RecipientInfo[] = [
-        { public_key: "age1abc123", comment: "Alice" },
-        { public_key: "age1def456", comment: null },
+        { public_key: "age1abc123", comment: "Alice", key_type: "x25519" },
+        { public_key: "age1def456", comment: null, key_type: "x25519" },
       ];
       const wrapper = await mountAtStep2(recipients);
 
@@ -257,39 +257,105 @@ describe("SetupPage", () => {
     it("shows message when no recipients found", async () => {
       const wrapper = await mountAtStep2([]);
 
-      expect(wrapper.text()).toContain("No recipients file found");
+      expect(wrapper.text()).toContain(
+        "fresh repository with no recipients yet",
+      );
     });
 
-    it("allows selecting a recipient", async () => {
-      const recipients: RecipientInfo[] = [
-        { public_key: "age1abc123", comment: "Alice" },
-        { public_key: "age1def456", comment: null },
-      ];
-      const wrapper = await mountAtStep2(recipients);
+    it("highlights the recipient matching a pasted identity", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([
+          { public_key: "age1abc123", comment: "Alice", key_type: "x25519" },
+          { public_key: "age1def456", comment: null, key_type: "x25519" },
+        ]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1def456",
+        }); // validate_identity
+      const wrapper = mountPage();
+      await flushPromises();
 
-      // Click on second recipient
-      const items = wrapper.findAll(".cursor-pointer");
-      await items[1].trigger("click");
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1XYZ");
+      await flushPromises(); // resolve validate_identity
 
-      // Second item should be selected (has accent border class)
-      expect(items[1].classes()).toContain("border-accent");
+      // The matching recipient is highlighted; the other is not.
+      expect(wrapper.find("[data-pubkey='age1def456']").classes()).toContain(
+        "border-accent",
+      );
+      expect(
+        wrapper.find("[data-pubkey='age1abc123']").classes(),
+      ).not.toContain("border-accent");
     });
 
-    it("auto-selects first recipient when only one exists", async () => {
-      const recipients: RecipientInfo[] = [
-        { public_key: "age1only", comment: "Only key" },
-      ];
-      const wrapper = await mountAtStep2(recipients);
+    it("hard-blocks submit when the pasted identity matches no recipient", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([
+          { public_key: "age1abc123", comment: "Alice", key_type: "x25519" },
+        ]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1nomatch",
+        }); // validate_identity
+      const wrapper = mountPage();
+      await flushPromises();
 
-      // The single recipient should show as selected
-      const item = wrapper.find(".cursor-pointer");
-      expect(item.classes()).toContain("border-accent");
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1XYZ");
+      await flushPromises();
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain(
+        "doesn't match any recipient",
+      );
+      expect(invoke).not.toHaveBeenCalledWith(
+        "complete_setup",
+        expect.anything(),
+      );
+    });
+
+    it("proceeds with any identity when the repo has no recipients (bootstrap)", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients (empty)
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        }) // validate_identity
+        .mockResolvedValueOnce(undefined); // complete_setup
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1XYZ");
+      await flushPromises();
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("complete_setup", {
+        identity: "AGE-SECRET-KEY-1XYZ",
+        passphrase: null,
+      });
     });
 
     it("calls complete_setup with identity", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        }) // validate_identity
         .mockResolvedValueOnce(undefined); // complete_setup
 
       const wrapper = mountPage();
@@ -298,6 +364,7 @@ describe("SetupPage", () => {
       await wrapper
         .find('textarea[id="identity"]')
         .setValue("AGE-SECRET-KEY-1abc");
+      await flushPromises(); // resolve validate_identity
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
@@ -310,7 +377,12 @@ describe("SetupPage", () => {
     it("blocks complete_setup when the at-rest passphrase and confirm do not match", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready → skip to step 2
-        .mockResolvedValueOnce([]); // list_recipients
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        }); // validate_identity (watch fires on paste)
 
       const wrapper = mountPage();
       await flushPromises();
@@ -341,6 +413,11 @@ describe("SetupPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        }) // validate_identity
         .mockResolvedValueOnce(undefined); // complete_setup
 
       const wrapper = mountPage();
@@ -349,6 +426,7 @@ describe("SetupPage", () => {
       await wrapper
         .find('textarea[id="identity"]')
         .setValue("AGE-SECRET-KEY-1abc");
+      await flushPromises(); // resolve validate_identity
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
@@ -379,21 +457,113 @@ describe("SetupPage", () => {
       );
     });
 
-    it("shows error when recipients exist but none selected", async () => {
-      const recipients: RecipientInfo[] = [
-        { public_key: "age1abc123", comment: "Alice" },
-        { public_key: "age1def456", comment: null },
-      ];
-      const wrapper = await mountAtStep2(recipients);
+    it("shows an unsupported alert for a post-quantum identity", async () => {
+      const wrapper = await mountAtStep2([]);
 
       await wrapper
         .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
-      await wrapper.find("form").trigger("submit.prevent");
+        .setValue("AGE-SECRET-KEY-PQ-1XYZ");
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toBe(
-        "Please select a recipient",
+      expect(wrapper.text()).toContain(
+        "Post-quantum age keys aren't supported",
+      );
+    });
+
+    it("shows an unsupported alert for an age-plugin identity", async () => {
+      const wrapper = await mountAtStep2([]);
+
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-PLUGIN-YUBIKEY-1XYZ");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain(
+        "age-plugin identities aren't supported for decryption",
+      );
+    });
+
+    it("verifies an encrypted SSH paste and highlights the match", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([
+          {
+            public_key: "ssh-ed25519 AAAAmatch",
+            comment: null,
+            key_type: "ssh_ed25519",
+          },
+        ]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "ssh_ed25519",
+          encrypted: true,
+          recipient: null,
+        }) // validate_identity (encrypted → no recipient yet)
+        .mockResolvedValueOnce({ recipient: "ssh-ed25519 AAAAmatch" }); // verify_pasted_identity
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue(
+          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
+        );
+      await flushPromises(); // validate_identity → encrypted SSH detected
+
+      await wrapper.find('input[id="passphrase"]').setValue("the-pass");
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Verify"))!
+        .trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("verify_pasted_identity", {
+        identity:
+          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
+        passphrase: "the-pass",
+      });
+      expect(
+        wrapper.find("[data-pubkey='ssh-ed25519 AAAAmatch']").classes(),
+      ).toContain("border-accent");
+    });
+
+    it("shows a wrong-passphrase error for an encrypted SSH paste", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([
+          {
+            public_key: "ssh-ed25519 AAAAmatch",
+            comment: null,
+            key_type: "ssh_ed25519",
+          },
+        ]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "ssh_ed25519",
+          encrypted: true,
+          recipient: null,
+        }) // validate_identity
+        .mockRejectedValueOnce({
+          code: "WRONG_PASSPHRASE",
+          message: "wrong",
+        }); // verify_pasted_identity
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue(
+          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
+        );
+      await flushPromises();
+
+      await wrapper.find('input[id="passphrase"]').setValue("bad-pass");
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Verify"))!
+        .trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain(
+        "Wrong passphrase",
       );
     });
 
@@ -401,10 +571,15 @@ describe("SetupPage", () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        }) // validate_identity
         .mockRejectedValueOnce({
           code: "INVALID_IDENTITY",
           message: "Identity does not match any recipient",
-        });
+        }); // complete_setup
 
       const wrapper = mountPage();
       await flushPromises();
@@ -412,6 +587,7 @@ describe("SetupPage", () => {
       await wrapper
         .find('textarea[id="identity"]')
         .setValue("AGE-SECRET-KEY-1abc");
+      await flushPromises(); // resolve validate_identity
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
@@ -532,6 +708,38 @@ describe("SetupPage", () => {
       expect(invoke).toHaveBeenCalledWith("complete_setup_from_file", {
         passphrase: null,
       });
+    });
+
+    it("hard-blocks submit when a picked file matches no recipient", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([
+          { public_key: "age1abc123", comment: "Alice", key_type: "x25519" },
+        ]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          filename: "key.txt",
+          recipient: "age1different",
+        }); // pick_identity_file — non-matching recipient
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Upload identity file"))!
+        .trigger("click");
+      await flushPromises();
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain(
+        "doesn't match any recipient",
+      );
+      expect(invoke).not.toHaveBeenCalledWith(
+        "complete_setup_from_file",
+        expect.anything(),
+      );
     });
 
     it("unlocks an encrypted file and reveals its public key", async () => {
@@ -801,4 +1009,5 @@ describe("SetupPage", () => {
 interface RecipientInfo {
   public_key: string;
   comment: string | null;
+  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
 }

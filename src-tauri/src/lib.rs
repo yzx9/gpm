@@ -228,6 +228,7 @@ pub fn run() {
             setup::complete_setup,
             setup::pick_identity_file,
             setup::verify_picked_identity,
+            setup::verify_pasted_identity,
             setup::complete_setup_from_file,
             setup::clear_pending_identity,
             setup::setup,
