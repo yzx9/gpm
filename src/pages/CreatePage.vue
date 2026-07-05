@@ -33,6 +33,7 @@ import {
   useOverlayBackHandler,
   useToast,
 } from "@/composables";
+import { navBack } from "@/utils/nav";
 import { ArrowLeft, Dices, Eye, EyeOff } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -173,7 +174,7 @@ function backToPick() {
 }
 
 function goBack() {
-  if (mode.value === "pick") router.push({ name: "entries" });
+  if (mode.value === "pick") navBack(router, { name: "entries" });
   else backToPick();
 }
 
@@ -228,7 +229,9 @@ async function submit() {
 
     if (outcome.kind === "written") {
       toast.success(`✓ Saved (commit ${outcome.commit})`);
-      router.push({ name: "entries" });
+      // Pop to entries (the opener). The finished compose form becomes forward
+      // history, which Android system back can't reopen.
+      navBack(router, { name: "entries" });
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The push lost a race — surface the divergence for the user to resolve.
       // The local commit was made; adopt discards it, keep pushes it. Drop the
@@ -287,7 +290,7 @@ async function resolveDivergence(choice: DivergenceChoice) {
       // keep_mine pushed the local entries — the head is now published.
       toast.success(`✓ Kept mine (commit ${result.head})`);
     }
-    router.push({ name: "entries" });
+    navBack(router, { name: "entries" });
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
@@ -295,7 +298,7 @@ async function resolveDivergence(choice: DivergenceChoice) {
       // The remote moved since the user reviewed — recheck from the entries list.
       divergence.value = null;
       toast.info("The remote changed since you reviewed this — rechecking…");
-      router.push({ name: "entries" });
+      navBack(router, { name: "entries" });
     } else {
       divergeError.value =
         appError?.message || "Could not resolve the divergence";

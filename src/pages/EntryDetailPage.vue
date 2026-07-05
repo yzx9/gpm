@@ -30,6 +30,7 @@ import {
   useSecuritySettings,
   useToast,
 } from "@/composables";
+import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Eye } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -141,7 +142,9 @@ async function deleteSecret() {
     if (outcome.kind === "written") {
       clear();
       toast.success(`✓ Deleted (commit ${outcome.commit})`);
-      router.push({ name: "entries" });
+      // Pop to entries (the opener). The deleted-entry page becomes forward
+      // history, which Android system back can't reopen.
+      navBack(router, { name: "entries" });
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The delete's push lost a race — surface the divergence. The local delete
       // was committed; adopt discards it (entry returns), keep pushes it.
@@ -293,14 +296,15 @@ async function resolveDivergence(choice: DivergenceChoice) {
     } else {
       toast.success(`✓ Kept mine (commit ${result.head})`);
     }
-    router.push({ name: "entries" });
+    // Pop to entries; the resolved-divergence UI becomes forward history.
+    navBack(router, { name: "entries" });
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     if (appError?.code === "PULL_FF_FAILED") {
       divergence.value = null;
       toast.info("The remote changed since you reviewed this — rechecking…");
-      router.push({ name: "entries" });
+      navBack(router, { name: "entries" });
     } else {
       divergeError.value =
         appError?.message || "Could not resolve the divergence";
@@ -318,7 +322,9 @@ function goBack() {
     return;
   }
   clear();
-  router.push({ name: "entries" });
+  // Pop to the page that opened this entry (normally entries). At a deep-link
+  // root there's nothing to pop, so fall back to entries as the new root.
+  navBack(router, { name: "entries" });
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -334,7 +340,7 @@ function handleKeydown(e: KeyboardEvent) {
       <button
         @click="goBack"
         class="bg-transparent border-none text-base cursor-pointer text-accent p-1 min-w-12 min-h-12 inline-flex items-center gap-1"
-        aria-label="Back to entry list"
+        aria-label="Back"
       >
         <BaseIcon :icon="ArrowLeft" /> Back
       </button>

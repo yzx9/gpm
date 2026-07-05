@@ -8,8 +8,9 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SetupPage from "./SetupPage.vue";
 
-const { mockPush } = vi.hoisted(() => ({
+const { mockPush, mockReplace } = vi.hoisted(() => ({
   mockPush: vi.fn(),
+  mockReplace: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core");
@@ -18,7 +19,7 @@ vi.mock("vue-router", () => ({
   createWebHashHistory: vi.fn(),
   useRouter: () => ({
     push: mockPush,
-    replace: vi.fn(),
+    replace: mockReplace,
     back: vi.fn(),
   }),
   useRoute: () => ({
@@ -582,7 +583,7 @@ describe("SetupPage", () => {
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
-      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+      expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
 
     it("shows error when identity is empty", async () => {

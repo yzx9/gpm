@@ -60,6 +60,7 @@ import {
   useSecuritySettings,
   useToast,
 } from "@/composables";
+import { navBack } from "@/utils/nav";
 import {
   ArrowLeft,
   CircleCheck,
@@ -711,7 +712,10 @@ async function doReset() {
   try {
     await apiResetConfig();
     resetOpen.value = false;
-    router.push({ name: "setup" });
+    // Reset wipes the repo — replace so Back can't return to a Settings page
+    // backed by erased state. (The unsaved-changes leave guard still runs; the
+    // pre-existing guard-ordering caveat is tracked as a follow-up.)
+    router.replace({ name: "setup" });
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Reset failed";
@@ -720,7 +724,8 @@ async function doReset() {
 }
 
 function goBack() {
-  router.push({ name: "entries" });
+  // Pop to the page that opened Settings (normally entries).
+  navBack(router, { name: "entries" });
 }
 
 // ── Deferred-save dirty tracking + leave guard (Commit Identity, Add Key) ──
@@ -810,7 +815,7 @@ onMounted(() => {
       <h1 class="text-xl flex items-center gap-1">
         <BaseIcon :icon="Settings" :size="24" /> Settings
       </h1>
-      <BaseButton size="sm" aria-label="Back to entries" @click="goBack">
+      <BaseButton size="sm" aria-label="Back" @click="goBack">
         <BaseIcon :icon="ArrowLeft" /> Back
       </BaseButton>
     </header>

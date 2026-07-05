@@ -8,14 +8,17 @@ import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GeneratePasswordPage from "./GeneratePasswordPage.vue";
 
-const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
+const { mockPush, mockReplace } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+  mockReplace: vi.fn(),
+}));
 
 vi.mock("@tauri-apps/api/core");
 
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),
   createWebHashHistory: vi.fn(),
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: vi.fn() }),
 }));
 
 /** Wire `invoke` per command; returns a fresh mounted GeneratePasswordPage. */
@@ -210,6 +213,6 @@ describe("GeneratePasswordPage", () => {
   it("Back returns to the entry list", async () => {
     const { wrapper } = await mountPage({});
     await wrapper.find('button[aria-label="Back"]').trigger("click");
-    expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
 });

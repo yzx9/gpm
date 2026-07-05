@@ -20,7 +20,8 @@ const router = useRouter();
 const mode = ref<"clone" | "create">("clone");
 
 function onDone() {
-  router.push({ name: "entries" });
+  // Setup is terminal — replace so Back can't return to the setup flow.
+  router.replace({ name: "entries" });
 }
 </script>
 

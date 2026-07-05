@@ -8,14 +8,17 @@ import { flushPromises, mount, type DOMWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import CreatePage from "./CreatePage.vue";
 
-const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
+const { mockPush, mockReplace } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+  mockReplace: vi.fn(),
+}));
 
 vi.mock("@tauri-apps/api/core");
 
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),
   createWebHashHistory: vi.fn(),
-  useRouter: () => ({ push: mockPush, replace: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: vi.fn() }),
   useRoute: () => ({
     params: {},
     query: {},
@@ -156,7 +159,7 @@ describe("CreatePage", () => {
       presetId: "website",
       fields: { url: "example.com", username: "alice", password: "hunter2" },
     });
-    expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
 
   it("creates a custom secret via create_secret", async () => {
@@ -174,7 +177,7 @@ describe("CreatePage", () => {
       name: "servers/db1",
       content: "master-password",
     });
-    expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
 
   it("routes to the generator when the Generate password card is tapped", async () => {
@@ -254,7 +257,7 @@ describe("CreatePage", () => {
       expectedRemoteOid: "abc123",
       choice: "adopt_remote",
     });
-    expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
 
   it("on divergence, Keep mine publishes and navigates", async () => {
@@ -303,7 +306,7 @@ describe("CreatePage", () => {
         t.message.includes("✓ Kept mine (commit def5678)"),
       ),
     ).toBe(true);
-    expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+    expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
 
   it("cancel dismisses the divergence modal without resolving or navigating", async () => {

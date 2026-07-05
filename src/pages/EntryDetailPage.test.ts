@@ -8,8 +8,9 @@ import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EntryDetailPage from "./EntryDetailPage.vue";
 
-const { mockPush } = vi.hoisted(() => ({
+const { mockPush, mockReplace } = vi.hoisted(() => ({
   mockPush: vi.fn(),
+  mockReplace: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core");
@@ -28,7 +29,7 @@ vi.mock("vue-router", () => ({
   createWebHashHistory: vi.fn(),
   useRouter: () => ({
     push: mockPush,
-    replace: vi.fn(),
+    replace: mockReplace,
     back: vi.fn(),
   }),
   useRoute: () => mockRoute,
@@ -305,7 +306,7 @@ describe("EntryDetailPage", () => {
       await wrapper.find("main").trigger("keydown", { key: "Escape" });
       await flushPromises();
 
-      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+      expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
   });
 
@@ -343,7 +344,7 @@ describe("EntryDetailPage", () => {
           t.message.includes("✓ Deleted (commit abc1234)"),
         ),
       ).toBe(true);
-      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+      expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
 
     it("on delete divergence, surfaces the shared modal and adopt resolves", async () => {
@@ -795,7 +796,7 @@ describe("EntryDetailPage", () => {
           t.message.includes("remote changed since you reviewed this"),
         ),
       ).toBe(true);
-      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+      expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
   });
 });

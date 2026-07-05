@@ -8,8 +8,9 @@ import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "./SettingsPage.vue";
 
-const { mockPush, mockOnBeforeRouteLeave } = vi.hoisted(() => ({
+const { mockPush, mockReplace, mockOnBeforeRouteLeave } = vi.hoisted(() => ({
   mockPush: vi.fn(),
+  mockReplace: vi.fn(),
   mockOnBeforeRouteLeave: vi.fn(),
 }));
 
@@ -20,7 +21,7 @@ vi.mock("vue-router", () => ({
   onBeforeRouteLeave: mockOnBeforeRouteLeave,
   useRouter: () => ({
     push: mockPush,
-    replace: vi.fn(),
+    replace: mockReplace,
     back: vi.fn(),
   }),
   useRoute: () => ({
@@ -570,7 +571,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("reset_config");
-      expect(mockPush).toHaveBeenCalledWith({ name: "setup" });
+      expect(mockReplace).toHaveBeenCalledWith({ name: "setup" });
     });
 
     it("keeps the confirm button disabled until RESET is typed", async () => {
@@ -638,12 +639,10 @@ describe("SettingsPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('button[aria-label="Back to entries"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Back"]').trigger("click");
       await flushPromises();
 
-      expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
+      expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
   });
 

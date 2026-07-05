@@ -109,6 +109,9 @@ async function copyHash(commit: CommitSigInfo) {
 }
 
 function openSettings() {
+  // Forward nav, not a pop: History is reached from both Settings and the entry
+  // list, so the Settings button must always go to Settings regardless of the
+  // opener.
   router.push({ name: "settings" });
 }
 

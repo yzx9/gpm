@@ -14,6 +14,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import { useLockState, useToast } from "@/composables";
+import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Dices } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -55,7 +56,7 @@ const lenPayload = computed(() => {
 });
 
 function goBack() {
-  router.push({ name: "entries" });
+  navBack(router, { name: "entries" });
 }
 
 /** Generate a batch of passwords via the backend (CSPRNG). */
