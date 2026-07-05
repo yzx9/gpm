@@ -3,12 +3,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import type { AppError } from "@/api";
+import type { AppError, CommitSigInfo } from "@/api";
 import {
   ignoreCommitIssue,
   listCommitSignatures,
   trustCommitSigner,
-  type CommitSigInfo,
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -182,7 +181,7 @@ onBeforeUnmount(() => {
       <li
         v-for="commit in commits"
         :key="commit.hash"
-        class="flex items-center gap-2 p-[0.6rem_0.75rem] bg-surface rounded-md min-h-12 cursor-pointer hover:bg-hover active:bg-hover"
+        class="flex items-start gap-2 p-[0.6rem_0.75rem] bg-surface rounded-md min-h-12 cursor-pointer hover:bg-hover active:bg-hover"
         role="button"
         tabindex="0"
         @click="openDetail(commit)"
@@ -190,28 +189,25 @@ onBeforeUnmount(() => {
       >
         <CommitSigIndicator
           :status="commit.status"
-          class="w-6 text-center shrink-0"
+          class="w-6 text-center shrink-0 mt-0.5"
         />
-        <div class="flex-1 min-w-0">
-          <div class="flex items-baseline gap-2">
-            <code class="text-xs text-muted">{{ commit.short_hash }}</code>
-            <span
-              class="font-medium whitespace-nowrap overflow-hidden text-ellipsis"
-              >{{ commit.subject || "(no message)" }}</span
-            >
-          </div>
-          <div
-            class="text-xs text-subtle whitespace-nowrap overflow-hidden text-ellipsis"
-          >
-            {{ commit.author }}
+        <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+          <span class="font-medium wrap-break-word line-clamp-2">{{
+            commit.subject || "(no message)"
+          }}</span>
+          <div class="flex items-center gap-1.5 text-xs text-subtle min-w-0">
+            <code class="shrink-0">{{ commit.short_hash }}</code>
+            <span aria-hidden="true" class="shrink-0">·</span>
+            <span class="truncate min-w-0">{{ commit.author }}</span>
+            <span aria-hidden="true" class="shrink-0">·</span>
+            <span class="shrink-0">{{
+              formatRelativeTime(relativeNow, Date.parse(commit.date))
+            }}</span>
           </div>
         </div>
-        <span class="text-xs text-subtle shrink-0">
-          {{ formatRelativeTime(relativeNow, Date.parse(commit.date)) }}
-        </span>
         <span
           v-if="commit.ignored"
-          class="text-[0.6rem] text-subtle shrink-0 px-1 rounded-sm bg-edge"
+          class="text-[0.6rem] text-subtle shrink-0 mt-0.5 px-1 rounded-sm bg-edge"
           >ignored</span
         >
       </li>

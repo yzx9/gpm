@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The unlock screen now leads with your biometric option (fingerprint or face) when biometric unlock is enabled, and tucks the passphrase entry behind an "Unlock with passphrase" switch until you actually need it — so the screen shows one clear primary action instead of two competing buttons. The two actions are also the same width now. Cancelling the biometric prompt keeps you on that screen; tap the switch to type your passphrase instead.
+- The History screen now shows commit ages more clearly. Recent commits still read "2h ago" or "3d ago", but anything older than a week shows an actual date — "Mar 15", or "Mar 15, 2024" for a prior year — instead of a hard-to-parse value like "249h ago".
+- History's commit rows are easier to read. Each commit's message now gets its own line, with the hash, author, and time grouped on a quieter line underneath, instead of all three squeezed into one cramped row that truncated the message.
 
 ## [v0.9.0] - 2026-07-05
 
