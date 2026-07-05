@@ -37,7 +37,7 @@ async fn writable_store() -> (tempfile::TempDir, tempfile::TempDir, Store, Vec<u
 
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         vec![],
-        vec![(".gopass-recipients", recipient.as_bytes())],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
         &recipient,
     );
 
@@ -67,7 +67,7 @@ async fn set_writes_encrypts_and_commits_locally() {
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         vec![],
-        vec![(".gopass-recipients", recipient.as_bytes())],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
         &recipient,
     );
     let bare_commits_before = head_commit_count(bare_dir.path());
@@ -180,7 +180,7 @@ async fn set_encrypts_to_all_recipients_and_stays_readable_by_us() {
     let recipients = format!("{recipient}\n{other_recipient}\n");
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         vec![],
-        vec![(".gopass-recipients", recipients.as_bytes())],
+        vec![(TEST_RECIPIENTS_FILE, recipients.as_bytes())],
         &recipient,
     );
 

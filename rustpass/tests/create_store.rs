@@ -50,7 +50,7 @@ mod tests {
             "store is not fully configured until the identity is saved"
         );
 
-        let recipients_path = config_dir.path().join("repo/.age-recipients");
+        let recipients_path = config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE);
         let recipients_content =
             std::fs::read_to_string(&recipients_path).expect("recipients file exists");
         assert!(
@@ -142,7 +142,7 @@ mod tests {
             .unwrap();
         let tree = bare.find_commit(head).unwrap().tree().unwrap();
         assert!(
-            tree.get_path(Path::new(".age-recipients")).is_ok(),
+            tree.get_path(Path::new(TEST_RECIPIENTS_FILE)).is_ok(),
             "remote tree must contain .age-recipients after push"
         );
     }
@@ -164,7 +164,8 @@ mod tests {
             .expect("create_store with SSH recipient");
 
         let recipients_content =
-            std::fs::read_to_string(config_dir.path().join("repo/.age-recipients")).unwrap();
+            std::fs::read_to_string(config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE))
+                .unwrap();
         assert!(
             recipients_content.starts_with("ssh-ed25519 "),
             "recipients file should hold the SSH recipient"

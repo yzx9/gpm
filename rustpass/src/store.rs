@@ -22,7 +22,7 @@ use crate::crypto::{AgeBackend, CryptoBackend};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity, validate_identity_format};
-use crate::recipient::Recipient;
+use crate::recipient::{RECIPIENTS_FILE, Recipient};
 use crate::secret::Secret;
 use crate::signing::{
     self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedKey, VerifyMode,
@@ -463,7 +463,7 @@ impl Store {
                 .await?;
 
             let message = format!("Initialized Store for {recipient}");
-            let rel_paths = vec![".age-recipients".to_string()];
+            let rel_paths = vec![RECIPIENTS_FILE.to_string()];
             self.storage
                 .commit_initial(&repo_dir, &rel_paths, &message)
                 .await?;
@@ -750,8 +750,8 @@ impl Store {
     /// sync, no push).
     ///
     /// This is gopass's `set` (write) command, local-only. The plaintext is
-    /// encrypted to every recipient in the store's `.gopass-recipients` /
-    /// `.age-recipients`, with our own key guaranteed to be among the encryption
+    /// encrypted to every recipient in the store's `.age-recipients`, with our
+    /// own key guaranteed to be among the encryption
     /// targets (mirroring gopass's `ensureOurKeyID`, so we can always read back
     /// what we wrote), written to `<name>.age`, and committed on the current
     /// branch. It does **not** pull or push — publishing is the caller's job.

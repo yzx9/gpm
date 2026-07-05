@@ -4,9 +4,8 @@
 
 //! Recipient discovery and identity validation for age-encrypted stores.
 //!
-//! Reads `.gopass-recipients` or `.age-recipients` files from a cloned
-//! repository and provides utilities to validate that an age identity
-//! matches a known recipient.
+//! Reads the `.age-recipients` file from a cloned repository and provides
+//! utilities to validate that an age identity matches a known recipient.
 //!
 //! Supports both native x25519 age keys (`age1...` / `AGE-SECRET-KEY-...`)
 //! and SSH keys (`ssh-ed25519` / `ssh-rsa` as recipients, OpenSSH private
@@ -60,27 +59,32 @@ pub struct Recipient {
     pub key_type: KeyType,
 }
 
-/// Read recipients from a cloned gopass repository.
+/// The gopass age-backend recipient-list filename — the single file gopass
+/// reads and writes for an age store (its `crypto.IDFile()`, `.age-recipients`).
+/// `list_recipients` reads it, `write_recipients` writes it (target + temp),
+/// and store init commits it. One source of truth so the filename cannot drift
+/// across the read/write/commit sites.
+pub(crate) const RECIPIENTS_FILE: &str = ".age-recipients";
+
+/// Read recipients from a cloned gopass repository's `.age-recipients` file.
 ///
-/// Looks for `.gopass-recipients` first, then falls back to `.age-recipients`.
-/// Returns an empty list if neither file exists (the user can still proceed).
+/// Returns an empty list if the file does not exist (an uninitialized store —
+/// the user can still proceed with setup).
 ///
 /// # Errors
 ///
 /// Returns an error if the file exists but cannot be read.
 pub async fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> {
-    let gopass_path = repo_path.join(".gopass-recipients");
-    let age_path = repo_path.join(".age-recipients");
-
-    let file_path = if gopass_path.exists() {
-        &gopass_path
-    } else if age_path.exists() {
-        &age_path
-    } else {
-        return Ok(Vec::new());
+    let recipients_path = repo_path.join(RECIPIENTS_FILE);
+    // Read directly and treat "not found" as an uninitialized store, rather than
+    // checking exists() first. A check-then-read race could otherwise let a
+    // concurrent git pull land `.age-recipients` between the check and the read,
+    // silently shrinking the recipient set we encrypt the next secret to.
+    let content = match fs::read_to_string(&recipients_path).await {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
     };
-
-    let content = fs::read_to_string(file_path).await?;
     Ok(parse_recipients(&content))
 }
 
@@ -109,12 +113,12 @@ pub async fn write_recipients(repo_path: &Path, recipients: &[String]) -> Result
         content.push('\n');
     }
 
-    let target = repo_path.join(".age-recipients");
+    let target = repo_path.join(RECIPIENTS_FILE);
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).await?;
     }
 
-    let temp = repo_path.join(".age-recipients.tmp");
+    let temp = repo_path.join(format!("{RECIPIENTS_FILE}.tmp"));
     fs::write(&temp, content.as_bytes()).await?;
     fs::rename(&temp, &target).await?;
     Ok(())
@@ -651,7 +655,20 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
     }
 
     #[tokio::test]
-    async fn list_recipients_from_gopass_file() {
+    async fn list_recipients_from_age_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".age-recipients"), "age1key1\n").unwrap();
+
+        let recipients = list_recipients(dir.path()).await.unwrap();
+        assert_eq!(recipients.len(), 1);
+    }
+
+    /// gopass uses `.age-recipients` only; a stray `.gopass-recipients` file
+    /// (which neither gopass nor gpm ever writes) must be ignored, not honored
+    /// as a recipient source. Seeding only that file reads as an uninitialized
+    /// store, matching gopass.
+    #[tokio::test]
+    async fn list_recipients_ignores_gopass_recipients_file() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(".gopass-recipients"),
@@ -660,28 +677,20 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
         .unwrap();
 
         let recipients = list_recipients(dir.path()).await.unwrap();
-        assert_eq!(recipients.len(), 2);
+        assert!(recipients.is_empty());
     }
 
+    /// With both files present, `.age-recipients` (the gopass-canonical name)
+    /// wins and `.gopass-recipients` is ignored — gpm never honors the fallback.
     #[tokio::test]
-    async fn list_recipients_fallback_to_age_file() {
-        let dir = tempfile::tempdir().unwrap();
-        // Only .age-recipients exists
-        std::fs::write(dir.path().join(".age-recipients"), "age1key1\n").unwrap();
-
-        let recipients = list_recipients(dir.path()).await.unwrap();
-        assert_eq!(recipients.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn list_recipients_prefers_gopass_over_age() {
+    async fn list_recipients_reads_age_recipients_when_both_present() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".gopass-recipients"), "age1gopass\n").unwrap();
         std::fs::write(dir.path().join(".age-recipients"), "age1age\n").unwrap();
 
         let recipients = list_recipients(dir.path()).await.unwrap();
         assert_eq!(recipients.len(), 1);
-        assert_eq!(recipients.first().unwrap().public_key, "age1gopass");
+        assert_eq!(recipients.first().unwrap().public_key, "age1age");
     }
 
     #[tokio::test]

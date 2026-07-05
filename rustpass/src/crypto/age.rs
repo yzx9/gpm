@@ -201,7 +201,7 @@ pub fn decrypt_bytes(
 /// Each recipient string may be a native x25519 public key (`age1...`), an SSH
 /// public key (`ssh-ed25519 ...` / `ssh-rsa ...`), or an age plugin recipient
 /// (`age1<plugin>1...`, e.g. `age1yubikey1...` from age-plugin-yubikey) — exactly
-/// as they appear in a gopass `.gopass-recipients` / `.age-recipients` file. This
+/// as they appear in a gopass `.age-recipients` file. This
 /// mirrors gopass's `age` crypto backend, which encrypts every secret to all
 /// store recipients.
 ///

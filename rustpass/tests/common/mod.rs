@@ -13,6 +13,11 @@ use age::x25519::{Identity, Recipient};
 
 use rustpass::{SyncOutcome, SyncResult};
 
+/// The recipients filename integration tests seed (gopass's `.age-recipients`).
+/// One test-side source of truth so fixtures cannot drift from the filename
+/// `rustpass::recipient::list_recipients` actually reads.
+pub const TEST_RECIPIENTS_FILE: &str = ".age-recipients";
+
 /// Unwrap a [`SyncOutcome::FastForwarded`] to its inner [`SyncResult`],
 /// panicking on `Diverged`. Existing fast-forward / verified-pull tests do not
 /// expect a divergence (that is covered by `sync_divergence.rs`).
@@ -104,7 +109,7 @@ pub fn create_test_git_repo(
 }
 
 /// Like [`create_test_git_repo`], but also commits `plaintext_files` verbatim
-/// (not encrypted). Used to seed a `.gopass-recipients` file so write tests can
+/// (not encrypted). Used to seed a `.age-recipients` file so write tests can
 /// encrypt new secrets, and (later) `.pass-template` files for template tests.
 #[allow(dead_code)]
 pub fn create_test_git_repo_with(
@@ -267,7 +272,7 @@ pub async fn store_with_base(
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         base_entries,
-        vec![(".gopass-recipients", recipient.as_bytes())],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
         &recipient,
     );
     let config_dir = tempfile::tempdir().expect("config dir");
@@ -313,7 +318,7 @@ pub fn bare_blob(bare_path: &std::path::Path, rel: &str) -> Vec<u8> {
 }
 
 /// Add a commit to the bare repo writing `files` (rel path → raw bytes) VERBATIM
-/// (not encrypted) — used to change `.gopass-recipients` on the remote.
+/// (not encrypted) — used to change `.age-recipients` on the remote.
 #[allow(dead_code)]
 pub fn commit_plain_files_to_bare(
     bare_path: &std::path::Path,

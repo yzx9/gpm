@@ -162,7 +162,7 @@ async fn keep_mine_re_encrypts_to_current_recipients() {
     let (id2, r2) = generate_test_keypair();
     commit_plain_files_to_bare(
         bare_dir.path(),
-        vec![(".gopass-recipients", r2.as_bytes())],
+        vec![(TEST_RECIPIENTS_FILE, r2.as_bytes())],
         "remote rotates recipients",
     );
 
@@ -565,7 +565,7 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         vec![("entry.age", b"v1")],
-        vec![(".gopass-recipients", recipient.as_bytes())],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
         &recipient,
     );
     let config_dir = tempfile::tempdir().expect("config dir");

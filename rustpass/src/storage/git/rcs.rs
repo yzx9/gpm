@@ -1344,7 +1344,7 @@ fn keep_local_conflict(
 /// sides (an irreconcilable same-secret conflict) — the user must adopt the
 /// remote or cancel; gpm never merges `.age` blobs.
 ///
-/// Non-secret local changes (`.gopass-recipients`, templates) are NOT replayed:
+/// Non-secret local changes (`.age-recipients`, templates) are NOT replayed:
 /// "keep mine" adopts the remote's non-secret files verbatim and re-encrypts only
 /// secrets onto them. gpm is single-identity today, so local recipient edits do
 /// not arise; multi-recipient overwrite-safety is deferred (TODO).
@@ -1914,13 +1914,14 @@ mod tests {
 
     #[test]
     fn init_repo_and_commit_initial_create_first_commit_no_parent() {
+        use crate::recipient::RECIPIENTS_FILE;
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         init_repo(dir.path()).expect("init_repo");
 
         // Write a recipients file, then make the no-parent initial commit.
-        std::fs::write(dir.path().join(".age-recipients"), "age1abc\n").unwrap();
+        std::fs::write(dir.path().join(RECIPIENTS_FILE), "age1abc\n").unwrap();
         let message = "Initialized Store for age1abc";
-        let head = commit_initial(dir.path(), &[".age-recipients".to_string()], message)
+        let head = commit_initial(dir.path(), &[RECIPIENTS_FILE.to_string()], message)
             .expect("commit_initial");
         assert!(!head.is_empty());
 
@@ -1935,7 +1936,7 @@ mod tests {
         );
         // .age-recipients is recorded in the commit tree.
         let tree = head_commit.tree().unwrap();
-        assert!(tree.get_path(Path::new(".age-recipients")).is_ok());
+        assert!(tree.get_path(Path::new(RECIPIENTS_FILE)).is_ok());
 
         // A follow-up commit (which needs a parent HEAD) works after the initial.
         std::fs::write(dir.path().join("foo.age"), b"x").unwrap();

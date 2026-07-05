@@ -27,7 +27,7 @@ async fn store_with_recipients() -> (tempfile::TempDir, tempfile::TempDir, Store
 
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         vec![],
-        vec![(".gopass-recipients", recipient.as_bytes())],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
         &recipient,
     );
 

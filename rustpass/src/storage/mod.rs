@@ -231,8 +231,8 @@ pub trait StorageBackend: Send + Sync {
     /// the repo; otherwise an I/O error.
     async fn delete(&self, repo_path: &Path, name: &str) -> Result<(), Error>;
 
-    /// Read + parse the store's recipients file (`.gopass-recipients` preferred,
-    /// `.age-recipients` fallback). **Temporary surface** — recipients semantics
+    /// Read + parse the store's `.age-recipients` recipients file. **Temporary
+    /// surface** — recipients semantics
     /// stay in `crypto` (crypto owns the semantics; storage owns the file);
     /// this returns the parsed list for now and moves to raw bytes when a second
     /// backend informs the split.

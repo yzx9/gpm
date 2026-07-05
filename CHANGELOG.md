@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tapping the "Showing" button while a password is already revealed now hides it, instead of asking you to unlock again and decrypting it a second time. The reveal button now works as a toggle: tap to show, tap again to hide.
 - Tapping Edit on an entry now prompts for your passphrase when the identity is locked, instead of showing an "Identity is encrypted — unlock with passphrase first" error. You no longer have to reveal or copy a secret first just to edit it.
+- Cloning a gopass repository now discovers recipients from the `.age-recipients` file only, matching gopass exactly. gpm no longer also reads a `.gopass-recipients` file that gopass itself never writes or uses, so the two stay in sync on a shared store.
 
 ## [v0.8.1] - 2026-07-03
 

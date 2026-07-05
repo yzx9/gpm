@@ -19,7 +19,7 @@ async fn templated_store(
     root_template: Option<&str>,
 ) -> (tempfile::TempDir, tempfile::TempDir, Store) {
     let (identity, recipient) = generate_test_keypair();
-    let mut plaintext: Vec<(&str, &[u8])> = vec![(".gopass-recipients", recipient.as_bytes())];
+    let mut plaintext: Vec<(&str, &[u8])> = vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())];
     let tmpl_bytes;
     if let Some(t) = root_template {
         tmpl_bytes = t.as_bytes().to_vec();
@@ -98,7 +98,7 @@ async fn lookup_template_nearest_wins() {
     // Bare ships BOTH a root template and a `websites/.pass-template`.
     let (identity, recipient) = generate_test_keypair();
     let plaintext: Vec<(&str, &[u8])> = vec![
-        (".gopass-recipients", recipient.as_bytes()),
+        (TEST_RECIPIENTS_FILE, recipient.as_bytes()),
         (".pass-template", b"ROOT"),
         ("websites/.pass-template", b"{{ .Content }}\nuser: "),
     ];
