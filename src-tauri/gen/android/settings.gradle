@@ -1,3 +1,48 @@
 include ':app'
 
 apply from: 'tauri.settings.gradle'
+
+// Tauri re-renders app/build.gradle.kts from its template on every
+// `tauri android build`, dropping any manually-added lines (e.g. the debug
+// applicationIdSuffix that lets debug APKs coexist with release). Apply the
+// suffix here instead, from a file Tauri does not regenerate.
+//
+// Timing: gradle.beforeProject fires before :app's build script, so the
+// afterEvaluate registered here is queued BEFORE AGP's variant-creation
+// listener (added when the android plugin applies inside the build script) —
+// the suffix lands before variants are created, where AGP reads it. Groovy
+// dynamic dispatch reaches the AGP extension without a compile-time dep.
+//
+// Why not AGP's androidComponents Variant API (the official successor to
+// afterEvaluate)? applicationIdSuffix is a BuildType DSL property, not a
+// first-class Variant property — the Variant API exposes only the resolved
+// `applicationId` Property, so switching means appending to a lazy Property
+// with its own AGP-version-dependent lock fragility, plus a buildscript dep on
+// AGP. Mutating the BuildType DSL is the simpler correct tool here; the assert
+// below catches the silent-no-op regression case that motivated this hook.
+gradle.beforeProject { p ->
+    if (p.path == ':app') {
+        p.afterEvaluate {
+            try {
+                def android = p.extensions.findByName("android")
+                if (android == null) {
+                    logger.lifecycle("gpm: :app has no 'android' extension — skipping debug applicationIdSuffix")
+                    return
+                }
+                def debug = android.buildTypes.getByName("debug")
+                debug.applicationIdSuffix = ".debug"
+                // Fail loud if AGP silently ignores the assignment — the exact
+                // regression that went undetected for months when the suffix
+                // lived in app/build.gradle.kts. AssertionError is a
+                // java.lang.Error, so it escapes catch(Exception) on purpose:
+                // structural failures above are contained (this debug tweak
+                // never gates a release-only build), but a silent stickiness
+                // regression fails every build until someone investigates.
+                assert debug.applicationIdSuffix == ".debug" : \
+                    "gpm: debug applicationIdSuffix did not stick (AGP version regression?)"
+            } catch (Exception e) {
+                logger.lifecycle("gpm: could not apply debug applicationIdSuffix: {}", e.message)
+            }
+        }
+    }
+}

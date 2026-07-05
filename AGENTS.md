@@ -71,7 +71,7 @@ Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration t
 - Single age identity only (multi-identity deferred); supports x25519 native keys (optionally passphrase-encrypted at rest) and SSH private keys (ed25519, RSA), including passphrase-protected SSH keys
 - HTTPS and SSH Git remotes (SSH key generation + paste)
 - Biometric unlock (fingerprint/face) on Android 11+ for passphrase-protected identities. Desktop and Android <11 stay passphrase-only. iOS deferred.
-- `gen/android/` looks like a generated directory but contains git-tracked, manually maintained files.
+- `gen/android/` looks like a generated directory but contains git-tracked, manually maintained files — **except `app/build.gradle.kts`, which `tauri android build` re-renders from its template every run, silently dropping manual edits.** Put manual gradle config (e.g. `applicationIdSuffix`) in `gen/android/settings.gradle` instead, which Tauri does not regenerate.
 - Tauri v2 IPC naming: Rust uses `snake_case`, frontend/Kotlin use `camelCase` — Tauri auto-converts at the boundary. Match the existing plugin code.
 - The Android debug build sets `applicationIdSuffix = ".debug"` (installs as `xyz.yzx9.gpm.debug`) so it coexists with the release — install a debug build for diagnostics without uninstalling.
 - Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
