@@ -434,14 +434,11 @@ onUnmounted(clearPendingFile);
 <template>
   <form class="flex flex-col gap-4" @submit.prevent="onCompleteSetup">
     <!-- Back button — MUST be the first button[type='button'] in this form
-         (the back-navigation test relies on this ordering). -->
-    <button
-      type="button"
-      class="self-start text-sm text-muted hover:text-accent active:text-accent transition-colors inline-flex items-center gap-1"
-      @click="goBack"
-    >
+         (the back-navigation test relies on this ordering). BaseButton renders
+         <button type="button"> by default, preserving that. -->
+    <BaseButton variant="ghost" class="self-start" @click="goBack">
       <BaseIcon :icon="ArrowLeft" /> Back
-    </button>
+    </BaseButton>
 
     <h2 class="text-lg font-semibold">Recipients in this repository</h2>
     <p class="text-xs text-muted">

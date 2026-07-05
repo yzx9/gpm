@@ -8,11 +8,14 @@ import BaseSpinner from "./BaseSpinner.vue";
 
 const props = withDefaults(
   defineProps<{
-    /** Visual style. `action` / `action-danger` are full-width, left-aligned. */
+    /** Visual style. `ghost` is a quiet tinted action (no border, subordinate to
+     * `primary`) for low-emphasis entries like a method-switch; `action` /
+     * `action-danger` are full-width, left-aligned. */
     variant?:
       | "primary"
       | "secondary"
       | "outline"
+      | "ghost"
       | "danger"
       | "action"
       | "action-danger";
@@ -128,6 +131,19 @@ const sizeClass = computed(() =>
   background: var(--color-hover);
 }
 
+/* Quiet tinted action: a faint surface tint (no border) so the row reads as
+   tappable on a no-hover touch screen, while staying clearly subordinate to a
+   filled `primary`. The label uses the inherited body color so it clears
+   contrast against the tint; subordination comes from no-fill + no-border. */
+.ghost {
+  background: var(--color-hover);
+  color: inherit;
+  border: none;
+}
+.ghost:active:not(:disabled) {
+  background: var(--color-edge);
+}
+
 .danger {
   background: var(--color-surface);
   color: var(--color-danger);
@@ -169,6 +185,9 @@ const sizeClass = computed(() =>
   .action:hover:not(:disabled),
   .action-danger:hover:not(:disabled) {
     background: var(--color-hover);
+  }
+  .ghost:hover:not(:disabled) {
+    color: var(--color-accent);
   }
   .danger:hover:not(:disabled) {
     background: var(--color-danger-soft);

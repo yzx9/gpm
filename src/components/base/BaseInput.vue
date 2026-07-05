@@ -3,6 +3,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
+import { ref } from "vue";
+
 // Single source of truth for the former `.input-base`. The model is
 // `string | number` and the `.number` modifier (v-model.number) is honored via
 // the set transformer, so numeric inputs (length/count) work the same as raw
@@ -27,10 +29,17 @@ withDefaults(
   }>(),
   { type: "text" },
 );
+
+// Expose focus() so parents can focus a v-if-revealed input. The native
+// `autofocus` attribute only fires on initial document load, not when an input
+// is mounted dynamically (e.g. a mode toggle revealing a passphrase field).
+const inputRef = ref<HTMLInputElement | null>(null);
+defineExpose({ focus: () => inputRef.value?.focus() });
 </script>
 
 <template>
   <input
+    ref="inputRef"
     v-model="model"
     class="input"
     :type="type"

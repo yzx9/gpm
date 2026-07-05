@@ -49,21 +49,25 @@ describe("UnlockModal", () => {
     expect(invoke).toHaveBeenCalledWith("biometric_unlock");
   });
 
-  it("keeps the passphrase form silently when biometric is cancelled", async () => {
+  it("stays in biometric mode when the prompt is cancelled (passphrase behind the switch)", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(true) // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({
         code: "BIOMETRIC_CANCELLED",
         message: "cancel",
-      }); // biometric_unlock
+      }); // biometric_unlock (auto-prompt)
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
     // No notice shown for a plain cancel.
     expect(wrapper.text()).not.toContain("Biometric was reset");
-    // The passphrase form is always present.
-    expect(wrapper.find('input[type="password"]').exists()).toBe(true);
+    // Cancel keeps the user in biometric mode: the primary is still present and
+    // the passphrase input stays hidden behind the "Unlock with passphrase"
+    // switch (tapping it reveals the form — covered by a later test).
+    expect(wrapper.text()).toContain("Unlock with biometric");
+    expect(wrapper.text()).toContain("Unlock with passphrase");
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false);
   });
 
   it("shows a reset notice and disables biometric when the key was invalidated", async () => {
@@ -80,6 +84,10 @@ describe("UnlockModal", () => {
 
     expect(invoke).toHaveBeenCalledWith("disable_biometric_unlock");
     expect(wrapper.text()).toContain("Biometric was reset");
+    // Auto-switched to passphrase mode (biometric is no longer viable): the
+    // input is now visible and the "Unlock with biometric" switch is gone.
+    expect(wrapper.find('input[type="password"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("Unlock with biometric");
   });
 
   it("does not auto-prompt when biometric is unavailable", async () => {
@@ -127,6 +135,102 @@ describe("UnlockModal", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("biometric_unlock");
+  });
+
+  it("reveals the passphrase form on tap and submits to unlock", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(true) // is_biometric_available
+      .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
+      .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    // Starts in biometric mode (no passphrase input yet).
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false);
+
+    // Tap the ghost switch to reveal the passphrase form.
+    const switchBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Unlock with passphrase"))!;
+    expect(switchBtn).toBeTruthy();
+    await switchBtn.trigger("click");
+    await flushPromises();
+
+    // Input now present; submitting flows to unlock.
+    expect(wrapper.find('input[type="password"]').exists()).toBe(true);
+    await wrapper.find('input[type="password"]').setValue("secret");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("unlock", { passphrase: "secret" });
+  });
+
+  it("offers a back-to-biometric action in passphrase mode that re-prompts", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(true) // is_biometric_available
+      .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
+      .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    // Reveal the passphrase form first.
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Unlock with passphrase"))!
+      .trigger("click");
+    await flushPromises();
+
+    // The back-to-biometric switch is present in passphrase mode; tapping it
+    // re-prompts biometric.
+    const toBiometric = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Unlock with biometric"))!;
+    expect(toBiometric).toBeTruthy();
+    await toBiometric.trigger("click");
+    await flushPromises();
+
+    const biometricCalls = vi
+      .mocked(invoke)
+      .mock.calls.filter((c) => c[0] === "biometric_unlock");
+    expect(biometricCalls).toHaveLength(2); // auto-prompt + manual re-prompt
+  });
+
+  it("stays in biometric mode on a transient biometric error (lockout)", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(true) // is_biometric_available
+      .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
+      .mockRejectedValueOnce({
+        code: "BIOMETRIC_LOCKOUT",
+        message: "Too many attempts, try later",
+      }) // auto-prompt (transient)
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    // Notice shown, but still in biometric mode — no auto-switch, no disable.
+    expect(wrapper.text()).toContain("Too many attempts, try later");
+    expect(wrapper.text()).toContain("Unlock with biometric");
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("disable_biometric_unlock");
+  });
+
+  it("surfaces an error when the passphrase is wrong", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "immediate" }) // get_config
+      .mockRejectedValueOnce({ code: "WRONG_PASSPHRASE", message: "nope" }); // unlock
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    await wrapper.find('input[type="password"]').setValue("wrong");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("unlock", { passphrase: "wrong" });
+    expect(wrapper.text()).toContain("Wrong passphrase");
   });
 
   it("the close (×) button emits `close` so the host can dismiss the overlay", async () => {

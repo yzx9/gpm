@@ -15,7 +15,7 @@ import {
   type LockMode,
 } from "@/api";
 import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
@@ -29,11 +29,22 @@ const loading = ref(false);
 const error = ref("");
 const showHelp = ref(false);
 
+// ── Unlock method ─────────────────────────────────────────────────────
+// Two modes: biometric (the default path when available) and passphrase
+// (revealed on demand). `resolved` gates the interactive body until onMounted
+// has chosen the mode, so the wrong branch never paints for a frame.
+const mode = ref<"biometric" | "passphrase">("passphrase");
+const resolved = ref(false);
+const passphraseInputRef = ref<{ focus: () => void } | null>(null);
+
 // ── Biometric state ───────────────────────────────────────────────────
 const biometricAvailable = ref(false);
 const biometricEnabled = ref(false);
 const biometricLoading = ref(false);
 const biometricNotice = ref("");
+const biometricUsable = computed(
+  () => biometricAvailable.value && biometricEnabled.value,
+);
 
 // ── Auto-lock policy hint ─────────────────────────────────────────────
 // The policy in effect (Immediate / N min idle / Never), shown so the user
@@ -49,6 +60,24 @@ function describeLockMode(m: LockMode): string {
   return `Identity auto-locks after ${mins} min of inactivity.`;
 }
 
+// Single path into passphrase mode — used by both the switch tap and the
+// error-driven auto-fallback. Clears stale status, flips mode, and focuses
+// the revealed input (the native `autofocus` attribute does not fire when an
+// input is mounted dynamically via v-if).
+function enterPassphraseMode() {
+  error.value = "";
+  mode.value = "passphrase";
+  nextTick(() => passphraseInputRef.value?.focus());
+}
+
+function switchToBiometric() {
+  error.value = "";
+  biometricNotice.value = "";
+  mode.value = "biometric";
+  // Re-prompt; the native biometric sheet handles its own focus.
+  tryBiometricUnlock();
+}
+
 async function tryBiometricUnlock() {
   biometricNotice.value = "";
   biometricLoading.value = true;
@@ -60,21 +89,27 @@ async function tryBiometricUnlock() {
     const err = asBiometricError(e) as BiometricError;
     switch (err.code) {
       case "BIOMETRIC_CANCELLED":
-        // User chose "Use passphrase" — keep the form, stay quiet.
+        // User dismissed the prompt — stay in the current mode. The visible
+        // ghost switch is the way to the other method; no notice needed.
         break;
       case "BIOMETRIC_KEY_INVALIDATED":
         biometricNotice.value =
           "Biometric was reset (new fingerprint?) — re-enable it in Settings.";
         await disableBiometricUnlock();
         biometricEnabled.value = false;
+        // Biometric is no longer viable — land on the passphrase form.
+        enterPassphraseMode();
         break;
       case "WRONG_PASSPHRASE":
         biometricNotice.value =
           "Stored passphrase is invalid — re-enable biometric in Settings.";
         await disableBiometricUnlock();
         biometricEnabled.value = false;
+        enterPassphraseMode();
         break;
       default:
+        // Transient/unavailable (LOCKOUT, FAILED, …): keep biometric available
+        // so the user can retry, or switch manually via the ghost button.
         biometricNotice.value = err.message || "Biometric unlock failed";
     }
   } finally {
@@ -115,9 +150,16 @@ async function onUnlock() {
 onMounted(async () => {
   biometricAvailable.value = await isBiometricAvailable();
   biometricEnabled.value = await isBiometricUnlockEnabled();
-  // Auto-prompt when enabled and available; cancel reveals the form silently.
-  if (biometricEnabled.value && biometricAvailable.value) {
+  // Pick the mode before un-gating so the first paint is correct (no flash of
+  // the passphrase form on the biometric path), then auto-prompt if usable.
+  if (biometricUsable.value) mode.value = "biometric";
+  resolved.value = true;
+  if (biometricUsable.value) {
     await tryBiometricUnlock();
+  } else {
+    // Passphrase mode is the initial render here — focus the input ourselves
+    // since `autofocus` doesn't fire on this dynamically (v-if) mounted field.
+    nextTick(() => passphraseInputRef.value?.focus());
   }
   // Best-effort: read the auto-lock policy so the hint matches the user's
   // setting. A failure (or pre-setup) leaves the "immediate" default.
@@ -182,42 +224,42 @@ onMounted(async () => {
       {{ biometricNotice }}
     </BaseAlert>
 
-    <!-- Unlock with biometric -->
-    <BaseButton
-      v-if="biometricAvailable && biometricEnabled"
-      variant="secondary"
-      :loading="biometricLoading"
-      :disabled="loading"
-      @click="tryBiometricUnlock"
-    >
-      <BaseIcon v-if="!biometricLoading" :icon="ScanFace" />
-      <span>{{
-        biometricLoading ? "Unlocking…" : "Unlock with biometric"
-      }}</span>
-    </BaseButton>
-
-    <div
-      v-if="biometricAvailable && biometricEnabled"
-      class="flex items-center gap-2 my-4"
-      aria-hidden="true"
-    >
-      <span class="divider-line"></span>
-      <span class="text-xs text-subtle">or use passphrase</span>
-      <span class="divider-line"></span>
+    <!-- BIOMETRIC MODE: primary biometric action + low-emphasis switch. -->
+    <div v-if="resolved && mode === 'biometric'" class="flex flex-col gap-4">
+      <BaseButton
+        variant="primary"
+        block
+        :loading="biometricLoading"
+        :disabled="loading"
+        @click="tryBiometricUnlock"
+      >
+        <BaseIcon v-if="!biometricLoading" :icon="ScanFace" />
+        <span>{{
+          biometricLoading ? "Unlocking…" : "Unlock with biometric"
+        }}</span>
+      </BaseButton>
+      <BaseButton variant="ghost" block @click="enterPassphraseMode">
+        Unlock with passphrase
+      </BaseButton>
     </div>
 
-    <form @submit.prevent="onUnlock" class="flex flex-col gap-4">
+    <!-- PASSPHRASE MODE: input + primary + (optional) switch back to biometric. -->
+    <form
+      v-else-if="resolved"
+      @submit.prevent="onUnlock"
+      class="flex flex-col gap-4"
+    >
       <div class="flex flex-col gap-1">
         <label for="passphrase" class="text-sm font-medium">Passphrase</label>
         <BaseInput
           id="passphrase"
+          ref="passphraseInputRef"
           v-model="passphrase"
           type="password"
           placeholder="Enter your passphrase"
           required
           autocomplete="off"
           :disabled="loading"
-          autofocus
         />
         <small class="text-xs text-muted"
           >Enter the passphrase to unlock your identity</small
@@ -226,19 +268,23 @@ onMounted(async () => {
 
       <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
-      <BaseButton variant="primary" type="submit" :loading="loading">{{
+      <BaseButton variant="primary" type="submit" block :loading="loading">{{
         loading ? "Decrypting…" : "Unlock"
       }}</BaseButton>
+
+      <BaseButton
+        v-if="biometricUsable"
+        variant="ghost"
+        block
+        @click="switchToBiometric"
+      >
+        Unlock with biometric
+      </BaseButton>
     </form>
   </BaseModalShell>
 </template>
 
 <style scoped>
-.divider-line {
-  flex: 1;
-  height: 1px;
-  background: var(--color-edge);
-}
 .close-x {
   position: absolute;
   top: -0.25rem;
