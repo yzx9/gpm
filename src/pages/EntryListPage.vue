@@ -33,6 +33,7 @@ import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
+  useAppLockState,
   useLockState,
   usePullToRefresh,
   useToast,
@@ -67,6 +68,7 @@ import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { runWithAuth, overlayUp } = useLockState();
+const { appLocked } = useAppLockState();
 const { toast } = useToast();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
@@ -203,6 +205,22 @@ function loadMore() {
 function retry() {
   void fetchPage("", 0, true);
 }
+
+// App-Lock recovery: with the at-rest gate on, the cold-start list fetch fails
+// `AtRestKeyUnavailable` while `repo.json` is sealed, and the page intentionally
+// surfaces that as a "locked" error — it tells the user the content needs an
+// unlock, and because the fetch failed no entry data was loaded, so only the
+// chrome + message are visible behind the (semi-transparent) AppLockOverlay.
+// Abandoning unlock leaves the message in place as a reminder. Once `appLocked`
+// flips to false the master key is back in memory, so clear the now-stale error
+// and load the list. Guarded on `error` so a resume re-lock over an
+// already-loaded list is left intact.
+watch(appLocked, (locked, prev) => {
+  if (prev && !locked && error.value) {
+    error.value = "";
+    void fetchPage(search.value.trim(), 0, true);
+  }
+});
 
 // Debounced fuzzy search (150 ms). Clearing the query drops straight back to
 // browse page 0; typing re-fetches page 0 of the new query once the user pauses.

@@ -222,7 +222,7 @@ impl AtRest {
         let Some(key) = guard.as_ref() else {
             return Err(Error::new(
                 ErrorCode::AtRestKeyUnavailable,
-                "At-rest data is encrypted but the master key is unavailable — re-setup required",
+                "At-rest data is encrypted — unlock the app to read it.",
             ));
         };
 

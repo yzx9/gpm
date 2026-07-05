@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - History's commit rows are easier to read. Each commit's message now gets its own line, with the hash, author, and time grouped on a quieter line underneath, instead of all three squeezed into one cramped row that truncated the message.
 - The Back button now returns to the page you actually came from, instead of always jumping to a fixed page. Pressing Back from Settings takes you to wherever you opened Settings (usually the entry list), and the Android system back button now agrees with the in-app Back button — repeated Back no longer cycles through pages you already visited, and Back from the entry list exits the app.
 
+### Fixed
+
+- When App Lock is on, the entry list no longer stays stuck on a "locked" message after you unlock with your fingerprint. It loads your entries on its own the moment the store unlocks, instead of making you leave the screen and come back. (The message while locked is intentional — it reminds you the content needs an unlock, and no entry data is loaded until then.)
+- Under App Lock, the "locked" message on the entry list no longer falsely warns that you need to set the app up again — you don't, just unlock. It now simply tells you to unlock.
+
 ## [v0.9.0] - 2026-07-05
 
 ### Added

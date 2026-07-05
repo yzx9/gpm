@@ -166,6 +166,56 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).toContain("github-token");
     });
 
+    it("shows a 'locked' error while app-locked, then loads on unlock", async () => {
+      // Cold start with App Lock on: the master key is absent, so the first
+      // list_entries fails with AtRestKeyUnavailable (intentional — the error
+      // reminds the user the content is locked, and no entry data loads while
+      // sealed). The second call — after the biometric unlock injects the
+      // master key — succeeds.
+      let listCall = 0;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "list_entries") {
+          listCall += 1;
+          return listCall === 1
+            ? Promise.reject({
+                code: "AT_REST_KEY_UNAVAILABLE",
+                message: "Store is locked",
+              })
+            : Promise.resolve(page(sampleEntries));
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+
+      const { wrapper, appLock } = mountWithApp(EntryListPage);
+      // The page mounts under the AppLockOverlay with the gate locked. Drive
+      // the live ref directly — production flips it via `app-lock-state` after
+      // a biometric unlock; the watch only acts on the locked→unlocked edge.
+      const appLocked = appLock.appLocked as unknown as { value: boolean };
+      appLocked.value = true;
+      await flushPromises();
+
+      // While locked: the "locked" error is shown (a reminder, not a bug), and
+      // no entries are loaded.
+      expect(wrapper.find("[role='alert']").text()).toContain(
+        "Store is locked",
+      );
+      expect(wrapper.text()).not.toContain("github-token");
+
+      // Biometric unlock: master key back in memory → the error clears and the
+      // list loads via the watch (no manual retry / navigation needed).
+      appLocked.value = false;
+      await flushPromises();
+
+      expect(listCall).toBe(2);
+      expect(wrapper.text()).toContain("github-token");
+      expect(wrapper.text()).not.toContain("Store is locked");
+    });
+
     it("shows empty state when no entries", async () => {
       when("list_entries", page([]));
       const wrapper = mountPage();
