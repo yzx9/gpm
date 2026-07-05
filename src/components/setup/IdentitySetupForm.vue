@@ -22,6 +22,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
+import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
   ArrowLeft,
   Check,
@@ -64,6 +65,27 @@ const deriving = ref(false);
 const error = ref("");
 // Confirm-field controller for the x25519 at-rest passphrase (validate/reset).
 const pf = ref<InstanceType<typeof PassphraseField> | null>(null);
+// Forced "this x25519 at-rest passphrase cannot be recovered" ack. SSH keys
+// and the file/verify paths are out of scope. Reset whenever the passphrase OR
+// the pasted identity changes (watches below) so a stale ack can't carry
+// across contexts or be reused for a different committed value.
+const ackX25519 = ref(false);
+// Required only on the paste+x25519 at-rest path, and only once a passphrase is
+// actually typed (empty optional = plaintext = no lockout risk).
+const ackRequired = computed(
+  () =>
+    identitySource.value === "paste" &&
+    identityType.value === "x25519" &&
+    !!passphrase.value &&
+    !ackX25519.value,
+);
+// Ack is value-bound: any edit to the passphrase invalidates it.
+watch(
+  () => passphrase.value,
+  () => {
+    ackX25519.value = false;
+  },
+);
 
 // Race guard: a monotonic token so a stale validate_identity response (from an
 // earlier paste) cannot overwrite a newer edit's derived recipient.
@@ -182,6 +204,9 @@ function validateStep2(): string | null {
     // those enter an existing passphrase, not a new one to confirm).
     const passphraseError = pf.value?.validate() ?? null;
     if (passphraseError) return passphraseError;
+    if (ackRequired.value) {
+      return "Please acknowledge that this passphrase cannot be recovered.";
+    }
   }
   // Last check (mirrors the Store::save_identity backstop): hard-block a
   // derived recipient that matches nothing in a non-empty repo.
@@ -347,6 +372,8 @@ watch(identity, (val) => {
   deriving.value = false;
   malformedIdentity.value = false;
   error.value = "";
+  // A different identity is a different ack context — force a re-ack.
+  ackX25519.value = false;
 
   const trimmed = val.trim();
   if (!trimmed) {
@@ -667,14 +694,29 @@ onUnmounted(clearPendingFile);
       </template>
     </PassphraseField>
 
+    <!-- x25519 at-rest: forced unrecoverable ack (only once a passphrase is
+         typed; empty = plaintext = no lockout risk). The SSH-key passphrase
+         field above decrypts an existing key rather than setting a new at-rest
+         passphrase, so it gets no ack. -->
+    <PassphraseUnrecoverableAck
+      v-if="
+        identitySource === 'paste' && identityType === 'x25519' && passphrase
+      "
+      v-model="ackX25519"
+    />
+
     <BaseAlert variant="info" class="text-center">
       Stored locally. Nothing leaves your device.
     </BaseAlert>
 
     <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
-    <BaseButton variant="primary" type="submit" :loading="loadingIdentity">{{
-      loadingIdentity ? "Verifying…" : "Complete Setup"
-    }}</BaseButton>
+    <BaseButton
+      variant="primary"
+      type="submit"
+      :loading="loadingIdentity"
+      :disabled="ackRequired"
+      >{{ loadingIdentity ? "Verifying…" : "Complete Setup" }}</BaseButton
+    >
   </form>
 </template>

@@ -17,8 +17,9 @@ import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
+import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import { CircleCheck, KeyRound } from "@lucide/vue";
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
 
@@ -33,6 +34,10 @@ const passphrase = ref("");
 // Confirm-field controller — exposes validate()/reset() for the set-new-
 // passphrase check at generate (SSH) and at create (age at-rest).
 const pf = ref<InstanceType<typeof PassphraseField> | null>(null);
+// Forced "this age at-rest passphrase cannot be recovered" ack. SSH key-gen has
+// its own native protection and is explicitly out of scope. Reset on every
+// identity-kind switch (see selectKind) so an age ack can't leak into ssh.
+const ackAge = ref(false);
 // The passphrase that minted the SSH key (snapshot at generate time). SSH
 // derives its recipient from the passphrase-encrypted PEM, so complete must
 // reuse exactly this value — not the live field, which is locked after generate
@@ -52,6 +57,17 @@ const error = ref("");
 const emit = defineEmits<{ done: [] }>();
 
 const isSshUrl = computed(() => isSshRepoUrl(repoUrl.value));
+// Ack is only required when an age at-rest passphrase has actually been typed
+// (empty optional = plaintext = no lockout risk).
+const ackRequired = computed(
+  () => identityKind.value === "age" && !!passphrase.value && !ackAge.value,
+);
+// Invalidate the ack when the typed passphrase changes — each distinct
+// committed value gets its own acknowledgment. selectKind() still resets it
+// explicitly for the age↔ssh switch (passphrase itself isn't cleared there).
+watch(passphrase, () => {
+  ackAge.value = false;
+});
 
 function selectKind(kind: CreateIdentityKind) {
   if (identityKind.value === kind) return;
@@ -61,8 +77,11 @@ function selectKind(kind: CreateIdentityKind) {
   recipient.value = "";
   mintedSshPassphrase.value = null;
   // The confirm field was given in the previous kind's context — clear it so a
-  // stale confirm can't silently match under the new semantics.
+  // stale confirm can't silently match under the new semantics. Same for the
+  // age unrecoverable-ack: an ack given under one identity kind must not carry
+  // into the other.
   pf.value?.reset();
+  ackAge.value = false;
   clearPendingIdentity().catch(() => {});
 }
 
@@ -128,6 +147,9 @@ function validate(): string | null {
   }
   const passphraseError = pf.value?.validate() ?? null;
   if (passphraseError) return passphraseError;
+  if (ackRequired.value) {
+    return "Please acknowledge that this passphrase cannot be recovered.";
+  }
   return null;
 }
 
@@ -253,6 +275,14 @@ async function onCreate() {
       </template>
     </PassphraseField>
 
+    <!-- age at-rest: forced unrecoverable ack (only once a passphrase is
+         typed; empty = plaintext = no lockout risk). SSH key-gen is out of
+         scope — its passphrase uses SSH's own native protection. -->
+    <PassphraseUnrecoverableAck
+      v-if="identityKind === 'age' && passphrase"
+      v-model="ackAge"
+    />
+
     <!-- Generate -->
     <BaseButton
       variant="secondary"
@@ -311,8 +341,12 @@ async function onCreate() {
 
     <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
-    <BaseButton variant="primary" type="submit" :loading="loading">{{
-      loading ? "Creating…" : "Create Store"
-    }}</BaseButton>
+    <BaseButton
+      variant="primary"
+      type="submit"
+      :loading="loading"
+      :disabled="ackRequired"
+      >{{ loading ? "Creating…" : "Create Store" }}</BaseButton
+    >
   </form>
 </template>

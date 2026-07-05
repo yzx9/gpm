@@ -508,4 +508,148 @@ describe("CreateFlow", () => {
     ]);
     expect(wrapper.emitted("done")).toHaveLength(1);
   });
+
+  // ── unrecoverable passphrase ack ───────────────────────────────────────
+
+  it("age: gates Create Store on the unrecoverable ack once a passphrase is typed", async () => {
+    mockInvoke({
+      generate_identity: () => "age1r",
+      is_configured: () => false,
+      create_store: () => undefined,
+      complete_setup_from_file: () => undefined,
+    });
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "Generate identity");
+
+    // Type an at-rest passphrase → ack appears, unchecked → Create Store disabled.
+    await wrapper.find('input[id="create-passphrase"]').setValue("secret");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("secret");
+    const ack = wrapper.find('input[type="checkbox"]');
+    expect(ack.exists()).toBe(true);
+    expect((ack.element as HTMLInputElement).checked).toBe(false);
+    const createBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Create Store"))!;
+    expect((createBtn.element as HTMLButtonElement).disabled).toBe(true);
+
+    // Enter-key backstop: submit is blocked via validate() too.
+    await submit(wrapper);
+    expect(invoke).not.toHaveBeenCalledWith("create_store", expect.anything());
+
+    // Acknowledge → Create Store enables and the store is created.
+    await ack.setValue(true);
+    expect(
+      (
+        wrapper
+          .findAll("button")
+          .find((b) => b.text().includes("Create Store"))!
+          .element as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    await submit(wrapper);
+    expect(invoke).toHaveBeenCalledWith("complete_setup_from_file", {
+      passphrase: "secret",
+    });
+    expect(wrapper.emitted("done")).toHaveLength(1);
+  });
+
+  it("age: editing the passphrase after acking forces a re-ack", async () => {
+    mockInvoke({
+      generate_identity: () => "age1r",
+      is_configured: () => false,
+    });
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "Generate identity");
+    await wrapper.find('input[id="create-passphrase"]').setValue("secret");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("secret");
+    await wrapper.find('input[type="checkbox"]').setValue(true);
+
+    // Editing the passphrase invalidates the ack → Create Store re-gated.
+    await wrapper.find('input[id="create-passphrase"]').setValue("changed");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("changed");
+    expect(
+      (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    const createBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Create Store"))!;
+    expect((createBtn.element as HTMLButtonElement).disabled).toBe(true);
+    await submit(wrapper);
+    expect(invoke).not.toHaveBeenCalledWith(
+      "complete_setup_from_file",
+      expect.anything(),
+    );
+  });
+
+  it("ssh: shows no unrecoverable ack and Generate SSH key is not gated", async () => {
+    mockInvoke({ generate_identity: () => "ssh-ed25519 AAAApub" });
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "SSH (ed25519)");
+    // SSH key-gen uses SSH's own native passphrase protection → no ack.
+    await wrapper.find('input[id="create-passphrase"]').setValue("ssh-pass");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("ssh-pass");
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("cannot be recovered");
+
+    // Generate SSH key works without any ack.
+    await clickButton(wrapper, "Generate SSH key");
+    expect(invoke).toHaveBeenCalledWith("generate_identity", {
+      kind: "ssh",
+      passphrase: "ssh-pass",
+    });
+  });
+
+  it("switching age→ssh clears the age ack so it can't leak across kinds", async () => {
+    mockInvoke({
+      generate_identity: () => "age1r",
+      clear_pending_identity: () => undefined,
+    });
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await wrapper.find('input[id="create-passphrase"]').setValue("secret");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("secret");
+    const ack = wrapper.find('input[type="checkbox"]');
+    await ack.setValue(true);
+    expect((ack.element as HTMLInputElement).checked).toBe(true);
+
+    // Switch to SSH then back to age — the ack must have reset to unchecked.
+    await clickButton(wrapper, "SSH (ed25519)");
+    await clickButton(wrapper, "Age (x25519)");
+    await wrapper.find('input[id="create-passphrase"]').setValue("secret");
+    await wrapper
+      .find('input[id="create-passphrase-confirm"]')
+      .setValue("secret");
+    expect(
+      (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+  });
+
+  it("age: empty (plaintext) passphrase shows no ack and Create Store is enabled", async () => {
+    mockInvoke({ generate_identity: () => "age1r" });
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "Generate identity");
+    // No passphrase typed → plaintext → no lockout risk → no ack.
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("cannot be recovered");
+    const createBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Create Store"))!;
+    expect((createBtn.element as HTMLButtonElement).disabled).toBe(false);
+  });
 });

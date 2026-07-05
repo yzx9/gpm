@@ -52,6 +52,7 @@ import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
+import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
   useLockState,
   useOverlayBackHandler,
@@ -72,7 +73,7 @@ import {
   Trash2,
   TriangleAlert,
 } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
 
 const router = useRouter();
@@ -107,6 +108,9 @@ const passphraseLoading = ref(false);
 // the confirm box + validate() so setting a passphrase asks you to type it
 // twice and checks the two match before submitting).
 const ppField = ref<InstanceType<typeof PassphraseField> | null>(null);
+// Forced "this passphrase cannot be recovered" acknowledgment for set/change.
+// Reset on every modal open/close so an old ack can't carry across sessions.
+const ppAck = ref(false);
 
 const ppModalTitle = computed(() => {
   switch (passphraseModal.value) {
@@ -145,6 +149,18 @@ const ppShowCurrent = computed(
 const ppShowNew = computed(
   () => passphraseModal.value === "set" || passphraseModal.value === "change",
 );
+// Submit is blocked until the user acknowledges a NEW passphrase (set/change)
+// is unrecoverable. Empty passphrase is rejected by validate() on submit, so
+// the gate only needs to engage once something has been typed.
+const ppSubmitDisabled = computed(
+  () => ppShowNew.value && !!ppNew.value && !ppAck.value,
+);
+// Invalidate the ack whenever the typed passphrase changes — each distinct
+// committed value gets its own acknowledgment (ack is value-bound, not
+// modal-bound), so editing the passphrase after ticking forces a re-ack.
+watch(ppNew, () => {
+  ppAck.value = false;
+});
 
 // ── Biometric unlock state ──────────────────────────────────────────────
 const biometricAvailable = ref(false);
@@ -431,6 +447,7 @@ async function copyText(text: string) {
 function openPassphraseModal(mode: PassphraseMode) {
   ppCurrent.value = "";
   ppNew.value = "";
+  ppAck.value = false;
   error.value = "";
   passphraseModal.value = mode;
 }
@@ -438,6 +455,7 @@ function openPassphraseModal(mode: PassphraseMode) {
 function closePassphraseModal() {
   ppCurrent.value = "";
   ppNew.value = "";
+  ppAck.value = false;
   passphraseModal.value = null;
 }
 
@@ -459,6 +477,14 @@ async function onPassphraseSubmit() {
   // set / change enter the new passphrase via PassphraseField (with a confirm
   // box); validate the two match before dispatching.
   if (ppShowNew.value) {
+    // Defensive re-check: the submit button is already :disabled while unacked,
+    // but this guards a future refactor that wraps the modal in a <form> (where
+    // Enter could submit past a disabled button).
+    if (!!ppNew.value && !ppAck.value) {
+      error.value =
+        "Please acknowledge that this passphrase cannot be recovered.";
+      return;
+    }
     const passphraseError = ppField.value?.validate() ?? null;
     if (passphraseError) {
       error.value = passphraseError;
@@ -1379,6 +1405,11 @@ onMounted(() => {
         :disabled="passphraseLoading"
         class="mb-3"
       />
+      <PassphraseUnrecoverableAck
+        v-if="ppShowNew"
+        v-model="ppAck"
+        class="mb-3"
+      />
       <div class="flex gap-2 justify-end">
         <BaseButton
           variant="secondary"
@@ -1389,6 +1420,7 @@ onMounted(() => {
         <BaseButton
           variant="action"
           :loading="passphraseLoading"
+          :disabled="ppSubmitDisabled"
           @click="onPassphraseSubmit"
           >{{ ppSubmitLabel }}</BaseButton
         >

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Setting or changing a passphrase now asks you to type it twice, and gpm checks the two entries match before continuing, so a single typo can't silently become the passphrase that locks your identity (gpm cannot recover a lost passphrase). Each box has a show/hide toggle so you can also verify what you typed. This applies everywhere you set a new passphrase: initial setup, SSH key generation, and Settings.
+- When you set or change your identity passphrase, you must now tick a box confirming you understand gpm cannot recover it — losing it permanently locks you out of your secrets. The same warning the unlock screen shows now appears at the moment you actually choose the passphrase, so the consequence is clear before you commit. This applies wherever you set a new at-rest passphrase: initial setup and Settings (set and change).
 
 ### Changed
 

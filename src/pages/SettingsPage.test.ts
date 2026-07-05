@@ -174,19 +174,92 @@ describe("SettingsPage", () => {
   });
 
   describe("identity passphrase", () => {
+    it("set passphrase: blocks Encrypt until the unrecoverable ack is checked", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+      const openBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Set Passphrase"))!;
+      await openBtn.trigger("click");
+      await flushPromises();
+      const modal = wrapper.find('[role="dialog"]');
+      const modalBtn = (text: string) =>
+        modal.findAll("button").find((b) => b.text().includes(text))!;
+
+      await modal.find('input[id="pp-new"]').setValue("secret");
+      await modal.find('input[id="pp-new-confirm"]').setValue("secret");
+
+      // Ack is shown, unchecked → Encrypt disabled; clicking is a no-op.
+      const ack = modal.find('input[type="checkbox"]');
+      expect(ack.exists()).toBe(true);
+      expect((ack.element as HTMLInputElement).checked).toBe(false);
+      expect(
+        (modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled,
+      ).toBe(true);
+      await modalBtn("Encrypt Identity").trigger("click");
+      await flushPromises();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_passphrase",
+        expect.anything(),
+      );
+
+      // Acknowledge → Encrypt enables and set_passphrase fires.
+      await ack.setValue(true);
+      when("set_passphrase", { ok: true });
+      await modalBtn("Encrypt Identity").trigger("click");
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_passphrase", {
+        passphrase: "secret",
+      });
+    });
+
+    it("set passphrase: editing the passphrase after acking forces a re-ack", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+      const openBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Set Passphrase"))!;
+      await openBtn.trigger("click");
+      await flushPromises();
+      const modal = wrapper.find('[role="dialog"]');
+      const modalBtn = (text: string) =>
+        modal.findAll("button").find((b) => b.text().includes(text))!;
+      await modal.find('input[id="pp-new"]').setValue("secret");
+      await modal.find('input[id="pp-new-confirm"]').setValue("secret");
+      await modal.find('input[type="checkbox"]').setValue(true);
+      expect(
+        (modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled,
+      ).toBe(false);
+
+      // Editing the passphrase after acking invalidates the ack → re-gated.
+      await modal.find('input[id="pp-new"]').setValue("changed");
+      await modal.find('input[id="pp-new-confirm"]').setValue("changed");
+      expect(
+        (modal.find('input[type="checkbox"]').element as HTMLInputElement)
+          .checked,
+      ).toBe(false);
+      expect(
+        (modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled,
+      ).toBe(true);
+    });
+
     it("set passphrase: blocks encrypt when the confirm does not match", async () => {
       const wrapper = mountPage();
       await flushPromises();
-
-      // Identity is unencrypted by default → the "Set Passphrase" affordance.
-      const button = (text: string) =>
-        wrapper.findAll("button").find((b) => b.text().includes(text))!;
-      await button("Set Passphrase").trigger("click");
+      const openBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Set Passphrase"))!;
+      await openBtn.trigger("click");
       await flushPromises();
+      const modal = wrapper.find('[role="dialog"]');
+      const modalBtn = (text: string) =>
+        modal.findAll("button").find((b) => b.text().includes(text))!;
 
-      await wrapper.find('input[id="pp-new"]').setValue("secret");
-      await wrapper.find('input[id="pp-new-confirm"]').setValue("different");
-      await button("Encrypt Identity").trigger("click");
+      await modal.find('input[id="pp-new"]').setValue("secret");
+      await modal.find('input[id="pp-new-confirm"]').setValue("different");
+      // Ack first so the mismatch path is what blocks submit.
+      await modal.find('input[type="checkbox"]').setValue(true);
+      await modalBtn("Encrypt Identity").trigger("click");
       await flushPromises();
 
       expect(invoke).not.toHaveBeenCalledWith(
@@ -194,6 +267,66 @@ describe("SettingsPage", () => {
         expect.anything(),
       );
       expect(wrapper.text()).toContain("Passphrases do not match");
+    });
+
+    it("change passphrase: submit is gated on the unrecoverable ack too", async () => {
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: true,
+        identity_type: "x25519",
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+      const openBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Change Passphrase"))!;
+      await openBtn.trigger("click");
+      await flushPromises();
+      const modal = wrapper.find('[role="dialog"]');
+      const modalBtn = (text: string) =>
+        modal.findAll("button").find((b) => b.text().includes(text))!;
+
+      await modal.find('input[id="pp-current"]').setValue("old-pass");
+      await modal.find('input[id="pp-new"]').setValue("new-pass");
+      await modal.find('input[id="pp-new-confirm"]').setValue("new-pass");
+
+      const ack = modal.find('input[type="checkbox"]');
+      // "Change Passphrase" appears on both the card and the modal submit —
+      // assert on the modal-scoped submit button.
+      expect(
+        (modalBtn("Change Passphrase").element as HTMLButtonElement).disabled,
+      ).toBe(true);
+      await ack.setValue(true);
+      when("change_passphrase", { ok: true });
+      await modalBtn("Change Passphrase").trigger("click");
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("change_passphrase", {
+        oldPassphrase: "old-pass",
+        newPassphrase: "new-pass",
+      });
+    });
+
+    it("enable-biometric modal does not show the unrecoverable ack", async () => {
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: true,
+        identity_type: "x25519",
+      });
+      when("is_biometric_available", true);
+      const wrapper = mountPage();
+      await flushPromises();
+      const openBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Enable Biometric"))!;
+      await openBtn.trigger("click");
+      await flushPromises();
+
+      // No new passphrase is being established → no unrecoverable ack.
+      const modal = wrapper.find('[role="dialog"]');
+      expect(modal.text()).not.toContain("cannot be recovered");
+      expect(modal.find('input[type="checkbox"]').exists()).toBe(false);
     });
   });
 
@@ -738,6 +871,8 @@ describe("SettingsPage", () => {
       const modal = wrapper.find('[role="dialog"]');
       expect(modal.exists()).toBe(true);
       await modal.find("#pp-new").setValue("secret");
+      // The ack is part of the modal state and must be wiped on close too.
+      await modal.find('input[type="checkbox"]').setValue(true);
       await modal
         .findAll("button")
         .find((b) => b.text().includes("Cancel"))!
@@ -750,12 +885,18 @@ describe("SettingsPage", () => {
         expect.anything(),
       );
 
-      // Re-open: the field was wiped on close, not retained.
+      // Re-open: the field AND the ack were wiped on close, not retained.
       await setBtn!.trigger("click");
       await flushPromises();
       expect((wrapper.find("#pp-new").element as HTMLInputElement).value).toBe(
         "",
       );
+      expect(
+        (
+          wrapper.find('[role="dialog"]').find('input[type="checkbox"]')
+            .element as HTMLInputElement
+        ).checked,
+      ).toBe(false);
     });
 
     it("backdrop dismisses without invoking", async () => {

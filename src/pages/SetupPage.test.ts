@@ -397,6 +397,8 @@ describe("SetupPage", () => {
       await wrapper
         .find('input[id="identity-passphrase-confirm"]')
         .setValue("different");
+      // Ack first so the mismatch is what blocks submit (not the ack gate).
+      await wrapper.find('input[type="checkbox"]').setValue(true);
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
@@ -407,6 +409,156 @@ describe("SetupPage", () => {
         expect.anything(),
       );
       expect(wrapper.text()).toContain("Passphrases do not match");
+    });
+
+    it("x25519: gates Complete Setup on the unrecoverable ack once a passphrase is typed", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        }) // validate_identity
+        .mockResolvedValueOnce(undefined); // complete_setup
+
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await flushPromises();
+
+      await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
+      await wrapper
+        .find('input[id="identity-passphrase-confirm"]')
+        .setValue("secret");
+
+      // Ack present + unchecked → Complete Setup disabled; submit is blocked.
+      const ack = wrapper.find('input[type="checkbox"]');
+      expect(ack.exists()).toBe(true);
+      expect((ack.element as HTMLInputElement).checked).toBe(false);
+      const completeBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Complete Setup"))!;
+      expect((completeBtn.element as HTMLButtonElement).disabled).toBe(true);
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "complete_setup",
+        expect.anything(),
+      );
+
+      // Acknowledge → Complete Setup enables and complete_setup fires.
+      await ack.setValue(true);
+      expect(
+        (
+          wrapper
+            .findAll("button")
+            .find((b) => b.text().includes("Complete Setup"))!
+            .element as HTMLButtonElement
+        ).disabled,
+      ).toBe(false);
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("complete_setup", {
+        identity: "AGE-SECRET-KEY-1abc",
+        passphrase: "secret",
+      });
+    });
+
+    it("x25519: editing the passphrase after acking forces a re-ack", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        });
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await flushPromises();
+      await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
+      await wrapper
+        .find('input[id="identity-passphrase-confirm"]')
+        .setValue("secret");
+      await wrapper.find('input[type="checkbox"]').setValue(true);
+
+      // Editing the passphrase invalidates the ack.
+      await wrapper.find('input[id="identity-passphrase"]').setValue("changed");
+      await wrapper
+        .find('input[id="identity-passphrase-confirm"]')
+        .setValue("changed");
+      expect(
+        (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
+          .checked,
+      ).toBe(false);
+    });
+
+    it("x25519: pasting a different identity after acking forces a re-ack", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1first",
+        })
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1second",
+        });
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1aaa");
+      await flushPromises();
+      await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
+      await wrapper
+        .find('input[id="identity-passphrase-confirm"]')
+        .setValue("secret");
+      await wrapper.find('input[type="checkbox"]').setValue(true);
+
+      // Pasting a different identity invalidates the ack.
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1bbb");
+      await flushPromises();
+      expect(
+        (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
+          .checked,
+      ).toBe(false);
+    });
+
+    it("x25519: empty (plaintext) passphrase shows no ack and Complete Setup is not gated", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "x25519",
+          encrypted: false,
+          recipient: "age1derived",
+        }); // validate_identity
+
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue("AGE-SECRET-KEY-1abc");
+      await flushPromises();
+
+      // No passphrase typed → plaintext → no lockout risk → no ack.
+      expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+      const completeBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Complete Setup"))!;
+      expect((completeBtn.element as HTMLButtonElement).disabled).toBe(false);
     });
 
     it("navigates to entries on success", async () => {
@@ -565,6 +717,31 @@ describe("SetupPage", () => {
       expect(wrapper.find("[role='alert']").text()).toContain(
         "Wrong passphrase",
       );
+    });
+
+    it("encrypted SSH paste shows no unrecoverable ack (verify field is not a new passphrase)", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(true) // is_repo_ready
+        .mockResolvedValueOnce([]) // list_recipients
+        .mockResolvedValueOnce({
+          key_type: "ssh_ed25519",
+          encrypted: true,
+          recipient: null,
+        }); // validate_identity
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper
+        .find('textarea[id="identity"]')
+        .setValue(
+          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
+        );
+      await flushPromises();
+
+      // The SSH passphrase field decrypts an existing key (BaseInput), it does
+      // not set a new at-rest passphrase → no unrecoverable ack.
+      expect(wrapper.find('input[id="passphrase"]').exists()).toBe(true);
+      expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+      expect(wrapper.text()).not.toContain("cannot be recovered");
     });
 
     it("displays error from complete_setup failure", async () => {
