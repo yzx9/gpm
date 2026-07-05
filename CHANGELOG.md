@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-07-05
+
 ### Added
 
 - Setting or changing a passphrase now asks you to type it twice, and gpm checks the two entries match before continuing, so a single typo can't silently become the passphrase that locks your identity (gpm cannot recover a lost passphrase). Each box has a show/hide toggle so you can also verify what you typed. This applies everywhere you set a new passphrase: initial setup, SSH key generation, and Settings.
@@ -201,7 +203,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.9.0...HEAD
+[v0.9.0]: https://github.com/yzx9/gpm/compare/v0.8.1...v0.9.0
 [v0.8.1]: https://github.com/yzx9/gpm/compare/v0.8.0...v0.8.1
 [v0.8.0]: https://github.com/yzx9/gpm/compare/v0.7.3...v0.8.0
 [v0.7.3]: https://github.com/yzx9/gpm/compare/v0.7.2...v0.7.3
