@@ -12,10 +12,12 @@ import {
   APP_LOCK_KEY,
   createAppLockStore,
   createLockState,
+  createNavDirection,
   createSecureScreen,
   createSecuritySettings,
   createToast,
   LOCK_KEY,
+  NAV_DIRECTION_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
@@ -128,8 +130,13 @@ router.afterEach(async (to) => {
 
 const app = createApp(App);
 app.use(router);
+// Direction tracker for the <router-view> slide transition. Registered after
+// the secure-screen guards so its afterEach runs alongside them. The
+// secure-boundary gate inside it keeps FLAG_SECURE safe (see useNavDirection).
+const navDirection = createNavDirection(router);
 app.provide(LOCK_KEY, lockState);
 app.provide(APP_LOCK_KEY, appLockStore);
+app.provide(NAV_DIRECTION_KEY, navDirection);
 app.provide(SECURE_SCREEN_KEY, secureScreenState);
 app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);
 app.provide(TOAST_KEY, toastState);

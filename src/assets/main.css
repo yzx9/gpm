@@ -115,6 +115,12 @@
     padding-left: var(--safe-area-inset-left, 0px);
     padding-right: var(--safe-area-inset-right, 0px);
     min-height: 100vh;
+    /* Anchor for the page-transition's absolutely-positioned departing page.
+       `overflow-x: clip` (not hidden) clips the off-screen translate without
+       establishing a scroll container — `hidden` would compute overflow-y to
+       auto and silently reparent scrolling from the body to .app-shell. */
+    position: relative;
+    overflow-x: clip;
   }
 
   /* Touch press + keyboard focus defaults.
@@ -153,6 +159,55 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Page transitions (router-view slide)
+ *
+ * Forward (router.push) = the arriving page slides in from the right and the
+ * departing page slides out to the left. Back (router.back/pop) = the reverse.
+ * Only the departing page is position:absolute during the swap; the arriving
+ * page stays in flow so it carries .app-shell's height (making both absolute
+ * would collapse the shell). The global prefers-reduced-motion rule above
+ * already pins transition-duration to ~0, so reduced-motion users get an
+ * instant swap with no extra rule here.
+ *
+ * Secure↔non-secure swaps are gated to "" (no animation) in useNavDirection so
+ * FLAG_SECURE is never down while a secure page is still visible.
+ * --------------------------------------------------------------------------- */
+.slide-forward-enter-active,
+.slide-forward-leave-active,
+.slide-back-enter-active,
+.slide-back-leave-active {
+  transition: transform 0.25s ease;
+}
+
+.slide-forward-leave-active,
+.slide-back-leave-active {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* The departing page must not intercept taps during the slide — a fast
+     second tap could otherwise hit a stale control (e.g. Delete) on the page
+     that's sliding away. */
+  pointer-events: none;
+}
+
+/* Forward: arriving from the right, departing to the left. */
+.slide-forward-enter-from {
+  transform: translateX(100%);
+}
+.slide-forward-leave-to {
+  transform: translateX(-100%);
+}
+
+/* Back: arriving from the left, departing to the right. */
+.slide-back-enter-from {
+  transform: translateX(-100%);
+}
+.slide-back-leave-to {
+  transform: translateX(100%);
 }
 
 /* ---------------------------------------------------------------------------

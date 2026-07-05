@@ -10,6 +10,7 @@ import UnlockModal from "./components/UnlockModal.vue";
 import {
   useAppLockState,
   useLockState,
+  useNavDirection,
   useOverlayBackHandler,
   useSecureScreen,
   useSecuritySettings,
@@ -20,6 +21,10 @@ const { overlayUp, ready, init, dismissOverlay } = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
 const { loadSecuritySettings } = useSecuritySettings();
 const { initSecureScreen, setSecureOverlay } = useSecureScreen();
+// Drives the <router-view> slide transition: "slide-forward" on a push,
+// "slide-back" on a pop, "" (instant) on secure↔non-secure boundaries and
+// replace navigations. See useNavDirection for the secure-boundary gate.
+const { transitionName } = useNavDirection();
 
 // The global unlock overlay collects the identity passphrase — a credential.
 // Force FLAG_SECURE on whenever it's up, even on an otherwise-capturable route
@@ -56,7 +61,19 @@ onMounted(() => {
     <!-- Unified toast host: top-of-shell, in-flow. Renders the useToast queue
          once for every caller (pages + app-shell code like the router guard). -->
     <ToastHost />
-    <router-view />
+    <!--
+      Stack-style slide between pages. No `mode="out-in"`: push/pop animate the
+      departing and arriving pages simultaneously (iOS NavigationController
+      feel). `:key="route.fullPath"` makes Vue treat each route as a distinct
+      element so the transition fires on every nav. `transitionName` is "" on
+      secure↔non-secure boundaries so FLAG_SECURE is never down while a secure
+      page is still mid-leave (see useNavDirection + main.ts secure guard).
+    -->
+    <router-view v-slot="{ Component, route }">
+      <Transition :name="transitionName">
+        <component :is="Component" :key="route.fullPath" />
+      </Transition>
+    </router-view>
     <!--
       App-launch biometric gate overlay: shown over everything while the
       at-rest master key is not in memory (cold start with the gate on, or after

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opening a page now slides in from the right, and going back slides it the other way — a stack-style transition between pages. Transitions to or from a page that shows secrets swap instantly, so the screen-capture guard never leaves a secret visible during the animation.
+
 ### Changed
 
 - The unlock screen now leads with your biometric option (fingerprint or face) when biometric unlock is enabled, and tucks the passphrase entry behind an "Unlock with passphrase" switch until you actually need it — so the screen shows one clear primary action instead of two competing buttons. The two actions are also the same width now. Cancelling the biometric prompt keeps you on that screen; tap the switch to type your passphrase instead.
