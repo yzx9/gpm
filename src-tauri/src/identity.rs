@@ -137,7 +137,7 @@ pub(crate) async fn set_passphrase(
 ) -> Result<(), Error> {
     state.store.set_passphrase(&passphrase).await?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
-    let _ = app.keystore().delete();
+    let _ = app.keystore().delete().await;
     // Setting a passphrase locks the store (forces re-auth with the new
     // passphrase); emit the real state so the frontend shows the overlay.
     emit_lock_state(&app, &state.store, false).await;
@@ -158,7 +158,7 @@ pub(crate) async fn change_passphrase(
         .change_passphrase(&old_passphrase, &new_passphrase)
         .await?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
-    let _ = app.keystore().delete();
+    let _ = app.keystore().delete().await;
     // Changing the passphrase locks the store; emit the real state.
     emit_lock_state(&app, &state.store, false).await;
     Ok(())

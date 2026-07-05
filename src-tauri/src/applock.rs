@@ -102,7 +102,7 @@ fn emit_app_lock_state<R: Runtime>(app: &AppHandle<R>, enabled: bool, locked: bo
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn is_app_lock_available(app: AppHandle) -> Result<bool, AppLockError> {
-    Ok(app.secure_keystore().is_biometric_available()?)
+    Ok(app.secure_keystore().is_biometric_available().await?)
 }
 
 /// Current app-lock state, for the frontend's initial render.
@@ -127,13 +127,13 @@ pub(crate) async fn enable_biometric_app_lock(
     app: AppHandle,
 ) -> Result<(), AppLockError> {
     let ks = app.secure_keystore();
-    if !ks.is_biometric_available()? {
+    if !ks.is_biometric_available().await? {
         return Err(AppLockError::from(
             tauri_plugin_secure_keystore::SecureKeystoreError::unavailable(),
         ));
     }
     // Already enabled (key already biometric-gated) — nothing to migrate.
-    if ks.has_stored_biometric()? {
+    if ks.has_stored_biometric().await? {
         state.app_lock_enabled.store(true, Ordering::SeqCst);
         return Ok(());
     }
@@ -141,7 +141,8 @@ pub(crate) async fn enable_biometric_app_lock(
     // Read the current auth-free master key (non-prompting). This is the value
     // we re-seal; wipe it as soon as it's copied into the biometric store.
     let b64 = Zeroizing::new(
-        ks.retrieve()?
+        ks.retrieve()
+            .await?
             .ok_or_else(|| AppLockError::failed("No at-rest master key to migrate"))?,
     );
 
@@ -149,7 +150,7 @@ pub(crate) async fn enable_biometric_app_lock(
     // key is untouched — no bricking.
     ks.store_biometric(&b64).await?;
     // Only now drop the auth-free copy and persist the flag.
-    ks.delete()?;
+    ks.delete().await?;
     state.store.set_biometric_app_lock(true).await?;
     state.app_lock_enabled.store(true, Ordering::SeqCst);
     Ok(())
@@ -178,8 +179,8 @@ pub(crate) async fn disable_biometric_app_lock(
     // exists) — re-inject it BEFORE clearing the flag, since the flag write
     // seals `repo.json` via AtRest::unseal and would fail with
     // `AtRestKeyUnavailable` if the key were still absent.
-    ks.store(&b64)?;
-    ks.delete_biometric()?;
+    ks.store(&b64).await?;
+    ks.delete_biometric().await?;
     if let Some(key) = decode_master_key(&b64) {
         state.store.set_master_key(Some(key));
     }

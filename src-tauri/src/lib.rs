@@ -109,20 +109,20 @@ pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
 /// (logged, non-fatal). A freshly generated key that cannot be sealed is
 /// discarded (`None`) rather than used unpersisted, so it can never orphan
 /// later envelopes behind a key the next run won't have.
-fn master_key_from<R: tauri::Runtime>(
+async fn master_key_from<R: tauri::Runtime>(
     ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
 ) -> Option<[u8; 32]> {
-    if !ks.is_available().unwrap_or(false) {
+    if !ks.is_available().await.unwrap_or(false) {
         return None;
     }
-    if let Some(b64) = ks.retrieve().unwrap_or(None) {
+    if let Some(b64) = ks.retrieve().await.unwrap_or(None) {
         return decode_master_key(&b64);
     }
     // No sealed key yet: generate + seal a fresh master key.
     let key = rustpass::atrest::generate_master_key().ok()?;
     // Seal before adopting — an unpersisted key would orphan future envelopes
     // on the next run.
-    ks.store(&B64.encode(key)).ok()?;
+    ks.store(&B64.encode(key)).await.ok()?;
     Some(key)
 }
 
@@ -133,13 +133,13 @@ fn master_key_from<R: tauri::Runtime>(
 /// biometric prompt — so `repo.json` stays unreadable until the user
 /// authenticates. Otherwise the auth-free master key loads silently (the
 /// pre-app-lock path). Returns `(master_key, app_lock_enabled)`.
-fn startup_master_key<R: tauri::Runtime>(
+async fn startup_master_key<R: tauri::Runtime>(
     ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
 ) -> (Option<[u8; 32]>, bool) {
-    if ks.has_stored_biometric().unwrap_or(false) {
+    if ks.has_stored_biometric().await.unwrap_or(false) {
         (None, true)
     } else {
-        (master_key_from(ks), false)
+        (master_key_from(ks).await, false)
     }
 }
 
@@ -166,7 +166,8 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // the app-unlock biometric prompt — so `repo.json` stays unreadable until
     // the user authenticates on launch/resume. Otherwise the auth-free master
     // key loads silently (the pre-app-lock path).
-    let (master_key, app_lock_enabled) = startup_master_key(app.secure_keystore());
+    let (master_key, app_lock_enabled) =
+        tauri::async_runtime::block_on(startup_master_key(app.secure_keystore()));
     // App-shell (non-repo) preferences — primarily the screen-capture master
     // toggle. Borrows `config_dir` before it is moved into `Store` below.
     let app_config = app_config::AppConfigStore::new(&config_dir);

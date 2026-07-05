@@ -109,20 +109,21 @@ pub struct SecureKeystore<R: Runtime>(std::marker::PhantomData<fn() -> R>);
 #[cfg(target_os = "android")]
 impl<R: Runtime> SecureKeystore<R> {
     /// Whether the secure keystore is usable on this device. Fast / non-prompting.
-    pub fn is_available(&self) -> Result<bool, SecureKeystoreError> {
+    pub async fn is_available(&self) -> Result<bool, SecureKeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             available: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("isAvailable", ())
+            .run_mobile_plugin_async::<Resp>("isAvailable", ())
+            .await
             .map(|r| r.available)
             .map_err(map_invoke_err)
     }
 
     /// Retrieve the sealed master key (Base64), or `None` if nothing is sealed.
     /// Non-prompting (the key is auth-free).
-    pub fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
+    pub async fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             stored: bool,
@@ -130,39 +131,43 @@ impl<R: Runtime> SecureKeystore<R> {
         }
         let r = self
             .0
-            .run_mobile_plugin::<Resp>("retrieve", ())
+            .run_mobile_plugin_async::<Resp>("retrieve", ())
+            .await
             .map_err(map_invoke_err)?;
         Ok(if r.stored { r.key } else { None })
     }
 
     /// Seal the supplied master key (Base64) into the Keystore.
-    pub fn store(&self, key_b64: &str) -> Result<(), SecureKeystoreError> {
+    pub async fn store(&self, key_b64: &str) -> Result<(), SecureKeystoreError> {
         #[derive(Serialize)]
         struct Payload<'a> {
             key: &'a str,
         }
         self.0
-            .run_mobile_plugin::<()>("store", Payload { key: key_b64 })
+            .run_mobile_plugin_async::<()>("store", Payload { key: key_b64 })
+            .await
             .map_err(map_invoke_err)
     }
 
     /// Delete the Keystore key and the stored ciphertext (best-effort).
-    pub fn delete(&self) -> Result<(), SecureKeystoreError> {
+    pub async fn delete(&self) -> Result<(), SecureKeystoreError> {
         self.0
-            .run_mobile_plugin::<()>("delete", ())
+            .run_mobile_plugin_async::<()>("delete", ())
+            .await
             .map_err(map_invoke_err)
     }
 
     /// Whether STRONG biometric auth is usable on this device (API 30+ with a
     /// fingerprint/face enrolled). Fast / non-prompting. Gates the app-lock:
     /// the toggle is only offered when this is `true`.
-    pub fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
+    pub async fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             available: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("isBiometricAvailable", ())
+            .run_mobile_plugin_async::<Resp>("isBiometricAvailable", ())
+            .await
             .map(|r| r.available)
             .map_err(map_invoke_err)
     }
@@ -172,13 +177,14 @@ impl<R: Runtime> SecureKeystore<R> {
     /// "app-lock is enabled" signal at startup — readable before `repo.json`,
     /// since the master key's location (auth-free vs biometric-gated) is itself
     /// the toggle state. `false` if biometrics were removed and the key is dead.
-    pub fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
+    pub async fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             stored: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("hasStoredBiometric", ())
+            .run_mobile_plugin_async::<Resp>("hasStoredBiometric", ())
+            .await
             .map(|r| r.stored)
             .map_err(map_invoke_err)
     }
@@ -218,9 +224,10 @@ impl<R: Runtime> SecureKeystore<R> {
     /// Delete the biometric-gated Keystore key and ciphertext (best-effort).
     /// Used when disabling the app-lock (after the master key is migrated back
     /// to the auth-free store).
-    pub fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
+    pub async fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
         self.0
-            .run_mobile_plugin::<()>("deleteBiometric", ())
+            .run_mobile_plugin_async::<()>("deleteBiometric", ())
+            .await
             .map_err(map_invoke_err)
     }
 }
@@ -228,32 +235,32 @@ impl<R: Runtime> SecureKeystore<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> SecureKeystore<R> {
     /// Inert: the secure keystore is never available on non-Android targets.
-    pub fn is_available(&self) -> Result<bool, SecureKeystoreError> {
+    pub async fn is_available(&self) -> Result<bool, SecureKeystoreError> {
         Ok(false)
     }
 
     /// Inert: nothing is ever stored.
-    pub fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
+    pub async fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
         Ok(None)
     }
 
     /// Inert: never succeeds — the secure keystore is unavailable.
-    pub fn store(&self, _key_b64: &str) -> Result<(), SecureKeystoreError> {
+    pub async fn store(&self, _key_b64: &str) -> Result<(), SecureKeystoreError> {
         Err(SecureKeystoreError::unavailable())
     }
 
     /// Inert: nothing to delete.
-    pub fn delete(&self) -> Result<(), SecureKeystoreError> {
+    pub async fn delete(&self) -> Result<(), SecureKeystoreError> {
         Ok(())
     }
 
     /// Inert: biometric is never available on non-Android targets.
-    pub fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
+    pub async fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
         Ok(false)
     }
 
     /// Inert: no biometric-gated key is ever stored.
-    pub fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
+    pub async fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
         Ok(false)
     }
 
@@ -268,7 +275,7 @@ impl<R: Runtime> SecureKeystore<R> {
     }
 
     /// Inert: nothing to delete.
-    pub fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
+    pub async fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
         Ok(())
     }
 }

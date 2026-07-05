@@ -94,41 +94,44 @@ pub struct Keystore<R: Runtime>(std::marker::PhantomData<fn() -> R>);
 impl<R: Runtime> Keystore<R> {
     /// Whether biometric-gated storage is usable on this device
     /// (API 30+ with a STRONG biometric enrolled). Fast / non-prompting.
-    pub fn is_available(&self) -> Result<bool, KeystoreError> {
+    pub async fn is_available(&self) -> Result<bool, KeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             available: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("isAvailable", ())
+            .run_mobile_plugin_async::<Resp>("isAvailable", ())
+            .await
             .map(|r| r.available)
             .map_err(map_invoke_err)
     }
 
     /// Whether a stored passphrase exists (non-prompting read of the
     /// ciphertext state in prefs).
-    pub fn has_stored(&self) -> Result<bool, KeystoreError> {
+    pub async fn has_stored(&self) -> Result<bool, KeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             stored: bool,
         }
         self.0
-            .run_mobile_plugin::<Resp>("hasStored", ())
+            .run_mobile_plugin_async::<Resp>("hasStored", ())
+            .await
             .map(|r| r.stored)
             .map_err(map_invoke_err)
     }
 
     /// Delete the stored passphrase and the Keystore key (best-effort).
-    pub fn delete(&self) -> Result<(), KeystoreError> {
+    pub async fn delete(&self) -> Result<(), KeystoreError> {
         self.0
-            .run_mobile_plugin::<()>("delete", ())
+            .run_mobile_plugin_async::<()>("delete", ())
+            .await
             .map_err(map_invoke_err)
     }
 
     /// Seal `passphrase` into the Keystore. **Shows a biometric prompt**
     /// (CryptoObject ENCRYPT) — the key is `setUserAuthenticationRequired`,
-    /// so encrypt needs user auth too. Holds the `Invoke` across the prompt,
-    /// so it uses the async variant (Finding 7).
+    /// so encrypt needs user auth too. The `Invoke` stays open across the
+    /// prompt and is resolved only from a terminal biometric callback.
     pub async fn store(&self, passphrase: &str) -> Result<(), KeystoreError> {
         #[derive(Serialize)]
         struct Payload<'a> {
@@ -159,17 +162,17 @@ impl<R: Runtime> Keystore<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> Keystore<R> {
     /// Inert: biometric is never available on non-Android targets.
-    pub fn is_available(&self) -> Result<bool, KeystoreError> {
+    pub async fn is_available(&self) -> Result<bool, KeystoreError> {
         Ok(false)
     }
 
     /// Inert: nothing is ever stored.
-    pub fn has_stored(&self) -> Result<bool, KeystoreError> {
+    pub async fn has_stored(&self) -> Result<bool, KeystoreError> {
         Ok(false)
     }
 
     /// Inert: nothing to delete.
-    pub fn delete(&self) -> Result<(), KeystoreError> {
+    pub async fn delete(&self) -> Result<(), KeystoreError> {
         Ok(())
     }
 

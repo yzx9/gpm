@@ -60,7 +60,7 @@ impl From<tauri_plugin_biometric_keystore::KeystoreError> for BiometricError {
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn is_biometric_available(app: AppHandle) -> Result<bool, BiometricError> {
-    Ok(app.keystore().is_available()?)
+    Ok(app.keystore().is_available().await?)
 }
 
 /// Whether a passphrase is sealed in the Keystore — the single source of
@@ -68,7 +68,7 @@ pub(crate) async fn is_biometric_available(app: AppHandle) -> Result<bool, Biome
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn is_biometric_unlock_enabled(app: AppHandle) -> Result<bool, BiometricError> {
-    Ok(app.keystore().has_stored()?)
+    Ok(app.keystore().has_stored().await?)
 }
 
 /// Defense-in-depth backstop for the Settings UI gate: refuse biometric
@@ -124,7 +124,7 @@ pub(crate) async fn biometric_unlock(
     if let Err(e) = unlock_and_arm(&state, &app, &passphrase).await {
         if e.code == "WRONG_PASSPHRASE" {
             // Stale sealed passphrase — clear it so the page reveals the form.
-            let _ = app.keystore().delete();
+            let _ = app.keystore().delete().await;
         }
         return Err(BiometricError::from(e));
     }
@@ -135,7 +135,7 @@ pub(crate) async fn biometric_unlock(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn disable_biometric_unlock(app: AppHandle) -> Result<(), BiometricError> {
-    app.keystore().delete()?;
+    app.keystore().delete().await?;
     Ok(())
 }
 
