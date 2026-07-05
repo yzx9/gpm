@@ -152,6 +152,14 @@ function pickCustom() {
   mode.value = "custom";
 }
 
+/** The generate card in the pick step routes to the standalone generator (which
+ *  only copies to the clipboard — it saves nothing). Kept inside the ＋ flow
+ *  because "generate a one-off password" is the same intent as "create a
+ *  secret", just without persistence. */
+function openGenerate() {
+  router.push({ name: "generate" });
+}
+
 function backToPick() {
   mode.value = "pick";
   activePreset.value = null;
@@ -233,7 +241,7 @@ async function submit() {
       // authenticity_blocked — the pre-write pull was refused under Enforce.
       // Stay on the form; the user resolves signatures via the Sync screen.
       error.value =
-        "Save blocked: the remote failed signature verification under Enforce mode. Review via Sync, then retry.";
+        "Save blocked: the remote failed signature verification under Enforce mode. Review in History, then pull to sync and retry.";
     }
   } catch (e) {
     if (isAuthCancelled(e)) return;
@@ -327,7 +335,9 @@ onBeforeUnmount(() => {
 
     <!-- Step 1: pick a type -->
     <section v-if="mode === 'pick'">
-      <p class="text-sm text-muted mb-3">Choose a type of secret to create.</p>
+      <p class="text-sm text-muted mb-3">
+        Choose a type of secret to create, or generate a one-off password.
+      </p>
       <div v-if="presetsLoading" class="loading"><BaseSpinner /> Loading…</div>
       <ul v-else class="list-none flex flex-col gap-2" role="list">
         <li v-for="p in presets" :key="p.id">
@@ -343,6 +353,17 @@ onBeforeUnmount(() => {
             <span class="block text-base font-medium">Custom secret</span>
             <span class="block text-xs text-muted"
               >Any path and content you choose</span
+            >
+          </button>
+        </li>
+        <li>
+          <button class="type-card" @click="openGenerate">
+            <span class="flex items-center gap-2 text-base font-medium">
+              <BaseIcon :icon="Dices" :size="18" />
+              Generate password
+            </span>
+            <span class="block text-xs text-muted"
+              >Copy a random password without saving</span
             >
           </button>
         </li>

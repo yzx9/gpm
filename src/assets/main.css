@@ -99,6 +99,16 @@
     min-height: 100vh;
   }
 
+  /* Suppress the WebView's native pull-to-refresh / rubber-band / scroll-chaining
+     so the app's own pull-to-refresh owns the gesture. This is global (every
+     page), which is benign: short pages lose native rubber-band feedback but
+     nothing else. Must sit on html/body (the elements that carry the window
+     scroll) — overscroll-behavior on a non-scrolling descendant is a no-op. */
+  html,
+  body {
+    overscroll-behavior-y: contain;
+  }
+
   .app-shell {
     padding-top: var(--safe-area-inset-top, 0px);
     padding-bottom: var(--safe-area-inset-bottom, 0px);

@@ -1125,10 +1125,10 @@ onMounted(() => {
                 >Each save pulls, commits, and pushes automatically.</template
               >
               <template v-else
-                >Saves stay local until you Sync. Direct collisions show a
-                resolve prompt; rarely, an edit from an out-of-date view can
-                overwrite a newer change without a prompt — recoverable in git
-                history.</template
+                >Saves stay local until you sync (swipe down on the list).
+                Direct collisions show a resolve prompt; rarely, an edit from an
+                out-of-date view can overwrite a newer change without a prompt —
+                recoverable in git history.</template
               >
             </p>
           </template>

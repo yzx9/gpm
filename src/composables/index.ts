@@ -6,6 +6,7 @@
 export * from "./useAppLockState";
 export * from "./useLockState";
 export * from "./useOverlayBackHandler";
+export * from "./usePullToRefresh";
 export * from "./useSecretReveal";
 export * from "./useSecureScreen";
 export * from "./useSecuritySettings";

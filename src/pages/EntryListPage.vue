@@ -31,7 +31,12 @@ import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
-import { isAuthCancelled, useLockState, useToast } from "@/composables";
+import {
+  isAuthCancelled,
+  useLockState,
+  usePullToRefresh,
+  useToast,
+} from "@/composables";
 import { formatRelativeTime } from "@/utils/format";
 import { statusLabel } from "@/utils/signature";
 import type { LucideIcon } from "@lucide/vue";
@@ -42,6 +47,7 @@ import {
   CircleCheck,
   CircleDashed,
   Dices,
+  Copy,
   Lock,
   LockKeyhole,
   Plus,
@@ -62,7 +68,7 @@ import {
 import { useRouter } from "vue-router";
 
 const router = useRouter();
-const { runWithAuth } = useLockState();
+const { runWithAuth, overlayUp } = useLockState();
 const { toast } = useToast();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
@@ -242,15 +248,6 @@ async function cancelSync() {
   }
 }
 
-/** The header button starts a sync (pull + push), or cancels one in flight. */
-function toggleSync() {
-  if (pulling.value) {
-    void cancelSync();
-  } else {
-    void syncRepo();
-  }
-}
-
 async function syncRepo() {
   pulling.value = true;
   pullResult.value = "";
@@ -310,6 +307,26 @@ async function syncRepo() {
     pulling.value = false;
   }
 }
+
+// ── Pull-to-refresh ──────────────────────────────────────────────────────
+// The gesture state machine lives in the composable (unit-tested there). The
+// `enabled` gate suppresses a pull while any modal or the unlock overlay is up,
+// so a stray drag can't race an open divergence resolve — that would overwrite
+// the `remote_tip` the user is mid-decision on (`resolveDivergence` captures it
+// at call time). syncRepo itself needs no identity (pull/push of existing
+// commits), so the locked-overlay case is benign, but we still suppress it so a
+// pull can't park a resolve on auth mid-flow. The `!pulling.value` term is the
+// single-flight guard: a fast double-pull would otherwise re-enter syncRepo,
+// racing two sync_repo IPC calls and overwriting/leaking pullProgressUnlisten.
+const { pullDistance, armed } = usePullToRefresh({
+  onRefresh: () => void syncRepo(),
+  enabled: () =>
+    !pulling.value &&
+    !divergence.value &&
+    !blockIssues.value &&
+    !auditIssues.value &&
+    !overlayUp.value,
+});
 
 /** Resolve a sync divergence per the user's choice. `keep_mine` re-encrypts
  *  local-only entries onto the reviewed remote tip and pushes — identity-gated
@@ -415,10 +432,6 @@ function openCreate() {
   router.push({ name: "create" });
 }
 
-function openGenerate() {
-  router.push({ name: "generate" });
-}
-
 function openSettings() {
   router.push({ name: "settings" });
 }
@@ -464,14 +477,29 @@ onBeforeUnmount(() => {
   }
   reqId++; // drop any in-flight page response landing after unmount
 });
+
+// Exposed for the test harness: the Sync header button is gone (replaced by
+// pull-to-refresh), so the sync-outcome tests drive this directly.
+defineExpose({ syncRepo });
 </script>
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-4" role="banner">
-      <h1 class="text-xl flex items-center gap-1">
-        <BaseIcon :icon="LockKeyhole" :size="24" /> gpm
-      </h1>
+      <div class="flex items-center gap-1">
+        <h1 class="text-xl flex items-center gap-1">
+          <BaseIcon :icon="LockKeyhole" :size="24" /> gpm
+        </h1>
+        <button
+          @click="openHistory"
+          class="sig-light"
+          :class="badge.cls"
+          :aria-label="badge.title"
+          :title="badge.title"
+        >
+          <BaseIcon :icon="badge.icon" :size="16" />
+        </button>
+      </div>
       <div class="flex gap-2 items-center">
         <BaseButton
           size="sm"
@@ -480,32 +508,6 @@ onBeforeUnmount(() => {
           @click="openCreate"
         >
           <BaseIcon :icon="Plus" />
-        </BaseButton>
-        <button
-          @click="openHistory"
-          class="badge-btn"
-          :class="badge.cls"
-          :aria-label="badge.title"
-          :title="badge.title"
-        >
-          <BaseIcon :icon="badge.icon" />
-        </button>
-        <BaseButton
-          size="sm"
-          :aria-label="pulling ? 'Cancel sync' : 'Sync with remote'"
-          :title="pulling ? 'Cancel sync' : 'Sync with remote'"
-          @click="toggleSync"
-        >
-          <BaseIcon :icon="pulling ? X : RefreshCw" />
-          {{ pulling ? "Cancel" : "Sync" }}
-        </BaseButton>
-        <BaseButton
-          size="sm"
-          aria-label="Generate passwords"
-          title="Generate passwords"
-          @click="openGenerate"
-        >
-          <BaseIcon :icon="Dices" />
         </BaseButton>
         <BaseButton
           size="sm"
@@ -518,18 +520,39 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <div
+      v-if="!pulling"
+      class="ptr-indicator"
+      aria-hidden="true"
+      :style="{ height: `${pullDistance}px` }"
+    >
+      <span class="ptr-icon-wrap" :class="{ 'ptr-armed': armed }">
+        <BaseIcon :icon="RefreshCw" :size="22" />
+      </span>
+    </div>
+
     <div v-if="pulling" class="pull-progress">
-      <div
-        class="pull-progress-track"
-        role="progressbar"
-        :aria-valuenow="pullProgressPercent"
-        aria-valuemin="0"
-        aria-valuemax="100"
-      >
+      <div class="pull-progress-row">
         <div
-          class="pull-progress-fill"
-          :style="{ width: `${pullProgressPercent}%` }"
-        ></div>
+          class="pull-progress-track"
+          role="progressbar"
+          :aria-valuenow="pullProgressPercent"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div
+            class="pull-progress-fill"
+            :style="{ width: `${pullProgressPercent}%` }"
+          ></div>
+        </div>
+        <button
+          class="cancel-sync"
+          aria-label="Cancel sync"
+          title="Cancel sync"
+          @click="cancelSync"
+        >
+          <BaseIcon :icon="X" :size="16" />
+        </button>
       </div>
       <div class="text-xs text-muted mt-1" aria-live="polite">
         {{ pullProgressText }}
@@ -592,7 +615,9 @@ onBeforeUnmount(() => {
           class="block mb-2 mx-auto text-subtle"
         />
         <p>No passwords yet</p>
-        <p class="text-xs text-subtle mt-1">Sync, or check your repository</p>
+        <p class="text-xs text-subtle mt-1">
+          Swipe down to sync, or check your repository
+        </p>
       </template>
     </div>
 
@@ -734,21 +759,67 @@ onBeforeUnmount(() => {
   opacity: 0.8;
 }
 
-.badge-btn {
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
+.pull-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.cancel-sync {
+  flex: 0 0 auto;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-sm);
   background: var(--color-surface);
+  color: var(--color-danger);
   cursor: pointer;
-  font-size: 1rem;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.badge-btn:hover {
+.cancel-sync:hover {
   background: var(--color-hover);
+}
+
+/* Pull-to-refresh indicator: a centered icon whose container grows with the
+   pull distance. At rest (0) it collapses out of flow; once the sync starts
+   (`pulling`), `v-if="!pulling"` removes it entirely and the progress bar below
+   takes over — no stale spinner during the gap between release and sync start. */
+.ptr-indicator {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--color-muted);
+}
+.ptr-icon-wrap.ptr-armed {
+  color: var(--color-accent);
+}
+
+/* Status light next to the logo: visually a small colored icon, but the touch
+   target stays ≥48 px (transparent padding around the 16 px icon) so it's an
+   accessible tap on Android. Borderless/backgroundless so it reads as a lamp,
+   not a toolbar button. */
+.sig-light {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 48px;
+  padding: 0;
+  margin-left: -0.25rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.sig-light:hover {
+  opacity: 0.7;
+}
+.sig-light:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 .badge-ok {
   color: var(--color-success, #3a9);

@@ -152,7 +152,7 @@ async function deleteSecret() {
     } else {
       // authenticity_blocked — pre-write pull refused under Enforce.
       error.value =
-        "Delete blocked: the remote failed signature verification under Enforce mode. Review via Sync, then retry.";
+        "Delete blocked: the remote failed signature verification under Enforce mode. Review in History, then pull to sync and retry.";
     }
   } catch (e) {
     const appError = e as AppError;

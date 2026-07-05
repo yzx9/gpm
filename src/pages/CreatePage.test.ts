@@ -177,6 +177,16 @@ describe("CreatePage", () => {
     expect(mockPush).toHaveBeenCalledWith({ name: "entries" });
   });
 
+  it("routes to the generator when the Generate password card is tapped", async () => {
+    const { wrapper } = await mountPage({});
+
+    const card = findButton(wrapper, "Generate password");
+    expect(card).toBeDefined();
+    await card!.trigger("click");
+
+    expect(mockPush).toHaveBeenCalledWith({ name: "generate" });
+  });
+
   it("swallows AUTH_CANCELLED silently on submit when the auth overlay is dismissed", async () => {
     // unlocked:false → identity NOT cached → submit's runWithAuth parks on the
     // auth overlay (no singleton to wipe mid-test).

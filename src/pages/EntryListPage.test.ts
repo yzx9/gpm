@@ -335,9 +335,9 @@ describe("EntryListPage", () => {
           blocked: false,
         },
       });
-      await wrapper
-        .find('button[aria-label="Sync with remote"]')
-        .trigger("click");
+      await (
+        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
+      ).syncRepo();
       await flushPromises();
       await flushPromises();
 
@@ -469,9 +469,9 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('button[aria-label="Sync with remote"]')
-        .trigger("click");
+      await (
+        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
+      ).syncRepo();
       await flushPromises();
 
       expect(wrapper.text()).toContain("Already up to date");
@@ -513,9 +513,9 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('button[aria-label="Sync with remote"]')
-        .trigger("click");
+      await (
+        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
+      ).syncRepo();
       await flushPromises();
 
       expect(wrapper.text()).toContain("Updated to def456");
@@ -535,9 +535,9 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('button[aria-label="Sync with remote"]')
-        .trigger("click");
+      await (
+        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
+      ).syncRepo();
       await flushPromises();
 
       // Modal surfaces, listing every local-side change category.
@@ -561,6 +561,44 @@ describe("EntryListPage", () => {
           .findAll("button")
           .some((b) => b.text().includes("Discard my commit")),
       ).toBe(true);
+    });
+
+    it("cancel button calls cancel_git for an in-flight sync", async () => {
+      when("list_entries", page(sampleEntries));
+      // sync_repo never resolves → pulling stays true → the Cancel button stays
+      // rendered in the progress row.
+      when("sync_repo", new Promise(() => {}));
+      const wrapper = mountPage();
+      await flushPromises();
+
+      void (
+        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
+      ).syncRepo();
+      await flushPromises(); // pulling=true renders the progress bar + Cancel
+
+      await wrapper.find('button[aria-label="Cancel sync"]').trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("cancel_git");
+    });
+  });
+
+  describe("header regression guards", () => {
+    it("does not render Sync or Generate header buttons", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(
+        wrapper.find('button[aria-label="Sync with remote"]').exists(),
+      ).toBe(false);
+      expect(
+        wrapper.find('button[aria-label="Generate passwords"]').exists(),
+      ).toBe(false);
+      // The two header buttons that remain:
+      expect(
+        wrapper.find('button[aria-label="Create a new secret"]').exists(),
+      ).toBe(true);
+      expect(wrapper.find('button[aria-label="Settings"]').exists()).toBe(true);
     });
   });
 
