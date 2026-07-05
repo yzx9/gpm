@@ -121,10 +121,24 @@ router.beforeEach(async (to, from) => {
   return true;
 });
 
-router.afterEach(async (to) => {
+// `afterEach` is fire-and-forget in vue-router, and it runs even for navigations
+// that aborted or were cancelled (with `failure` set). Two guards keep the
+// settle honest:
+//  - `failure`: a nav that never confirmed never mounted its target page, so
+//    settling to its route level would desync `currentRouteSecure` from the page
+//    actually on screen (and re-raise FLAG for a route we never reached).
+//  - the generation token: a newer navigation can confirm while an older one is
+//    still awaiting `nextTick`; a stale settle could otherwise drop FLAG_SECURE
+//    for a route we've already left — and the current route by then may be a
+//    secret one. Dropping superseded settles means correctness no longer depends
+//    on microtask/IPC ordering.
+let secureGen = 0;
+router.afterEach(async (to, _from, failure) => {
   // The arriving page has mounted/painted; now drop the transition-time cover
   // and reconcile to the arriving route's own level.
+  const gen = ++secureGen;
   await nextTick();
+  if (failure || gen !== secureGen) return; // aborted, or superseded by a newer nav
   await secureScreenState.applySecureForRoute(!!to.meta?.secure);
 });
 
