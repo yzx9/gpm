@@ -49,6 +49,11 @@ ssh-key = { version = "0.6", features = [
   "rand_core",
   "std",
 ] }
+# Pure-Rust OpenPGP (RFC 9580) for GPG commit-signature verification (RFC 0009).
+# Same pure-Rust, MIT/Apache, no-ring/openssl posture as `age`/`ssh-key`, so it
+# cross-compiles to Android NDK with no C deps. The `crypto::openpgp` wrapper is
+# also the shared seam for the future GPG crypto backend (RFC 0036).
+pgp = "0.19"
 # At-rest AEAD for local private files (repo.json, identity). AES-256-GCM gives
 # confidentiality + integrity in one op with a random symmetric master key.
 aes-gcm = "0.10"

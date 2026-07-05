@@ -26,6 +26,10 @@ use crate::error::Error;
 /// The age encryption backend (the sole `CryptoBackend` implementation today).
 pub mod age;
 
+/// Low-level OpenPGP (rpgp) wrapper for GPG commit-signature verification
+/// (RFC 0009). Shared seam reused by the future GPG crypto backend (RFC 0036).
+pub mod openpgp;
+
 #[allow(unused_imports)]
 // re-export brings the age impl surface to `crypto::` for existing callers
 // (src-tauri's `generate_age_identity`, integration tests, the at-rest

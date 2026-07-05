@@ -19,6 +19,7 @@ foreign-types = { workspace = true }
 walkdir = { workspace = true }
 nucleo-matcher = { workspace = true }
 ssh-key = { workspace = true }
+pgp = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt", "sync"] }
 aes-gcm = { workspace = true, features = ["zeroize"] }
 getrandom = { workspace = true }
@@ -27,3 +28,6 @@ getrandom = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
 bech32 = { workspace = true }
+# RNG for GPG keygen + signing in the rpgp round-trip test (pgp 0.19 also uses
+# rand 0.8, so this pulls no new major into the graph).
+rand = "0.8"

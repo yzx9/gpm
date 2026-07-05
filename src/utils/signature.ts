@@ -15,6 +15,8 @@ export function statusLabel(status: CommitSigStatus): string {
       return "Verified";
     case "untrusted_key":
       return "Untrusted signer";
+    case "unverified_signature":
+      return "Unverified signature";
     case "unsigned":
       return "Unsigned";
     case "bad_signature":
@@ -38,7 +40,9 @@ export function isIgnorable(status: CommitSigStatus): boolean {
 
 /** The signer fingerprint, when the status carries one. */
 export function signerFp(status: CommitSigStatus): string | null {
-  return status.kind === "verified" || status.kind === "untrusted_key"
+  return status.kind === "verified" ||
+    status.kind === "untrusted_key" ||
+    status.kind === "unverified_signature"
     ? status.signer_fp
     : null;
 }

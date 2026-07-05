@@ -82,6 +82,7 @@ export type VerifyMode = "off" | "audit" | "enforce";
 export type CommitSigStatus =
   | { kind: "verified"; signer_fp: string }
   | { kind: "untrusted_key"; signer_fp: string }
+  | { kind: "unverified_signature"; signer_fp: string }
   | { kind: "unsigned" }
   | { kind: "bad_signature" }
   | { kind: "unsupported_format"; format: string }

@@ -887,7 +887,7 @@ fn verify_and_advance(
     policy: &AuthenticityConfig,
 ) -> Result<SyncResult, Error> {
     let mode = policy.mode;
-    let trusted = signing::trusted_fingerprints(policy);
+    let trusted = signing::TrustSet::from_config(policy);
     let new_commits = signing::verify_range(repo, pre_oid, fetched_oid, &trusted, &policy.ignored)?;
     let open_issues: Vec<_> = new_commits
         .iter()
@@ -1166,7 +1166,7 @@ pub fn adopt_remote(
     // contract on a divergence.
     let pre = pre_oid.unwrap_or(fetched_oid);
     let base = repo.merge_base(pre, fetched_oid).unwrap_or(pre);
-    let trusted = signing::trusted_fingerprints(policy);
+    let trusted = signing::TrustSet::from_config(policy);
     let new_commits = signing::verify_range(&repo, base, fetched_oid, &trusted, &policy.ignored)?;
     let open_issues: Vec<_> = new_commits
         .iter()
@@ -1387,7 +1387,7 @@ pub(crate) fn keep_local_plan(
     let (new_commits, open_issues, blocked) = if mode == VerifyMode::Off {
         (Vec::new(), Vec::new(), false)
     } else {
-        let trusted = signing::trusted_fingerprints(policy);
+        let trusted = signing::TrustSet::from_config(policy);
         let nc = signing::verify_range(&repo, base, fetched_oid, &trusted, &policy.ignored)?;
         let oi: Vec<_> = nc
             .iter()

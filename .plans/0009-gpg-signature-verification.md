@@ -1,8 +1,8 @@
 # GPG / OpenPGP commit signature verification
 
 **Priority:** P3
-**Status:** Draft
-**Phase:** Future
+**Status:** Accepted (implemented — verification path + in-app trust management)
+**Phase:** Current
 
 ## Goal
 
@@ -22,7 +22,70 @@ user ignores each one. This plan would turn those into real `Verified` /
 The non-goal is unchanged from the authenticity feature: gpm only
 **verifies** — it never signs. Signing remains a desktop-side concern.
 
-## Why (优点)
+## Resolution
+
+The open questions in `Blocks` are settled as follows. (The earlier "no new
+status variant, just reuse the existing ones" stance — stated in `Relationship
+to existing work` below — was **reversed** during implementation; see the
+`UnverifiedSignature` paragraph.)
+
+**OpenPGP crate: rpgp** (the `pgp` crate). Pure Rust, MIT/Apache-licensed, no
+C / `ring` / `openssl` — the same dependency class as the existing `age` and
+`ssh-key` stacks, which is what makes it acceptable on Android (gpm's first
+platform). This is the decision the future full GPG crypto backend inherits.
+Verified empirically: the crate cross-compiles to the Android NDK, and the
+verifier accepts and verifies a real `gpg`-produced Ed25519 keypair where
+GnuPG signs with its default subkey.
+
+**Trust model: paste or import an armored public key; trust by primary
+fingerprint.** A GPG signature carries only the issuer fingerprint / key-id,
+never the public key itself (unlike SSH-sig, which embeds the key). So GPG
+trust cannot be TOFU-extracted from the commit — the user supplies the
+armored public key out-of-band, by pasting it or by importing a `.asc` file
+through the native file picker (the file-import path is the primary one on a
+phone, where pasting a multi-line armored block is painful). The trusted
+identity is the PRIMARY key fingerprint; a signature made by a subkey
+verifies against the trusted primary via its binding signature. No keyserver
+lookup, no web-of-trust, no `.gpg-id` — no new network trust vector is
+introduced.
+
+**One add-trusted-key entry point, format detected server-side.** A single
+"add a trusted signing key" path inspects the pasted armor and routes GPG vs
+SSH accordingly, so the Settings UI has one paste box for both formats (no
+client-side format branching). SSH keeps its paste-only flow; GPG adds the
+file-import path. A GPG trust entry is a sibling of the SSH one under the
+same authenticity config (an additive field — old configs parse unchanged).
+
+**New status variant `UnverifiedSignature`** for the GPG case where the
+issuer is identified but NOT in the trusted set. Because no trusted public
+key is available, **no cryptographic verification is performed** — a weaker
+statement than SSH's `UntrustedKey`, which IS crypto-verified (SSH-sig
+embeds the key, so gpm can always check the signature and only the trust
+decision remains). `UnverifiedSignature` makes that distinction visible
+instead of collapsing both into `UntrustedKey`. It is a soft, ignorable
+issue, and pasting the signer's key later makes future commits `Verified`.
+
+**Enforce counts both formats.** Enforce refuses to activate — and
+auto-downgrades to Audit on last-key removal — only when the trust set is
+empty across BOTH SSH and GPG keys. A user who trusts only a GPG key can
+still enable Enforce.
+
+**Recovery UX.** Under Enforce, a GPG-signed commit by an untrusted signer
+blocks the pull; the block surface and the history detail point the user to
+"add this signer's public key in Settings" (with the issuer fingerprint),
+since GPG offers no one-tap "trust this signer" — the signature carries no
+key to auto-trust.
+
+**Deferred.** Expiry and revocation are NOT enforced in this phase (an
+expired or revoked key still verifies; revocation is not parsed for policy);
+`SECURITY.md` states this plainly. Web-of-trust, keyserver lookup, a
+`.gpg-id`-style store property, and a MIME/extension filter for the file
+picker remain out of scope. The full GPG secret-encryption backend is the
+separate, larger RFC. **Build proof is not runtime proof:** the Android APK
+build demonstrates rpgp links and compiles for the NDK, not that verification
+runs correctly on-device; on-device runtime smoke is deferred.
+
+## Why
 
 - **Closes the ecosystem gap.** git supports two signing formats; gpm currently
   honours only one. Repositories that mandate GPG signing (organizational
@@ -43,7 +106,7 @@ The non-goal is unchanged from the authenticity feature: gpm only
   weaker claim when it silently skips an entire signing format the user
   actually relies on.
 
-## Cons (缺点)
+## Cons
 
 - **A real, heavy crypto dependency.** Unlike SSH-sig verification (which
   reused the already-present `ssh-key` crate at zero cost), GPG needs an
@@ -65,7 +128,7 @@ The non-goal is unchanged from the authenticity feature: gpm only
   GitHub-signing ecosystem have converged on SSH signatures; GPG is the
   legacy/enterprise path. The effort may serve a minority of users.
 
-## Blocks (前置依赖)
+## Blocks
 
 - **Pick the OpenPGP crate.** `sequoia-openpgp` (more complete, actively
   maintained, larger) vs `pgp` (lighter, pure-Rust, less mature). This is a
@@ -88,7 +151,7 @@ The non-goal is unchanged from the authenticity feature: gpm only
   path already proved this works against `git2::extract_signature`'s
   `signed_data`; GPG should reuse the same bytes.)
 
-## Challenges (可能的挑战)
+## Challenges
 
 - **Key / algorithm diversity.** GPG keys may be RSA, DSA, EdDSA, or ECC
   (NIST/Brainpool/Curve25519). The chosen crate must verify all of them —

@@ -37,6 +37,7 @@ const props = withDefaults(
 const ICON: Record<CommitSigStatus["kind"], LucideIcon> = {
   verified: CircleCheck,
   untrusted_key: CircleAlert,
+  unverified_signature: CircleAlert,
   unsigned: CircleDashed,
   bad_signature: CircleX,
   unsupported_format: CircleQuestionMark,
@@ -57,6 +58,7 @@ function tone(status: CommitSigStatus): Tone {
       return "danger";
     case "unsigned":
     case "untrusted_key":
+    case "unverified_signature":
     case "unsupported_format":
     case "unknown":
       return "warning";

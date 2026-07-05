@@ -66,7 +66,12 @@ deployment behind it: Delta Chat's Rust core uses rpgp across its Android, iOS,
 and desktop builds. There is no Tauri + Android + rpgp app to cite as a
 same-stack precedent — the closest cross-platform Rust PGP project instead
 chose Sequoia — so the Android cross-compile confidence rests on rpgp being
-pure Rust and on Delta Chat's mobile use, not on a same-stack app. Its
+pure Rust and on Delta Chat's mobile use, not on a same-stack app. That
+assumption has since held up empirically: the RFC 0009 verification spike
+cross-compiled rpgp to the Android NDK through the existing flake toolchain
+with no system C crypto pulled in, moving the crate from "pure-Rust by
+inspection" to "pure-Rust by build proof" and retiring the cross-compile risk
+this paragraph had to argue around. Its
 format coverage — multi-recipient encryption, SEIPD v1 (and v2 / RFC 9580 AEAD),
 S2K passphrase-protected secret keys including Argon2, and RSA / Curve25519 /
 Ed25519 / NIST curves — is everything gopass produces, and its secret material

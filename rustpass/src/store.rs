@@ -1769,7 +1769,7 @@ impl Store {
     pub async fn ignore_commit_issue(&self, commit: &str) -> Result<(), Error> {
         let repo_path = self.repo_path().await?;
         let mut rc = self.config.load_repo_config().await?;
-        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let trusted = signing::TrustSet::from_config(&rc.authenticity);
 
         // Recompute the commit's current status so the recorded ignore matches
         // what verification will see later.
@@ -1810,7 +1810,7 @@ impl Store {
     pub async fn head_signature_status(&self) -> Result<CommitSigStatus, Error> {
         let repo_path = self.repo_path().await?;
         let rc = self.config.load_repo_config().await?;
-        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let trusted = signing::TrustSet::from_config(&rc.authenticity);
         spawn_blocking(move || signing::head_status_at(&repo_path, &trusted)).await?
     }
 
@@ -1869,7 +1869,7 @@ impl Store {
     pub async fn verify_range(&self, from: &str, to: &str) -> Result<Vec<CommitSigInfo>, Error> {
         let repo_path = self.repo_path().await?;
         let rc = self.config.load_repo_config().await?;
-        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let trusted = signing::TrustSet::from_config(&rc.authenticity);
         let ignored = rc.authenticity.ignored.clone();
         let from_owned = from.to_string();
         let to_owned = to.to_string();
@@ -1888,7 +1888,7 @@ impl Store {
     pub async fn list_commit_signatures(&self, limit: usize) -> Result<Vec<CommitSigInfo>, Error> {
         let repo_path = self.repo_path().await?;
         let rc = self.config.load_repo_config().await?;
-        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let trusted = signing::TrustSet::from_config(&rc.authenticity);
         let ignored = rc.authenticity.ignored.clone();
         spawn_blocking(move || {
             signing::list_commit_signatures_at(&repo_path, limit, &trusted, &ignored)
@@ -1906,7 +1906,7 @@ impl Store {
     pub async fn commit_signature(&self, commit_hash: &str) -> Result<CommitSigInfo, Error> {
         let repo_path = self.repo_path().await?;
         let rc = self.config.load_repo_config().await?;
-        let trusted = signing::trusted_fingerprints(&rc.authenticity);
+        let trusted = signing::TrustSet::from_config(&rc.authenticity);
         let ignored = rc.authenticity.ignored.clone();
         let hash_owned = commit_hash.to_string();
         spawn_blocking(move || {
