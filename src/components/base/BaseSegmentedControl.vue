@@ -65,13 +65,19 @@ function select(v: T) {
   border-radius: var(--radius-md);
   background: var(--color-surface);
   cursor: pointer;
+  -webkit-tap-highlight-color: var(--color-hover);
   min-height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.mode-pill:hover {
+.mode-pill:active {
   background: var(--color-hover);
+}
+@media (hover: hover) {
+  .mode-pill:hover {
+    background: var(--color-hover);
+  }
 }
 .mode-active {
   border-color: var(--color-accent);

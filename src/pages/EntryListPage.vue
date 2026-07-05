@@ -46,8 +46,6 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDashed,
-  Dices,
-  Copy,
   Lock,
   LockKeyhole,
   Plus,
@@ -624,7 +622,7 @@ defineExpose({ syncRepo });
     <ul v-else class="list-none flex flex-col gap-0.5" role="list">
       <li v-for="entry in displayedEntries" :key="entry.path">
         <div
-          class="flex items-center gap-2 p-[0.6rem_0.75rem] md:p-[0.8rem_1rem] bg-surface rounded-md transition-colors duration-150 min-h-12 hover:bg-hover cursor-pointer"
+          class="flex items-center gap-2 p-[0.6rem_0.75rem] md:p-[0.8rem_1rem] bg-surface rounded-md transition-colors duration-150 min-h-12 hover:bg-hover cursor-pointer active:bg-hover"
           tabindex="0"
           role="button"
           :aria-label="`Open ${entry.name}`"
@@ -755,8 +753,13 @@ defineExpose({ syncRepo });
   min-height: 48px;
 }
 
-.btn-retry:hover {
+.btn-retry:active {
   opacity: 0.8;
+}
+@media (hover: hover) {
+  .btn-retry:hover {
+    opacity: 0.8;
+  }
 }
 
 .pull-progress-row {
@@ -843,9 +846,15 @@ defineExpose({ syncRepo });
   min-height: 48px;
 }
 
-.btn-danger:hover:not(:disabled) {
+.btn-danger:active:not(:disabled) {
   background: var(--color-danger);
   color: var(--color-surface);
+}
+@media (hover: hover) {
+  .btn-danger:hover:not(:disabled) {
+    background: var(--color-danger);
+    color: var(--color-surface);
+  }
 }
 
 .btn-danger:disabled {

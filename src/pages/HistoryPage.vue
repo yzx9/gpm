@@ -182,7 +182,7 @@ onBeforeUnmount(() => {
       <li
         v-for="commit in commits"
         :key="commit.hash"
-        class="flex items-center gap-2 p-[0.6rem_0.75rem] bg-surface rounded-md min-h-12 cursor-pointer hover:bg-hover"
+        class="flex items-center gap-2 p-[0.6rem_0.75rem] bg-surface rounded-md min-h-12 cursor-pointer hover:bg-hover active:bg-hover"
         role="button"
         tabindex="0"
         @click="openDetail(commit)"

@@ -252,8 +252,13 @@ onMounted(async () => {
   color: var(--color-muted);
   transition: color 0.15s;
 }
-.close-x:hover {
+.close-x:active {
   color: var(--color-text);
+}
+@media (hover: hover) {
+  .close-x:hover {
+    color: var(--color-text);
+  }
 }
 .help-btn {
   display: inline-flex;
@@ -265,8 +270,13 @@ onMounted(async () => {
   color: var(--color-muted);
   transition: color 0.15s;
 }
-.help-btn:hover,
+.help-btn:active,
 .help-btn.active {
   color: var(--color-text);
+}
+@media (hover: hover) {
+  .help-btn:hover {
+    color: var(--color-text);
+  }
 }
 </style>

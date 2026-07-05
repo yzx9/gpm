@@ -267,8 +267,13 @@ onBeforeUnmount(() => {
   line-height: 1;
   padding: 0;
 }
-.icon-btn:hover:not(:disabled) {
+.icon-btn:active:not(:disabled) {
   background: var(--color-hover);
+}
+@media (hover: hover) {
+  .icon-btn:hover:not(:disabled) {
+    background: var(--color-hover);
+  }
 }
 .icon-btn:disabled {
   opacity: 0.6;

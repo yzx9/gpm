@@ -512,8 +512,13 @@ onBeforeUnmount(() => {
   cursor: pointer;
   min-height: 48px;
 }
-.type-card:hover {
+.type-card:active {
   background: var(--color-hover);
+}
+@media (hover: hover) {
+  .type-card:hover {
+    background: var(--color-hover);
+  }
 }
 
 .field-row {
@@ -545,8 +550,13 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
-.icon-btn:hover:not(:disabled) {
+.icon-btn:active:not(:disabled) {
   background: var(--color-hover);
+}
+@media (hover: hover) {
+  .icon-btn:hover:not(:disabled) {
+    background: var(--color-hover);
+  }
 }
 
 .icon-btn:disabled {

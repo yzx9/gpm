@@ -117,6 +117,26 @@
     min-height: 100vh;
   }
 
+  /* Touch press + keyboard focus defaults.
+     Tint the native tap flash to --color-hover on every pressable so touch
+     feedback is consistent app-wide AND no element loses feedback: many
+     buttons (e.g. .back-btn, .cancel-link, kind-toggle buttons) carry no
+     themed :active rule, so stripping the native flash (transparent) would
+     leave them with zero press feedback. A themed :active on the buttons
+     that have one still gives the crisp press color; this rule is the
+     reliable fallback, especially for non-button pressables where CSS
+     :active is unreliable in Android WebView (chromium:40300816). */
+  button,
+  [role="button"] {
+    -webkit-tap-highlight-color: var(--color-hover);
+  }
+  /* Keyboard focus ring — matches BaseSegmentedControl's active-pill ring. */
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent-ring);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -154,8 +174,13 @@
   min-height: 36px;
 }
 
-.btn-copy:hover {
+.btn-copy:active {
   background: var(--color-hover);
+}
+@media (hover: hover) {
+  .btn-copy:hover {
+    background: var(--color-hover);
+  }
 }
 
 .public-key-display {

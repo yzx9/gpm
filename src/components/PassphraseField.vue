@@ -113,7 +113,7 @@ defineExpose({
       />
       <button
         type="button"
-        class="absolute inset-y-0 right-0 px-3 text-muted hover:text-accent transition-colors"
+        class="absolute inset-y-0 right-0 px-3 text-muted hover:text-accent active:text-accent transition-colors"
         :aria-label="show ? 'Hide passphrase' : 'Show passphrase'"
         @click="show = !show"
       >

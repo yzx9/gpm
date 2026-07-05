@@ -437,7 +437,7 @@ onUnmounted(clearPendingFile);
          (the back-navigation test relies on this ordering). -->
     <button
       type="button"
-      class="self-start text-sm text-muted hover:text-accent transition-colors inline-flex items-center gap-1"
+      class="self-start text-sm text-muted hover:text-accent active:text-accent transition-colors inline-flex items-center gap-1"
       @click="goBack"
     >
       <BaseIcon :icon="ArrowLeft" /> Back
@@ -557,7 +557,7 @@ onUnmounted(clearPendingFile);
           </span>
           <button
             type="button"
-            class="shrink-0 text-muted hover:text-danger transition-colors"
+            class="shrink-0 text-muted hover:text-danger active:text-danger transition-colors"
             @click="onUsePaste"
           >
             Remove

@@ -102,7 +102,10 @@ const sizeClass = computed(() =>
   color: white;
   border: none;
 }
-.primary:hover:not(:disabled) {
+/* Pressed (touch + mouse). BaseButton renders a real <button>, so :active is
+   reliable here — this variant block is the reference pattern. The native tap
+   flash is dropped globally (main.css) so the themed :active reads clean. */
+.primary:active:not(:disabled) {
   background: var(--color-accent-deep);
 }
 
@@ -111,7 +114,7 @@ const sizeClass = computed(() =>
   color: inherit;
   border: 1px solid var(--color-edge);
 }
-.secondary:hover:not(:disabled) {
+.secondary:active:not(:disabled) {
   background: var(--color-hover);
 }
 
@@ -121,7 +124,7 @@ const sizeClass = computed(() =>
   color: var(--color-accent);
   border: 1px solid var(--color-accent);
 }
-.outline:hover:not(:disabled) {
+.outline:active:not(:disabled) {
   background: var(--color-hover);
 }
 
@@ -130,7 +133,7 @@ const sizeClass = computed(() =>
   color: var(--color-danger);
   border: 1px solid var(--color-danger);
 }
-.danger:hover:not(:disabled) {
+.danger:active:not(:disabled) {
   background: var(--color-danger-soft);
 }
 
@@ -146,14 +149,29 @@ const sizeClass = computed(() =>
   background: var(--color-surface);
   border: 1px solid var(--color-edge);
 }
-.action:hover:not(:disabled) {
+.action:active:not(:disabled),
+.action-danger:active:not(:disabled) {
   background: var(--color-hover);
 }
 .action-danger {
   border-color: var(--color-danger-edge, var(--color-danger, #c66));
   color: #c66;
 }
-.action-danger:hover:not(:disabled) {
-  background: var(--color-hover);
+
+/* Hover hint — mouse/trackpad only. Gated by (hover: hover) so it never
+   sticks on touch (the original sticky-hover bug). Same colors as :active. */
+@media (hover: hover) {
+  .primary:hover:not(:disabled) {
+    background: var(--color-accent-deep);
+  }
+  .secondary:hover:not(:disabled),
+  .outline:hover:not(:disabled),
+  .action:hover:not(:disabled),
+  .action-danger:hover:not(:disabled) {
+    background: var(--color-hover);
+  }
+  .danger:hover:not(:disabled) {
+    background: var(--color-danger-soft);
+  }
 }
 </style>

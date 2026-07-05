@@ -274,9 +274,15 @@ watch(
   justify-content: center;
   gap: 0.4rem;
 }
-.btn-danger:hover:not(:disabled) {
+.btn-danger:active:not(:disabled) {
   background: var(--color-danger);
   color: var(--color-surface);
+}
+@media (hover: hover) {
+  .btn-danger:hover:not(:disabled) {
+    background: var(--color-danger);
+    color: var(--color-surface);
+  }
 }
 .btn-danger:disabled {
   opacity: 0.5;
