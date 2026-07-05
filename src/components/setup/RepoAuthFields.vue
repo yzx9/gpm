@@ -116,7 +116,7 @@ async function copyPublicKey() {
     <!-- Tab toggle: Paste / Generate (hidden when showKeygen is false) -->
     <div
       v-if="showKeygen"
-      class="flex gap-1 border border-[var(--color-edge)] rounded-[var(--radius-md)] overflow-hidden"
+      class="flex gap-1 border border-edge rounded-md overflow-hidden"
     >
       <button
         type="button"

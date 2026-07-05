@@ -228,9 +228,7 @@ async function onCreate() {
     <!-- Identity type -->
     <div class="flex flex-col gap-1">
       <span class="text-sm font-medium">Identity type</span>
-      <div
-        class="flex gap-1 border border-[var(--color-edge)] rounded-[var(--radius-md)] overflow-hidden"
-      >
+      <div class="flex gap-1 border border-edge rounded-md overflow-hidden">
         <button
           type="button"
           :disabled="generating || loading"
@@ -315,7 +313,7 @@ async function onCreate() {
     </div>
 
     <!-- Optional remote -->
-    <div class="flex flex-col gap-3 pt-4 border-t border-[var(--color-edge)]">
+    <div class="flex flex-col gap-3 pt-4 border-t border-edge">
       <div>
         <span class="text-sm font-medium">Remote (optional)</span>
         <p class="text-xs text-muted">

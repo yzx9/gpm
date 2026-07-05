@@ -468,10 +468,10 @@ onUnmounted(clearPendingFile);
           matchedRecipient?.public_key === r.public_key ? 'true' : undefined
         "
         :class="[
-          'flex items-start gap-3 p-3 rounded-[var(--radius-md)] border transition-colors',
+          'flex items-start gap-3 p-3 rounded-md border transition-colors',
           matchedRecipient?.public_key === r.public_key
             ? 'border-accent bg-accent-soft'
-            : 'border-[var(--color-edge)] bg-[var(--color-input)]',
+            : 'border-edge bg-input',
         ]"
       >
         <BaseIcon
@@ -487,7 +487,7 @@ onUnmounted(clearPendingFile);
             }}</code>
             <span
               v-if="r.key_type !== 'x25519'"
-              class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--color-edge)] text-muted"
+              class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-edge text-muted"
               >{{
                 r.key_type === "post_quantum"
                   ? "PQ"
@@ -542,7 +542,7 @@ onUnmounted(clearPendingFile);
       <!-- Picked-file panel: the bytes live in backend state, not here -->
       <div
         v-if="identitySource === 'file' && pickedFile"
-        class="flex flex-col gap-2 text-xs bg-[var(--color-input)] border border-[var(--color-edge)] rounded-[var(--radius-md)] p-2 px-2.5"
+        class="flex flex-col gap-2 text-xs bg-input border border-edge rounded-md p-2 px-2.5"
       >
         <div class="flex items-center justify-between gap-2">
           <span class="min-w-0 truncate">
