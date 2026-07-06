@@ -776,17 +776,23 @@ function resetConfig() {
 
 async function doReset() {
   if (!resetReady.value) return;
+  // Gate the leave guard before the wipe — see onBeforeRouteLeave. Covers the
+  // Android-back-during-wipe race (the reset modal has no back handler).
+  isResetting = true;
   try {
     await apiResetConfig();
     resetOpen.value = false;
-    // Reset wipes the repo — replace so Back can't return to a Settings page
-    // backed by erased state. (The unsaved-changes leave guard still runs; the
-    // pre-existing guard-ordering caveat is tracked as a follow-up.)
-    router.replace({ name: "setup" });
+    const failure = await router.replace({ name: "setup" });
+    // vue-router resolves a cancelled/aborted nav as a NavigationFailure, not a
+    // throw. The backend is already wiped — force a re-init so the app re-enters at
+    // /setup instead of stranding the user on stale Settings.
+    if (failure) window.location.reload();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Reset failed";
     resetOpen.value = false;
+  } finally {
+    isResetting = false;
   }
 }
 
@@ -829,6 +835,11 @@ let pendingResolve: ((c: UnsavedChoice) => void) | null = null;
 // Re-entrancy guard: if a second navigation supersedes the guarded one while
 // the modal is open, only the latest token's resolver runs; older ones no-op.
 let promptToken = 0;
+// Gate the unsaved-changes leave guard for the entire reset flow. Set BEFORE the
+// apiResetConfig await: the reset modal has no useOverlayBackHandler, so on Android
+// hardware Back can fire during the wipe and trip the guard before a post-wipe flag
+// would exist. Cleared in doReset's finally.
+let isResetting = false;
 
 function promptUnsaved(): Promise<UnsavedChoice> {
   const token = ++promptToken;
@@ -848,6 +859,10 @@ function resolveUnsaved(c: UnsavedChoice) {
 }
 
 onBeforeRouteLeave(async () => {
+  // Reset in flight: unsaved edits are scoped to the store the wipe just destroyed,
+  // so the Save/Keep/Discard prompt is incoherent. The gate covers the whole reset
+  // (see doReset), not just the navigation.
+  if (isResetting) return true;
   if (!hasUnsavedChanges.value) return true;
   const choice = await promptUnsaved();
   if (choice === "cancel") return false;

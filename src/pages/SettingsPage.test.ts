@@ -10,7 +10,17 @@ import SettingsPage from "./SettingsPage.vue";
 
 const { mockPush, mockReplace, mockOnBeforeRouteLeave } = vi.hoisted(() => ({
   mockPush: vi.fn(),
-  mockReplace: vi.fn(),
+  // Mimic vue-router's pipeline: invoking replace runs the registered leave guard
+  // so tests can observe whether the reset bypass short-circuits before the
+  // unsaved-changes modal opens. Resolves to undefined (a clean navigation).
+  mockReplace: vi.fn(() => {
+    const calls = mockOnBeforeRouteLeave.mock.calls;
+    const guard = calls[calls.length - 1]?.[0] as
+      | (() => Promise<unknown>)
+      | undefined;
+    void guard?.();
+    return Promise.resolve();
+  }),
   mockOnBeforeRouteLeave: vi.fn(),
 }));
 
@@ -637,6 +647,65 @@ describe("SettingsPage", () => {
       expect(wrapper.find("[role='alert']").text()).toContain("Reset failed");
       // A failed reset closes the modal (does not leave it open for retry).
       expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
+    });
+
+    it("reset bypasses the leave guard even with dirty edits", async () => {
+      when("reset_config", undefined);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Dirty the commit-identity form so the guard WOULD prompt if it ran.
+      await wrapper.find("#commit-name").setValue("Alice");
+
+      // Open the reset modal, type RESET, confirm.
+      await openReset(wrapper);
+      await wrapper.find('[role="alertdialog"] input').setValue("RESET");
+      await modalConfirmBtn(wrapper)!.trigger("click");
+      await flushPromises();
+
+      // Reset navigates via replace, and the unsaved-changes modal never opened
+      // (the isResetting gate bypassed the guard before promptUnsaved ran).
+      expect(mockReplace).toHaveBeenCalledWith({ name: "setup" });
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
+        false,
+      );
+    });
+
+    it("the reset gate covers a navigation during the pending wipe", async () => {
+      // Hold reset_config pending so a leave-nav can fire during the wipe window
+      // (the Android-back race: the reset modal has no useOverlayBackHandler).
+      let resolveReset!: () => void;
+      when(
+        "reset_config",
+        new Promise<void>((r) => {
+          resolveReset = r;
+        }),
+      );
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Dirty the form, open reset, confirm — doReset is now awaiting apiResetConfig
+      // with the isResetting gate already armed (before the wipe).
+      await wrapper.find("#commit-name").setValue("Alice");
+      await openReset(wrapper);
+      await wrapper.find('[role="alertdialog"] input').setValue("RESET");
+      await modalConfirmBtn(wrapper)!.trigger("click");
+      await flushPromises();
+
+      // A leave-navigation firing mid-wipe is bypassed, so the unsaved-changes modal
+      // does not appear.
+      const guard = mockOnBeforeRouteLeave.mock.calls[0]?.[0] as () => Promise<
+        boolean | void
+      >;
+      await expect(guard()).resolves.toBe(true);
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
+        false,
+      );
+
+      // Release the wipe; doReset finishes and navigates to setup.
+      resolveReset();
+      await flushPromises();
+      expect(mockReplace).toHaveBeenCalledWith({ name: "setup" });
     });
   });
 
