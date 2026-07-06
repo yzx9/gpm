@@ -297,9 +297,10 @@ pub fn run() {
             config::set_autosync,
             config::get_commit_identity_default,
             config::reset_config,
-            // app config: screen-capture master toggle + platform availability
+            // app config: screen-capture master toggle + display language + platform availability
             app_config::get_app_config,
             app_config::set_secure_screen,
+            app_config::set_locale_pref,
             app_config::screen_secure_available,
             // biometric
             biometric::is_biometric_available,

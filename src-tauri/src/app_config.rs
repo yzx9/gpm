@@ -4,21 +4,22 @@
 
 //! App-shell configuration that must persist before any repo is set up.
 //!
-//! Today this is the screen-capture master toggle ([`AppConfig::secure_screen`]).
-//! It lives at `app.json` in the config directory — distinct from `repo.json`,
-//! which is repo-scoped and (on Android) sealed at rest. `app.json` is a
-//! plaintext UI preference (no secret); encrypting it would be theater and
-//! would couple this app-shell module to the `rustpass` store layer.
+//! Today this holds the screen-capture master toggle ([`AppConfig::secure_screen`])
+//! and the display-language preference ([`AppConfig::locale`]). Both live at
+//! `app.json` in the config directory — distinct from `repo.json`, which is
+//! repo-scoped and (on Android) sealed at rest. `app.json` is a plaintext UI
+//! preference (no secret); encrypting it would be theater and would couple this
+//! app-shell module to the `rustpass` store layer.
 //!
 //! `app.json` intentionally survives `reset_config` (which wipes the repo dir,
-//! `identity`, and `repo.json`): the toggle is a device-level preference, not
-//! repo data, so re-setting up the repo should not reset the user's
-//! screen-capture choice.
+//! `identity`, and `repo.json`): these are device-level preferences, not repo
+//! data, so re-setting up the repo should not reset the user's screen-capture or
+//! language choice.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rustpass::Error;
+use rustpass::{Error, ErrorCode};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -26,6 +27,10 @@ use crate::AppState;
 
 /// File name of the app-level config, inside the config directory.
 const APP_CONFIG_FILE: &str = "app.json";
+
+/// Locales the app ships translations for. An explicit preference must be one
+/// of these; anything else degrades to the system-locale resolution.
+const SUPPORTED_LOCALES: [&str; 2] = ["en", "zh-CN"];
 
 /// App-level (non-repo) preferences. Plaintext on disk — no secrets, only UI
 /// toggles.
@@ -36,12 +41,20 @@ pub(crate) struct AppConfig {
     /// no page is ever secured (the user explicitly allowed capture).
     #[serde(default = "default_secure_screen")]
     pub(crate) secure_screen: bool,
+    /// Display-language override. `None` (the default) means "track the system
+    /// language" — the backend resolves the system locale at boot. `Some("en")`
+    /// / `Some("zh-CN")` pins the locale explicitly. `skip_serializing_if`
+    /// keeps existing `app.json` files (which predate this field) byte-identical
+    /// on round-trip, so adding the field is non-breaking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) locale: Option<String>,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             secure_screen: default_secure_screen(),
+            locale: None,
         }
     }
 }
@@ -49,6 +62,25 @@ impl Default for AppConfig {
 /// Serde default for [`AppConfig::secure_screen`] — `true` (secure by default).
 fn default_secure_screen() -> bool {
     true
+}
+
+/// True if `code` is one of [`SUPPORTED_LOCALES`].
+fn is_supported_locale(code: &str) -> bool {
+    SUPPORTED_LOCALES.contains(&code)
+}
+
+/// Reject an unsupported explicit locale code. `None` (track system) is always
+/// valid; `Some(code)` must be in [`SUPPORTED_LOCALES`].
+fn validate_locale(locale: Option<&str>) -> Result<(), Error> {
+    if let Some(code) = locale
+        && !is_supported_locale(code)
+    {
+        return Err(Error::new(
+            ErrorCode::ConfigError,
+            format!("Unsupported locale code '{code}'"),
+        ));
+    }
+    Ok(())
 }
 
 /// Persistent app-shell config, owned by [`AppState`]. The on-disk file is read
@@ -130,6 +162,22 @@ pub(crate) async fn set_secure_screen(
     Ok(cfg)
 }
 
+/// Set the display-language preference and persist it. `locale: null` clears
+/// the override (track system); `"en"` / `"zh-CN"` pin it. Returns the updated
+/// config. The frontend re-applies the locale on receipt.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_locale_pref(
+    state: State<'_, AppState>,
+    locale: Option<String>,
+) -> Result<AppConfig, Error> {
+    validate_locale(locale.as_deref())?;
+    let mut cfg = state.app_config.get();
+    cfg.locale = locale;
+    state.app_config.save(&cfg).await?;
+    Ok(cfg)
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -163,6 +211,7 @@ mod tests {
         store
             .save(&AppConfig {
                 secure_screen: false,
+                locale: None,
             })
             .await
             .unwrap();
@@ -176,9 +225,80 @@ mod tests {
         store_at(dir.path())
             .save(&AppConfig {
                 secure_screen: true,
+                locale: None,
             })
             .await
             .unwrap();
         assert!(store_at(dir.path()).get().secure_screen);
+    }
+
+    #[test]
+    fn default_locale_is_none() {
+        assert!(AppConfig::default().locale.is_none());
+    }
+
+    #[tokio::test]
+    async fn locale_roundtrips_through_save() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                locale: Some("zh-CN".to_string()),
+            })
+            .await
+            .unwrap();
+        let reloaded = store_at(dir.path()).get();
+        assert_eq!(reloaded.locale.as_deref(), Some("zh-CN"));
+    }
+
+    #[tokio::test]
+    async fn locale_omitted_on_disk_when_none() {
+        // skip_serializing_if keeps the field out of app.json when it is None,
+        // so existing files stay byte-identical and don't carry a null.
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                locale: None,
+            })
+            .await
+            .unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        assert!(
+            !on_disk.contains("locale"),
+            "locale key must be absent when None; got: {on_disk}"
+        );
+    }
+
+    #[test]
+    fn existing_app_json_without_locale_loads() {
+        // An app.json written before the locale field existed must still parse,
+        // with locale defaulting to None (backward compatibility).
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(APP_CONFIG_FILE),
+            r#"{"secure_screen":true}"#,
+        )
+        .unwrap();
+        let cfg = store_at(dir.path()).get();
+        assert!(cfg.secure_screen);
+        assert!(cfg.locale.is_none());
+    }
+
+    #[test]
+    fn validate_locale_accepts_supported_and_none() {
+        assert!(validate_locale(None).is_ok());
+        assert!(validate_locale(Some("en")).is_ok());
+        assert!(validate_locale(Some("zh-CN")).is_ok());
+    }
+
+    #[test]
+    fn validate_locale_rejects_unknown() {
+        let err = validate_locale(Some("zh-TW")).unwrap_err();
+        assert_eq!(err.code, "CONFIG_ERROR");
+        assert!(err.message.contains("zh-TW"));
+        assert!(validate_locale(Some("fr")).is_err());
     }
 }
