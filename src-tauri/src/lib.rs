@@ -69,6 +69,16 @@ pub(crate) struct AppState {
     pub(crate) lock_mode: Mutex<rustpass::LockMode>,
     /// Cached effective clipboard auto-clear seconds (same refresh contract).
     pub(crate) clipboard_clear_secs: Mutex<u64>,
+    /// Clipboard auto-clear timer handle — cancel-and-respawn pattern, same
+    /// shape as `lock_timer`. Holds the in-flight clear task so a fresh copy
+    /// aborts the prior one (the copy-overlap fix). The manual tap-clear path
+    /// doesn't abort this handle; instead the task self-skips by polling the
+    /// plugin's manual-clear flag on wake (see `arm_clipboard_clear`).
+    pub(crate) clipboard_clear_handle: Mutex<Option<JoinHandle<()>>>,
+    /// Monotonic generation tag for the clipboard-clear timer; bumped on every
+    /// (re)arm. The spawned task self-disarms if a newer arm happened while it
+    /// slept.
+    pub(crate) clipboard_clear_generation: Arc<AtomicU64>,
     /// Whether the app-launch biometric gate is enabled (the at-rest master key
     /// is sealed in the biometric-gated Keystore). Probed at startup from the
     /// key's location and updated on enable/disable. Drives whether the frontend
@@ -191,6 +201,8 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         // pre-setup no op reads them.
         lock_mode: Mutex::new(rustpass::LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+        clipboard_clear_handle: Mutex::new(None),
+        clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(app_lock_enabled),
         // Locked at startup iff the gate is on (master key not yet injected).
         app_locked: AtomicBool::new(app_lock_enabled),
@@ -212,6 +224,7 @@ pub fn run() {
         .plugin(tauri_plugin_secure_keystore::init())
         .plugin(tauri_plugin_file_picker::init())
         .plugin(tauri_plugin_screen_secure::init())
+        .plugin(tauri_plugin_clipboard_notify::init())
         .setup(|app| {
             app.manage(init_state(app));
             Ok(())
@@ -247,6 +260,8 @@ pub fn run() {
             read::copy_password,
             read::show_password,
             clipboard::copy_generated_password,
+            clipboard::are_clipboard_notifications_enabled,
+            clipboard::request_clipboard_notifications_permission,
             // generator
             generator::generate_password,
             generator::generate_password_batch,

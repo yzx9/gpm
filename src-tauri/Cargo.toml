@@ -21,6 +21,7 @@ tauri-plugin-biometric-keystore = { path = "../tauri-plugin-biometric-keystore" 
 tauri-plugin-secure-keystore = { path = "../tauri-plugin-secure-keystore" }
 tauri-plugin-file-picker = { path = "../tauri-plugin-file-picker" }
 tauri-plugin-screen-secure = { path = "../tauri-plugin-screen-secure" }
+tauri-plugin-clipboard-notify = { path = "../tauri-plugin-clipboard-notify" }
 rustpass = { path = "../rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }

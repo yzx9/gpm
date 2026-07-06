@@ -23,6 +23,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import {
+  ensureClipboardNotifyPermission,
   isAuthCancelled,
   useLockState,
   useOverlayBackHandler,
@@ -114,6 +115,7 @@ async function showPassword() {
 async function copyPassword() {
   error.value = "";
   try {
+    await ensureClipboardNotifyPermission();
     const result = await runWithAuth(() => copyPasswordCmd(entryPath));
     clear();
     toast.success(

@@ -8,6 +8,7 @@ members = [
   "tauri-plugin-secure-keystore",
   "tauri-plugin-file-picker",
   "tauri-plugin-screen-secure",
+  "tauri-plugin-clipboard-notify",
 ]
 
 [workspace.package]

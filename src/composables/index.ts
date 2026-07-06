@@ -4,6 +4,7 @@
 
 /** Barrel re-exporting every Vue 3 composable. */
 export * from "./useAppLockState";
+export * from "./useClipboardNotify";
 export * from "./useLockState";
 export * from "./useNavDirection";
 export * from "./useOverlayBackHandler";

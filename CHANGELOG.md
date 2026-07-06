@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Opening a page now slides in from the right, and going back slides it the other way — a stack-style transition between pages. Transitions to or from a page that shows secrets swap instantly, so the screen-capture guard never leaves a secret visible during the animation.
+- After you copy a password on Android, a small notification appears in your notification shade while the secret is on the clipboard — tap it to clear the clipboard immediately, without gpm taking over the foreground. It dismisses itself when the clipboard is cleared, whether by your tap or the automatic timer. The first time you copy, gpm asks once for permission to show notifications; if you decline, copying still works, just without the notification. Android only; desktop is unchanged.
 
 ### Changed
 
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The History screen now shows commit ages more clearly. Recent commits still read "2h ago" or "3d ago", but anything older than a week shows an actual date — "Mar 15", or "Mar 15, 2024" for a prior year — instead of a hard-to-parse value like "249h ago".
 - History's commit rows are easier to read. Each commit's message now gets its own line, with the hash, author, and time grouped on a quieter line underneath, instead of all three squeezed into one cramped row that truncated the message.
 - The Back button now returns to the page you actually came from, instead of always jumping to a fixed page. Pressing Back from Settings takes you to wherever you opened Settings (usually the entry list), and the Android system back button now agrees with the in-app Back button — repeated Back no longer cycles through pages you already visited, and Back from the entry list exits the app.
+- Generated passwords now use your configured clipboard auto-clear timeout (the same one stored-secret copies use) instead of a fixed 30 seconds, so the two copy paths agree on how long a secret lingers.
 
 ### Fixed
 
@@ -47,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tapping the "Showing" button while a password is already revealed now hides it, instead of asking you to unlock again and decrypting it a second time. The reveal button now works as a toggle: tap to show, tap again to hide.
 - Tapping Edit on an entry now prompts for your passphrase when the identity is locked, instead of showing an "Identity is encrypted — unlock with passphrase first" error. You no longer have to reveal or copy a secret first just to edit it.
 - Cloning a gopass repository now discovers recipients from the `.age-recipients` file only, matching gopass exactly. gpm no longer also reads a `.gopass-recipients` file that gopass itself never writes or uses, so the two stay in sync on a shared store.
+- Copying a password twice in a row no longer clears the second copy early. Previously the first copy's clear timer could fire and wipe the second copy short of its full timeout window.
 
 ## [v0.8.1] - 2026-07-03
 

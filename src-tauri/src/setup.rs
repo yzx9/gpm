@@ -669,6 +669,8 @@ mod tests {
             pending_identity: Mutex::new(None),
             lock_mode: Mutex::new(rustpass::LockMode::default()),
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+            clipboard_clear_handle: Mutex::new(None),
+            clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
             app_lock_enabled: std::sync::atomic::AtomicBool::new(false),
             app_locked: std::sync::atomic::AtomicBool::new(false),
             active_cancel_token: Mutex::new(None),

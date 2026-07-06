@@ -1700,6 +1700,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-biometric-keystore",
  "tauri-plugin-clipboard-manager",
+ "tauri-plugin-clipboard-notify",
  "tauri-plugin-file-picker",
  "tauri-plugin-safe-area",
  "tauri-plugin-screen-secure",
@@ -4571,6 +4572,15 @@ dependencies = [
  "tauri",
  "tauri-plugin",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tauri-plugin-clipboard-notify"
+version = "0.9.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Sticky Android notification while a secret is on the clipboard, with a tap-to-clear action. Backend-only; no frontend capability is granted — app commands in src-tauri proxy through the plugin handle."
+permissions = []

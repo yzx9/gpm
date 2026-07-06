@@ -13,7 +13,11 @@ import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
-import { useLockState, useToast } from "@/composables";
+import {
+  ensureClipboardNotifyPermission,
+  useLockState,
+  useToast,
+} from "@/composables";
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Dices } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
@@ -87,11 +91,12 @@ async function onGenerate() {
   }
 }
 
-/** Copy one generated password; the backend arms a 30s clipboard auto-clear. */
+/** Copy one generated password; the backend arms the configured clipboard auto-clear. */
 async function onCopyRow(pw: string) {
   try {
+    await ensureClipboardNotifyPermission();
     await copyGeneratedPassword(pw);
-    toast.success("Copied — clipboard clears in 30s");
+    toast.success("Copied — clipboard clears automatically");
   } catch (e) {
     const appError = e as AppError;
     toast.danger(appError?.message || "Could not copy");

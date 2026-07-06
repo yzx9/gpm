@@ -6,17 +6,17 @@
 //! read side of the store, mirroring [`crate::write`] on the write side.
 
 use std::fmt;
-use std::time::Duration;
 
 use rustpass::error::ErrorCode;
 use rustpass::{Entry, Error, RankedPage};
 use serde::Serialize;
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
-use crate::identity::{maybe_soft_wipe, reset_lock_timer};
+use crate::identity::{arm_clipboard_clear, disarm_clipboard_clear, maybe_soft_wipe, reset_lock_timer};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -126,7 +126,7 @@ pub(crate) async fn search_entries(
 /// `0`; a nonzero value spawns and reports itself, clamped into `u32`. Pure so
 /// the Never/nonzero contract is unit-testable without a clipboard.
 #[must_use]
-fn clipboard_clear_plan(clear_secs: u64) -> (bool, u32) {
+pub(crate) fn clipboard_clear_plan(clear_secs: u64) -> (bool, u32) {
     if clear_secs == 0 {
         (false, 0)
     } else {
@@ -165,15 +165,19 @@ pub(crate) async fn copy_password(
         .map_or_else(|_| rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS, |s| *s);
     let (spawn_clear, cleared_after_secs) = clipboard_clear_plan(clear_secs);
     if spawn_clear {
-        // The OS clipboard already holds the password; the spawned task just
-        // blanks it after the configured window. No need to keep a heap copy of
-        // the plaintext alive for the sleep (the decoded `secret` is zeroized on
-        // drop at end of scope).
-        let clear_handle = app.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(clear_secs)).await;
-            let _ = clear_handle.clipboard().write_text(String::new());
-        });
+        // Arm the cancellable auto-clear — replaces any in-flight clear task
+        // (the copy-overlap fix: copy-A's earlier timer must not survive to
+        // clear copy-B's secret short of its full timeout) — then post the
+        // sticky notification so the user can tap to clear early. The post is
+        // best-effort: a denial or plugin error never fails the copy (the
+        // notification method swallows its own errors).
+        arm_clipboard_clear(&state, &app, clear_secs);
+        app.clipboard_notify().post_notification(clear_secs).await;
+    } else {
+        // Never: abort any in-flight clear left over from a prior shorter
+        // setting so it can't fire and clear a clipboard the user asked to
+        // leave alone.
+        disarm_clipboard_clear(&state);
     }
 
     Ok(CopyResult {

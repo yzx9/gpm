@@ -31,6 +31,8 @@ use rustpass::{Error, ErrorCode, Store};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_biometric_keystore::KeystoreExt;
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
 
 use crate::AppState;
 
@@ -357,4 +359,78 @@ pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<
     });
 
     *timer = Some(handle);
+}
+
+/// (Re)arm the clipboard-clear timer to fire after `secs`, replacing any
+/// in-flight task. Mirrors [`arm_lock`]: abort the existing handle, bump the
+/// generation, and spawn a task that self-disarms if a newer arm happened
+/// while it slept. Aborting the prior handle on each arm fixes the copy-overlap
+/// bug (copy-A's earlier timer clearing copy-B's secret short of its full
+/// timeout).
+///
+/// The spawned task carries the manual-clear bridge: on wake it consumes the
+/// plugin's manual-clear flag (set by the notification-tap receiver) and, if
+/// set, self-skips — so a manual tap-clear is not later undone by this timer
+/// clobbering whatever the user copied next. The flag is reset in
+/// `postClipboardNotification` (Kotlin) at post time, so the reset always
+/// precedes any user tap (no race with the receiver). There is no Kotlin→Rust
+/// event for this (Tauri's plugin `trigger` is plugin-scoped, unreachable from
+/// a global Rust `listen` — see tauri issue #13027); the flag is polled via the
+/// proven `run_mobile_plugin_async` direction.
+pub(crate) fn arm_clipboard_clear<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    secs: u64,
+) {
+    let Ok(mut handle) = state.clipboard_clear_handle.lock() else {
+        return;
+    };
+
+    // Cancel any in-flight clear (the copy-overlap fix: copy-A's earlier task
+    // must not survive to clear copy-B's secret short of its full timeout).
+    if let Some(h) = handle.take() {
+        h.abort();
+    }
+
+    let generation = state.clipboard_clear_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let generation_cell = state.clipboard_clear_generation.clone();
+    let app_handle = app.clone();
+
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+
+        // Stale-task guard: a fresh copy bumped the generation while we slept.
+        if generation_cell.load(Ordering::SeqCst) != generation {
+            return;
+        }
+
+        // Manual-clear bridge: if the user tapped the notification during the
+        // window, the receiver already cleared the clipboard + dismissed the
+        // notification — self-skip so we don't clobber unrelated content the
+        // user placed after the tap.
+        if app_handle.clipboard_notify().consume_manual_clear_flag().await {
+            return;
+        }
+
+        // No manual clear — fire the auto-clear + dismiss the notification.
+        let _ = app_handle.clipboard().write_text(String::new());
+        app_handle.clipboard_notify().dismiss().await;
+    });
+
+    *handle = Some(task);
+}
+
+/// Cancel any armed clipboard-clear timer and bump the generation so an
+/// in-flight task self-disarms. Called when the configured timeout is `Never`
+/// (0) — a stale timer left over from a prior shorter setting must not fire and
+/// clear the clipboard the user explicitly asked to leave alone.
+pub(crate) fn disarm_clipboard_clear(state: &State<'_, AppState>) {
+    if let Ok(mut handle) = state.clipboard_clear_handle.lock()
+        && let Some(h) = handle.take()
+    {
+        h.abort();
+    }
+    state
+        .clipboard_clear_generation
+        .fetch_add(1, Ordering::SeqCst);
 }

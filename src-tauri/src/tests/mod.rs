@@ -15,6 +15,7 @@
 //! `AppHandle` run against a headless [`MockRuntime`] app
 //! (`tauri::test::mock_builder`) rather than a real webview.
 
+mod clipboard_clear;
 mod git_commands;
 mod lock_state;
 mod read_commands;
@@ -146,6 +147,8 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(rustpass::LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+        clipboard_clear_handle: Mutex::new(None),
+        clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(false),
         app_locked: AtomicBool::new(false),
         active_cancel_token: Mutex::new(None),
@@ -164,6 +167,10 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
 /// drive commands that take an `AppHandle`.
 pub(super) fn mock_app(state: AppState) -> tauri::App<MockRuntime> {
     mock_builder()
+        // Register clipboard-notify so the armed clear task's `dismiss()` call
+        // resolves against the desktop inert stub instead of panicking on a
+        // missing managed state.
+        .plugin(tauri_plugin_clipboard_notify::init())
         .manage(state)
         .build(mock_context(noop_assets()))
         .expect("failed to build mock app")
