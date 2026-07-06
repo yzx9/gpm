@@ -6,7 +6,7 @@ import { createApp, nextTick } from "vue";
 import { createRouter, createWebHashHistory } from "vue-router";
 import { getAuthState } from "./api";
 import App from "./App.vue";
-import "./assets/main.css";
+import "./style.css";
 
 import {
   APP_LOCK_KEY,
