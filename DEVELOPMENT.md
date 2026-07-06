@@ -22,16 +22,18 @@ cd gpm
 
 ### Dev environment
 
-We recommend using [Nix](https://nixos.org/download/) for a consistent, reproducible dev environment across all platforms.
-The provided `flake.nix` sets up everything you need.
+We recommend using [Nix](https://nixos.org/download/) for a consistent, reproducible dev
+environment across all platforms. The provided `flake.nix` sets up everything you need.
 
-Install [direnv](https://direnv.net/) (with its [shell hook](https://direnv.net/docs/hook.html)) to auto-load the environment when you `cd` into the project:
+Install [direnv](https://direnv.net/) (with its [shell hook](https://direnv.net/docs/hook.html))
+to auto-load the environment when you `cd` into the project:
 
 ```bash
 direnv allow
 ```
 
-On first run, Nix builds the dev shell (this may take a few minutes). Once done, `just`, `cargo`, `pnpm`, and the full Android toolchain will be in your PATH.
+On first run, Nix builds the dev shell (this may take a few minutes). Once done, `just`, `cargo`,
+`pnpm`, and the full Android toolchain will be in your PATH.
 
 <details>
 <summary><strong>Without Nix (manual setup)</strong></summary>
@@ -40,7 +42,8 @@ You'll need to install these yourself:
 
 **Rust toolchain**
 
-- [rustup](https://rustup.rs/) with stable toolchain + 4 Android cross-compilation targets: `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
+- [rustup](https://rustup.rs/) with stable toolchain + 4 Android cross-compilation targets:
+  `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
 
 **Frontend tooling**
 
@@ -50,7 +53,8 @@ You'll need to install these yourself:
 **Android & JDK**
 
 - **JDK 17**: [Adoptium Temurin](https://adoptium.net/) or your preferred distribution; set `JAVA_HOME`
-- **Android SDK/NDK** — Android Studio or [command-line tools](https://developer.android.com/studio#command-line-tools-only); set `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_NDK_ROOT`
+- **Android SDK/NDK** — Android Studio or [command-line tools](https://developer.android.com/studio#command-line-tools-only);
+  set `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_NDK_ROOT`
 
 **Utilities**
 
@@ -93,9 +97,12 @@ just android-install-release # Build + install release APK to connected device
 <details>
 <summary><strong>Without just (manual commands)</strong></summary>
 
-If you don't want to use `just`, you can see the individual commands in `justfile` and run them manually.
+If you don't want to use `just`, you can see the individual commands in `justfile` and run them
+manually.
 
-Android builds require launcher icons in `src-tauri/gen/android/app/src/main/res/mipmap-*/`, which are not tracked in git (they are regenerated on each build). If you use `just`, this is handled automatically. If you run `pnpm tauri android build` directly, generate icons first:
+Android builds require launcher icons in `src-tauri/gen/android/app/src/main/res/mipmap-*/`, which
+are not tracked in git (they are regenerated on each build). If you use `just`, this is handled
+automatically. If you run `pnpm tauri android build` directly, generate icons first:
 
 ```bash
 pnpm tauri icon assets/app-icon.png
@@ -115,7 +122,9 @@ error: failed to add native library .../libssl.a: invalid utf-8 sequence of 1 by
 
 Tracked upstream: [rust-lang/rust#131407](https://github.com/rust-lang/rust/issues/131407)
 
-**Root cause:** macOS's system `ar` creates BSD-format archives (header `#1/20` + `__.SYMDEF` symbol table). rustc cannot parse these when cross-compiling to Linux/Android targets — it expects GNU-format archives produced by GNU `ar` or LLVM's `llvm-ar`.
+**Root cause:** macOS's system `ar` creates BSD-format archives (header `#1/20` + `__.SYMDEF` symbol
+table). rustc cannot parse these when cross-compiling to Linux/Android targets — it expects GNU-
+format archives produced by GNU `ar` or LLVM's `llvm-ar`.
 
 **Fix:** Set `AR`, `TARGET_AR`, and `RANLIB` to the NDK's LLVM tools in `flake.nix` `shellHook`:
 
@@ -131,17 +140,27 @@ shellHook = ''
 
 Key details:
 
-- `openssl-sys`'s build script checks `TARGET_AR` (not `AR_aarch64_linux_android`), so setting only the target-prefixed env var is insufficient
-- All three vars (`AR`, `TARGET_AR`, `RANLIB`) are needed — `RANLIB` rebuilds the symbol table in GNU format
-- Gated behind `pkgs.stdenv.isDarwin` — Linux hosts are unaffected because the system `ar` already produces GNU-format archives
+- `openssl-sys`'s build script checks `TARGET_AR` (not `AR_aarch64_linux_android`), so setting only
+  the target-prefixed env var is insufficient
+- All three vars (`AR`, `TARGET_AR`, `RANLIB`) are needed — `RANLIB` rebuilds the symbol table in
+  GNU format
+- Gated behind `pkgs.stdenv.isDarwin` — Linux hosts are unaffected because the system `ar` already
+  produces GNU-format archives
 
-**Files involved:** `flake.nix` (shellHook), `src-tauri/Cargo.toml` (`git2` with `vendored-openssl` + `vendored-libgit2`)
+**Files involved:** `flake.nix` (shellHook), `src-tauri/Cargo.toml` (`git2` with `vendored-openssl` +
+`vendored-libgit2`)
 
 ### Android: HTTPS git certificate verification
 
-On Android the vendored OpenSSL is built `no-stdio`, so HTTPS git would fail certificate verification (it can't read the system CA store or a CA file). gpm embeds Mozilla's root bundle (`rustpass/data/cacert.pem`) and loads it into libgit2's trust store from memory — Android-only, lazily before the first HTTPS op, scheme-gated so SSH / local-only repos are untouched. Desktop is unaffected. The root cause (`no-stdio` → `BIO_new_file` compiled out → load via `GIT_OPT_ADD_SSL_X509_CERT`) is documented in `rustpass/src/git.rs`.
+On Android the vendored OpenSSL is built `no-stdio`, so HTTPS git would fail certificate
+verification (it can't read the system CA store or a CA file). gpm embeds Mozilla's root bundle
+(`rustpass/data/cacert.pem`) and loads it into libgit2's trust store from memory — Android-only,
+lazily before the first HTTPS op, scheme-gated so SSH / local-only repos are untouched. Desktop is
+unaffected. The root cause (`no-stdio` → `BIO_new_file` compiled out → load via
+`GIT_OPT_ADD_SSL_X509_CERT`) is documented in `rustpass/src/git.rs`.
 
-**Refresh the bundle every release** so the trusted roots track Mozilla's trust decisions (root additions/distrusts):
+**Refresh the bundle every release** so the trusted roots track Mozilla's trust decisions (root
+additions/distrusts):
 
 ```bash
 just refresh-ca   # re-downloads rustpass/data/cacert.pem from https://curl.se/ca/cacert.pem
@@ -149,7 +168,12 @@ just test         # the embedded_ca_bundle_parses_cleanly test guards against a 
 git commit rustpass/data/cacert.pem
 ```
 
-**Known limitation — self-hosted servers behind a private/enterprise CA:** this setup trusts only the public WebPKI roots Mozilla ships. A self-hosted Git server whose certificate chains to a private CA your device trusts is _not_ covered and will still fail verification. For those remotes, use an **SSH** URL (`git@host:repo` or `ssh://`) — gpm supports SSH key auth, and SSH does not go through the OpenSSL CA path. Bundling the device's full system/user CA store is tracked as a future Tier 2/Tier 3 improvement.
+**Known limitation — self-hosted servers behind a private/enterprise CA:** this setup trusts only
+the public WebPKI roots Mozilla ships. A self-hosted Git server whose certificate chains to a
+private CA your device trusts is _not_ covered and will still fail verification. For those remotes,
+use an **SSH** URL (`git@host:repo` or `ssh://`) — gpm supports SSH key auth, and SSH does not go
+through the OpenSSL CA path. Bundling the device's full system/user CA store is tracked as a future
+Tier 2/Tier 3 improvement.
 
 ## Contributing
 
@@ -161,11 +185,13 @@ Contributions are welcome! We follow standard GitHub flow:
 4. Open a pull request with a clear description of the problem and solution
 5. Address review feedback and iterate
 
-This project is licensed under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0). By contributing, you agree that your contributions will be licensed under the same terms.
+This project is licensed under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0). By
+contributing, you agree that your contributions will be licensed under the same terms.
 
 ## Releasing
 
-Releases are automated via GitHub Actions. Pushing a `v*` tag (e.g. `v0.1.0`) triggers the release workflow, which builds a signed APK and publishes it as a GitHub Release.
+Releases are automated via GitHub Actions. Pushing a `v*` tag (e.g. `v0.1.0`) triggers the release
+workflow, which builds a signed APK and publishes it as a GitHub Release.
 
 ### Setup (one-time)
 
@@ -197,4 +223,5 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow builds the signed APK and creates a GitHub Release with the artifact attached. Tags containing `-rc` or `-beta` are automatically marked as pre-releases.
+The workflow builds the signed APK and creates a GitHub Release with the artifact attached. Tags
+containing `-rc` or `-beta` are automatically marked as pre-releases.

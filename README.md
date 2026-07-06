@@ -38,7 +38,7 @@ resort to running gopass inside Termux on Android.
 Any help in the form of descriptive and friendly [issues](https://github.com/yzx9/gpm/issues) or
 comprehensive pull requests are welcome!
 
-Please check out [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Please check out [DEVELOPMENT.md](DEVELOPMENT.md) for guidelines.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
 gpm by you, as defined in the [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) license,
