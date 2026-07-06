@@ -32,7 +32,7 @@ pub struct AgeIdentity {
 /// This is gpm's in-app `age-keygen` equivalent — used by the create-store flow
 /// to mint a brand-new identity on device. The identity is never written to disk
 /// by this function; the caller persists it through the existing identity
-/// storage (at-rest encryption; biometric-keystore gating on Android).
+/// storage (seal encryption; biometric-keystore gating on Android).
 #[must_use]
 pub fn generate_age_identity() -> AgeIdentity {
     let sk = age::x25519::Identity::generate();

@@ -40,7 +40,7 @@ async function tryUnlock() {
         // User dismissed the prompt — keep the overlay, offer a retry.
         break;
       case "BIOMETRIC_KEY_INVALIDATED":
-        // The at-rest master key is sealed by the biometric-gated Keystore key,
+        // The seal master key is sealed by the biometric-gated Keystore key,
         // which Android destroyed when all enrolled biometrics were removed. The
         // master key is random (not passphrase-derived), so the store is
         // unrecoverable — and this overlay gates the whole app, so Settings is

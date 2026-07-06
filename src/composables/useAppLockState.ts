@@ -16,7 +16,7 @@ import { inject, ref, type InjectionKey, type Ref } from "vue";
  * event and re-locks on app resume.
  *
  * The gate is independent of the identity cache lock (`useLockState`): it gates
- * the WHOLE store (the at-rest master key), not just the identity session. While
+ * the WHOLE store (the seal master key), not just the identity session. While
  * `appLocked` is true the app-lock overlay is shown and the identity
  * `UnlockModal` is suppressed, so the two never race to show competing prompts.
  *

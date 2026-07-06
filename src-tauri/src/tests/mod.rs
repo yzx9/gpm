@@ -19,11 +19,12 @@ mod clipboard_clear;
 mod git_commands;
 mod lock_state;
 mod read_commands;
+mod seal_migrate;
 mod setup_flow;
 
 use std::io::Write;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use age::secrecy::ExposeSecret;
@@ -114,7 +115,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
     let bare_dir = create_bare_repo(entries, &recipient);
     let config_dir = tempfile::tempdir().unwrap();
 
-    // No master key: tests use plaintext at-rest passthrough (desktop parity).
+    // No master key: tests use plaintext seal passthrough (desktop parity).
     let store = Arc::new(Store::new(config_dir.path().to_path_buf(), None));
     store
         .configure(
@@ -151,6 +152,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(false),
         app_locked: AtomicBool::new(false),
+        seal_migrate_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
     };
     (

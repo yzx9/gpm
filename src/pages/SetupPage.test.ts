@@ -375,7 +375,7 @@ describe("SetupPage", () => {
       });
     });
 
-    it("blocks complete_setup when the at-rest passphrase and confirm do not match", async () => {
+    it("blocks complete_setup when the seal passphrase and confirm do not match", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready → skip to step 2
         .mockResolvedValueOnce([]) // list_recipients
@@ -388,7 +388,7 @@ describe("SetupPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      // Pasting an x25519 key reveals the optional at-rest PassphraseField.
+      // Pasting an x25519 key reveals the optional seal PassphraseField.
       await wrapper
         .find('textarea[id="identity"]')
         .setValue("AGE-SECRET-KEY-1abc");
@@ -739,7 +739,7 @@ describe("SetupPage", () => {
       await flushPromises();
 
       // The SSH passphrase field decrypts an existing key (BaseInput), it does
-      // not set a new at-rest passphrase → no unrecoverable ack.
+      // not set a new seal passphrase → no unrecoverable ack.
       expect(wrapper.find('input[id="passphrase"]').exists()).toBe(true);
       expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
       expect(wrapper.text()).not.toContain("cannot be recovered");

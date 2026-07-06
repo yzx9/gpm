@@ -168,7 +168,7 @@ describe("EntryListPage", () => {
 
     it("shows a 'locked' error while app-locked, then loads on unlock", async () => {
       // Cold start with App Lock on: the master key is absent, so the first
-      // list_entries fails with AtRestKeyUnavailable (intentional — the error
+      // list_entries fails with SealKeyUnavailable (intentional — the error
       // reminds the user the content is locked, and no entry data loads while
       // sealed). The second call — after the biometric unlock injects the
       // master key — succeeds.
@@ -178,7 +178,7 @@ describe("EntryListPage", () => {
           listCall += 1;
           return listCall === 1
             ? Promise.reject({
-                code: "AT_REST_KEY_UNAVAILABLE",
+                code: "SEAL_KEY_UNAVAILABLE",
                 message: "Store is locked",
               })
             : Promise.resolve(page(sampleEntries));

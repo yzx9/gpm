@@ -14,7 +14,7 @@
 //! recipient *semantics*, storage owns the recipients file.
 //!
 //! For now the age functions are also re-exported here so existing `crypto::`
-//! callers (the Tauri command layer's `generate_age_identity`, the at-rest
+//! callers (the Tauri command layer's `generate_age_identity`, the seal
 //! `Config` layer, integration tests) keep resolving unchanged.
 
 use async_trait::async_trait;
@@ -33,7 +33,7 @@ pub mod openpgp;
 
 #[allow(unused_imports)]
 // re-export brings the age impl surface to `crypto::` for existing callers
-// (src-tauri's `generate_age_identity`, integration tests, the at-rest
+// (src-tauri's `generate_age_identity`, integration tests, the seal
 // `Config` layer). `Store` itself routes through `AgeBackend`, not these.
 pub use age::*;
 

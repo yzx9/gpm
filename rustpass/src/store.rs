@@ -146,7 +146,7 @@ impl Store {
         }
     }
 
-    /// Replace the at-rest master key at runtime. The app-launch biometric lock
+    /// Replace the seal master key at runtime. The app-launch biometric lock
     /// builds the store without the key (so `repo.json` is unreadable until the
     /// unlock prompt), injects it via this call after a successful biometric
     /// unlock, and wipes it (`None`) when the process is backgrounded. See
@@ -155,15 +155,15 @@ impl Store {
         self.config.set_master_key(master_key);
     }
 
-    /// One-time migration: wrap any plaintext config files in the at-rest
+    /// One-time migration: wrap any plaintext config files in the seal
     /// envelope. No-op on desktop (no master key) and for already-wrapped
     /// files. Safe to call on every startup.
     ///
     /// # Errors
     ///
     /// Returns an error if a file cannot be read, sealed/unsealed, or written.
-    pub async fn migrate_at_rest(&self) -> Result<(), Error> {
-        self.config.migrate_at_rest().await
+    pub async fn migrate_seal(&self) -> Result<(), Error> {
+        self.config.migrate_seal().await
     }
 
     /// Check if the store has been configured (identity + repo exist).
@@ -552,7 +552,7 @@ impl Store {
             }
         }
 
-        // Only native x25519 keys support optional at-rest encryption; SSH keys
+        // Only native x25519 keys support optional seal encryption; SSH keys
         // are stored as-is.
         let storage_passphrase = match itype {
             IdentityType::SshEd25519 | IdentityType::SshRsa => None,
@@ -1253,7 +1253,7 @@ impl Store {
     ///
     /// Encrypts the current identity file in place. Rejects empty passphrase.
     ///
-    /// Only native x25519 keys support at-rest encryption; SSH keys are
+    /// Only native x25519 keys support seal encryption; SSH keys are
     /// rejected (they rely on their own native passphrase protection).
     ///
     /// # Errors
@@ -1654,7 +1654,7 @@ impl Store {
         Ok(rc)
     }
 
-    /// Seal the identity passphrase under the at-rest master key, for the
+    /// Seal the identity passphrase under the seal master key, for the
     /// identity-auto-unlock opt-in. See [`Config::save_app_identity_pass`].
     ///
     /// # Errors

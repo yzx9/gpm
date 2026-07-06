@@ -3,11 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! App-launch biometric gate (RFC 0028) — an opt-in lock that re-seals the
-//! at-rest master key behind a biometric-gated Keystore key, so the whole store
+//! seal master key behind a biometric-gated Keystore key, so the whole store
 //! is unreadable until the user authenticates on launch/resume.
 //!
 //! This is a **third**, UI/session-layer lock, deliberately independent of the
-//! identity cache lock (`identity::`) and of the auth-free at-rest master key:
+//! identity cache lock (`identity::`) and of the auth-free seal master key:
 //! - Enabling migrates the master key from the auth-free store to the
 //!   biometric-gated store (and back on disable). The key's location IS the
 //!   toggle state — probed non-promptingly at startup, before `repo.json`.
@@ -143,7 +143,7 @@ pub(crate) async fn enable_biometric_app_lock(
     let b64 = Zeroizing::new(
         ks.retrieve()
             .await?
-            .ok_or_else(|| AppLockError::failed("No at-rest master key to migrate"))?,
+            .ok_or_else(|| AppLockError::failed("No seal master key to migrate"))?,
     );
 
     // Seal behind biometric FIRST (prompt). If the user cancels, the auth-free
@@ -177,8 +177,8 @@ pub(crate) async fn disable_biometric_app_lock(
     // copy. The Store's in-memory master key may have been wiped by a prior
     // `app_lock` (disable can be invoked while locked, before a frontend guard
     // exists) — re-inject it BEFORE clearing the flag, since the flag write
-    // seals `repo.json` via AtRest::unseal and would fail with
-    // `AtRestKeyUnavailable` if the key were still absent.
+    // seals `repo.json` via Seal::unseal and would fail with
+    // `SealKeyUnavailable` if the key were still absent.
     ks.store(&b64).await?;
     ks.delete_biometric().await?;
     if let Some(key) = decode_master_key(&b64) {
@@ -198,6 +198,37 @@ pub(crate) async fn disable_biometric_app_lock(
     state.app_locked.store(false, Ordering::SeqCst);
     emit_app_lock_state(&app, false, false);
     Ok(())
+}
+
+/// One-shot legacy-envelope migrate, CAS-guarded against concurrent callers.
+///
+/// Called by `app_unlock` after the master key is injected: under App Lock the
+/// key is absent at cold start, so the startup migrate soft-skipped and the key
+/// exists only now. `Store::migrate_seal` converts `GPMATR1` envelopes to
+/// `GPMSEL1`. `pub(crate)` so the in-crate tests can drive it without a
+/// biometric-keystore mock.
+///
+/// State: `0` = Pending, `1` = `InFlight`, `2` = Done. The claiming call sets Done
+/// on Ok, Pending on Err (next unlock retries). A re-lock wiping the key
+/// mid-flight makes the legacy branch soft-skip → Ok → Done; that envelope
+/// stays legacy, kept readable by dual-read until the v1.0.x forced migrate.
+// TODO: v1.0.x — remove with the legacy-magic compat path.
+pub(crate) async fn run_seal_migrate_once(state: &AppState) {
+    const SM_PENDING: u8 = 0;
+    const SM_INFLIGHT: u8 = 1;
+    const SM_DONE: u8 = 2;
+    if state
+        .seal_migrate_state
+        .compare_exchange(SM_PENDING, SM_INFLIGHT, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        match state.store.migrate_seal().await {
+            Ok(()) => state.seal_migrate_state.store(SM_DONE, Ordering::Release),
+            Err(_) => state
+                .seal_migrate_state
+                .store(SM_PENDING, Ordering::Release),
+        }
+    }
 }
 
 /// Unlock the app: retrieve the master key via a biometric prompt and inject it
@@ -226,6 +257,11 @@ pub(crate) async fn app_unlock(
     let key = decode_master_key(&b64)
         .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;
     state.store.set_master_key(Some(key));
+    // One-shot legacy-envelope migrate, BEFORE the unlock emit so the app isn't
+    // interactive while repo.json is re-wrapped (no race with a settings write).
+    // Under App Lock the key is absent at cold start, so convert it now.
+    // TODO: v1.0.x — remove with the legacy-magic compat path.
+    run_seal_migrate_once(&state).await;
     state.app_locked.store(false, Ordering::SeqCst);
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
     emit_app_lock_state(&app, enabled, false);
@@ -293,9 +329,9 @@ pub(crate) async fn app_lock(
 ) -> Result<(), AppLockError> {
     // Wipe the master key (the store becomes unreadable) and the identity cache.
     // In-flight writes are intentionally allowed to finish: they hold only the
-    // already-captured identity bytes (git ops never touch the at-rest master
-    // key), and any at-rest read/write racing this wipe surfaces a clean
-    // `AtRestKeyUnavailable` (never a silent plaintext downgrade — the
+    // already-captured identity bytes (git ops never touch the seal master
+    // key), and any seal read/write racing this wipe surfaces a clean
+    // `SealKeyUnavailable` (never a silent plaintext downgrade — the
     // `ever_keyed` latch guards `seal`). Do not add a mutex here to "fix" that —
     // it would deadlock the write path.
     state.store.set_master_key(None);
@@ -307,7 +343,7 @@ pub(crate) async fn app_lock(
 }
 
 /// Enable the identity-auto-unlock opt-in: validate `passphrase`, then seal it
-/// under the at-rest master key so a later `app_unlock` can unlock the identity
+/// under the seal master key so a later `app_unlock` can unlock the identity
 /// with no second prompt. Requires the gate to be enabled and the identity to be
 /// passphrase-encrypted (the slot seals a passphrase, which a plaintext identity
 /// has none of). The master key must be in memory (i.e. the app is unlocked) for

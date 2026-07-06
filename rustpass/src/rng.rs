@@ -5,7 +5,7 @@
 //! Cryptographically-strong randomness primitives.
 //!
 //! Thin wrapper over the OS CSPRNG ([`getrandom`]) plus a uniform
-//! rejection-sampled index helper. Shared by at-rest key generation and the
+//! rejection-sampled index helper. Shared by seal key generation and the
 //! password generator — the analogue of gopass's `pkg/pwgen/rand.go`.
 
 use crate::error::{Error, ErrorCode};
@@ -15,7 +15,7 @@ use crate::error::{Error, ErrorCode};
 /// # Errors
 ///
 /// Returns [`ErrorCode::StoreError`] if the OS RNG fails (essentially never on a
-/// booted device; the same mapping the at-rest path has always used).
+/// booted device; the same mapping the seal path has always used).
 pub fn fill_random(out: &mut [u8]) -> Result<(), Error> {
     getrandom::getrandom(out)
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("OS RNG failed: {e}")))

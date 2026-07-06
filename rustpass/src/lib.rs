@@ -43,8 +43,6 @@
     clippy::pedantic
 )]
 
-/// At-rest AEAD encryption for local private files (`repo.json`, `identity`).
-pub mod atrest;
 /// Configuration and identity persistence.
 pub mod config;
 /// Age decryption backend.
@@ -61,6 +59,8 @@ pub mod identity;
 pub mod recipient;
 /// Cryptographically-strong randomness primitives (OS CSPRNG + uniform index).
 pub mod rng;
+/// At-rest AEAD encryption for local private files (`repo.json`, `identity`).
+pub mod seal;
 /// Decrypted secret type (gopass.Secret aligned).
 pub mod secret;
 /// Git commit signature extraction + SSH-sig verification (repo authenticity).

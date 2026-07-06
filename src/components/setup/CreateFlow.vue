@@ -32,9 +32,9 @@ const recipient = ref("");
 const identityKind = ref<CreateIdentityKind>("age");
 const passphrase = ref("");
 // Confirm-field controller — exposes validate()/reset() for the set-new-
-// passphrase check at generate (SSH) and at create (age at-rest).
+// passphrase check at generate (SSH) and at create (age seal).
 const pf = ref<InstanceType<typeof PassphraseField> | null>(null);
-// Forced "this age at-rest passphrase cannot be recovered" ack. SSH key-gen has
+// Forced "this age seal passphrase cannot be recovered" ack. SSH key-gen has
 // its own native protection and is explicitly out of scope. Reset on every
 // identity-kind switch (see selectKind) so an age ack can't leak into ssh.
 const ackAge = ref(false);
@@ -57,7 +57,7 @@ const error = ref("");
 const emit = defineEmits<{ done: [] }>();
 
 const isSshUrl = computed(() => isSshRepoUrl(repoUrl.value));
-// Ack is only required when an age at-rest passphrase has actually been typed
+// Ack is only required when an age seal passphrase has actually been typed
 // (empty optional = plaintext = no lockout risk).
 const ackRequired = computed(
   () => identityKind.value === "age" && !!passphrase.value && !ackAge.value,
@@ -184,7 +184,7 @@ async function onCreate() {
 
       // The identity was staged in backend state at generate time; this consumes
       // it (no secret crosses IPC). For SSH, reuse the passphrase that minted the
-      // key (snapshot); for age, the live field (at-rest encryption).
+      // key (snapshot); for age, the live field (seal encryption).
       await completeSetupFromFile(
         identityKind.value === "ssh"
           ? mintedSshPassphrase.value
@@ -258,7 +258,7 @@ async function onCreate() {
       </div>
     </div>
 
-    <!-- Passphrase (applied at generate for SSH, at-rest for age) -->
+    <!-- Passphrase (applied at generate for SSH, seal for age) -->
     <PassphraseField
       ref="pf"
       id="create-passphrase"
@@ -277,7 +277,7 @@ async function onCreate() {
       </template>
     </PassphraseField>
 
-    <!-- age at-rest: forced unrecoverable ack (only once a passphrase is
+    <!-- age seal: forced unrecoverable ack (only once a passphrase is
          typed; empty = plaintext = no lockout risk). SSH key-gen is out of
          scope — its passphrase uses SSH's own native protection. -->
     <PassphraseUnrecoverableAck

@@ -61,10 +61,10 @@ pub enum ErrorCode {
     /// decrypting with a plugin identity is not supported yet (recipients are).
     PluginIdentityNotSupported,
     /// At-rest envelope failed AEAD authentication (tampered or corrupt).
-    AtRestTampered,
-    /// An at-rest envelope exists but the master key is unavailable (Keystore
+    SealTampered,
+    /// An seal envelope exists but the master key is unavailable (Keystore
     /// wiped / app data cleared). Re-setup is required.
-    AtRestKeyUnavailable,
+    SealKeyUnavailable,
 }
 
 /// Safe error type that never contains secret content.
@@ -102,8 +102,8 @@ impl Error {
                 ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
                 ErrorCode::Cancelled => "CANCELLED",
                 ErrorCode::PostQuantumNotSupported => "POST_QUANTUM_NOT_SUPPORTED",
-                ErrorCode::AtRestTampered => "AT_REST_TAMPERED",
-                ErrorCode::AtRestKeyUnavailable => "AT_REST_KEY_UNAVAILABLE",
+                ErrorCode::SealTampered => "SEAL_TAMPERED",
+                ErrorCode::SealKeyUnavailable => "SEAL_KEY_UNAVAILABLE",
                 ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
                 ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
             }
@@ -198,8 +198,8 @@ mod tests {
             ErrorCode::IdentityNotEncrypted => "IDENTITY_NOT_ENCRYPTED",
             ErrorCode::Cancelled => "CANCELLED",
             ErrorCode::PostQuantumNotSupported => "POST_QUANTUM_NOT_SUPPORTED",
-            ErrorCode::AtRestTampered => "AT_REST_TAMPERED",
-            ErrorCode::AtRestKeyUnavailable => "AT_REST_KEY_UNAVAILABLE",
+            ErrorCode::SealTampered => "SEAL_TAMPERED",
+            ErrorCode::SealKeyUnavailable => "SEAL_KEY_UNAVAILABLE",
             ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
             ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
         }
@@ -229,8 +229,8 @@ mod tests {
             ErrorCode::IdentityNotEncrypted,
             ErrorCode::Cancelled,
             ErrorCode::PostQuantumNotSupported,
-            ErrorCode::AtRestTampered,
-            ErrorCode::AtRestKeyUnavailable,
+            ErrorCode::SealTampered,
+            ErrorCode::SealKeyUnavailable,
             ErrorCode::PluginUnavailable,
             ErrorCode::PluginIdentityNotSupported,
         ];
@@ -268,8 +268,8 @@ mod tests {
             ErrorCode::IdentityNotEncrypted,
             ErrorCode::Cancelled,
             ErrorCode::PostQuantumNotSupported,
-            ErrorCode::AtRestTampered,
-            ErrorCode::AtRestKeyUnavailable,
+            ErrorCode::SealTampered,
+            ErrorCode::SealKeyUnavailable,
             ErrorCode::PluginUnavailable,
             ErrorCode::PluginIdentityNotSupported,
         ];

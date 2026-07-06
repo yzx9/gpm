@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use serde_json;
 use tokio::fs;
 
-use crate::atrest::AtRest;
 use crate::crypto;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity};
+use crate::seal::Seal;
 use crate::signing::AuthenticityConfig;
 use crate::storage::GitAuth;
 
@@ -94,7 +94,7 @@ async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
 pub struct Config {
     config_dir: PathBuf,
     /// At-rest AEAD layer; `None` master key ⇒ plaintext passthrough.
-    atrest: AtRest,
+    seal: Seal,
 }
 
 impl Config {
@@ -106,17 +106,17 @@ impl Config {
     pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
         Self {
             config_dir,
-            atrest: AtRest::new(master_key),
+            seal: Seal::new(master_key),
         }
     }
 
-    /// Replace the at-rest master key at runtime. Used by the app-launch
+    /// Replace the seal master key at runtime. Used by the app-launch
     /// biometric lock to inject the key after the unlock prompt (retrieved from
     /// the biometric-gated Keystore) and to wipe it (`None`) when the process is
-    /// backgrounded, so a locked store's envelopes fail `AtRestKeyUnavailable`
+    /// backgrounded, so a locked store's envelopes fail `SealKeyUnavailable`
     /// until the next unlock. On desktop the key stays `None` (passthrough).
     pub fn set_master_key(&self, master_key: Option<[u8; 32]>) {
-        self.atrest.set_key(master_key);
+        self.seal.set_key(master_key);
     }
 
     /// Get the config directory used by this instance.
@@ -156,7 +156,7 @@ impl Config {
             Some(pw) if !pw.is_empty() => crypto::encrypt_identity(pw, identity)?,
             _ => identity.to_vec(),
         };
-        let sealed = self.atrest.seal("identity", &inner)?;
+        let sealed = self.seal.seal("identity", &inner)?;
 
         save_atomic(&self.identity_path(), &sealed).await
     }
@@ -188,7 +188,7 @@ impl Config {
             ));
         }
         let raw = fs::read(&path).await?;
-        self.atrest.unseal("identity", &raw)
+        self.seal.unseal("identity", &raw)
     }
 
     /// Delete the stored identity.
@@ -206,7 +206,7 @@ impl Config {
 
     /// Path of the optional identity-passphrase slot used by the app-launch
     /// biometric gate's identity-auto-unlock opt-in (RFC 0028). When that opt-in
-    /// is on, the identity passphrase is AEAD-sealed under the at-rest master
+    /// is on, the identity passphrase is AEAD-sealed under the seal master
     /// key here — so a successful app-unlock (which retrieves the master key via
     /// one biometric prompt) can unlock the identity with NO second prompt. The
     /// master key (biometric-gated when app-lock is on) gates this slot, so the
@@ -215,7 +215,7 @@ impl Config {
         self.config_dir.join("app_id_pass")
     }
 
-    /// Seal `passphrase` under the at-rest master key into the identity-pass
+    /// Seal `passphrase` under the seal master key into the identity-pass
     /// slot. No-op-equivalent on desktop (the key is `None` ⇒ passthrough, so
     /// the slot stores plaintext — acceptable since desktop has no app-lock).
     ///
@@ -227,7 +227,7 @@ impl Config {
     /// seal fails, or the file cannot be written.
     pub async fn save_app_identity_pass(&self, passphrase: &[u8]) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
-        let sealed = self.atrest.seal("app_identity_pass", passphrase)?;
+        let sealed = self.seal.seal("app_identity_pass", passphrase)?;
         save_atomic(&self.app_identity_pass_path(), &sealed).await
     }
 
@@ -238,7 +238,7 @@ impl Config {
     /// # Errors
     ///
     /// Returns an error if the file cannot be read or the AEAD unseal fails
-    /// (e.g. `AtRestKeyUnavailable` while the master key is wiped).
+    /// (e.g. `SealKeyUnavailable` while the master key is wiped).
     pub async fn load_app_identity_pass(&self) -> Result<Vec<u8>, Error> {
         let path = self.app_identity_pass_path();
         if !path.exists() {
@@ -248,7 +248,7 @@ impl Config {
             ));
         }
         let raw = fs::read(&path).await?;
-        self.atrest.unseal("app_identity_pass", &raw)
+        self.seal.unseal("app_identity_pass", &raw)
     }
 
     /// Clear the identity-passphrase slot (best-effort). Used when the opt-in is
@@ -319,7 +319,7 @@ impl Config {
     pub async fn save_repo_config_full(&self, config: &RepoConfig) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
         let json = serde_json::to_string_pretty(config)?;
-        let sealed = self.atrest.seal("repo_config", json.as_bytes())?;
+        let sealed = self.seal.seal("repo_config", json.as_bytes())?;
         save_atomic(&self.repo_config_path(), &sealed).await
     }
 
@@ -338,7 +338,7 @@ impl Config {
             ));
         }
         let raw = fs::read(&path).await?;
-        let json = self.atrest.unseal("repo_config", &raw)?;
+        let json = self.seal.unseal("repo_config", &raw)?;
         let config: RepoConfig = serde_json::from_slice(&json)?;
         Ok(config)
     }
@@ -370,41 +370,75 @@ impl Config {
         Ok(())
     }
 
-    /// Migrate any plaintext config files to the at-rest envelope.
+    /// Migrate private files onto the current seal envelope.
     ///
-    /// No-op when no master key is configured (desktop / tests) and for files
-    /// already wrapped. For each existing plaintext file: seal it, verify the
-    /// roundtrip, then commit atomically — a crash mid-migration leaves the
-    /// plaintext intact.
+    /// For each file: seal plaintext, and re-wrap any legacy-magic (`GPMATR1`)
+    /// envelope as `GPMSEL1`. No-op when no master key is configured (desktop /
+    /// tests), for current-magic envelopes, and for missing files. Each change
+    /// is verified by roundtrip then committed atomically, so a crash leaves the
+    /// prior bytes intact. Covers `repo_config`, `identity`, and the optional
+    /// identity-auto-unlock passphrase slot (file `app_id_pass`, AAD `app_identity_pass`).
+    ///
+    /// When the master key is absent (App Lock deferred at cold start), legacy
+    /// re-wraps soft-skip rather than error — see [`wrap_if_needed`].
     ///
     /// # Errors
     ///
     /// Returns an error if a file cannot be read, sealed/unsealed, or written.
-    pub async fn migrate_at_rest(&self) -> Result<(), Error> {
-        self.wrap_if_plain(&self.repo_config_path(), "repo_config")
+    pub async fn migrate_seal(&self) -> Result<(), Error> {
+        self.wrap_if_needed(&self.repo_config_path(), "repo_config")
             .await?;
-        self.wrap_if_plain(&self.identity_path(), "identity")
+        self.wrap_if_needed(&self.identity_path(), "identity")
+            .await?;
+        self.wrap_if_needed(&self.app_identity_pass_path(), "app_identity_pass")
             .await?;
         Ok(())
     }
 
-    /// If `path` holds plaintext (not an envelope), re-wrap it through the
-    /// at-rest layer. No-op for envelopes and for missing files.
-    async fn wrap_if_plain(&self, path: &Path, name: &str) -> Result<(), Error> {
+    /// If `path` holds plaintext, seal it; if it holds a legacy-magic envelope,
+    /// re-wrap it under the current magic. No-op for current-magic envelopes and
+    /// missing files.
+    ///
+    /// A legacy re-wrap whose master key is absent (App Lock deferred at cold
+    /// start) **soft-skips** — returns `Ok(())` with the file untouched — so the
+    /// startup migrate stays a clean no-op under App Lock; conversion then runs
+    /// via the one-shot post-unlock migrate in `applock::app_unlock`. A tampered
+    /// envelope (wrong key) still propagates as [`ErrorCode::SealTampered`].
+    async fn wrap_if_needed(&self, path: &Path, name: &str) -> Result<(), Error> {
         if !path.exists() {
             return Ok(());
         }
         let raw = fs::read(path).await?;
-        if crate::atrest::is_envelope(&raw) {
+        if crate::seal::is_envelope(&raw) {
+            // TODO: v1.0.x — remove this legacy re-wrap branch with LEGACY_MAGIC.
+            if crate::seal::is_legacy_envelope(&raw) {
+                // Soft-skip SealKeyUnavailable: key absent = App Lock deferred
+                // at cold start, expected, not an error. Tampered propagates.
+                let plain = match self.seal.unseal(name, &raw) {
+                    Ok(p) => p,
+                    Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => return Ok(()),
+                    Err(e) => return Err(e),
+                };
+                let resealed = self.seal.seal(name, &plain)?;
+                // Verify the roundtrip before committing, so a broken re-wrap
+                // never overwrites a readable envelope.
+                if self.seal.unseal(name, &resealed)? != plain {
+                    return Err(Error::new(
+                        ErrorCode::StoreError,
+                        "seal migration roundtrip check failed",
+                    ));
+                }
+                save_atomic(path, &resealed).await?;
+            }
             return Ok(());
         }
-        let sealed = self.atrest.seal(name, &raw)?;
+        let sealed = self.seal.seal(name, &raw)?;
         // Verify the roundtrip before committing, so a broken seal never
         // overwrites readable plaintext.
-        if self.atrest.unseal(name, &sealed)? != raw {
+        if self.seal.unseal(name, &sealed)? != raw {
             return Err(Error::new(
                 ErrorCode::StoreError,
-                "at-rest migration roundtrip check failed",
+                "seal migration roundtrip check failed",
             ));
         }
         save_atomic(path, &sealed).await
@@ -456,7 +490,7 @@ pub struct RepoConfig {
     /// `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub clipboard_clear_secs: Option<u64>,
-    /// Whether the app-launch biometric gate is enabled. When `true` the at-rest
+    /// Whether the app-launch biometric gate is enabled. When `true` the seal
     /// master key is sealed in the biometric-gated Keystore (injected after the
     /// unlock prompt, wiped on background) instead of the auth-free store, so the
     /// whole store is unreadable until the user authenticates on launch/resume.
@@ -1019,26 +1053,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migrate_at_rest_wraps_plaintext_and_roundtrips() {
+    async fn migrate_seal_wraps_plaintext_and_roundtrips() {
         let dir = tempfile::tempdir().unwrap();
-        let key = crate::atrest::generate_master_key().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
 
         // Simulate a pre-migration plaintext repo.json on disk.
         std::fs::create_dir_all(dir.path()).unwrap();
         let plaintext = r#"{"url":"https://x/repo","pat":"secret","local_path":"/p"}"#;
         std::fs::write(dir.path().join("repo.json"), plaintext).unwrap();
         assert!(
-            !crate::atrest::is_envelope(&std::fs::read(dir.path().join("repo.json")).unwrap()),
+            !crate::seal::is_envelope(&std::fs::read(dir.path().join("repo.json")).unwrap()),
             "precondition: plaintext file"
         );
 
         let cfg = Config::new(dir.path().to_path_buf(), Some(key));
-        cfg.migrate_at_rest().await.unwrap();
+        cfg.migrate_seal().await.unwrap();
 
-        // The file is now an at-rest envelope, and still loads correctly.
+        // The file is now an seal envelope, and still loads correctly.
         let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
         assert!(
-            crate::atrest::is_envelope(&raw),
+            crate::seal::is_envelope(&raw),
             "repo.json should be wrapped"
         );
         let rc = cfg.load_repo_config().await.unwrap();
@@ -1046,7 +1080,73 @@ mod tests {
         assert_eq!(rc.pat.as_deref(), Some("secret"));
 
         // Idempotent: a second migration is a no-op (already wrapped).
-        cfg.migrate_at_rest().await.unwrap();
+        cfg.migrate_seal().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn migrate_seal_rewraps_legacy_envelope() {
+        // A pre-rename on-disk envelope carries the GPMATR1 magic. Build one by
+        // sealing with the current key, then patching the 7-byte magic back —
+        // the magic is a plaintext prefix (not AEAD-authenticated), so the tag
+        // still verifies and this faithfully reproduces an old file.
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        std::fs::create_dir_all(dir.path()).unwrap();
+
+        let plaintext = br#"{"url":"https://x/repo","pat":"secret","local_path":"/p"}"#;
+        let sealer = Seal::new(Some(key));
+        let mut legacy = sealer.seal("repo_config", plaintext).unwrap();
+        assert!(legacy.starts_with(b"GPMSEL1"));
+        legacy.get_mut(..7).unwrap().copy_from_slice(b"GPMATR1");
+        std::fs::write(dir.path().join("repo.json"), &legacy).unwrap();
+        assert!(crate::seal::is_legacy_envelope(&legacy));
+
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        cfg.migrate_seal().await.unwrap();
+
+        // Re-wrapped to the current magic, still decryptable to the same bytes.
+        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        assert!(
+            raw.starts_with(b"GPMSEL1"),
+            "should be re-wrapped to GPMSEL1"
+        );
+        assert!(!crate::seal::is_legacy_envelope(&raw));
+        let rc = cfg.load_repo_config().await.unwrap();
+        assert_eq!(rc.url, "https://x/repo");
+        assert_eq!(rc.pat.as_deref(), Some("secret"));
+
+        // Idempotent: a second migration is a no-op (now current magic).
+        cfg.migrate_seal().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn migrate_seal_soft_skips_legacy_when_key_absent() {
+        // App-Lock cold start: the master key is NOT injected yet, but a legacy
+        // envelope already sits on disk. The migrate must soft-skip (Ok, file
+        // untouched), NOT error — the post-unlock migrate converts it once the
+        // key arrives. Regression for the App-Lock cold-start timing.
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        std::fs::create_dir_all(dir.path()).unwrap();
+
+        let plaintext = br#"{"url":"https://x/repo","pat":"secret","local_path":"/p"}"#;
+        let sealer = Seal::new(Some(key));
+        let mut legacy = sealer.seal("repo_config", plaintext).unwrap();
+        legacy.get_mut(..7).unwrap().copy_from_slice(b"GPMATR1");
+        std::fs::write(dir.path().join("repo.json"), &legacy).unwrap();
+
+        // Config built WITHOUT the key (App Lock deferred at cold start).
+        let cfg = Config::new(dir.path().to_path_buf(), None);
+        // Must not error — the soft-skip returns Ok.
+        cfg.migrate_seal().await.unwrap();
+
+        // File untouched — still the legacy envelope, readable later via dual-read.
+        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        assert!(
+            crate::seal::is_legacy_envelope(&raw),
+            "soft-skip leaves the file untouched"
+        );
+        assert_eq!(raw, legacy);
     }
 
     #[tokio::test]
@@ -1056,10 +1156,10 @@ mod tests {
         cfg.save_repo_config("https://x/repo", Some("pat"), None, None, "/p")
             .await
             .unwrap();
-        cfg.migrate_at_rest().await.unwrap();
+        cfg.migrate_seal().await.unwrap();
         let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
         assert!(
-            !crate::atrest::is_envelope(&raw),
+            !crate::seal::is_envelope(&raw),
             "passthrough must not wrap files"
         );
     }
@@ -1173,7 +1273,7 @@ mod tests {
         // another (or with the key absent once it has been used) — the AAD +
         // AEAD tag enforce that the slot stays under its sealing key.
         let dir = tempfile::tempdir().unwrap();
-        let key = crate::atrest::generate_master_key().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
         let sealed_cfg = Config::new(dir.path().to_path_buf(), Some(key));
         sealed_cfg
             .save_app_identity_pass(b"secret-pass")
@@ -1188,10 +1288,10 @@ mod tests {
 
         // A different key (a fresh store pointing at the same dir) cannot open
         // the slot the first key sealed.
-        let other_key = crate::atrest::generate_master_key().unwrap();
+        let other_key = crate::seal::generate_master_key().unwrap();
         let other_cfg = Config::new(dir.path().to_path_buf(), Some(other_key));
         let err = other_cfg.load_app_identity_pass().await.unwrap_err();
-        assert_eq!(err.code, "AT_REST_TAMPERED");
+        assert_eq!(err.code, "SEAL_TAMPERED");
     }
 
     #[tokio::test]

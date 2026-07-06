@@ -63,14 +63,14 @@ const picking = ref(false);
 const verifying = ref(false);
 const deriving = ref(false);
 const error = ref("");
-// Confirm-field controller for the x25519 at-rest passphrase (validate/reset).
+// Confirm-field controller for the x25519 seal passphrase (validate/reset).
 const pf = ref<InstanceType<typeof PassphraseField> | null>(null);
-// Forced "this x25519 at-rest passphrase cannot be recovered" ack. SSH keys
+// Forced "this x25519 seal passphrase cannot be recovered" ack. SSH keys
 // and the file/verify paths are out of scope. Reset whenever the passphrase OR
 // the pasted identity changes (watches below) so a stale ack can't carry
 // across contexts or be reused for a different committed value.
 const ackX25519 = ref(false);
-// Required only on the paste+x25519 at-rest path, and only once a passphrase is
+// Required only on the paste+x25519 seal path, and only once a passphrase is
 // actually typed (empty optional = plaintext = no lockout risk).
 const ackRequired = computed(
   () =>
@@ -200,7 +200,7 @@ function validateStep2(): string | null {
       !derivedRecipient.value
     )
       return "Verify your SSH key first";
-    // x25519 at-rest passphrase confirmation (pf is null on SSH/file paths —
+    // x25519 seal passphrase confirmation (pf is null on SSH/file paths —
     // those enter an existing passphrase, not a new one to confirm).
     const passphraseError = pf.value?.validate() ?? null;
     if (passphraseError) return passphraseError;
@@ -669,7 +669,7 @@ onUnmounted(clearPendingFile);
       >
     </div>
 
-    <!-- Optional at-rest encryption (paste path; x25519 keys only) -->
+    <!-- Optional seal encryption (paste path; x25519 keys only) -->
     <PassphraseField
       v-else-if="identitySource === 'paste' && identityType === 'x25519'"
       ref="pf"
@@ -695,9 +695,9 @@ onUnmounted(clearPendingFile);
       </template>
     </PassphraseField>
 
-    <!-- x25519 at-rest: forced unrecoverable ack (only once a passphrase is
+    <!-- x25519 seal: forced unrecoverable ack (only once a passphrase is
          typed; empty = plaintext = no lockout risk). The SSH-key passphrase
-         field above decrypts an existing key rather than setting a new at-rest
+         field above decrypts an existing key rather than setting a new seal
          passphrase, so it gets no ack. -->
     <PassphraseUnrecoverableAck
       v-if="

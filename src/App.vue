@@ -67,7 +67,7 @@ onMounted(() => {
     </router-view>
     <!--
       App-launch biometric gate overlay: shown over everything while the
-      at-rest master key is not in memory (cold start with the gate on, or after
+      seal master key is not in memory (cold start with the gate on, or after
       a background re-lock). Sits above the identity UnlockModal (z-index 70 vs
       60) and suppresses it while up, so the two gates never race to show
       competing prompts.

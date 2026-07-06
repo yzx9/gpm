@@ -180,7 +180,7 @@ pub(crate) async fn clone_repo(
 ///
 /// `Age` mints a native x25519 key; `Ssh` mints an ed25519 keypair, optionally
 /// encrypted with `passphrase`. For `Age` the `passphrase` is ignored at mint
-/// time (it is applied as at-rest encryption by `complete_setup_from_file`).
+/// time (it is applied as seal encryption by `complete_setup_from_file`).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn generate_identity(
@@ -673,6 +673,7 @@ mod tests {
             clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
             app_lock_enabled: std::sync::atomic::AtomicBool::new(false),
             app_locked: std::sync::atomic::AtomicBool::new(false),
+            seal_migrate_state: std::sync::atomic::AtomicU8::new(0),
             active_cancel_token: Mutex::new(None),
         };
         (state, dir)

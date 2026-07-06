@@ -54,7 +54,7 @@ export async function getAppLockState(): Promise<AppLockState> {
 }
 
 /**
- * Enable the gate: migrate the at-rest master key behind biometric. Shows a
+ * Enable the gate: migrate the seal master key behind biometric. Shows a
  * BiometricPrompt; rejects with {@link AppLockError} on cancel/failure.
  */
 export async function enableBiometricAppLock(): Promise<void> {

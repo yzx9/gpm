@@ -522,7 +522,7 @@ describe("CreateFlow", () => {
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
 
-    // Type an at-rest passphrase → ack appears, unchecked → Create Store disabled.
+    // Type an seal passphrase → ack appears, unchecked → Create Store disabled.
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
     await wrapper
       .find('input[id="create-passphrase-confirm"]')

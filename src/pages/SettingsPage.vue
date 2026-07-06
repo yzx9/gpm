@@ -280,7 +280,7 @@ const VERIFY_MODES: {
 
 // Whether the stored identity is an SSH key. SSH keys are never
 // passphrase-encrypted by gpm (they rely on their own native protection),
-// so the at-rest encryption UI is hidden for them.
+// so the seal encryption UI is hidden for them.
 const isSshIdentity = computed(
   () =>
     identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",

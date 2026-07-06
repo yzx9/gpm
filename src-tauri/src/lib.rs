@@ -19,7 +19,7 @@
     clippy::pedantic
 )]
 
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
@@ -79,7 +79,7 @@ pub(crate) struct AppState {
     /// (re)arm. The spawned task self-disarms if a newer arm happened while it
     /// slept.
     pub(crate) clipboard_clear_generation: Arc<AtomicU64>,
-    /// Whether the app-launch biometric gate is enabled (the at-rest master key
+    /// Whether the app-launch biometric gate is enabled (the seal master key
     /// is sealed in the biometric-gated Keystore). Probed at startup from the
     /// key's location and updated on enable/disable. Drives whether the frontend
     /// ever shows the app-lock overlay.
@@ -89,6 +89,12 @@ pub(crate) struct AppState {
     /// `applock::app_unlock`. Drives the frontend app-lock overlay (which
     /// suppresses the identity overlay while up, so the two never compete).
     pub(crate) app_locked: AtomicBool,
+    /// One-shot state for the post-unlock legacy-envelope migrate
+    /// (`0` = Pending, `1` = `InFlight`, `2` = Done). App Lock defers the master
+    /// key until `app_unlock`, so the startup migrate soft-skips; the first
+    /// unlock claims this and runs `migrate_seal` to convert `GPMATR1`
+    /// envelopes to `GPMSEL1`. TODO: v1.0.x — remove with the legacy-magic path.
+    pub(crate) seal_migrate_state: AtomicU8,
     /// Cancel token for the in-flight clone/pull (if any). Set by the
     /// `cancel_git` command; cleared by the owning command once the operation
     /// settles. `None` outside a user-initiated clone/pull.
@@ -112,10 +118,10 @@ pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
     bytes.try_into().ok()
 }
 
-/// Fetch the sealed at-rest master key, generating + sealing one on first run.
+/// Fetch the sealed seal master key, generating + sealing one on first run.
 ///
 /// Returns `None` on desktop (no Keystore) or if the Keystore is unavailable /
-/// errors — in which case at-rest encryption degrades to plaintext passthrough
+/// errors — in which case seal encryption degrades to plaintext passthrough
 /// (logged, non-fatal). A freshly generated key that cannot be sealed is
 /// discarded (`None`) rather than used unpersisted, so it can never orphan
 /// later envelopes behind a key the next run won't have.
@@ -129,14 +135,14 @@ async fn master_key_from<R: tauri::Runtime>(
         return decode_master_key(&b64);
     }
     // No sealed key yet: generate + seal a fresh master key.
-    let key = rustpass::atrest::generate_master_key().ok()?;
+    let key = rustpass::seal::generate_master_key().ok()?;
     // Seal before adopting — an unpersisted key would orphan future envelopes
     // on the next run.
     ks.store(&B64.encode(key)).await.ok()?;
     Some(key)
 }
 
-/// Resolve the at-rest master key + app-lock state at startup.
+/// Resolve the seal master key + app-lock state at startup.
 ///
 /// When a biometric-gated master key exists (the app-launch gate is on), the
 /// key is deliberately NOT loaded here — it is injected after the app-unlock
@@ -158,7 +164,7 @@ async fn startup_master_key<R: tauri::Runtime>(
 // ---------------------------------------------------------------------------
 
 /// Build the initial [`AppState`] during Tauri setup: resolve the config dir,
-/// load (or defer, when app-lock is on) the at-rest master key, run the one-time
+/// load (or defer, when app-lock is on) the seal master key, run the one-time
 /// plaintext→envelope migration, and assemble the state. Extracted from
 /// [`run`] so the entry point stays a thin builder.
 ///
@@ -182,13 +188,13 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // toggle. Borrows `config_dir` before it is moved into `Store` below.
     let app_config = app_config::AppConfigStore::new(&config_dir);
     let store = Arc::new(Store::new(config_dir, master_key));
-    // One-time migration of any pre-existing plaintext files into the at-rest
+    // One-time migration of any pre-existing plaintext files into the seal
     // envelope (no-op on desktop / already-wrapped). Each file is wrapped
     // atomically with a roundtrip check, so a failure leaves plaintext intact —
     // logged, non-fatal. With app-lock on the master key is absent here, so
     // this is a no-op over the existing envelopes.
-    if let Err(e) = tauri::async_runtime::block_on(store.migrate_at_rest()) {
-        eprintln!("[gpm] at-rest migration failed: {e}");
+    if let Err(e) = tauri::async_runtime::block_on(store.migrate_seal()) {
+        eprintln!("[gpm] seal migration failed: {e}");
     }
 
     AppState {
@@ -206,6 +212,9 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         app_lock_enabled: AtomicBool::new(app_lock_enabled),
         // Locked at startup iff the gate is on (master key not yet injected).
         app_locked: AtomicBool::new(app_lock_enabled),
+        // Legacy-envelope migrate pending; only consumed on the App-Lock path
+        // (first app_unlock). Stays Pending on non-app-lock/desktop (no unlock).
+        seal_migrate_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
     }
 }
@@ -333,7 +342,7 @@ mod decode_master_key_tests {
 
     #[test]
     fn valid_32_byte_key_roundtrips() {
-        let key = rustpass::atrest::generate_master_key().unwrap();
+        let key = rustpass::seal::generate_master_key().unwrap();
         let b64 = B64.encode(key);
         assert_eq!(decode_master_key(&b64), Some(key));
     }

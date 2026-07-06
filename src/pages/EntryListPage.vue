@@ -206,8 +206,8 @@ function retry() {
   void fetchPage("", 0, true);
 }
 
-// App-Lock recovery: with the at-rest gate on, the cold-start list fetch fails
-// `AtRestKeyUnavailable` while `repo.json` is sealed, and the page intentionally
+// App-Lock recovery: with the seal gate on, the cold-start list fetch fails
+// `SealKeyUnavailable` while `repo.json` is sealed, and the page intentionally
 // surfaces that as a "locked" error — it tells the user the content needs an
 // unlock, and because the fetch failed no entry data was loaded, so only the
 // chrome + message are visible behind the (semi-transparent) AppLockOverlay.
