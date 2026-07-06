@@ -392,7 +392,10 @@ pub(crate) fn arm_clipboard_clear<R: Runtime>(
         h.abort();
     }
 
-    let generation = state.clipboard_clear_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let generation = state
+        .clipboard_clear_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
     let generation_cell = state.clipboard_clear_generation.clone();
     let app_handle = app.clone();
 
@@ -408,7 +411,11 @@ pub(crate) fn arm_clipboard_clear<R: Runtime>(
         // window, the receiver already cleared the clipboard + dismissed the
         // notification — self-skip so we don't clobber unrelated content the
         // user placed after the tap.
-        if app_handle.clipboard_notify().consume_manual_clear_flag().await {
+        if app_handle
+            .clipboard_notify()
+            .consume_manual_clear_flag()
+            .await
+        {
             return;
         }
 

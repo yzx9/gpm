@@ -10,16 +10,16 @@
 //! in-memory string from the standalone generator) rely on. Both paths also
 //! post the sticky Android notification (best-effort; no-op on desktop).
 
-use rustpass::error::ErrorCode;
 use rustpass::Error;
+use rustpass::error::ErrorCode;
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
 use zeroize::Zeroizing;
 
+use crate::AppState;
 use crate::identity::{arm_clipboard_clear, disarm_clipboard_clear};
 use crate::read::clipboard_clear_plan;
-use crate::AppState;
 
 /// Write `text` to the system clipboard, then arm the cancellable auto-clear
 /// for the configured `clipboard_clear_secs` and post the sticky notification.

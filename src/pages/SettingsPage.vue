@@ -1315,10 +1315,7 @@ onMounted(() => {
         <div class="text-xs text-muted mb-1">
           Trusted signing keys ({{ trustedKeyRows.length }})
         </div>
-        <ul
-          v-if="trustedKeyRows.length"
-          class="flex flex-col gap-1 mb-2"
-        >
+        <ul v-if="trustedKeyRows.length" class="flex flex-col gap-1 mb-2">
           <li
             v-for="row in trustedKeyRows"
             :key="row.kind + ':' + row.fingerprint"
@@ -1330,7 +1327,9 @@ onMounted(() => {
               class="text-[0.6rem] text-subtle px-1 rounded-sm bg-edge shrink-0"
               >GPG</span
             >
-            <span class="text-xs text-muted mx-2 truncate">{{ row.label }}</span>
+            <span class="text-xs text-muted mx-2 truncate">{{
+              row.label
+            }}</span>
             <button
               type="button"
               class="btn-copy"

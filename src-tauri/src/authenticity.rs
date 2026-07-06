@@ -6,15 +6,15 @@
 //! signing keys, and the Off / Audit / Enforce verification modes.
 
 use rustpass::{
-    AuthenticityConfig, CommitSigInfo, CommitSigStatus, Error, ErrorCode, TrustedGpgKey, TrustedKey,
-    VerifyMode,
+    AuthenticityConfig, CommitSigInfo, CommitSigStatus, Error, ErrorCode, TrustedGpgKey,
+    TrustedKey, VerifyMode,
 };
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_file_picker::FilePickerExt;
 
-use crate::setup::map_file_picker_error;
 use crate::AppState;
+use crate::setup::map_file_picker_error;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -176,10 +176,7 @@ pub(crate) async fn add_trusted_signing_key(
         .trim()
         .starts_with("-----BEGIN PGP PUBLIC KEY BLOCK")
     {
-        let key = state
-            .store
-            .add_trusted_gpg_key(&armored, &label)
-            .await?;
+        let key = state.store.add_trusted_gpg_key(&armored, &label).await?;
         Ok(AddedTrustedKey::Gpg(key))
     } else {
         let key = state.store.add_trusted_key(&armored, &label).await?;
@@ -307,10 +304,7 @@ mod stage_gpg_key_tests {
         let big = vec![b'A'; MAX_GPG_KEY_FILE_BYTES + 1];
         let err = stage_gpg_key_from_bytes(&big, Some("k.asc"), "lbl").unwrap_err();
         assert_eq!(err.code, "SSH_KEY_INVALID");
-        assert!(
-            err.message.contains("too large"),
-            "got: {err}"
-        );
+        assert!(err.message.contains("too large"), "got: {err}");
     }
 
     #[test]
@@ -334,8 +328,7 @@ mod stage_gpg_key_tests {
 
     #[test]
     fn blank_label_is_prefilled_from_filename_stem() {
-        let (_, label) =
-            stage_gpg_key_from_bytes(b"armor", Some("alice.asc"), "   ").expect("ok");
+        let (_, label) = stage_gpg_key_from_bytes(b"armor", Some("alice.asc"), "   ").expect("ok");
         assert_eq!(label, "alice", "blank label should take the filename stem");
     }
 

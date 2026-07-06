@@ -27,7 +27,9 @@ export async function ensureClipboardNotifyPermission(): Promise<void> {
   // The notification is a best-effort UX layer; a broken permission probe must
   // never brick the copy. Any error here degrades to "skip prompt, still copy".
   try {
-    const enabled = await invoke<boolean>("are_clipboard_notifications_enabled");
+    const enabled = await invoke<boolean>(
+      "are_clipboard_notifications_enabled",
+    );
     if (enabled) return;
     if (localStorage.getItem(ASKED_KEY)) return;
 

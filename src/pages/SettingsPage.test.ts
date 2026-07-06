@@ -880,9 +880,7 @@ describe("SettingsPage", () => {
       await flushPromises();
 
       // The silent Verified→UnverifiedSignature downgrade must be visible.
-      expect(wrapper.text()).toContain(
-        "1 trusted GPG key(s) failed to load",
-      );
+      expect(wrapper.text()).toContain("1 trusted GPG key(s) failed to load");
     });
 
     it("switches verification mode", async () => {

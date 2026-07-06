@@ -171,7 +171,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .setup(|app, #[allow(unused_variables)] api| {
             #[cfg(target_os = "android")]
             {
-                let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "ClipboardNotifyPlugin")?;
+                let handle =
+                    api.register_android_plugin(PLUGIN_IDENTIFIER, "ClipboardNotifyPlugin")?;
                 app.manage(ClipboardNotify(handle));
             }
             #[cfg(not(target_os = "android"))]

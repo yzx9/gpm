@@ -75,15 +75,12 @@ const unverifiedSignerFp = computed(() => {
       </li>
     </ul>
     <div class="flex flex-col gap-2">
-      <p
-        v-if="unverifiedIssue"
-        class="text-xs text-muted mb-1 break-words"
-      >
+      <p v-if="unverifiedIssue" class="text-xs text-muted mb-1 break-words">
         GPG-signed commit
-        <code class="text-xs">{{ unverifiedIssue.short_hash }}</code> was made by
-        a signer you haven't trusted. GPG signatures don't embed the public key,
-        so open <strong>Settings → Trusted signing keys</strong> and add (or
-        import) that signer's armored public key to verify it.
+        <code class="text-xs">{{ unverifiedIssue.short_hash }}</code> was made
+        by a signer you haven't trusted. GPG signatures don't embed the public
+        key, so open <strong>Settings → Trusted signing keys</strong> and add
+        (or import) that signer's armored public key to verify it.
         <span v-if="unverifiedSignerFp">
           Issuer fingerprint:
           <code class="break-all">{{ unverifiedSignerFp }}</code>

@@ -196,19 +196,16 @@ pub(crate) fn verify_detached(
     // 8-byte key-id rendered as stable uppercase hex (matching GnuPG's long
     // key-id display). `KeyId: AsRef<[u8]>` gives the raw bytes; hex-encoding
     // them is stable across rpgp versions, unlike `Debug`.
-    let issuer = issuer_fps
-        .first()
-        .map(|fp| format!("{fp}"))
-        .or_else(|| {
-            issuer_kids.first().map(|kid| {
-                let mut hex = String::with_capacity(kid.as_ref().len() * 2);
-                for b in kid.as_ref() {
-                    // Writing to a String never fails.
-                    let _ = write!(hex, "{b:02X}");
-                }
-                hex
-            })
-        });
+    let issuer = issuer_fps.first().map(|fp| format!("{fp}")).or_else(|| {
+        issuer_kids.first().map(|kid| {
+            let mut hex = String::with_capacity(kid.as_ref().len() * 2);
+            for b in kid.as_ref() {
+                // Writing to a String never fails.
+                let _ = write!(hex, "{b:02X}");
+            }
+            hex
+        })
+    });
     match issuer {
         Some(fp) => GpgOutcome::Unverified { issuer_fp: fp },
         None => GpgOutcome::Unknown,

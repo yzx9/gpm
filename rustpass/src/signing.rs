@@ -1070,7 +1070,10 @@ mod tests {
     #[test]
     fn has_any_trusted_key_counts_ssh_and_gpg() {
         let empty = AuthenticityConfig::default();
-        assert!(!empty.has_any_trusted_key(), "empty config has no trusted key");
+        assert!(
+            !empty.has_any_trusted_key(),
+            "empty config has no trusted key"
+        );
 
         let ssh_only = AuthenticityConfig {
             trusted_keys: vec![TrustedKey {

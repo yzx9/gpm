@@ -30,22 +30,14 @@ async fn arm_clear_sets_handle_and_bumps_generation() {
         "precondition: generation starts at 0"
     );
     assert!(
-        app_state
-            .clipboard_clear_handle
-            .lock()
-            .unwrap()
-            .is_none(),
+        app_state.clipboard_clear_handle.lock().unwrap().is_none(),
         "precondition: no armed handle"
     );
 
     identity::arm_clipboard_clear(&app_state, app.handle(), 60);
 
     assert!(
-        app_state
-            .clipboard_clear_handle
-            .lock()
-            .unwrap()
-            .is_some(),
+        app_state.clipboard_clear_handle.lock().unwrap().is_some(),
         "arm must store a spawned task"
     );
     assert!(
@@ -76,11 +68,7 @@ async fn re_arm_bumps_generation_past_prior_task() {
          generation is stale and it self-disarms on wake — the overlap fix"
     );
     assert!(
-        app_state
-            .clipboard_clear_handle
-            .lock()
-            .unwrap()
-            .is_some(),
+        app_state.clipboard_clear_handle.lock().unwrap().is_some(),
         "re-arm must leave a single armed (copy-B) handle"
     );
 }
@@ -101,11 +89,7 @@ async fn disarm_clear_aborts_handle_and_bumps_generation() {
     identity::disarm_clipboard_clear(&app_state);
 
     assert!(
-        app_state
-            .clipboard_clear_handle
-            .lock()
-            .unwrap()
-            .is_none(),
+        app_state.clipboard_clear_handle.lock().unwrap().is_none(),
         "disarm must clear the armed handle"
     );
     assert!(

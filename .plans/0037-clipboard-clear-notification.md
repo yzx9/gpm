@@ -23,7 +23,7 @@ to short-circuit the window once the user is done pasting. The most common
 workflow — copy from gpm, switch to another app, paste, done — leaves the secret
 on the clipboard for the full timeout with no reminder and no manual clear.
 
-A notification fixes both, but only if tapping it clears *without* yanking the
+A notification fixes both, but only if tapping it clears _without_ yanking the
 user back into gpm. The user taps "clear" from inside the browser or login form
 they just pasted into; foregrounding gpm on the tap destroys that context. So
 the manual-clear action must be processed natively on the Android side, with no
@@ -76,7 +76,7 @@ The timer is the security backstop; the notification is best-effort UI. Two
 cases must not be modeled backwards:
 
 - **Android 14+** lets the user dismiss even an "ongoing" notification by swipe.
-  A user-dismissed notification must *not* cancel the armed timer — the secret
+  A user-dismissed notification must _not_ cancel the armed timer — the secret
   is still on the clipboard and the timer must still fire. Dismissal is purely
   cosmetic.
 - If the app process is killed mid-window, both timer and notification die and

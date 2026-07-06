@@ -16,7 +16,9 @@ use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
-use crate::identity::{arm_clipboard_clear, disarm_clipboard_clear, maybe_soft_wipe, reset_lock_timer};
+use crate::identity::{
+    arm_clipboard_clear, disarm_clipboard_clear, maybe_soft_wipe, reset_lock_timer,
+};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
