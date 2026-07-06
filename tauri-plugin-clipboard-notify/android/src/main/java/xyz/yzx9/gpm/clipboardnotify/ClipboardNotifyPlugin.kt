@@ -122,7 +122,7 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
             NotificationCompat.Builder(activity, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_clipboard_notify)
                 .setContentTitle("gpm")
-                .setContentText("Password copied — tap to clear")
+                .setContentText("Tap to clear · auto-clears in ${args.secs}s")
                 .setOngoing(true)
                 .setAutoCancel(false)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
