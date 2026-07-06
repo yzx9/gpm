@@ -54,6 +54,10 @@ ssh-key = { version = "0.6", features = [
 # cross-compiles to Android NDK with no C deps. The `crypto::openpgp` wrapper is
 # also the shared seam for the future GPG crypto backend (RFC 0036).
 pgp = "0.19"
+# RNG + SmallVec for rpgp's key-generation and MessageBuilder paths (builder
+# methods take `&mut impl CryptoRng`; preferred-algorithm lists are SmallVec).
+rand = "0.8"
+smallvec = "1"
 # At-rest AEAD for local private files (repo.json, identity). AES-256-GCM gives
 # confidentiality + integrity in one op with a random symmetric master key.
 aes-gcm = "0.10"

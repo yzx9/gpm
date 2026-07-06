@@ -26,8 +26,9 @@ use crate::error::Error;
 /// The age encryption backend (the sole `CryptoBackend` implementation today).
 pub mod age;
 
-/// Low-level OpenPGP (rpgp) wrapper for GPG commit-signature verification
-/// (RFC 0009). Shared seam reused by the future GPG crypto backend (RFC 0036).
+/// Low-level OpenPGP (rpgp) wrapper — the shared seam owning the `pgp` dep.
+/// Holds GPG commit-signature verification (RFC 0009, live) and the crypto
+/// primitives (RFC 0036, `#[allow(dead_code)]` until `GpgBackend` lands).
 pub mod openpgp;
 
 #[allow(unused_imports)]

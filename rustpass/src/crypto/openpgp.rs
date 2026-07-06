@@ -2,28 +2,41 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Low-level OpenPGP (rpgp) wrapper for GPG commit-signature verification.
+//! Low-level `OpenPGP` (rpgp) wrapper — the shared seam for both GPG
+//! commit-signature verification (RFC 0009) and the future GPG crypto backend
+//! (RFC 0036).
 //!
-//! This is the shared OpenPGP seam: it owns the `pgp` (rpgp) dependency so the
-//! rest of the crate never names rpgp directly, and the future GPG crypto
-//! backend (RFC 0036) reuses these parsing primitives for its keyring.
+//! Owns the `pgp` (rpgp 0.19) dependency so the rest of the crate never names
+//! rpgp directly. Two groups of primitives live here:
 //!
-//! Scope is **verification only**: parse an armored public key, parse a detached
-//! signature, verify the signature over arbitrary bytes against a trusted key
-//! set, and report which trusted key (primary or subkey) verified it. It does
-//! NOT encrypt, decrypt, sign, or manage secret material.
+//! - **Verify** (live, called by the signing path): parse an armored public key,
+//!   parse a detached signature, verify it over arbitrary bytes against a
+//!   trusted key set, and report which trusted key (primary or subkey) verified.
+//! - **Crypto** (`#[allow(dead_code)]`, awaiting the `GpgBackend` consumer):
+//!   generate a keypair, encrypt to recipient subkeys, and decrypt with one key
+//!   or a keyring. These are the load-bearing primitives the trait reshape will
+//!   route through; proven against system `gpg` by the in-module interop tests.
 //!
 //! All functions are synchronous CPU work — callers (the sync signing path, or
-//! a `spawn_blocking` from async Tauri commands) own the threading model.
-//! Callers running rpgp over attacker-controlled commit bytes should also wrap
-//! the per-commit call in `catch_unwind` (see `signing::status_of_commit`):
-//! rpgp returns `Result` for parse/verify failures, but a panic on a crafted
-//! packet would otherwise unwind through the whole commit walk.
+//! a `spawn_blocking` from async Tauri commands / the future `GpgBackend`) own
+//! the threading model. Callers running rpgp over attacker-controlled bytes
+//! (commit payloads, ciphertext) should also wrap the call in `catch_unwind`
+//! (see `signing::status_of_commit`): rpgp returns `Result` for parse/verify
+//! failures, but a panic on a crafted packet would otherwise unwind through the
+//! whole walk.
 
 use std::fmt::Write;
 
-use pgp::composed::{Deserializable, DetachedSignature, SignedPublicKey};
-use pgp::types::{Fingerprint, KeyDetails, KeyId};
+use pgp::composed::{
+    Deserializable, DetachedSignature, EncryptionCaps, KeyType, Message, MessageBuilder,
+    SecretKeyParamsBuilder, SignedPublicKey, SignedSecretKey, SubkeyParamsBuilder,
+};
+use pgp::crypto::ecc_curve::ECCCurve;
+use pgp::crypto::hash::HashAlgorithm;
+use pgp::crypto::sym::SymmetricKeyAlgorithm;
+use pgp::types::{Fingerprint, KeyDetails, KeyId, Password};
+use rand::thread_rng;
+use smallvec::smallvec;
 
 use crate::error::{Error, ErrorCode};
 
@@ -261,19 +274,261 @@ where
     (keys, warnings)
 }
 
+// ======================================================================
+// Crypto primitives (keygen / encrypt / decrypt)
+//
+// The load-bearing layer the future `GpgBackend` (RFC 0036 trait reshape)
+// routes through. They have NO production caller yet — `Store` still holds an
+// `AgeBackend` — so each is `#[allow(dead_code)]` until `GpgBackend` lands.
+// Mirrors the free-function shape of `crypto::age`: synchronous, returning
+// `Result`; the backend layer wraps these in `spawn_blocking` + `Zeroizing` +
+// `catch_unwind`.
+// ======================================================================
+
+/// Generate a V4 `OpenPGP` keypair (Ed25519 primary + Curve25519 ECDH subkey),
+/// optionally passphrase-protected, returning `(secret, public)`.
+///
+/// When a `passphrase` is given, the primary key + every subkey are S2K-locked
+/// with rpgp's default V4 KDF — **iterated+salted CFB, AES256, 224 rounds**
+/// (`S2kParams::new_default`, `pgp/src/types/s2k.rs`): exactly what
+/// `gpg`/`gopass` produce, and readable by every `gpg` version. Argon2 is
+/// V6-only and is intentionally NOT chosen — the gopass-compatibility hard
+/// constraint favors universal readability over a stronger KDF.
+///
+/// The passphrase is applied by re-locking AFTER `generate()`, NOT via the
+/// builder's `.passphrase()`: that setting is applied mid-generate but the
+/// subsequent self-signing step (`sign`) unlocks the key in place, so the
+/// returned key — and its armored form — would be UNPROTECTED. The explicit
+/// `set_password` below is load-bearing: a future `GpgBackend` stores the armored
+/// secret as the at-rest identity, which MUST be S2K-locked. Verified by
+/// `passphrase_keypair_wrong_passphrase_fails` (a wrong passphrase only fails to
+/// decrypt once this re-lock runs).
+///
+/// The public key joins the recipient pool / trust set.
+///
+/// # Errors
+///
+/// `StoreError` if rpgp's param build, key generation, or S2K locking fails
+/// (programmer error in practice — never user-driven input).
+#[allow(dead_code)]
+pub(crate) fn generate_keypair(
+    user_id: &str,
+    passphrase: Option<&str>,
+) -> Result<(SignedSecretKey, SignedPublicKey), Error> {
+    let mut rng = thread_rng();
+    let subkey = SubkeyParamsBuilder::default()
+        .key_type(KeyType::ECDH(ECCCurve::Curve25519))
+        .can_encrypt(EncryptionCaps::All)
+        .build()
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("subkey params: {e}")))?;
+    let mut params = SecretKeyParamsBuilder::default();
+    params
+        .key_type(KeyType::Ed25519Legacy)
+        .can_certify(false)
+        .can_sign(true)
+        .primary_user_id(user_id.to_string())
+        // `.passphrase()` is intentionally NOT set on the builder — rpgp applies
+        // it mid-generate then the self-sign step unlocks in place, leaving an
+        // unprotected key. We lock explicitly below instead.
+        .preferred_symmetric_algorithms(smallvec![SymmetricKeyAlgorithm::AES256])
+        .preferred_hash_algorithms(smallvec![HashAlgorithm::Sha256])
+        .preferred_compression_algorithms(smallvec![])
+        .subkeys(vec![subkey]);
+    let mut sk = params
+        .build()
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("key params: {e}")))?
+        .generate(&mut rng)
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("key generation: {e}")))?;
+    // Lock the primary + every subkey so the armored identity (what a future
+    // `GpgBackend` stores at rest) is genuinely passphrase-protected. `set_password`
+    // uses the default V4 iterated+salted S2K and requires the key to be unlocked
+    // (Plain), which it is here post-`generate()`.
+    if let Some(pw) = passphrase {
+        let password: Password = pw.into();
+        sk.primary_key
+            .set_password(&mut rng, &password)
+            .map_err(|e| Error::new(ErrorCode::StoreError, format!("lock primary key: {e}")))?;
+        for sub in &mut sk.secret_subkeys {
+            sub.key
+                .set_password(&mut rng, &password)
+                .map_err(|e| Error::new(ErrorCode::StoreError, format!("lock subkey: {e}")))?;
+        }
+    }
+    let pk = sk.to_public_key();
+    Ok((sk, pk))
+}
+
+/// Encrypt `plaintext` to every recipient's first subkey, returning binary
+/// (unarmored) `OpenPGP` — the on-disk gopass `<name>.gpg` format.
+///
+/// `seipd_v1` with no compression call produces uncompressed SEIPD v1 (MDC),
+/// matching gopass's `--compress-algo=none` output; one PKESK is emitted per
+/// recipient. The first subkey is used as-is — gopass/gpg place the encryption
+/// subkey first, so that holds for gopass stores; a future `GpgBackend` must
+/// pre-select the encryption-capable subkey for keys with a different layout
+/// (e.g. a signing subkey first), since this primitive does not validate key
+/// flags.
+///
+/// # Errors
+///
+/// `InvalidIdentity` if `recipients` is empty or a recipient has no subkey;
+/// `StoreError` if rpgp fails to encrypt or serialize.
+#[allow(dead_code)]
+pub(crate) fn encrypt_to_recipients(
+    plaintext: &[u8],
+    recipients: &[&SignedPublicKey],
+) -> Result<Vec<u8>, Error> {
+    // Fail fast: an empty recipient set would otherwise serialize a message with
+    // no PKESK — unrecoverable ciphertext. The future `GpgBackend` also guards
+    // this, but the primitive must not hand back data-loss bytes silently.
+    if recipients.is_empty() {
+        return Err(Error::new(
+            ErrorCode::InvalidIdentity,
+            "encrypt_to_recipients requires at least one recipient public key",
+        ));
+    }
+    let mut rng = thread_rng();
+    let mut builder = MessageBuilder::from_bytes("", plaintext.to_vec())
+        .seipd_v1(&mut rng, SymmetricKeyAlgorithm::AES256);
+    for r in recipients {
+        let enc_subkey = r.public_subkeys.first().ok_or_else(|| {
+            Error::new(
+                ErrorCode::InvalidIdentity,
+                "recipient GPG key has no encryption subkey",
+            )
+        })?;
+        builder
+            .encrypt_to_key(&mut rng, enc_subkey)
+            .map_err(|e| Error::new(ErrorCode::StoreError, format!("encrypt to subkey: {e}")))?;
+    }
+    builder
+        .to_vec(&mut rng)
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("serialize message: {e}")))
+}
+
+/// Decrypt a single-recipient `OpenPGP` message with one secret key + passphrase,
+/// returning the literal plaintext bytes. `passphrase` is `Password::empty()` for
+/// an unprotected key. The single-key special case of
+/// [`decrypt_message_with_keys`].
+///
+/// # Errors
+///
+/// `DecryptFailed` if the ciphertext is unparseable, the key/passphrase do not
+/// match, or the data is corrupt.
+#[allow(dead_code)]
+pub(crate) fn decrypt_message(
+    ciphertext: &[u8],
+    passphrase: &Password,
+    sk: &SignedSecretKey,
+) -> Result<Vec<u8>, Error> {
+    let mut decrypted = Message::from_bytes(ciphertext)
+        .map_err(|e| Error::new(ErrorCode::DecryptFailed, format!("parse message: {e}")))?
+        .decrypt(passphrase, sk)
+        .map_err(|e| Error::new(ErrorCode::DecryptFailed, format!("decrypt: {e}")))?;
+    decrypted
+        .as_data_vec()
+        .map_err(|e| Error::new(ErrorCode::DecryptFailed, format!("extract literal: {e}")))
+}
+
+/// Decrypt a multi-recipient `OpenPGP` message against a keyring — rpgp's
+/// `Message::decrypt_with_keys` tries each (key, passphrase) pair internally.
+/// This is the minimal keyring shape the future `GpgBackend` routes through.
+///
+/// Pass the full keyring and the full passphrase set: rpgp attempts every
+/// key×password combination, so a passphrase-protected key needs its passphrase
+/// present (an unprotected key pairs with `Password::empty()`).
+///
+/// # Errors
+///
+/// `DecryptFailed` if no (key, passphrase) combination decrypts the message, or
+/// the ciphertext is unparseable.
+#[allow(dead_code)]
+pub(crate) fn decrypt_message_with_keys(
+    ciphertext: &[u8],
+    keys: &[&SignedSecretKey],
+    passphrases: &[&Password],
+) -> Result<Vec<u8>, Error> {
+    let mut decrypted = Message::from_bytes(ciphertext)
+        .map_err(|e| Error::new(ErrorCode::DecryptFailed, format!("parse message: {e}")))?
+        .decrypt_with_keys(passphrases.to_vec(), keys.to_vec())
+        .map_err(|e| Error::new(ErrorCode::DecryptFailed, format!("decrypt: {e}")))?;
+    decrypted
+        .as_data_vec()
+        .map_err(|e| Error::new(ErrorCode::DecryptFailed, format!("extract literal: {e}")))
+}
+
+/// Armor a secret key for at-rest storage (the gopass identity format).
+/// Round-trips with [`parse_armored_secret_key`].
+///
+/// # Errors
+///
+/// `StoreError` if rpgp fails to serialize.
+#[allow(dead_code, clippy::default_trait_access)]
+pub(crate) fn armor_secret_key(sk: &SignedSecretKey) -> Result<String, Error> {
+    // `ArmorOptions` isn't re-exported by pgp 0.19 (`mod message` is private), so
+    // `Default::default()` is the only external way to construct it — matches
+    // pgp's own internal `to_armored_string(Default::default())` usage.
+    sk.to_armored_string(Default::default())
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("armor secret key: {e}")))
+}
+
+/// Parse an armored secret key produced by [`armor_secret_key`] or by
+/// `gpg --armor --export-secret-key`. Self-signatures are NOT re-validated here
+/// — the key is trusted as our own identity, not as an external signer. A future
+/// `GpgBackend` import path that accepts attacker-controlled armor (paste-in /
+/// sync-received identity) MUST call `verify_bindings` separately before
+/// trusting the key, mirroring [`parse_armored_public_key`].
+///
+/// # Errors
+///
+/// `InvalidIdentity` if the armor is unparseable.
+#[allow(dead_code)]
+pub(crate) fn parse_armored_secret_key(armored: &[u8]) -> Result<SignedSecretKey, Error> {
+    let (sk, _headers) = SignedSecretKey::from_armor_single(armored).map_err(|e| {
+        Error::new(
+            ErrorCode::InvalidIdentity,
+            format!("invalid GPG secret key: {e}"),
+        )
+    })?;
+    Ok(sk)
+}
+
 #[cfg(test)]
 mod tests {
-    //! Real-world interop proofs (RFC 0009 D2). The fixtures here are committed
-    //! bytes produced by the actual `gpg` CLI (Ed25519 primary + Ed25519 signing
-    //! subkey, subkey-signed — `GnuPG`'s default), so these tests prove rpgp
-    //! works on keys users actually have, NOT only on rpgp's own signatures.
-    //! No `gpg` binary is needed at test time.
+    //! Real-world interop proofs for both rpgp touchpoints.
+    //!
+    //! - **Verify** (RFC 0009): committed `gpg`-produced Ed25519 key + detached
+    //!   signature prove rpgp verifies the keys/sigs users actually have.
+    //! - **Crypto** (RFC 0036 spike): rpgp↔gpg encrypt/decrypt interop (RSA-2048
+    //!   fixture + rpgp-generated Curve25519), passphrase-keygen round-trips,
+    //!   and the multi-recipient keyring shape. No `gpg` binary is needed except
+    //!   the `#[ignore]` reverse-interop tests (they spawn `gpg` + `gpg-agent`).
+
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    use pgp::composed::Esk;
 
     use super::*;
 
+    // --- verify fixtures (RFC 0009): committed gpg-produced Ed25519 key/sig ---
     const GPG_PUBKEY: &str = include_str!("../../tests/fixtures/gpg/pubkey.asc");
     const GPG_SIG: &str = include_str!("../../tests/fixtures/gpg/payload.sig.asc");
     const GPG_PAYLOAD: &[u8] = include_bytes!("../../tests/fixtures/gpg/payload.txt");
+
+    // --- crypto fixtures (RFC 0036): committed gpg 2.4 RSA-2048 keypair +
+    //     ciphertext (--compress-algo=none, passphrase-protected). TEST-ONLY. ---
+    const FIXTURE_SECRET: &[u8] = include_bytes!("../../tests/fixtures/gpg/secret.asc");
+    const FIXTURE_PUBLIC: &[u8] = include_bytes!("../../tests/fixtures/gpg/public.asc");
+    const FIXTURE_GPG_ENCRYPTED: &[u8] =
+        include_bytes!("../../tests/fixtures/gpg/gpg-encrypted.gpg");
+    const FIXTURE_PASSPHRASE: &str = "test-passphrase-fixture-only";
+    const EXPECTED_PLAINTEXT: &[u8] = b"gpg-to-rpgp interop plaintext";
+
+    const SPIKE_UID: &str = "gpm spike <spike@gpm.local>";
+    const SPIKE_PASSPHRASE: &str = "spike-passphrase";
+
+    // ===================== verify tests (RFC 0009) =====================
 
     /// A `GnuPG`-produced Ed25519 armored pubkey parses and its self-signatures
     /// validate — the floor-level proof that `add_trusted_gpg_key` accepts a
@@ -347,5 +602,293 @@ mod tests {
             ),
             other => panic!("untrusted real GnuPG sig must be Unverified, got {other:?}"),
         }
+    }
+
+    // ===================== crypto tests (RFC 0036) =====================
+
+    #[test]
+    fn self_roundtrip_no_passphrase() {
+        const DATA: &[u8] = b"hello gopass from rpgp";
+        let (sk, pk) = generate_keypair(SPIKE_UID, None).expect("keygen");
+        let encrypted = encrypt_to_recipients(DATA, &[&pk]).expect("encrypt");
+        let decrypted = decrypt_message(&encrypted, &Password::empty(), &sk).expect("decrypt");
+        assert_eq!(decrypted, DATA);
+    }
+
+    #[test]
+    fn multi_recipient_each_can_decrypt() {
+        const DATA: &[u8] = b"shared secret for three recipients";
+        let (sk_a, pk_a) = generate_keypair(SPIKE_UID, None).expect("keygen a");
+        let (sk_b, pk_b) = generate_keypair(SPIKE_UID, None).expect("keygen b");
+        let (sk_c, pk_c) = generate_keypair(SPIKE_UID, None).expect("keygen c");
+
+        // Encrypt once to all three; each subkey gets its own PKESK.
+        let encrypted = encrypt_to_recipients(DATA, &[&pk_a, &pk_b, &pk_c]).expect("encrypt");
+
+        for (i, sk) in [sk_a, sk_b, sk_c].iter().enumerate() {
+            let decrypted = decrypt_message(&encrypted, &Password::empty(), sk)
+                .unwrap_or_else(|e| panic!("recipient {i} failed: {e:?}"));
+            assert_eq!(decrypted, DATA);
+        }
+    }
+
+    /// Packet-shape contract: one PKESK per recipient, no compression. SEIPD v1
+    /// is asserted transitively by the interop tests (gpg produces v1; if rpgp
+    /// emitted v2, `gpg_*_decrypts` would fail).
+    #[test]
+    fn packet_shape_uncompressed_one_pkesk_per_recipient() {
+        const DATA: &[u8] = b"shape check";
+        let (sk_a, pk_a) = generate_keypair(SPIKE_UID, None).expect("keygen a");
+        let (_sk_b, pk_b) = generate_keypair(SPIKE_UID, None).expect("keygen b");
+
+        let encrypted = encrypt_to_recipients(DATA, &[&pk_a, &pk_b]).expect("encrypt");
+
+        // One PKESK per recipient (2 recipients -> 2 ESK entries).
+        let msg = Message::from_bytes(&encrypted[..]).expect("parse");
+        let Message::Encrypted { esk, .. } = msg else {
+            panic!("expected encrypted message");
+        };
+        let pkesk_count = esk
+            .iter()
+            .filter(|e| matches!(e, Esk::PublicKeyEncryptedSessionKey(_)))
+            .count();
+        assert_eq!(pkesk_count, 2, "one PKESK per recipient");
+
+        // No compressed-data packet: the decrypted payload is a Literal, not
+        // Compressed (no `.compression()` was called on the builder).
+        let msg = Message::from_bytes(&encrypted[..]).expect("parse again");
+        let decrypted = msg
+            .decrypt(&Password::empty(), &sk_a)
+            .expect("decrypt with the matching key");
+        assert!(
+            !decrypted.is_compressed(),
+            "gopass emits compress-algo=none; rpgp output must not be compressed"
+        );
+    }
+
+    /// THE forward-interop test: rpgp decrypts a ciphertext + unlocks a
+    /// passphrase key, both produced by system gpg (RSA-2048, gopass's default).
+    /// Proves gpm can read existing gopass stores. Runs without a runtime gpg
+    /// (the fixture is committed).
+    #[test]
+    fn gpg_encrypts_rpgp_decrypts() {
+        let sk = parse_armored_secret_key(FIXTURE_SECRET).expect("parse gpg armored secret key");
+        let pw: Password = FIXTURE_PASSPHRASE.into();
+        let decrypted = decrypt_message(FIXTURE_GPG_ENCRYPTED, &pw, &sk)
+            .expect("rpgp decrypts gpg-produced ciphertext with the passphrase");
+        assert_eq!(decrypted, EXPECTED_PLAINTEXT);
+    }
+
+    #[test]
+    fn passphrase_keypair_decrypts_with_right_passphrase() {
+        const DATA: &[u8] = b"passphrase-protected round trip";
+        let passphrase = SPIKE_PASSPHRASE;
+        let pw: Password = passphrase.into();
+        let (sk, pk) = generate_keypair(SPIKE_UID, Some(passphrase)).expect("keygen");
+        let encrypted = encrypt_to_recipients(DATA, &[&pk]).expect("encrypt");
+        let decrypted = decrypt_message(&encrypted, &pw, &sk).expect("right passphrase decrypts");
+        assert_eq!(decrypted, DATA);
+    }
+
+    #[test]
+    fn passphrase_keypair_wrong_passphrase_fails() {
+        const DATA: &[u8] = b"passphrase-protected round trip";
+        let passphrase = SPIKE_PASSPHRASE;
+        let (sk, pk) = generate_keypair(SPIKE_UID, Some(passphrase)).expect("keygen");
+        let encrypted = encrypt_to_recipients(DATA, &[&pk]).expect("encrypt");
+        // A freshly generated key stays unlocked in memory (the passphrase only
+        // gates serialization), so round-trip through armor to get an S2K-locked
+        // key — the form that must reject a wrong passphrase, and the form a
+        // future `GpgBackend` stores at rest.
+        let armored = armor_secret_key(&sk).expect("armor");
+        let locked = parse_armored_secret_key(armored.as_bytes()).expect("parse armored");
+        let wrong: Password = "wrong".into();
+        let err = decrypt_message(&encrypted, &wrong, &locked)
+            .expect_err("wrong passphrase must fail on a locked key");
+        // Pin the failure mode the test exists to prove: S2K-rejection surfaces
+        // as DecryptFailed, not a different bucket (e.g. InvalidIdentity).
+        assert_eq!(
+            err.code, "DECRYPT_FAILED",
+            "wrong passphrase must surface as DecryptFailed"
+        );
+    }
+
+    #[test]
+    fn armored_secret_key_roundtrips_and_decrypts() {
+        const DATA: &[u8] = b"armor round-trip";
+        let passphrase = SPIKE_PASSPHRASE;
+        let pw: Password = passphrase.into();
+        let (sk, pk) = generate_keypair(SPIKE_UID, Some(passphrase)).expect("keygen");
+        let encrypted = encrypt_to_recipients(DATA, &[&pk]).expect("encrypt");
+
+        // Serialize → parse the secret key; the parsed key must still decrypt.
+        let armored = armor_secret_key(&sk).expect("armor");
+        let parsed = parse_armored_secret_key(armored.as_bytes()).expect("parse armored");
+        let decrypted = decrypt_message(&encrypted, &pw, &parsed).expect("parsed key decrypts");
+        assert_eq!(decrypted, DATA);
+    }
+
+    #[test]
+    fn decrypt_message_with_keys_two_recipients() {
+        const DATA: &[u8] = b"two-recipient keyring decrypt";
+        // Two recipients: an rpgp-generated key (no passphrase) + the gpg
+        // fixture key (passphrase-protected). A message encrypted to both
+        // decrypts via the keyring helper with either secret key.
+        let (sk_rpgp, pk_rpgp) = generate_keypair(SPIKE_UID, None).expect("rpgp keygen");
+        let (pk_fixture, _headers) =
+            SignedPublicKey::from_armor_single(FIXTURE_PUBLIC).expect("parse fixture public key");
+        let sk_fixture = parse_armored_secret_key(FIXTURE_SECRET).expect("parse fixture secret");
+        let fixture_pw: Password = FIXTURE_PASSPHRASE.into();
+
+        let encrypted = encrypt_to_recipients(DATA, &[&pk_rpgp, &pk_fixture]).expect("encrypt");
+
+        let empty = Password::empty();
+        let dec_rpgp = decrypt_message_with_keys(&encrypted, &[&sk_rpgp], &[&empty])
+            .expect("rpgp key decrypts via keyring");
+        assert_eq!(dec_rpgp, DATA);
+
+        let dec_fixture = decrypt_message_with_keys(&encrypted, &[&sk_fixture], &[&fixture_pw])
+            .expect("fixture key decrypts via keyring");
+        assert_eq!(dec_fixture, DATA);
+    }
+
+    // ===================== error-path tests (RFC 0036) =====================
+
+    #[test]
+    fn encrypt_to_recipients_rejects_empty_recipient_set() {
+        // Fail-fast: an empty recipient set must NOT serialize a no-PKESK
+        // message (unrecoverable ciphertext). InvalidIdentity, not a panic.
+        let err = encrypt_to_recipients(b"x", &[]).expect_err("empty recipients");
+        assert_eq!(err.code, "INVALID_IDENTITY");
+    }
+
+    #[test]
+    fn decrypt_message_rejects_non_openpgp_bytes() {
+        // Garbage ciphertext fails at the parse step, surfacing as DecryptFailed
+        // rather than panicking or returning empty bytes.
+        let (sk, _pk) = generate_keypair(SPIKE_UID, None).expect("keygen");
+        let err = decrypt_message(b"not an openpgp message", &Password::empty(), &sk)
+            .expect_err("garbage ciphertext must error");
+        assert_eq!(err.code, "DECRYPT_FAILED");
+    }
+
+    #[test]
+    fn parse_armored_secret_key_rejects_malformed_armor() {
+        // A truncated/invalid private-key block is the corrupt-identity-file path
+        // a user would actually hit; it must error, not accept garbage.
+        let malformed =
+            b"-----BEGIN PGP PRIVATE KEY BLOCK-----\nnot a real key\n-----END PGP PRIVATE KEY BLOCK-----\n";
+        assert!(parse_armored_secret_key(malformed).is_err());
+    }
+
+    /// Reverse interop: rpgp encrypts to the gpg fixture's public key and system
+    /// `gpg --decrypt` reads it with the matching secret key + passphrase. Proves
+    /// rpgp's ciphertext output is desktop-gopass-readable.
+    ///
+    /// `#[ignore]`: spawns `gpg`, which needs `gpg-agent` (an `AF_UNIX` socket the
+    /// sandbox blocks). Run with sandbox disabled:
+    ///   `cargo test -p rustpass crypto::openpgp::tests::rpgp_encrypts_gpg_decrypts -- --ignored`
+    #[test]
+    #[ignore = "needs system gpg + sandbox disabled (gpg-agent socket)"]
+    fn rpgp_encrypts_gpg_decrypts() {
+        let (pk, _headers) = SignedPublicKey::from_armor_single(FIXTURE_PUBLIC)
+            .expect("parse gpg armored public key");
+        let ciphertext =
+            encrypt_to_recipients(EXPECTED_PLAINTEXT, &[&pk]).expect("rpgp encrypts to gpg key");
+
+        let home = tempfile::tempdir().expect("tmp GNUPGHOME");
+        // Import the fixture secret key into the throwaway keyring.
+        let mut import = Command::new("gpg")
+            .env("GNUPGHOME", home.path())
+            .args(["--batch", "--import"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("spawn gpg import");
+        import
+            .stdin
+            .take()
+            .expect("gpg stdin")
+            .write_all(FIXTURE_SECRET)
+            .expect("pipe fixture secret");
+        let status = import.wait().expect("gpg import wait");
+        assert!(status.success(), "gpg import failed");
+
+        let ct_path = home.path().join("rpgp.gpg");
+        std::fs::write(&ct_path, &ciphertext).expect("write ciphertext");
+        let out = Command::new("gpg")
+            .env("GNUPGHOME", home.path())
+            .args([
+                "--batch",
+                "--yes",
+                "--pinentry-mode",
+                "loopback",
+                "--passphrase",
+                FIXTURE_PASSPHRASE,
+                "--decrypt",
+            ])
+            .arg(&ct_path)
+            .output()
+            .expect("spawn gpg decrypt");
+        assert!(
+            out.status.success(),
+            "gpg decrypt failed: {}",
+            String::from_utf8_lossy(&out.stderr),
+        );
+        assert_eq!(out.stdout, EXPECTED_PLAINTEXT);
+    }
+
+    /// Reverse interop, keygen variant: rpgp generates a passphrase-protected key
+    /// (iterated+salted V4 S2K — the gpg/gopass default), and system `gpg
+    /// --decrypt` reads a message encrypted to it. Proves gpm-produced keys are
+    /// desktop-gopass-readable.
+    ///
+    /// Same `#[ignore]` sandbox constraint as `rpgp_encrypts_gpg_decrypts`.
+    #[test]
+    #[ignore = "needs system gpg + sandbox disabled (gpg-agent socket)"]
+    fn rpgp_passphrase_key_gpg_decrypts() {
+        const DATA: &[u8] = b"rpgp-keygen-gpg-decrypt interop";
+        let passphrase = SPIKE_PASSPHRASE;
+        let (sk, pk) = generate_keypair(SPIKE_UID, Some(passphrase)).expect("keygen");
+        let ciphertext = encrypt_to_recipients(DATA, &[&pk]).expect("encrypt");
+        let armored_secret = armor_secret_key(&sk).expect("armor secret key");
+
+        let home = tempfile::tempdir().expect("tmp GNUPGHOME");
+        let mut import = Command::new("gpg")
+            .env("GNUPGHOME", home.path())
+            .args(["--batch", "--import"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("spawn gpg import");
+        import
+            .stdin
+            .take()
+            .expect("gpg stdin")
+            .write_all(armored_secret.as_bytes())
+            .expect("pipe rpgp secret");
+        let status = import.wait().expect("gpg import wait");
+        assert!(status.success(), "gpg import failed");
+
+        let ct_path = home.path().join("rpgp.gpg");
+        std::fs::write(&ct_path, &ciphertext).expect("write ciphertext");
+        let out = Command::new("gpg")
+            .env("GNUPGHOME", home.path())
+            .args([
+                "--batch",
+                "--yes",
+                "--pinentry-mode",
+                "loopback",
+                "--passphrase",
+                passphrase,
+                "--decrypt",
+            ])
+            .arg(&ct_path)
+            .output()
+            .expect("spawn gpg decrypt");
+        assert!(
+            out.status.success(),
+            "gpg decrypt of rpgp-generated key failed: {}",
+            String::from_utf8_lossy(&out.stderr),
+        );
+        assert_eq!(out.stdout, DATA);
     }
 }
