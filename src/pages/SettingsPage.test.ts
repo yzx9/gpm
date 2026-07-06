@@ -673,7 +673,9 @@ describe("SettingsPage", () => {
 
     it("the reset gate covers a navigation during the pending wipe", async () => {
       // Hold reset_config pending so a leave-nav can fire during the wipe window
-      // (the Android-back race: the reset modal has no useOverlayBackHandler).
+      // (the isResetting gate must cover the whole reset: back on the reset modal
+      // is now handled by BaseModalShell, but a nav tap — or back during the
+      // listener's async-registration window — could still trip the guard).
       let resolveReset!: () => void;
       when(
         "reset_config",

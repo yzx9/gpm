@@ -687,6 +687,8 @@ defineExpose({ syncRepo });
       v-if="auditIssues"
       variant="sheet"
       aria-label="Signature check"
+      :dismiss-on-backdrop="false"
+      @close="auditIssues = null"
     >
       <h2 class="text-base font-medium mb-1">Signature check</h2>
       <p class="text-xs text-muted mb-3">

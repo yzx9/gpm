@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When App Lock is on, the entry list no longer stays stuck on a "locked" message after you unlock with your fingerprint. It loads your entries on its own the moment the store unlocks, instead of making you leave the screen and come back. (The message while locked is intentional — it reminds you the content needs an unlock, and no entry data is loaded until then.)
 - Under App Lock, the "locked" message on the entry list no longer falsely warns that you need to set the app up again — you don't, just unlock. It now simply tells you to unlock.
 - Enforce mode can now be turned on whenever at least one trusted signing key is set — including when only a GPG key is trusted. Previously Enforce required an SSH key, so trusting only a GPG key left Enforce unavailable.
+- On Android, pressing the system Back button now closes an open sheet or dialog — a commit's detail, the reset confirmation, a signature-check notice, or a sync-conflict resolve — instead of navigating away and leaving it stranded. Back on the app-lock screen is now held in place rather than backing out, so the lock can't be slipped past.
 
 ## [v0.9.0] - 2026-07-05
 

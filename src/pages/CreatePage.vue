@@ -27,12 +27,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import {
-  isAuthCancelled,
-  useLockState,
-  useOverlayBackHandler,
-  useToast,
-} from "@/composables";
+import { isAuthCancelled, useLockState, useToast } from "@/composables";
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Dices, Eye, EyeOff } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -88,16 +83,6 @@ onLock(() => {
   fields.value = {};
   customContent.value = "";
 });
-
-// Android back while the divergence modal is up cancels it — same as the modal's
-// Cancel button (drops the modal, returns to the form). `resolving` guards
-// against firing mid-resolution.
-useOverlayBackHandler(
-  computed(() => !!divergence.value),
-  () => {
-    if (!resolving.value) cancelDivergence();
-  },
-);
 
 /** Generate a password for a generatable field via the backend (CSPRNG). */
 async function onGeneratePassword(f: PresetField) {
@@ -259,8 +244,8 @@ async function submit() {
  *  local commit stays and publishes on the next Sync; clear the identity the
  *  save path kept alive (deferred wipe) for a possible keep-mine resolve. */
 function cancelDivergence() {
-  // BaseModalShell also emits `close` on unmount, so guard: only wipe when a
-  // divergence is actually active (one deferred-wipe per abandoned resolve).
+  // Guard: a back press (BaseModalShell → emit close → cancelAll → here) could
+  // re-enter after `divergence` is already cleared; only wipe once.
   if (!divergence.value) return;
   divergence.value = null;
   divergeError.value = "";

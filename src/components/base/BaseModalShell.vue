@@ -3,7 +3,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { useOverlayBackHandler } from "@/composables";
+import { computed, ref } from "vue";
 import BaseCard from "./BaseCard.vue";
 
 const props = withDefaults(
@@ -14,8 +15,17 @@ const props = withDefaults(
     z?: number;
     /** Accessibility role; `dialog` (default) or `alertdialog`. */
     role?: string;
+    /** Whether a backdrop tap emits `close` (default true). Set false to force a
+     *  button-tap dismissal (e.g. a security-warning sheet that shouldn't be
+     *  waved away by tapping outside). */
+    dismissOnBackdrop?: boolean;
+    /** Whether the Android back button emits `close` (default true). Set false
+     *  to trap back — the listener still suppresses the default webview goBack —
+     *  e.g. a stacked shell that shouldn't dismiss, or while an async resolve is
+     *  in flight. */
+    dismissOnBack?: boolean;
   }>(),
-  { role: "dialog" },
+  { role: "dialog", dismissOnBackdrop: true, dismissOnBack: true },
 );
 
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -24,11 +34,21 @@ const resolvedZ = computed(
   () => props.z ?? (props.variant === "center" ? 60 : 40),
 );
 
-// Backdrop click closes only when the caller listens for `@close` (no-op
-// otherwise), preserving sites that intentionally dismiss only via buttons.
+// Backdrop and back are decoupled: each emits `close` only when its own prop
+// allows it. A caller without `@close` still gets no dismissal (emit is a
+// no-op with no listener), and back is always registered so the default
+// webview goBack is suppressed for the lifetime of any mounted shell.
 function onBackdrop() {
-  emit("close");
+  if (props.dismissOnBackdrop) emit("close");
 }
+
+// The shell is mounted only when shown (every caller uses v-if), so a constant
+// `ref(true)` arms the listener for the component's lifetime and the
+// composable's onBeforeUnmount releases it. See useOverlayBackHandler for the
+// async-registration race guards.
+useOverlayBackHandler(ref(true), () => {
+  if (props.dismissOnBack) emit("close");
+});
 </script>
 
 <template>

@@ -107,6 +107,7 @@ watch(
     variant="sheet"
     role="alertdialog"
     aria-label="Local and remote have diverged"
+    :dismiss-on-back="!pendingChoice"
     @close="cancelAll"
   >
     <h2
@@ -196,6 +197,8 @@ watch(
         ? 'Discard your local commit'
         : 'Push and overwrite remote'
     "
+    :dismiss-on-back="!resolving"
+    :dismiss-on-backdrop="!resolving"
     @close="cancelConfirm"
   >
     <h2

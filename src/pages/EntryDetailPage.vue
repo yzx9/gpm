@@ -26,7 +26,6 @@ import {
   ensureClipboardNotifyPermission,
   isAuthCancelled,
   useLockState,
-  useOverlayBackHandler,
   useSecretReveal,
   useSecuritySettings,
   useToast,
@@ -80,16 +79,6 @@ onLock(() => {
   exitEdit();
   divergence.value = null;
 });
-
-// Android back while the divergence modal is up cancels it — same as the modal's
-// Cancel button (drops the modal, keeps the draft). `resolving` guards against
-// firing mid-resolution.
-useOverlayBackHandler(
-  computed(() => !!divergence.value),
-  () => {
-    if (!resolving.value) cancelDivergence();
-  },
-);
 
 async function showPassword() {
   // Toggle off: if already revealed, hide (and wipe the plaintext) instead of

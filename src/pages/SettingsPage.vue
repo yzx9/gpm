@@ -58,7 +58,6 @@ import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
   useLockState,
-  useOverlayBackHandler,
   useSecureScreen,
   useSecuritySettings,
   useToast,
@@ -776,8 +775,10 @@ function resetConfig() {
 
 async function doReset() {
   if (!resetReady.value) return;
-  // Gate the leave guard before the wipe — see onBeforeRouteLeave. Covers the
-  // Android-back-during-wipe race (the reset modal has no back handler).
+  // Gate the leave guard before the wipe — see onBeforeRouteLeave. Covers
+  // navigation during the wipe: the reset modal's back is now handled by
+  // BaseModalShell, but a nav tap — or back during the listener's
+  // async-registration window — could still trip the guard.
   isResetting = true;
   try {
     await apiResetConfig();
@@ -836,9 +837,9 @@ let pendingResolve: ((c: UnsavedChoice) => void) | null = null;
 // the modal is open, only the latest token's resolver runs; older ones no-op.
 let promptToken = 0;
 // Gate the unsaved-changes leave guard for the entire reset flow. Set BEFORE the
-// apiResetConfig await: the reset modal has no useOverlayBackHandler, so on Android
-// hardware Back can fire during the wipe and trip the guard before a post-wipe flag
-// would exist. Cleared in doReset's finally.
+// apiResetConfig await: during the wipe, any navigation — a nav tap, or hardware
+// Back during the reset modal's brief async-listener-registration window — could
+// trip the guard before a post-wipe flag would exist. Cleared in doReset's finally.
 let isResetting = false;
 
 function promptUnsaved(): Promise<UnsavedChoice> {
@@ -872,18 +873,6 @@ onBeforeRouteLeave(async () => {
   }
   return true; // discard, or save succeeded
 });
-
-// Android back inside either modal dismisses it (= cancel), mirroring the
-// UnlockModal / AppLockOverlay pattern. Both register concurrently; only one
-// is shown at a time, so two idle listeners are benign.
-useOverlayBackHandler(
-  computed(() => passphraseModal.value !== null),
-  () => closePassphraseModal(),
-);
-useOverlayBackHandler(
-  computed(() => unsavedOpen.value),
-  () => resolveUnsaved("cancel"),
-);
 
 onMounted(() => {
   loadConfig();

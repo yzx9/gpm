@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { onMounted, watch } from "vue";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
 import ToastHost from "./components/ToastHost.vue";
 import UnlockModal from "./components/UnlockModal.vue";
@@ -11,7 +11,6 @@ import {
   useAppLockState,
   useLockState,
   useNavDirection,
-  useOverlayBackHandler,
   useSecureScreen,
   useSecuritySettings,
 } from "./composables";
@@ -32,14 +31,6 @@ const { transitionName } = useNavDirection();
 watch(overlayUp, (up) => {
   void setSecureOverlay(up);
 });
-
-// Capture the Android back button while the unlock overlay is up: back dismisses
-// it — a per-op auth is cancelled (rejecting parked callers), and a hard lock is
-// hidden WITHOUT unlocking (the identity stays locked; the next secret op
-// re-prompts). Mirrors the `v-if` source exactly so the handler is armed only
-// while the overlay is actually rendered.
-const overlayShown = computed(() => ready.value && overlayUp.value);
-useOverlayBackHandler(overlayShown, dismissOverlay);
 
 onMounted(() => {
   applySafeAreaInsets();
