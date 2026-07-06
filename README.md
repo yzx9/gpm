@@ -15,7 +15,7 @@ resort to running gopass inside Termux on Android.
 
 - **Age-only** — no GPG, no cloud, no analytics, no Autofill
 - **Copy password never touches WebView** — decrypts and copies entirely on the Rust side
-- **Show password has 30s auto-clear** — with page-leave cleanup in Vue
+- **Show password auto-clear** — with page-leave cleanup in Vue
 - **Zeroize-per-decrypt** — identity bytes wiped after every decrypt call
 - **Safe error messages** — no secrets in logs, errors, or toasts
 
