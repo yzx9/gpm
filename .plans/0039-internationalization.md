@@ -85,7 +85,7 @@ are the two simplest cases, so no custom pluralization is needed now.
   select/gender.
 - **A boot IPC fetch, then reconcile.** Rejected as the primary path: it paints
   a default-language first frame and reconciles afterward, which — unlike the
-  screen-capture toggle's invisible, safe-direction reconcile — is a *visible*
+  screen-capture toggle's invisible, safe-direction reconcile — is a _visible_
   wrong-language flash, because rendered text is visible and has no safe
   default. Injection removes that flash without a second store.
 - **A WebView-side locale cache (localStorage).** Rejected: injection achieves

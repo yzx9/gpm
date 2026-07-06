@@ -31,8 +31,8 @@ built — and select them by the in-app locale.
 
 **Locale source — the shared backend resolver, not the system locale.** Android
 resources follow the device's system locale by default, which is wrong whenever
-the user overrides the language in-app. The prompt must use the *resolved in-app
-locale* — the same value 0039's backend resolver computes for the WebView. The
+the user overrides the language in-app. The prompt must use the _resolved in-app
+locale_ — the same value 0039's backend resolver computes for the WebView. The
 mechanism used to select strings by that locale (a locale-overridden resource
 context, or passing the localized strings in directly at prompt-build time) is
 an implementation choice for when this RFC is picked up; the fixed decision is

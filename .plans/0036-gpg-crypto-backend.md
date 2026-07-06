@@ -168,10 +168,42 @@ RFC picks it for both.
 Large — substantially bigger than 0033 (a pure refactor with no behavior
 change): a new crypto implementation, an in-app keyring, a key generation /
 import flow, a GPG-specific setup sub-flow, and the trait rework the second
-backend triggers. A rpgp spike should land first — encrypt to a fixed recipient
-set, decrypt one passphrase key, prove the Android NDK build, and verify a
-round-trip against desktop gopass — so the trait reshape is informed by working
-code rather than designed ahead.
+backend triggers. The rpgp spike this anticipated has landed — encrypt to a
+recipient set, decrypt a passphrase key, the Android NDK build proven, and
+round-trips verified against desktop gopass in both directions — so the trait
+reshape is informed by working code rather than designed ahead. The constraints
+it surfaced are recorded below.
+
+## Spike findings (constraints the backend must honor)
+
+The spike lives as crypto primitives in the shared `crypto::openpgp` seam
+(alongside the live signature verification), unused until this backend wires
+them. Four constraints it surfaced, recorded so the next pass does not
+re-discover them the hard way:
+
+- **The at-rest identity's S2K-passphrase layer must actually be enforced.**
+  The armored secret key is S2K-passphrase-protected, then AEAD-sealed at rest —
+  two independent layers. rpgp's key generation leaves the in-memory key
+  unlocked (the builder's passphrase setting does not survive the self-signing
+  step), so producing an identity to store requires applying the S2K lock
+  explicitly. Skip it and the armored form is unprotected, leaving only the
+  AEAD layer and a passphrase that gates nothing. The biometric-unlock
+  passphrase exists to satisfy this layer.
+- **Decrypt must return raw bytes.** gopass secrets may be binary; a UTF-8
+  round-trip would reject valid non-UTF-8 secrets and add an extra unzeroized
+  plaintext copy.
+- **Decrypt and parse over attacker-controlled bytes need panic isolation.**
+  rpgp can panic on crafted packets, and a pulled `<name>.gpg` is
+  attacker-controlled. The verify path already isolates this; the decrypt path
+  must too, or a malicious secret aborts the whole request.
+- **Error sanitization and the wrong-passphrase distinction belong to the
+  backend, not the primitives.** The primitives forward rpgp's error text and
+  collapse wrong-passphrase and corrupt-data into one failure; the backend must
+  sanitize at its boundary (as the age backend does for plugin errors) and add
+  an unlock step to tell the two apart.
+
+The threat model is unchanged: plaintext never reaches the WebView, and
+decrypted content is zeroized and wiped.
 
 ## Depends on / Supersedes
 

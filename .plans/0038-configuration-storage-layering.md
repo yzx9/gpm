@@ -39,14 +39,14 @@ Three concrete confusions stem from the undocumented model today:
 
 **Axes.** Every persisted value is placed by three axes:
 
-- **Scope** — *repository-scoped* (tied to a particular remote/clone: git URL,
+- **Scope** — _repository-scoped_ (tied to a particular remote/clone: git URL,
   credentials, the authenticity trust set, commit identity) vs
-  *application-scoped* (independent of which repo is connected and persisting
+  _application-scoped_ (independent of which repo is connected and persisting
   across a repository reset: UI language, the screen-capture toggle, auto-clear
   timers, lock mode, autosync). Application-scoped is the codebase's existing
   "device-level / app-shell" notion.
-- **Protection need**, on two independent sub-axes: *confidentiality* (would a
-  read attacker learning it cause harm?) and *integrity / tamper-value* (would a
+- **Protection need**, on two independent sub-axes: _confidentiality_ (would a
+  read attacker learning it cause harm?) and _integrity / tamper-value_ (would a
   successful tamper be a meaningful attack?). These decouple: the authenticity
   trust set needs integrity but not confidentiality.
 - **Pre-unlock readability** — must the value be readable or writable at a
@@ -74,17 +74,17 @@ Three concrete confusions stem from the undocumented model today:
 cost is negligible and the store is unlocked on every launch anyway: the at-rest
 master key is auth-free in the common case, so sealed state is available
 immediately with no user friction. The burden of proof is therefore on
-*declassifying* state to plaintext, not on encrypting it. "Necessary" means a
+_declassifying_ state to plaintext, not on encrypting it. "Necessary" means a
 hard pre-unlock-readability requirement that a WebView-side cache cannot meet.
 
 **The one open decision — the application store's protection level.**
 
-- *Option A — plaintext application store (today's state).* Threat-model
+- _Option A — plaintext application store (today's state)._ Threat-model
   consistent: application preferences are not confidential, and the local write
   attacker is explicitly out of scope, so the integrity bonus on them is
   marginal. It also preserves the existing decoupling: the app-shell layer does
   not depend on the master-key/store lifecycle.
-- *Option B — sealed application store.* Honors the encrypt-by-default posture
+- _Option B — sealed application store._ Honors the encrypt-by-default posture
   and empties the plaintext surface, but couples the app-shell layer to the
   master-key injection lifecycle that Option A deliberately avoids. It also
   forces every pre-unlock-readable value onto the WebView-side cache — the
