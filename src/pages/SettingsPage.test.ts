@@ -15,9 +15,9 @@ const { mockPush, mockReplace, mockOnBeforeRouteLeave } = vi.hoisted(() => ({
   // unsaved-changes modal opens. Resolves to undefined (a clean navigation).
   mockReplace: vi.fn(() => {
     const calls = mockOnBeforeRouteLeave.mock.calls;
+    // prettier-ignore
     const guard = calls[calls.length - 1]?.[0] as
-      | (() => Promise<unknown>)
-      | undefined;
+      (() => Promise<unknown>) | undefined;
     void guard?.();
     return Promise.resolve();
   }),

@@ -111,9 +111,9 @@ export interface TrustedGpgKey {
 /** The typed entry returned by `add_trusted_signing_key` — discriminated by
  * `kind` so the UI knows which trust list to refresh. Mirrors the Rust
  * `AddedTrustedKey` enum (internally tagged: `{ kind, key }`). */
+// prettier-ignore
 export type AddedTrustedKey =
-  | { kind: "ssh"; key: TrustedKey }
-  | { kind: "gpg"; key: TrustedGpgKey };
+  { kind: "ssh"; key: TrustedKey } | { kind: "gpg"; key: TrustedGpgKey };
 
 /** A user-dismissed commit issue (scoped per commit + status). */
 export interface IgnoredIssue {
