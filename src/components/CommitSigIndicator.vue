@@ -98,7 +98,7 @@ const BANNER_TONE: Record<Tone, string> = {
     </div>
     <span
       v-if="props.ignored"
-      class="text-[0.6rem] text-subtle px-1 rounded-sm bg-edge shrink-0"
+      class="text-[0.6rem] text-default px-1 rounded-sm bg-edge shrink-0"
       >ignored</span
     >
   </div>

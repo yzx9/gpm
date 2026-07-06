@@ -256,7 +256,7 @@ async function onClone() {
           :style="{ width: `${progressPercent}%` }"
         ></div>
       </div>
-      <div v-if="formatBytes(receivedBytes)" class="text-xs text-subtle">
+      <div v-if="formatBytes(receivedBytes)" class="text-xs text-muted">
         {{ formatBytes(receivedBytes) }} received
       </div>
     </div>

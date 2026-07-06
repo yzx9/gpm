@@ -234,7 +234,7 @@ async function onCreate() {
           :disabled="generating || loading"
           :class="[
             'flex-1 py-2 text-sm font-medium transition-colors',
-            identityKind === 'age' ? 'bg-accent text-white' : 'bg-surface',
+            identityKind === 'age' ? 'bg-accent text-on-accent' : 'bg-surface',
           ]"
           @click="selectKind('age')"
         >
@@ -245,7 +245,7 @@ async function onCreate() {
           :disabled="generating || loading"
           :class="[
             'flex-1 py-2 text-sm font-medium transition-colors',
-            identityKind === 'ssh' ? 'bg-accent text-white' : 'bg-surface',
+            identityKind === 'ssh' ? 'bg-accent text-on-accent' : 'bg-surface',
           ]"
           @click="selectKind('ssh')"
         >

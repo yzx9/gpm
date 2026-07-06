@@ -54,7 +54,7 @@ function onIdentityDone() {
     <span
       :class="[
         'inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold',
-        step >= 1 ? 'bg-accent text-white' : 'bg-edge text-muted',
+        step >= 1 ? 'bg-accent text-on-accent' : 'bg-edge text-muted',
       ]"
       >1</span
     >
@@ -62,7 +62,7 @@ function onIdentityDone() {
     <span
       :class="[
         'inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold',
-        step >= 2 ? 'bg-accent text-white' : 'bg-edge text-muted',
+        step >= 2 ? 'bg-accent text-on-accent' : 'bg-edge text-muted',
       ]"
       >2</span
     >

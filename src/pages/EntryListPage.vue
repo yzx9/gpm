@@ -577,7 +577,7 @@ defineExpose({ syncRepo });
 
     <div
       v-if="lastSyncLabel"
-      class="text-xs text-subtle text-center mb-2"
+      class="text-xs text-muted text-center mb-2"
       aria-live="polite"
       role="status"
     >
@@ -620,7 +620,7 @@ defineExpose({ syncRepo });
         <BaseIcon
           :icon="Search"
           :size="40"
-          class="block mb-2 mx-auto text-subtle"
+          class="block mb-2 mx-auto text-muted"
         />
         <p>No matches for "{{ search }}"</p>
       </template>
@@ -628,10 +628,10 @@ defineExpose({ syncRepo });
         <BaseIcon
           :icon="Lock"
           :size="40"
-          class="block mb-2 mx-auto text-subtle"
+          class="block mb-2 mx-auto text-muted"
         />
         <p>No passwords yet</p>
-        <p class="text-xs text-subtle mt-1">
+        <p class="text-xs text-muted mt-1">
           Swipe down to sync, or check your repository
         </p>
       </template>
@@ -661,7 +661,7 @@ defineExpose({ syncRepo });
           <BaseIcon
             :icon="ChevronRight"
             :size="20"
-            class="text-subtle shrink-0"
+            class="text-muted shrink-0"
           />
         </div>
       </li>
@@ -845,14 +845,14 @@ defineExpose({ syncRepo });
   outline-offset: 2px;
 }
 .badge-ok {
-  color: var(--color-success, #3a9);
+  color: var(--color-success);
 }
 .badge-warn {
-  color: var(--color-warning, #c93);
+  color: var(--color-warning);
 }
 .badge-off,
 .badge-none {
-  color: var(--color-subtle, #999);
+  color: var(--color-muted);
 }
 
 .btn-danger {

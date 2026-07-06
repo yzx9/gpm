@@ -902,7 +902,7 @@ onMounted(() => {
       <BaseCard as="section">
         <h2 class="text-sm font-medium mb-2">Repository</h2>
         <div class="text-sm text-muted break-all">{{ config.url }}</div>
-        <div class="text-xs text-subtle mt-1">
+        <div class="text-xs text-muted mt-1">
           Auth: {{ isSsh ? "SSH Key" : config.pat ? "PAT" : "None (public)" }}
         </div>
       </BaseCard>
@@ -1169,7 +1169,7 @@ onMounted(() => {
           @change="onSecureScreenChange"
         >
           <template #hint>
-            <p class="text-xs text-subtle mt-1">
+            <p class="text-xs text-muted mt-1">
               <template v-if="secureScreen"
                 >Sensitive pages block capture; the entry list and history stay
                 capturable.</template
@@ -1196,7 +1196,7 @@ onMounted(() => {
           @change="onAutosyncChange"
         >
           <template #hint>
-            <p class="text-xs text-subtle mt-1">
+            <p class="text-xs text-muted mt-1">
               <template v-if="autosyncEnabled"
                 >Each save pulls, commits, and pushes automatically.</template
               >
@@ -1232,7 +1232,7 @@ onMounted(() => {
           @change="onLockModeChange"
         >
           <template #hint>
-            <p class="text-xs text-subtle mt-1">
+            <p class="text-xs text-muted mt-1">
               <template v-if="lockModeActive('immediate')"
                 >Per-operation: re-authenticate each copy/show/create. Strongest
                 default.</template
@@ -1303,7 +1303,7 @@ onMounted(() => {
           @change="onModeChange"
         >
           <template #hint>
-            <p class="text-xs text-subtle mt-1">
+            <p class="text-xs text-muted mt-1">
               <template v-if="authConfig.mode === 'off'"
                 >No verification.</template
               >
@@ -1328,7 +1328,7 @@ onMounted(() => {
             <code class="text-xs break-all flex-1">{{ row.fingerprint }}</code>
             <span
               v-if="row.kind === 'gpg'"
-              class="text-[0.6rem] text-subtle px-1 rounded-sm bg-edge shrink-0"
+              class="text-[0.6rem] text-default px-1 rounded-sm bg-edge shrink-0"
               >GPG</span
             >
             <span class="text-xs text-muted mx-2 truncate">{{
@@ -1343,7 +1343,7 @@ onMounted(() => {
             </button>
           </li>
         </ul>
-        <p v-else class="text-xs text-subtle mb-2">
+        <p v-else class="text-xs text-muted mb-2">
           No trusted keys yet. Trust this repo's signer, paste a key, or import
           a GPG .asc file below.
         </p>
@@ -1424,7 +1424,7 @@ onMounted(() => {
         <BaseButton variant="action-danger" @click="resetConfig">
           <BaseIcon :icon="Trash2" /> Reset All Data
         </BaseButton>
-        <p class="text-xs text-subtle mt-1">
+        <p class="text-xs text-muted mt-1">
           Remove all local data and configuration.
         </p>
       </BaseCard>

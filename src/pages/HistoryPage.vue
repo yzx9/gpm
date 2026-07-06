@@ -175,7 +175,7 @@ onBeforeUnmount(() => {
       <BaseIcon
         :icon="GitCommitHorizontal"
         :size="40"
-        class="block mb-2 mx-auto text-subtle"
+        class="block mb-2 mx-auto text-muted"
       />
       <p>No commits found</p>
     </div>
@@ -198,7 +198,7 @@ onBeforeUnmount(() => {
           <span class="font-medium wrap-break-word line-clamp-2">{{
             commit.subject || "(no message)"
           }}</span>
-          <div class="flex items-center gap-1.5 text-xs text-subtle min-w-0">
+          <div class="flex items-center gap-1.5 text-xs text-muted min-w-0">
             <code class="shrink-0">{{ commit.short_hash }}</code>
             <span aria-hidden="true" class="shrink-0">·</span>
             <span class="truncate min-w-0">{{ commit.author }}</span>
@@ -210,7 +210,7 @@ onBeforeUnmount(() => {
         </div>
         <span
           v-if="commit.ignored"
-          class="text-[0.6rem] text-subtle shrink-0 mt-0.5 px-1 rounded-sm bg-edge"
+          class="text-[0.6rem] text-default shrink-0 mt-0.5 px-1 rounded-sm bg-edge"
           >ignored</span
         >
       </li>
@@ -236,7 +236,7 @@ onBeforeUnmount(() => {
       <p class="text-xs text-muted mt-1 wrap-break-word">
         {{ selected.author }}
       </p>
-      <p class="text-xs text-subtle mt-0.5">{{ selected.date }}</p>
+      <p class="text-xs text-muted mt-0.5">{{ selected.date }}</p>
 
       <CommitSigIndicator
         :status="selected.status"

@@ -102,7 +102,7 @@ const sizeClass = computed(() =>
 /* Variants */
 .primary {
   background: var(--color-accent);
-  color: white;
+  color: var(--color-on-accent);
   border: none;
 }
 /* Pressed (touch + mouse). BaseButton renders a real <button>, so :active is
@@ -170,8 +170,8 @@ const sizeClass = computed(() =>
   background: var(--color-hover);
 }
 .action-danger {
-  border-color: var(--color-danger-edge, var(--color-danger, #c66));
-  color: #c66;
+  border-color: var(--color-danger-edge, var(--color-danger));
+  color: var(--color-danger);
 }
 
 /* Hover hint — mouse/trackpad only. Gated by (hover: hover) so it never

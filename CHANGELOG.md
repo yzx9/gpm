@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Text and controls are easier to read in both light and dark mode — secondary labels, links, the primary button, and the dark-theme status colors (red/green/blue) now meet WCAG AA contrast. Several grays and the brand blue were previously below the 4.5:1 threshold, especially in dark mode where the status colors had never been re-tuned.
 - When App Lock is on, the entry list no longer stays stuck on a "locked" message after you unlock with your fingerprint. It loads your entries on its own the moment the store unlocks, instead of making you leave the screen and come back. (The message while locked is intentional — it reminds you the content needs an unlock, and no entry data is loaded until then.)
 - Under App Lock, the "locked" message on the entry list no longer falsely warns that you need to set the app up again — you don't, just unlock. It now simply tells you to unlock.
 - Enforce mode can now be turned on whenever at least one trusted signing key is set — including when only a GPG key is trusted. Previously Enforce required an SSH key, so trusting only a GPG key left Enforce unavailable.

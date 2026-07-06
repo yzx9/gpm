@@ -36,7 +36,7 @@ withDefaults(
 }
 
 .spinner-white {
-  border-color: rgba(255, 255, 255, 0.3);
-  border-top-color: white;
+  border-color: color-mix(in srgb, var(--color-on-accent) 30%, transparent);
+  border-top-color: var(--color-on-accent);
 }
 </style>

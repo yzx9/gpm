@@ -495,7 +495,7 @@ onUnmounted(clearPendingFile);
             >
             <span
               v-if="matchedRecipient?.public_key === r.public_key"
-              class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-accent text-white"
+              class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-accent text-on-accent"
               >your key</span
             >
           </div>

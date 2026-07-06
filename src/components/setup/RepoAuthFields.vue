@@ -122,7 +122,7 @@ async function copyPublicKey() {
         type="button"
         :class="[
           'flex-1 py-2 text-sm font-medium transition-colors',
-          sshKeySource === 'paste' ? 'bg-accent text-white' : 'bg-surface',
+          sshKeySource === 'paste' ? 'bg-accent text-on-accent' : 'bg-surface',
         ]"
         @click="sshKeySource = 'paste'"
       >
@@ -132,7 +132,9 @@ async function copyPublicKey() {
         type="button"
         :class="[
           'flex-1 py-2 text-sm font-medium transition-colors',
-          sshKeySource === 'generate' ? 'bg-accent text-white' : 'bg-surface',
+          sshKeySource === 'generate'
+            ? 'bg-accent text-on-accent'
+            : 'bg-surface',
         ]"
         @click="sshKeySource = 'generate'"
       >

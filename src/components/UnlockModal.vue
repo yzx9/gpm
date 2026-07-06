@@ -204,7 +204,7 @@ onMounted(async () => {
       </h1>
     </div>
     <p class="text-center text-muted text-sm mb-1">Identity is locked</p>
-    <p class="text-center text-subtle text-xs mb-6">{{ lockHint }}</p>
+    <p class="text-center text-muted text-xs mb-6">{{ lockHint }}</p>
 
     <!-- What is the passphrase? (toggleable) -->
     <BaseAlert v-if="showHelp" variant="info" class="mb-4">
@@ -299,11 +299,11 @@ onMounted(async () => {
   transition: color 0.15s;
 }
 .close-x:active {
-  color: var(--color-text);
+  color: var(--color-default);
 }
 @media (hover: hover) {
   .close-x:hover {
-    color: var(--color-text);
+    color: var(--color-default);
   }
 }
 .help-btn {
@@ -318,11 +318,11 @@ onMounted(async () => {
 }
 .help-btn:active,
 .help-btn.active {
-  color: var(--color-text);
+  color: var(--color-default);
 }
 @media (hover: hover) {
   .help-btn:hover {
-    color: var(--color-text);
+    color: var(--color-default);
   }
 }
 </style>
