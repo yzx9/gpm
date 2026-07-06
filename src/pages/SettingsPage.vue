@@ -528,7 +528,7 @@ async function onPassphraseSubmit() {
       isIdentityEncrypted.value = true;
       // Setting a passphrase can invalidate a previously-sealed biometric unlock.
       biometricEnabled.value = await isBiometricUnlockEnabled();
-      toast.success("✓ Passphrase set — identity is now encrypted");
+      toast.success("✓ Passphrase set — your private key is now encrypted");
     } else if (mode === "change") {
       await changePassphrase(ppCurrent.value, ppNew.value);
       biometricEnabled.value = await isBiometricUnlockEnabled();
@@ -1016,12 +1016,13 @@ onMounted(() => {
            their own native passphrase protection). Set / change run in the
            shared passphrase modal, which is the commit boundary. -->
       <BaseCard as="section" v-if="!isSshIdentity">
-        <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
+        <h2 class="text-sm font-medium mb-3">Passphrase</h2>
 
         <!-- Not encrypted: set passphrase -->
         <template v-if="!isIdentityEncrypted">
           <p class="text-xs text-muted mb-2">
-            The identity is stored in plaintext. Set a passphrase to encrypt it.
+            Your private key is stored in plaintext. Set a passphrase to encrypt
+            it.
           </p>
           <BaseButton variant="action" @click="openPassphraseModal('set')">
             <BaseIcon :icon="Lock" /> Set Passphrase
@@ -1032,7 +1033,7 @@ onMounted(() => {
         <template v-else>
           <p class="text-xs text-muted mb-2 flex items-center gap-1">
             <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
-            Identity is passphrase-encrypted.
+            Your private key is passphrase-encrypted.
           </p>
           <BaseButton variant="action" @click="openPassphraseModal('change')">
             <BaseIcon :icon="KeyRound" /> Change Passphrase
@@ -1042,7 +1043,7 @@ onMounted(() => {
 
       <!-- SSH key identities are not encrypted by gpm -->
       <BaseCard as="section" v-else>
-        <h2 class="text-sm font-medium mb-3">Identity Encryption</h2>
+        <h2 class="text-sm font-medium mb-3">Passphrase</h2>
         <p class="text-xs text-muted">
           SSH key identities rely on their own native passphrase protection and
           are not re-encrypted by gpm.
@@ -1084,9 +1085,9 @@ onMounted(() => {
       <BaseCard as="section" v-if="appLockAvailable">
         <h2 class="text-sm font-medium mb-3">App Lock</h2>
         <p class="text-xs text-muted mb-3">
-          Require biometric every time you open or return to gpm. When on, the
-          whole store is sealed behind your fingerprint — nothing is visible
-          until you authenticate.
+          Require biometric every time you open or return to gpm. When on, your
+          app key is sealed behind your fingerprint — the repository can't be
+          opened until you authenticate.
         </p>
 
         <!-- App lock enable/disable -->

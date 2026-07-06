@@ -224,6 +224,10 @@ async function onCreate() {
       Generate an identity and seed a brand-new, gopass-compatible age store on
       this device. A remote is optional.
     </p>
+    <p class="text-xs text-muted">
+      To open your repository, gpm keeps an app key on this device — your
+      private key plus the git credentials.
+    </p>
 
     <!-- Identity type -->
     <div class="flex flex-col gap-1">
@@ -268,7 +272,7 @@ async function onCreate() {
         <small class="text-xs text-muted">{{
           identityKind === "ssh"
             ? "Encrypts the generated SSH key — set this before generating."
-            : "Encrypts the identity at rest. Recommended for Android."
+            : "Encrypts the private key. Recommended for Android."
         }}</small>
       </template>
     </PassphraseField>

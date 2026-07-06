@@ -445,6 +445,10 @@ onUnmounted(clearPendingFile);
       This repository encrypts secrets to the recipients below. Paste the
       identity that matches one of them.
     </p>
+    <p class="text-xs text-muted">
+      To open your repository, gpm keeps an app key on this device — your
+      private key plus the git credentials.
+    </p>
 
     <!-- Recipients list (read-only context; the match is derived, not selected) -->
     <div v-if="loadingRecipients" class="text-center py-4 text-sm text-muted">
@@ -678,7 +682,7 @@ onUnmounted(clearPendingFile);
     >
       <template #help>
         <small class="text-xs text-muted"
-          >Encrypts the identity file at rest. Recommended for Android.</small
+          >Encrypts the private key. Recommended for Android.</small
         >
         <BaseAlert v-if="!passphrase.trim()" variant="warning">
           <BaseIcon
@@ -686,7 +690,7 @@ onUnmounted(clearPendingFile);
             :size="14"
             class="inline-block align-middle"
           />
-          Without a passphrase, the identity is stored in plaintext.
+          Without a passphrase, your private key is stored in plaintext.
         </BaseAlert>
       </template>
     </PassphraseField>

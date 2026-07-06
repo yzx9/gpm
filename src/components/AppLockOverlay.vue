@@ -48,7 +48,7 @@ async function tryUnlock() {
         // up again. (Uninstall also purges the stale Keystore aliases; "Clear
         // data" overwrites them on next setup — both work.)
         notice.value =
-          "All fingerprints were removed, so gpm can no longer unlock its store. Clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again.";
+          "All fingerprints were removed, so gpm can no longer unlock your app key. Clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again.";
         break;
       default:
         notice.value = err.message || "Unlock failed";
