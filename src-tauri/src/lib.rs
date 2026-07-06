@@ -225,6 +225,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
 ///
 /// Panics if the Tauri runtime fails to start.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::too_many_lines)] // length is the command-registration list, not logic
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -234,6 +235,8 @@ pub fn run() {
         .plugin(tauri_plugin_file_picker::init())
         .plugin(tauri_plugin_screen_secure::init())
         .plugin(tauri_plugin_clipboard_notify::init())
+        // Best-effort display language baked in pre-paint; `resolved_locale` IPC reconciles a pinned preference after mount (see `app_config`).
+        .append_invoke_initialization_script(app_config::locale_init_script())
         .setup(|app| {
             app.manage(init_state(app));
             Ok(())
@@ -301,6 +304,7 @@ pub fn run() {
             app_config::get_app_config,
             app_config::set_secure_screen,
             app_config::set_locale_pref,
+            app_config::resolved_locale,
             app_config::screen_secure_available,
             // biometric
             biometric::is_biometric_available,

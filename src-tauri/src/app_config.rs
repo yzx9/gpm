@@ -32,6 +32,10 @@ const APP_CONFIG_FILE: &str = "app.json";
 /// of these; anything else degrades to the system-locale resolution.
 const SUPPORTED_LOCALES: [&str; 2] = ["en", "zh-CN"];
 
+/// The locale used when no preference is set and the system locale is neither
+/// English nor Chinese — keeps an unsupported system from rendering blank keys.
+const DEFAULT_LOCALE: &str = "en";
+
 /// App-level (non-repo) preferences. Plaintext on disk — no secrets, only UI
 /// toggles.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +87,44 @@ fn validate_locale(locale: Option<&str>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Map a BCP-47 system-locale tag (from `sys_locale::get_locale`) to one of the
+/// supported locale codes. Chinese variants collapse to `zh-CN`, English
+/// variants to `en`, anything else (or `None`) falls back to [`DEFAULT_LOCALE`].
+fn normalize_system_locale(raw: Option<&str>) -> String {
+    match raw {
+        Some(s) if s.to_ascii_lowercase().starts_with("zh") => "zh-CN".to_string(),
+        Some(s) if s.to_ascii_lowercase().starts_with("en") => "en".to_string(),
+        _ => DEFAULT_LOCALE.to_string(),
+    }
+}
+
+/// The locale to bake into the `WebView` initialization script.
+///
+/// This runs at Tauri `Builder` time, before the `App` exists — so on Android
+/// the config directory (and thus `app.json`) is not yet readable (it is only
+/// resolvable through the running app's mobile-plugin IPC). The system locale
+/// is readable this early, though (`sys_locale` reads it via libc, no app
+/// required, on every platform), so the inject carries the "track system"
+/// resolution. This is exactly correct for users who haven't pinned a language
+/// (the default, and the first-launch case), and the boot `resolved_locale`
+/// IPC corrects it within one frame for users who have.
+pub(crate) fn init_script_locale() -> String {
+    normalize_system_locale(sys_locale::get_locale().as_deref())
+}
+
+/// The full JavaScript snippet that bakes the boot locale into the `WebView` as
+/// `window.__GPM_LOCALE__` before the page's own scripts run. Registered on the
+/// Tauri `Builder` (`append_invoke_initialization_script`) so it applies to
+/// every webview on every platform, riding the same channel that sets up
+/// `__TAURI_INTERNALS__`.
+pub(crate) fn locale_init_script() -> String {
+    let locale = init_script_locale();
+    format!(
+        "window.__GPM_LOCALE__ = {};",
+        serde_json::to_string(&locale).expect("locale always serializes to a JS string literal")
+    )
+}
+
 /// Persistent app-shell config, owned by [`AppState`]. The on-disk file is read
 /// once synchronously at construction; the in-memory cache is authoritative
 /// thereafter. The [`Mutex`] guard is never held across an `.await`.
@@ -111,6 +153,21 @@ impl AppConfigStore {
     /// Snapshot the cached config.
     pub(crate) fn get(&self) -> AppConfig {
         self.cache.lock().expect("app config lock poisoned").clone()
+    }
+
+    /// Resolve the locale the app should render in: an explicit, supported
+    /// override when one is set, otherwise the system locale (normalized to a
+    /// supported code). Always returns a value in [`SUPPORTED_LOCALES`]. A
+    /// stale/unsupported on-disk override (including `Some("")` from a
+    /// hand-edited file) degrades to system-locale resolution rather than
+    /// poisoning the result — the frontend therefore reads this, not the raw
+    /// `locale` field, so an unsupported value never reaches the `WebView`.
+    pub(crate) fn resolved_locale(&self) -> String {
+        let cfg = self.get();
+        match cfg.locale.as_deref() {
+            Some(explicit) if is_supported_locale(explicit) => explicit.to_string(),
+            _ => normalize_system_locale(sys_locale::get_locale().as_deref()),
+        }
     }
 
     /// Persist `cfg` atomically (temp + rename, mirroring
@@ -176,6 +233,15 @@ pub(crate) async fn set_locale_pref(
     cfg.locale = locale;
     state.app_config.save(&cfg).await?;
     Ok(cfg)
+}
+
+/// The authoritative locale the app should render in. The frontend uses this at
+/// boot to reconcile against the best-effort value baked into the `WebView` init
+/// script (which can only carry the system locale, not a pinned preference).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn resolved_locale(state: State<'_, AppState>) -> String {
+    state.app_config.resolved_locale()
 }
 
 #[cfg(test)]
@@ -300,5 +366,74 @@ mod tests {
         assert_eq!(err.code, "CONFIG_ERROR");
         assert!(err.message.contains("zh-TW"));
         assert!(validate_locale(Some("fr")).is_err());
+    }
+
+    #[test]
+    fn normalize_system_locale_maps_variants() {
+        assert_eq!(normalize_system_locale(None), "en");
+        assert_eq!(normalize_system_locale(Some("en")), "en");
+        assert_eq!(normalize_system_locale(Some("en-US")), "en");
+        assert_eq!(normalize_system_locale(Some("zh")), "zh-CN");
+        assert_eq!(normalize_system_locale(Some("zh-CN")), "zh-CN");
+        assert_eq!(normalize_system_locale(Some("zh-Hans-CN")), "zh-CN");
+        assert_eq!(normalize_system_locale(Some("zh-TW")), "zh-CN");
+        // An unsupported system locale falls back to the default.
+        assert_eq!(normalize_system_locale(Some("fr-FR")), "en");
+    }
+
+    #[tokio::test]
+    async fn resolved_locale_uses_explicit_override() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                locale: Some("zh-CN".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(store.resolved_locale(), "zh-CN");
+    }
+
+    #[tokio::test]
+    async fn resolved_locale_ignores_unsupported_disk_value() {
+        // A hand-edited file (or a future migration) could write an unsupported
+        // code or empty string. The resolver must not surface it — it degrades
+        // to a supported locale rather than handing the raw value to the UI.
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                locale: Some("fr".to_string()),
+            })
+            .await
+            .unwrap();
+        let resolved = store.resolved_locale();
+        assert!(
+            is_supported_locale(&resolved),
+            "unsupported override must resolve to a supported locale, got {resolved}"
+        );
+    }
+
+    #[test]
+    fn resolved_locale_with_none_returns_supported() {
+        let dir = tempdir().expect("tempdir");
+        let resolved = store_at(dir.path()).resolved_locale();
+        assert!(
+            is_supported_locale(&resolved),
+            "resolved locale must be supported, got {resolved}"
+        );
+    }
+
+    #[test]
+    fn init_script_locale_returns_supported() {
+        // The init script runs before app.json is readable, so it carries the
+        // system-locale resolution — always a supported code.
+        let resolved = init_script_locale();
+        assert!(
+            is_supported_locale(&resolved),
+            "init script locale must be supported, got {resolved}"
+        );
     }
 }

@@ -28,6 +28,7 @@ serde_json = { workspace = true }
 zeroize = { workspace = true }
 tokio = { workspace = true, features = ["rt", "fs"] }
 base64 = { workspace = true }
+sys-locale = "0.3"
 
 [dev-dependencies]
 tempfile = { workspace = true }
