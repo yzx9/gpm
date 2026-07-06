@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 gpm is an Android-first, age-only gopass password client built with Tauri v2 + Rust + Vue 3. It works against age-encrypted gopass repositories — clone, list, search, decrypt/copy, create secrets (with templates), and sync over git. No GPG-based secret encryption (age-only), no cloud-hosted sync (sync is git pull/push to your own repo). Commit authenticity verifies BOTH SSH-signed and GPG/OpenPGP-signed commits (see Security Model).
 
