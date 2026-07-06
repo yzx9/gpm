@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Opening a page now slides in from the right, and going back slides it the other way — a stack-style transition between pages. Transitions to or from a page that shows secrets swap instantly, so the screen-capture guard never leaves a secret visible during the animation.
 - After you copy a password on Android, a small notification appears in your notification shade while the secret is on the clipboard — tap it to clear the clipboard immediately, without gpm taking over the foreground. It dismisses itself when the clipboard is cleared, whether by your tap or the automatic timer. The first time you copy, gpm asks once for permission to show notifications; if you decline, copying still works, just without the notification. Android only; desktop is unchanged.
+- GPG/OpenPGP-signed commits are now verified, the same way SSH-signed commits already are — instead of being flagged as an unsupported format. Under Settings → Trusted signing keys you can paste a GPG public key (or import a `.asc` file from your device) to trust a signer; once trusted, a commit signed by that key shows as verified in Audit/Enforce mode and in the history view. A commit signed by a GPG key you haven't trusted shows a distinct "Unverified signature" status with a hint to add the signer's key, since GPG signatures don't carry the public key the way SSH signatures do.
 
 ### Changed
 
@@ -24,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - When App Lock is on, the entry list no longer stays stuck on a "locked" message after you unlock with your fingerprint. It loads your entries on its own the moment the store unlocks, instead of making you leave the screen and come back. (The message while locked is intentional — it reminds you the content needs an unlock, and no entry data is loaded until then.)
 - Under App Lock, the "locked" message on the entry list no longer falsely warns that you need to set the app up again — you don't, just unlock. It now simply tells you to unlock.
+- Enforce mode can now be turned on whenever at least one trusted signing key is set — including when only a GPG key is trusted. Previously Enforce required an SSH key, so trusting only a GPG key left Enforce unavailable.
 
 ## [v0.9.0] - 2026-07-05
 

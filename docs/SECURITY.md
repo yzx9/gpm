@@ -171,9 +171,12 @@ graph — not that it came from someone you trust. An attacker who controls the
 remote can feed age blobs that decrypt fine but contain data they also know
 (e.g. a new `aws/root.age` with a password they chose).
 
-To close this, gpm offers optional **SSH-signed commit verification** (git ≥
-2.34 `gpg.format = ssh`, verified against a user-managed trusted-signing-key
-set). It is a tri-state per-repo setting:
+To close this, gpm offers optional **commit signature verification** for both
+formats git supports — **SSH-signed** commits (git ≥ 2.34 `gpg.format = ssh`,
+verified with the already-present `ssh-key` crate) and **GPG/OpenPGP-signed**
+commits (verified with the pure-Rust `rpgp` crate, the same dependency class
+as `age`/`ssh-key` — no C, `ring`, or `openssl`). Both are checked against a
+user-managed trusted-signing-key set. It is a tri-state per-repo setting:
 
 - **Off** — no verification (the default).
 - **Audit** — verify every pulled commit; warn on a mismatch, always pull.
@@ -183,19 +186,41 @@ set). It is a tri-state per-repo setting:
 
 On each pull every commit in the range `(old HEAD, new HEAD]` is verified (not
 just the tip — a buried malicious commit behind a signed tip is still caught).
-Verification reuses the already-present `ssh-key` crate; **no new crypto
-dependency**. GPG-signed commits are out of scope and surface as "signed but
-not verifiable by gpm". The trusted-signing-key set is public, non-secret
-data; it lives as the `authenticity` field of `repo.json`.
+The trusted-signing-key set is public, non-secret data; it lives as the
+`authenticity` field of `repo.json`.
+
+**Trust is set membership, not web-of-trust.** gpm does a simple "is this key
+in the trusted set?" check — it ignores GPG owner-trust, certification levels,
+and keyserver lookups entirely, so no new network trust vector is introduced.
+You add a trusted signer by pasting its public key (or importing a `.asc`
+file). For GPG the trusted identity is the primary-key fingerprint, and a
+subkey signature verifies against the trusted primary via its binding
+signature.
+
+**Expiry and revocation are NOT enforced.** A GPG key past its expiry date, or
+one carrying a revocation signature, still verifies in this phase (revocation
+is not even parsed for policy). Treat the trust set as "the keys I have
+chosen to trust", not "keys currently valid by GPG's own rules."
+
+**SSH-sig and GPG make different guarantees about an untrusted signer.** An
+SSH signature embeds the signer's public key, so gpm always verifies the
+cryptography and only the trust decision remains — an untrusted SSH signer
+surfaces as `UntrustedKey` (crypto-verified, just not in your trust set). A
+GPG signature carries only the issuer fingerprint, never the key, so when the
+signer is not trusted gpm has no key to check against and performs **no
+cryptographic verification** — that surfaces as a distinct
+`UnverifiedSignature` status, a weaker statement than `UntrustedKey`. The
+difference is visible to the user, not hidden behind one label.
 
 **Defeats** (Enforce; detects in Audit): a compromised remote feeding unsigned
 or attacker-signed commits, or tampering with a signed commit's contents (any
-edit invalidates the SSH signature → `BadSignature`).
+edit invalidates the signature → `BadSignature`).
 
 **Does not defeat**: the signing key itself being compromised (rotation/
-revocation is the countermeasure); a malicious commit made before the feature
-was enabled (verification is forward-looking — use the History screen to audit
-the past); transport-level spoofing (handled by HTTPS/SSH transport trust).
+revocation is the countermeasure — and see above, gpm does not yet honor
+revocation); a malicious commit made before the feature was enabled
+(verification is forward-looking — use the History screen to audit the past);
+transport-level spoofing (handled by HTTPS/SSH transport trust).
 
 **Irreducible first-use assumption:** trusting the current HEAD's signer at
 enable time assumes that HEAD isn't already an attacker commit. The explicit

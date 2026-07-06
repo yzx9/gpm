@@ -62,7 +62,13 @@ describe("SettingsPage", () => {
     },
     is_biometric_available: false,
     is_biometric_unlock_enabled: false,
-    get_authenticity_config: { mode: "off", trusted_keys: [], ignored: [] },
+    get_authenticity_config: {
+      mode: "off",
+      trusted_keys: [],
+      trusted_gpg_keys: [],
+      ignored: [],
+    },
+    get_gpg_key_parse_warnings: [],
     get_commit_identity_default: { name: "gpm", email: "gpm@local" },
     get_ssh_public_key: { public_key: "ssh-ed25519 default" },
     export_ssh_private_key: { private_key: "default-private" },
@@ -779,6 +785,7 @@ describe("SettingsPage", () => {
             added_at_commit: "deadbeef",
           },
         ],
+        trusted_gpg_keys: [],
         ignored: [],
       });
       vi.mocked(globalThis.confirm).mockReturnValue(true);
@@ -799,6 +806,83 @@ describe("SettingsPage", () => {
       expect(invoke).toHaveBeenCalledWith("remove_trusted_key", {
         fingerprint: "SHA256:abcd",
       });
+    });
+
+    it("lists GPG trusted keys and routes their remove to remove_trusted_gpg_key", async () => {
+      when("get_authenticity_config", {
+        mode: "audit",
+        trusted_keys: [],
+        trusted_gpg_keys: [
+          {
+            armored_public_key: "-----BEGIN PGP PUBLIC KEY BLOCK-----",
+            fingerprint: "abcdef0123456789",
+            label: "Bob GPG",
+            added_at_commit: "cafef00d",
+          },
+        ],
+        ignored: [],
+      });
+      vi.mocked(globalThis.confirm).mockReturnValue(true);
+      when("remove_trusted_gpg_key", undefined);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // GPG rows are badged and the hex fingerprint renders alongside SSH ones.
+      expect(wrapper.text()).toContain("abcdef0123456789");
+      expect(wrapper.text()).toContain("GPG");
+
+      const removeBtn = wrapper
+        .findAll(".btn-copy")
+        .find((b) => b.text().includes("Remove"));
+      expect(removeBtn).toBeDefined();
+      await removeBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("remove_trusted_gpg_key", {
+        fingerprint: "abcdef0123456789",
+      });
+    });
+
+    it("import GPG key file button invokes import_trusted_gpg_key_file", async () => {
+      vi.spyOn(globalThis, "prompt").mockReturnValue("Bob");
+      when("import_trusted_gpg_key_file", undefined);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const importBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Import GPG key file"));
+      expect(importBtn).toBeDefined();
+      await importBtn!.trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("import_trusted_gpg_key_file", {
+        label: "Bob",
+      });
+    });
+
+    it("shows a notice when a trusted GPG key fails to load", async () => {
+      when("get_authenticity_config", {
+        mode: "audit",
+        trusted_keys: [],
+        trusted_gpg_keys: [
+          {
+            armored_public_key: "broken",
+            fingerprint: "deadbeef",
+            label: "Stale",
+            added_at_commit: "x",
+          },
+        ],
+        ignored: [],
+      });
+      when("get_gpg_key_parse_warnings", ["Invalid GPG public key: broken"]);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // The silent Verified→UnverifiedSignature downgrade must be visible.
+      expect(wrapper.text()).toContain(
+        "1 trusted GPG key(s) failed to load",
+      );
     });
 
     it("switches verification mode", async () => {
@@ -1057,7 +1141,7 @@ describe("SettingsPage", () => {
     });
 
     it("save with only add-key dirty adds the key, not commit identity", async () => {
-      when("add_trusted_key", undefined);
+      when("add_trusted_signing_key", undefined);
       const wrapper = mountPage();
       await flushPromises();
 
@@ -1079,8 +1163,10 @@ describe("SettingsPage", () => {
         .trigger("click");
 
       await expect(p).resolves.toBe(true);
-      expect(invoke).toHaveBeenCalledWith("add_trusted_key", {
-        publicKey: "ssh-ed25519 AAAA key",
+      // The paste form routes through the unified server-detect command (D7),
+      // not the SSH-only add_trusted_key.
+      expect(invoke).toHaveBeenCalledWith("add_trusted_signing_key", {
+        armored: "ssh-ed25519 AAAA key",
         label: "signer",
       });
       expect(invoke).not.toHaveBeenCalledWith(

@@ -4,9 +4,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AddedTrustedKey,
   AuthenticityConfig,
   CommitSigInfo,
   CommitSigStatus,
+  TrustedGpgKey,
   VerifyMode,
 } from "./common";
 
@@ -49,9 +51,42 @@ export async function addTrustedKey(
   await invoke("add_trusted_key", { publicKey, label });
 }
 
+/** Add a trusted signing key from an armored block of EITHER format — the
+ * backend detects GPG (`-----BEGIN PGP PUBLIC KEY BLOCK-----`) vs SSH and
+ * routes to the right trust store. Returns the typed entry so the caller knows
+ * which list to refresh. The paste form calls this; there is no client-side
+ * format branching. */
+export async function addTrustedSigningKey(
+  armored: string,
+  label: string,
+): Promise<AddedTrustedKey> {
+  return invoke<AddedTrustedKey>("add_trusted_signing_key", { armored, label });
+}
+
+/** Import a trusted GPG public key from a native-picked file — the primary GPG
+ * path on Android, where pasting a multi-line armored block is painful. File
+ * bytes stay backend-side. */
+export async function importTrustedGpgKeyFile(
+  label: string,
+): Promise<TrustedGpgKey> {
+  return invoke<TrustedGpgKey>("import_trusted_gpg_key_file", { label });
+}
+
 /** Remove a trusted signing key by fingerprint. */
 export async function removeTrustedKey(fingerprint: string): Promise<void> {
   await invoke("remove_trusted_key", { fingerprint });
+}
+
+/** Remove a trusted GPG key by primary fingerprint. */
+export async function removeTrustedGpgKey(fingerprint: string): Promise<void> {
+  await invoke("remove_trusted_gpg_key", { fingerprint });
+}
+
+/** Per-key parse warnings for the persisted trusted GPG keys (Settings-only).
+ * A trusted key that later fails to re-parse surfaces here instead of silently
+ * downgrading its commits to `unverified_signature`. */
+export async function getGpgKeyParseWarnings(): Promise<string[]> {
+  return invoke<string[]>("get_gpg_key_parse_warnings");
 }
 
 /** Trust the signer of the current HEAD with a `label`. */

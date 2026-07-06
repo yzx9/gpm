@@ -637,7 +637,7 @@ fn key_type_string(key_type: KeyType) -> &'static str {
 
 /// Map a [`tauri_plugin_file_picker::FilePickerError`] into the app's IPC error
 /// type, turning a Kotlin `CANCELLED` into [`ErrorCode::Cancelled`].
-fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError) -> Error {
+pub(crate) fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError) -> Error {
     let code = match e.code.as_str() {
         "CANCELLED" => ErrorCode::Cancelled,
         _ => ErrorCode::InvalidIdentity,

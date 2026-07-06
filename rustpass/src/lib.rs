@@ -83,11 +83,17 @@ pub use generator::{GenerateMode, GenerateOptions, generate_password};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use secret::Secret;
 pub use signing::{
-    AuthenticityConfig, CommitSigInfo, CommitSigStatus, IgnoredIssue, TrustedKey, VerifyMode,
-    fingerprint_of_public_key,
+    AuthenticityConfig, CommitSigInfo, CommitSigStatus, IgnoredIssue, TrustedGpgKey, TrustedKey,
+    VerifyMode, fingerprint_of_public_key,
 };
 pub use storage::{CancelToken, GitProgress, ProgressSender};
 pub use store::{
     CommitIdentity, DivergenceChoice, RankedPage, Store, SyncDivergence, SyncOutcome, SyncResult,
     WriteOutcome, WriteResult,
 };
+
+/// Upper bound on a trusted GPG/OpenPGP armored public key's size (paste OR
+/// file import). Armored pubkeys are small; this rejects a mis-pasted/mis-picked
+/// multi-MB blob before rpgp parses it. Enforced at the `Store::add_trusted_gpg_key`
+/// chokepoint so both the paste and file-import paths share one guard.
+pub const MAX_GPG_KEY_FILE_BYTES: usize = 64 * 1024;

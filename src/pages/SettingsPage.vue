@@ -14,7 +14,7 @@ import type {
   VerifyMode,
 } from "@/api";
 import {
-  addTrustedKey,
+  addTrustedSigningKey,
   resetConfig as apiResetConfig,
   asAppLockError,
   changePassphrase,
@@ -29,10 +29,13 @@ import {
   getAuthenticityConfig,
   getCommitIdentityDefault,
   getConfig,
+  getGpgKeyParseWarnings,
   getSshPublicKey,
+  importTrustedGpgKeyFile,
   isAppLockAvailable,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
+  removeTrustedGpgKey,
   removeTrustedKey,
   setAutosync,
   setClipboardClearSecs,
@@ -65,6 +68,7 @@ import {
   ArrowLeft,
   CircleCheck,
   Copy,
+  FileUp,
   History,
   KeyRound,
   Lock,
@@ -180,6 +184,32 @@ const authLoading = ref(false);
 const showAddKey = ref(false);
 const newPublicKey = ref("");
 const newKeyLabel = ref("");
+/** Per-key parse warnings for the persisted trusted GPG keys — non-empty when
+ * a previously-trusted key later fails to re-parse (surfaces the silent
+ * Verified→UnverifiedSignature downgrade so the user can re-add or remove). */
+const gpgWarnings = ref<string[]>([]);
+
+/** SSH + GPG trusted keys flattened into render rows tagged by origin list, so
+ * the combined list can badge GPG entries and route each Remove to the right
+ * command without sniffing the fingerprint string. */
+const trustedKeyRows = computed<
+  ReadonlyArray<{ kind: "ssh" | "gpg"; fingerprint: string; label: string }>
+>(() => {
+  const cfg = authConfig.value;
+  if (!cfg) return [];
+  return [
+    ...cfg.trusted_keys.map((k) => ({
+      kind: "ssh" as const,
+      fingerprint: k.fingerprint,
+      label: k.label,
+    })),
+    ...cfg.trusted_gpg_keys.map((k) => ({
+      kind: "gpg" as const,
+      fingerprint: k.fingerprint,
+      label: k.label,
+    })),
+  ];
+});
 
 // ── Commit identity state ───────────────────────────────────────────────
 const commitName = ref("");
@@ -599,7 +629,15 @@ async function onDisableIdentityAutoUnlock() {
 // ── Repository authenticity ──────────────────────────────────────────────
 async function loadAuthConfig() {
   try {
-    authConfig.value = await getAuthenticityConfig();
+    // Warnings are a Settings-only concern (separate command, NOT on the
+    // entry-list badge path); fetch alongside the config. A warnings failure
+    // must not brick the whole card.
+    const [cfg, warnings] = await Promise.all([
+      getAuthenticityConfig(),
+      getGpgKeyParseWarnings().catch(() => [] as string[]),
+    ]);
+    authConfig.value = cfg;
+    gpgWarnings.value = warnings;
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to load authenticity config";
@@ -632,12 +670,15 @@ async function onAddKey(): Promise<boolean> {
   error.value = "";
   const key = newPublicKey.value.trim();
   if (!key) {
-    error.value = "Paste an SSH signing public key";
+    error.value = "Paste a signing public key (SSH one-liner or GPG armor)";
     return false;
   }
   authLoading.value = true;
   try {
-    await addTrustedKey(key, newKeyLabel.value.trim() || "signer");
+    // The backend detects GPG vs SSH from the armor prefix — no client-side
+    // branching. `added.kind` tells us which list refreshed, but loadAuthConfig
+    // re-reads both regardless.
+    await addTrustedSigningKey(key, newKeyLabel.value.trim() || "signer");
     newPublicKey.value = "";
     newKeyLabel.value = "";
     showAddKey.value = false;
@@ -653,16 +694,42 @@ async function onAddKey(): Promise<boolean> {
   }
 }
 
-async function onRemoveKey(fingerprint: string) {
+async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
   if (!confirm("Remove this trusted signing key?")) return;
   authLoading.value = true;
   try {
-    await removeTrustedKey(fingerprint);
+    if (kind === "gpg") {
+      await removeTrustedGpgKey(fingerprint);
+    } else {
+      await removeTrustedKey(fingerprint);
+    }
     toast.success("Trusted key removed");
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || "Failed to remove key";
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+async function onImportGpgKey() {
+  // Prompt for a label up front; the backend pre-fills from the filename when
+  // this is blank, so empty is fine too.
+  const label = window.prompt(
+    "Label for the imported GPG key? (Leave blank to use the filename.)",
+    "",
+  );
+  if (label === null) return;
+  authLoading.value = true;
+  error.value = "";
+  try {
+    await importTrustedGpgKeyFile(label.trim());
+    toast.success("✓ GPG key imported");
+    await loadAuthConfig();
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || "Failed to import GPG key";
   } finally {
     authLoading.value = false;
   }
@@ -1244,37 +1311,50 @@ onMounted(() => {
           </template>
         </BaseSegmentedControl>
 
-        <!-- Trusted signing keys -->
+        <!-- Trusted signing keys (SSH + GPG combined; GPG entries tagged) -->
         <div class="text-xs text-muted mb-1">
-          Trusted signing keys ({{ authConfig.trusted_keys.length }})
+          Trusted signing keys ({{ trustedKeyRows.length }})
         </div>
         <ul
-          v-if="authConfig.trusted_keys.length"
+          v-if="trustedKeyRows.length"
           class="flex flex-col gap-1 mb-2"
         >
           <li
-            v-for="k in authConfig.trusted_keys"
-            :key="k.fingerprint"
+            v-for="row in trustedKeyRows"
+            :key="row.kind + ':' + row.fingerprint"
             class="key-row"
           >
-            <code class="text-xs break-all flex-1">{{ k.fingerprint }}</code>
-            <span class="text-xs text-muted mx-2 truncate">{{ k.label }}</span>
+            <code class="text-xs break-all flex-1">{{ row.fingerprint }}</code>
+            <span
+              v-if="row.kind === 'gpg'"
+              class="text-[0.6rem] text-subtle px-1 rounded-sm bg-edge shrink-0"
+              >GPG</span
+            >
+            <span class="text-xs text-muted mx-2 truncate">{{ row.label }}</span>
             <button
               type="button"
               class="btn-copy"
-              @click="onRemoveKey(k.fingerprint)"
+              @click="onRemoveKey(row.fingerprint, row.kind)"
             >
               Remove
             </button>
           </li>
         </ul>
         <p v-else class="text-xs text-subtle mb-2">
-          No trusted keys yet. Trust this repo's signer or paste a key below.
+          No trusted keys yet. Trust this repo's signer, paste a key, or import
+          a GPG .asc file below.
+        </p>
+        <p
+          v-if="gpgWarnings.length"
+          class="text-xs text-warning mb-2 break-words"
+        >
+          {{ gpgWarnings.length }} trusted GPG key(s) failed to load — re-add or
+          remove to restore verification.
         </p>
 
         <div class="flex flex-col gap-2">
           <BaseButton
-            v-if="authConfig.trusted_keys.length === 0"
+            v-if="trustedKeyRows.length === 0"
             variant="action"
             @click="onTrustHead"
           >
@@ -1287,11 +1367,19 @@ onMounted(() => {
           >
             <BaseIcon :icon="Plus" /> Add a signing public key
           </BaseButton>
+          <BaseButton
+            v-if="!showAddKey"
+            variant="action"
+            :disabled="authLoading"
+            @click="onImportGpgKey"
+          >
+            <BaseIcon :icon="FileUp" /> Import GPG key file (.asc)
+          </BaseButton>
           <div v-if="showAddKey" class="flex flex-col gap-2">
             <BaseTextarea
               v-model="newPublicKey"
-              rows="2"
-              placeholder="ssh-ed25519 AAAA… [comment]"
+              rows="3"
+              placeholder="ssh-ed25519 AAAA… [comment]  — or paste a GPG public key block"
               class="font-mono text-xs"
             />
             <BaseInput

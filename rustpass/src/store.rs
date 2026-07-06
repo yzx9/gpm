@@ -25,7 +25,7 @@ use crate::identity::{IdentityType, classify_identity, validate_identity_format}
 use crate::recipient::{RECIPIENTS_FILE, Recipient};
 use crate::secret::Secret;
 use crate::signing::{
-    self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedKey, VerifyMode,
+    self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedGpgKey, TrustedKey, VerifyMode,
 };
 use crate::storage::git::passfile_rel;
 use crate::storage::{
@@ -1495,8 +1495,8 @@ impl Store {
     }
 
     /// Set the verification mode. Refuses [`VerifyMode::Enforce`] when no
-    /// trusted key is recorded yet (Enforce with zero keys would block every
-    /// pull). Returns the effective stored mode.
+    /// trusted key (SSH **or** GPG) is recorded yet (Enforce with zero keys
+    /// would block every pull). Returns the effective stored mode.
     ///
     /// # Errors
     ///
@@ -1504,7 +1504,7 @@ impl Store {
     /// trusted keys, or the config cannot be persisted.
     pub async fn set_verification_mode(&self, mode: VerifyMode) -> Result<VerifyMode, Error> {
         let mut rc = self.config.load_repo_config().await?;
-        if mode == VerifyMode::Enforce && rc.authenticity.trusted_keys.is_empty() {
+        if mode == VerifyMode::Enforce && !rc.authenticity.has_any_trusted_key() {
             return Err(Error::new(
                 ErrorCode::ConfigError,
                 "Add a trusted signing key before enabling Enforce.",
@@ -1735,9 +1735,9 @@ impl Store {
         Ok(key)
     }
 
-    /// Remove a trusted signing key by fingerprint. Removing the last key
-    /// while in Enforce downgrades to Audit (Enforce with zero keys would
-    /// block everything).
+    /// Remove a trusted signing key by fingerprint. Removing the last trusted
+    /// key of either kind (SSH or GPG) while in Enforce downgrades to Audit
+    /// (Enforce with zero keys would block everything).
     ///
     /// # Errors
     ///
@@ -1747,10 +1747,103 @@ impl Store {
         rc.authenticity
             .trusted_keys
             .retain(|k| k.fingerprint != fingerprint);
-        if rc.authenticity.trusted_keys.is_empty() && rc.authenticity.mode == VerifyMode::Enforce {
+        if !rc.authenticity.has_any_trusted_key() && rc.authenticity.mode == VerifyMode::Enforce {
             rc.authenticity.mode = VerifyMode::Audit;
         }
         self.config.save_repo_config_full(&rc).await
+    }
+
+    /// Add a trusted GPG/OpenPGP public key (RFC 0009). Parses the armored
+    /// block, derives the primary-key fingerprint, and dedupes — if a key with
+    /// the same primary fingerprint is already trusted, the existing entry is
+    /// returned unchanged (idempotent).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::SshKeyInvalid`] if the armor is unparseable or its
+    /// self-signatures do not validate, or an error if the config cannot be
+    /// persisted.
+    pub async fn add_trusted_gpg_key(
+        &self,
+        armored_public_key: &str,
+        label: &str,
+    ) -> Result<TrustedGpgKey, Error> {
+        // Bound the input before rpgp parses it — a mis-pasted/mis-picked
+        // multi-MB blob is rejected with the same "not a usable GPG key" error
+        // whether it arrives via paste or file import.
+        if armored_public_key.len() > crate::MAX_GPG_KEY_FILE_BYTES {
+            return Err(Error::new(
+                ErrorCode::SshKeyInvalid,
+                format!(
+                    "GPG public key too large ({} bytes; limit {} bytes) — not an armored public key.",
+                    armored_public_key.len(),
+                    crate::MAX_GPG_KEY_FILE_BYTES
+                ),
+            ));
+        }
+        let key = crate::crypto::openpgp::parse_armored_public_key(armored_public_key)?;
+        let fingerprint = crate::crypto::openpgp::primary_fingerprint(&key);
+
+        let mut rc = self.config.load_repo_config().await?;
+        if let Some(existing) = rc
+            .authenticity
+            .trusted_gpg_keys
+            .iter()
+            .find(|k| k.fingerprint == fingerprint)
+            .cloned()
+        {
+            return Ok(existing);
+        }
+
+        let head = self.current_head_hash().await.unwrap_or_default();
+        let entry = TrustedGpgKey {
+            armored_public_key: armored_public_key.trim().to_string(),
+            fingerprint,
+            label: label.to_string(),
+            added_at_commit: head,
+        };
+        rc.authenticity.trusted_gpg_keys.push(entry.clone());
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(entry)
+    }
+
+    /// Remove a trusted GPG key by primary fingerprint. Removing the last
+    /// trusted key of either kind (SSH or GPG) while in Enforce downgrades to
+    /// Audit (Enforce with zero keys would block everything).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be persisted.
+    pub async fn remove_trusted_gpg_key(&self, fingerprint: &str) -> Result<(), Error> {
+        let mut rc = self.config.load_repo_config().await?;
+        rc.authenticity
+            .trusted_gpg_keys
+            .retain(|k| k.fingerprint != fingerprint);
+        if !rc.authenticity.has_any_trusted_key() && rc.authenticity.mode == VerifyMode::Enforce {
+            rc.authenticity.mode = VerifyMode::Audit;
+        }
+        self.config.save_repo_config_full(&rc).await
+    }
+
+    /// The per-key parse warnings for the persisted trusted GPG keys — one
+    /// human-readable string per entry that failed to re-parse. A trusted key
+    /// that later breaks must not silently downgrade commits to
+    /// `UnverifiedSignature`; the Settings card surfaces these so the user can
+    /// re-add or remove the broken entry. Settings-load frequency only — the
+    /// per-commit verifier path uses `TrustSet::from_config` (separate).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be read.
+    pub async fn gpg_key_parse_warnings(&self) -> Result<Vec<String>, Error> {
+        let rc = self.config.load_repo_config().await?;
+        let armored = rc
+            .authenticity
+            .trusted_gpg_keys
+            .iter()
+            .map(|k| k.armored_public_key.as_str());
+        let (_keys, warnings) = crate::crypto::openpgp::parse_trusted_keys(armored);
+        Ok(warnings)
     }
 
     /// Record a per-commit ignore, scoped to this commit + its **current**

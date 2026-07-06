@@ -153,8 +153,8 @@ onBeforeUnmount(() => {
     </header>
 
     <p class="text-xs text-muted mb-4">
-      Recent commits and their SSH signature status. Tap a commit to review or
-      trust its signer.
+      Recent commits and their signature status (SSH or GPG). Tap a commit to
+      review, trust, or resolve its signer.
     </p>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">
@@ -258,6 +258,18 @@ onBeforeUnmount(() => {
       </p>
 
       <div class="flex flex-col gap-2 mt-4">
+        <p
+          v-if="selected.status.kind === 'unverified_signature'"
+          class="text-xs text-muted break-words"
+        >
+          GPG-signed by an untrusted signer — GPG signatures don't embed the
+          public key, so add (or import) that signer's armored public key in
+          <strong>Settings → Trusted signing keys</strong> to verify it.
+          <span v-if="signerFp(selected.status)">
+            Issuer fingerprint:
+            <code class="break-all">{{ signerFp(selected.status) }}</code>
+          </span>
+        </p>
         <BaseButton
           v-if="selected.status.kind === 'untrusted_key'"
           variant="action"

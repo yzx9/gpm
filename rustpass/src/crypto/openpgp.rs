@@ -20,6 +20,8 @@
 //! rpgp returns `Result` for parse/verify failures, but a panic on a crafted
 //! packet would otherwise unwind through the whole commit walk.
 
+use std::fmt::Write;
+
 use pgp::composed::{Deserializable, DetachedSignature, SignedPublicKey};
 use pgp::types::{Fingerprint, KeyDetails, KeyId};
 
@@ -136,8 +138,17 @@ pub(crate) fn verify_detached(
                 };
             }
         }
-        // Subkeys — a commit is usually signed by a signing subkey, not the primary.
+        // Subkeys — a commit is usually signed by a signing subkey, not the
+        // primary. Only a subkey whose binding grants signing usage may
+        // authenticate a commit as its primary: a signature from an
+        // encryption-only subkey (whose private half may be held by someone
+        // who shouldn't sign) must NOT be accepted as the primary's. Skipped
+        // here, so it neither verifies nor counts as a failed claim. Mirrors
+        // rpgp's own `sig.key_flags().sign()` signing-capable convention.
         for sub in &key.public_subkeys {
+            if !sub.signatures.iter().any(|s| s.key_flags().sign()) {
+                continue;
+            }
             let sub_fp = sub.fingerprint();
             let sub_kid = sub.legacy_key_id();
             if identity_matches(&sub_fp, sub_kid, &issuer_fps, &issuer_kids) {
@@ -167,6 +178,10 @@ pub(crate) fn verify_detached(
                 };
             }
             for sub in &key.public_subkeys {
+                // Same signing-capable gate as the issuer-matched loop above.
+                if !sub.signatures.iter().any(|s| s.key_flags().sign()) {
+                    continue;
+                }
                 if sig.verify(sub, signed_data).is_ok() {
                     return GpgOutcome::Verified {
                         primary_fp: pk.fingerprint.clone(),
@@ -178,11 +193,22 @@ pub(crate) fn verify_detached(
     }
 
     // Issuer known but untrusted — prefer the fingerprint, fall back to the
-    // key-id's hex (KeyId's Debug prints hex via derive_more).
+    // 8-byte key-id rendered as stable uppercase hex (matching GnuPG's long
+    // key-id display). `KeyId: AsRef<[u8]>` gives the raw bytes; hex-encoding
+    // them is stable across rpgp versions, unlike `Debug`.
     let issuer = issuer_fps
         .first()
         .map(|fp| format!("{fp}"))
-        .or_else(|| issuer_kids.first().map(|kid| format!("{kid:?}")));
+        .or_else(|| {
+            issuer_kids.first().map(|kid| {
+                let mut hex = String::with_capacity(kid.as_ref().len() * 2);
+                for b in kid.as_ref() {
+                    // Writing to a String never fails.
+                    let _ = write!(hex, "{b:02X}");
+                }
+                hex
+            })
+        });
     match issuer {
         Some(fp) => GpgOutcome::Unverified { issuer_fp: fp },
         None => GpgOutcome::Unknown,
@@ -236,4 +262,93 @@ where
         }
     }
     (keys, warnings)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Real-world interop proofs (RFC 0009 D2). The fixtures here are committed
+    //! bytes produced by the actual `gpg` CLI (Ed25519 primary + Ed25519 signing
+    //! subkey, subkey-signed — `GnuPG`'s default), so these tests prove rpgp
+    //! works on keys users actually have, NOT only on rpgp's own signatures.
+    //! No `gpg` binary is needed at test time.
+
+    use super::*;
+
+    const GPG_PUBKEY: &str = include_str!("../../tests/fixtures/gpg/pubkey.asc");
+    const GPG_SIG: &str = include_str!("../../tests/fixtures/gpg/payload.sig.asc");
+    const GPG_PAYLOAD: &[u8] = include_bytes!("../../tests/fixtures/gpg/payload.txt");
+
+    /// A `GnuPG`-produced Ed25519 armored pubkey parses and its self-signatures
+    /// validate — the floor-level proof that `add_trusted_gpg_key` accepts a
+    /// real key instead of rejecting it with `SshKeyInvalid`.
+    #[test]
+    fn real_gnupg_pubkey_parses() {
+        let key = parse_armored_public_key(GPG_PUBKEY).expect("real GnuPG pubkey must parse");
+        // The primary fingerprint is the stable identity stored in
+        // TrustedGpgKey; it must be non-empty hex.
+        let fp = primary_fingerprint(&key);
+        assert!(!fp.is_empty(), "primary fingerprint must be non-empty");
+    }
+
+    /// A real `gpg --detach-sign --armor` signature — made by the signing
+    /// SUBKEY (`GnuPG`'s default) — verifies against the trusted primary via
+    /// rpgp. This is the load-bearing interop case: subkey signs, user trusts
+    /// the primary, the binding must hold and the crypto must pass.
+    #[test]
+    fn real_gnupg_subkey_signature_verifies() {
+        let key = parse_armored_public_key(GPG_PUBKEY).expect("pubkey parses");
+        let sig = parse_detached_signature(GPG_SIG).expect("real GnuPG detached sig must parse");
+        let trusted = vec![ParsedGpgKey {
+            fingerprint: primary_fingerprint(&key),
+            key,
+        }];
+        match verify_detached(&sig, GPG_PAYLOAD, &trusted) {
+            GpgOutcome::Verified { primary_fp } => {
+                assert!(
+                    !primary_fp.is_empty(),
+                    "verified outcome must carry the primary fingerprint"
+                );
+            }
+            other => panic!("real GnuPG subkey signature must verify, got {other:?}"),
+        }
+    }
+
+    /// Tampering the signed payload flips the outcome to `BadSignature` — the
+    /// tampering catch holds on real `GnuPG` signatures, not only rpgp ones.
+    #[test]
+    fn real_gnupg_signature_tampered_is_bad() {
+        let key = parse_armored_public_key(GPG_PUBKEY).expect("pubkey parses");
+        let sig = parse_detached_signature(GPG_SIG).expect("sig parses");
+        let trusted = vec![ParsedGpgKey {
+            fingerprint: primary_fingerprint(&key),
+            key,
+        }];
+        // Flip one byte of a non-empty payload (clippy-safe vs indexing).
+        assert!(!GPG_PAYLOAD.is_empty());
+        let mut tampered = GPG_PAYLOAD.to_vec();
+        if let Some(b) = tampered.first_mut() {
+            *b ^= 0xff;
+        }
+        let outcome = verify_detached(&sig, &tampered, &trusted);
+        assert!(
+            matches!(outcome, GpgOutcome::BadSignature),
+            "tampered real GnuPG signature must be BadSignature, got {outcome:?}"
+        );
+    }
+
+    /// A real `GnuPG` signature by a key NOT in the trust set surfaces as
+    /// `Unverified` (issuer known via the signature's issuer subpacket, but no
+    /// crypto performed) — the `UnverifiedSignature` status source.
+    #[test]
+    fn real_gnupg_signature_untrusted_is_unverified() {
+        let sig = parse_detached_signature(GPG_SIG).expect("sig parses");
+        let outcome = verify_detached(&sig, GPG_PAYLOAD, &[]);
+        match outcome {
+            GpgOutcome::Unverified { issuer_fp } => assert!(
+                !issuer_fp.is_empty(),
+                "issuer fingerprint must be surfaced for an untrusted GPG signature"
+            ),
+            other => panic!("untrusted real GnuPG sig must be Unverified, got {other:?}"),
+        }
+    }
 }

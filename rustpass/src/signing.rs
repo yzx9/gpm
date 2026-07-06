@@ -222,6 +222,18 @@ impl AuthenticityConfig {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+
+    /// Whether ANY trusted signing key is recorded — SSH **or** GPG. The
+    /// Enforce gate and the last-key downgrade both key off this: Enforce with
+    /// zero trusted keys would block every pull, so a user who trusts only a
+    /// GPG key must still be allowed to enable Enforce. Counting only
+    /// `trusted_keys` (SSH) is the load-bearing bug a sibling trust type
+    /// introduces — every `trusted_keys.is_empty()` predicate becomes wrong the
+    /// moment GPG keys exist alongside SSH ones.
+    #[must_use]
+    pub fn has_any_trusted_key(&self) -> bool {
+        !self.trusted_keys.is_empty() || !self.trusted_gpg_keys.is_empty()
+    }
 }
 
 /// A commit's metadata + verification status (used by sync results & history).
@@ -1043,6 +1055,47 @@ mod tests {
         let cfg: AuthenticityConfig = serde_json::from_str(json).expect("parse empty");
         assert_eq!(cfg.mode, VerifyMode::Off);
         assert!(cfg.trusted_keys.is_empty());
+        // The GPG field is additive (`#[serde(default)]`): an old config that
+        // predates RFC 0009 must deserialize to an empty list, not fail.
+        assert!(
+            cfg.trusted_gpg_keys.is_empty(),
+            "old config without trusted_gpg_keys must default to empty"
+        );
+    }
+
+    /// Pins the combined-trust predicate that the Enforce gate and the
+    /// last-key downgrade both key off (the C1 fix): a GPG-only trust set must
+    /// count as "has a trusted key", or a GPG-only user could never enable
+    /// Enforce.
+    #[test]
+    fn has_any_trusted_key_counts_ssh_and_gpg() {
+        let empty = AuthenticityConfig::default();
+        assert!(!empty.has_any_trusted_key(), "empty config has no trusted key");
+
+        let ssh_only = AuthenticityConfig {
+            trusted_keys: vec![TrustedKey {
+                public_key: "ssh-ed25519 AAAA".to_string(),
+                fingerprint: "SHA256:ssh".to_string(),
+                label: "ssh".to_string(),
+                added_at_commit: String::new(),
+            }],
+            ..Default::default()
+        };
+        assert!(ssh_only.has_any_trusted_key(), "SSH key alone counts");
+
+        let gpg_only = AuthenticityConfig {
+            trusted_gpg_keys: vec![TrustedGpgKey {
+                armored_public_key: "-----BEGIN PGP PUBLIC KEY BLOCK-----".to_string(),
+                fingerprint: "abcdef".to_string(),
+                label: "gpg".to_string(),
+                added_at_commit: String::new(),
+            }],
+            ..Default::default()
+        };
+        assert!(
+            gpg_only.has_any_trusted_key(),
+            "GPG key alone must count — the C1 fix"
+        );
     }
 
     // ── classification ────────────────────────────────────────────────────

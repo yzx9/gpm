@@ -30,6 +30,23 @@ const emit = defineEmits<{
 const untrustedIssue = computed(() =>
   props.issues?.find((c) => c.status.kind === "untrusted_key"),
 );
+
+/** The first GPG `unverified_signature` issue, if any. GPG signatures carry no
+ * public key to auto-trust (unlike SSH-sig), so there's no "Trust this signer"
+ * button for these — the only recovery is to add (or import) the signer's
+ * armored public key in Settings. This gates that hint. */
+const unverifiedIssue = computed(() =>
+  props.issues?.find((c) => c.status.kind === "unverified_signature"),
+);
+
+/** The issuer fingerprint the unverified signature claimed (hex), so the user
+ * can find the right key to paste. */
+const unverifiedSignerFp = computed(() => {
+  const issue = unverifiedIssue.value;
+  return issue && issue.status.kind === "unverified_signature"
+    ? issue.status.signer_fp
+    : null;
+});
 </script>
 
 <template>
@@ -58,6 +75,20 @@ const untrustedIssue = computed(() =>
       </li>
     </ul>
     <div class="flex flex-col gap-2">
+      <p
+        v-if="unverifiedIssue"
+        class="text-xs text-muted mb-1 break-words"
+      >
+        GPG-signed commit
+        <code class="text-xs">{{ unverifiedIssue.short_hash }}</code> was made by
+        a signer you haven't trusted. GPG signatures don't embed the public key,
+        so open <strong>Settings → Trusted signing keys</strong> and add (or
+        import) that signer's armored public key to verify it.
+        <span v-if="unverifiedSignerFp">
+          Issuer fingerprint:
+          <code class="break-all">{{ unverifiedSignerFp }}</code>
+        </span>
+      </p>
       <BaseButton
         v-if="untrustedIssue"
         size="sm"

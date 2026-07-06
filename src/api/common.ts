@@ -97,6 +97,24 @@ export interface TrustedKey {
   added_at_commit: string;
 }
 
+/** A trusted GPG/OpenPGP signing public key (RFC 0009). The armored block is
+ * re-parsed each verification pass; the primary-key fingerprint (hex) is the
+ * stable identity, distinct from SSH's `SHA256:…` namespace. */
+export interface TrustedGpgKey {
+  armored_public_key: string;
+  fingerprint: string;
+  label: string;
+  /** HEAD hash when the key was trusted (provenance). */
+  added_at_commit: string;
+}
+
+/** The typed entry returned by `add_trusted_signing_key` — discriminated by
+ * `kind` so the UI knows which trust list to refresh. Mirrors the Rust
+ * `AddedTrustedKey` enum (internally tagged: `{ kind, key }`). */
+export type AddedTrustedKey =
+  | { kind: "ssh"; key: TrustedKey }
+  | { kind: "gpg"; key: TrustedGpgKey };
+
 /** A user-dismissed commit issue (scoped per commit + status). */
 export interface IgnoredIssue {
   commit: string;
@@ -108,6 +126,8 @@ export interface IgnoredIssue {
 export interface AuthenticityConfig {
   mode: VerifyMode;
   trusted_keys: TrustedKey[];
+  /** Trusted GPG/OpenPGP signing public keys (RFC 0009). */
+  trusted_gpg_keys: TrustedGpgKey[];
   ignored: IgnoredIssue[];
 }
 
