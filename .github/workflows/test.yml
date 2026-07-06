@@ -58,3 +58,49 @@ jobs:
 
       - name: Run frontend tests
         run: pnpm test
+
+  # Runs the safe-area plugin's Robolectric unit tests. The test is pure JVM
+  # (no NDK, no Rust artifacts), but gradle can't even configure without
+  # tauri.settings.gradle present — and that file is gitignored, generated
+  # only by `tauri android build`. So a single-ABI debug build is done first
+  # purely to produce it; the unit test itself runs on the configured project.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: "aarch64-linux-android"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: gradle
+
+      - name: Configure Android NDK
+        run: |
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Generate icons
+        run: sh scripts/gen-icons.sh
+
+      - name: Build (single-ABI; produces tauri.settings.gradle for the test)
+        run: pnpm tauri android build --debug --target aarch64
+
+      - name: Run safe-area plugin unit tests
+        run: cd src-tauri/gen/android && ./gradlew :tauri-plugin-safe-area:testDebugUnitTest --console=plain
