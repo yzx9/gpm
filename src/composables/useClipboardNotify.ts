@@ -13,7 +13,10 @@
  * resumes with no re-prompt. Desktop is a no-op (the check reports `true`).
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import {
+  areClipboardNotificationsEnabled,
+  requestClipboardNotificationsPermission,
+} from "@/api";
 
 const ASKED_KEY = "gpm.clipboard.notify.asked";
 
@@ -27,9 +30,7 @@ export async function ensureClipboardNotifyPermission(): Promise<void> {
   // The notification is a best-effort UX layer; a broken permission probe must
   // never brick the copy. Any error here degrades to "skip prompt, still copy".
   try {
-    const enabled = await invoke<boolean>(
-      "are_clipboard_notifications_enabled",
-    );
+    const enabled = await areClipboardNotificationsEnabled();
     if (enabled) return;
     if (localStorage.getItem(ASKED_KEY)) return;
 
@@ -43,7 +44,7 @@ export async function ensureClipboardNotifyPermission(): Promise<void> {
       // Fires the system permission dialog and awaits its result (the Kotlin
       // side holds the invoke across the dialog via requestPermissionForAlias).
       // Grant lands before this resolves; denial resolves with granted=false.
-      await invoke<boolean>("request_clipboard_notifications_permission");
+      await requestClipboardNotificationsPermission();
     }
   } catch {
     // Permission probe broken — degrade to "skip prompt, still copy".

@@ -19,6 +19,7 @@ export * from "./appLock";
 export * from "./auth";
 export * from "./authenticity";
 export * from "./biometric";
+export * from "./clipboard";
 export * from "./common";
 export * from "./config";
 export * from "./identity";
