@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
  * Thin wrappers over the app-launch biometric gate commands in
@@ -117,4 +118,12 @@ export async function disableIdentityAutoUnlock(): Promise<void> {
 /** Type-narrow a caught value into an {@link AppLockError}. */
 export function asAppLockError(e: unknown): AppLockError {
   return e as AppLockError;
+}
+
+/** Subscribe to backend app-lock gate transitions (the same
+ *  {@link AppLockState} shape `getAppLockState` returns). Returns an unlisten. */
+export async function subscribeAppLockState(
+  cb: (e: AppLockState) => void,
+): Promise<UnlistenFn> {
+  return listen<AppLockState>("app-lock-state", (e) => cb(e.payload));
 }

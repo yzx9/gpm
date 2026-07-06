@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import { onBackButtonPress } from "@tauri-apps/api/app";
 import {
   addPluginListener,
   invoke,
@@ -80,4 +81,17 @@ export async function subscribeSafeArea(
     "safe-area-changed",
     cb,
   );
+}
+
+/**
+ * Subscribe to the Android back button (`back-button` event). Each press while
+ * subscribed calls `cb` instead of navigating the webview (the default
+ * `app.tauri.AppPlugin` behavior). Android-only in effect — on desktop this
+ * registers an idle listener that never fires. Returns the plugin listener;
+ * call `.unregister()` to release it back to Tauri's default back behavior.
+ */
+export async function subscribeBackButton(
+  cb: () => void,
+): Promise<PluginListener> {
+  return onBackButtonPress(cb);
 }

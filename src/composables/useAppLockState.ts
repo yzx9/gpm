@@ -2,8 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { appLock, getAppLockState, type AppLockState } from "@/api";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  appLock,
+  getAppLockState,
+  subscribeAppLockState,
+  type AppLockState,
+  type UnlistenFn,
+} from "@/api";
 import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
@@ -96,9 +101,7 @@ export function createAppLockStore(
     if (initialized) return;
     initialized = true;
 
-    unlisten ??= await listen<AppLockState>("app-lock-state", (e) =>
-      onAppLockEvent(e.payload),
-    );
+    unlisten ??= await subscribeAppLockState(onAppLockEvent);
 
     try {
       onAppLockEvent(await getAppLockState());

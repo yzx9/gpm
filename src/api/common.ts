@@ -149,3 +149,16 @@ export interface AuthenticityResult {
   open_issues: CommitSigInfo[];
   blocked: boolean;
 }
+
+// ── Tauri runtime event handles ────────────────────────────────────────────
+//
+// Re-exported here so pages/composables never reach for `@tauri-apps/api/*`
+// directly just to spell a type — they import the typed `subscribe*` wrapper
+// from the domain module and this handle type from the same `@/api` barrel.
+
+/** Unlisten handle returned by `listen`-based subscriptions (`repo`, `auth`,
+ *  `appLock`). Call to tear the subscription down. */
+export type { UnlistenFn } from "@tauri-apps/api/event";
+/** Listener handle returned by `addPluginListener`/`onBackButtonPress`-based
+ *  subscriptions (`system`). Call `.unregister()` to release. */
+export type { PluginListener } from "@tauri-apps/api/core";

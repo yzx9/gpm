@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AuthState } from "./common";
 
 /**
@@ -29,4 +30,22 @@ export async function getAuthState(): Promise<AuthState> {
  */
 export async function unlock(passphrase: string): Promise<void> {
   await invoke("unlock", { passphrase });
+}
+
+/** Payload of the `identity-lock-state` event: the backend's identity-cache
+ *  lock snapshot. `locked` = the decrypted identity is NOT cached (the next
+ *  identity-needing op will require auth); `soft` = a soft wipe (Immediate
+ *  post-op) that emptied the cache without raising the hard-lock overlay. */
+export interface IdentityLockState {
+  locked: boolean;
+  soft: boolean;
+}
+
+/** Subscribe to backend identity lock-state transitions — hard locks/unlocks
+ *  and Immediate-mode soft wipes. The backend is the single source of truth and
+ *  emits on every transition; returns an unlisten handle. */
+export async function subscribeIdentityLockState(
+  cb: (e: IdentityLockState) => void,
+): Promise<UnlistenFn> {
+  return listen<IdentityLockState>("identity-lock-state", (e) => cb(e.payload));
 }

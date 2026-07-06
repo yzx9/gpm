@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { onBackButtonPress } from "@tauri-apps/api/app";
-import type { PluginListener } from "@tauri-apps/api/core";
+import { subscribeBackButton, type PluginListener } from "@/api";
 import { onBeforeUnmount, watch, type Ref } from "vue";
 
 /**
@@ -43,7 +42,7 @@ export function useOverlayBackHandler(shown: Ref<boolean>, onBack: () => void) {
     async (up) => {
       if (up) {
         const myToken = ++registerToken;
-        const l = await onBackButtonPress(() => onBack());
+        const l = await subscribeBackButton(() => onBack());
         // Stale if toggled off, unmounted, or superseded by a newer registration.
         if (disposed || !shown.value || myToken !== registerToken) {
           void l.unregister();

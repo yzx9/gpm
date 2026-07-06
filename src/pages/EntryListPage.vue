@@ -3,6 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
+import type { UnlistenFn } from "@/api";
 import {
   cancelGit,
   getAuthenticityState,
@@ -55,7 +56,6 @@ import {
   Settings,
   X,
 } from "@lucide/vue";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   computed,
   nextTick,

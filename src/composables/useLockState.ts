@@ -2,8 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { getAuthState } from "@/api";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  getAuthState,
+  subscribeIdentityLockState,
+  type UnlistenFn,
+} from "@/api";
 import {
   computed,
   getCurrentScope,
@@ -176,10 +179,7 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
     initialized = true;
 
     // Own the one listener that mirrors the backend's lock-state snapshot.
-    unlisten ??= await listen<{ locked: boolean; soft: boolean }>(
-      "identity-lock-state",
-      (e) => onLockEvent(e.payload),
-    );
+    unlisten ??= await subscribeIdentityLockState(onLockEvent);
 
     try {
       const auth = await getAuthState();
