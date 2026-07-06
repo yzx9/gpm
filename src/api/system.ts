@@ -24,9 +24,15 @@ export interface SafeAreaInsets {
   right: number;
 }
 
-/** Persisted app-level config (`app.json`) — currently just the secure-screen flag. */
+/** Persisted app-level config (`app.json`).
+ *  - `secure_screen`: master screen-capture-protection toggle.
+ *  - `locale`: display-language override. Absent (not `null`) ⇒ track system;
+ *    `"en"` / `"zh-CN"` ⇒ pinned. Mirrors the Rust `AppConfig` (`Option<String>`
+ *    with `skip_serializing_if`, so `None` is omitted on the wire ⇒ `undefined`
+ *    here — callers must not compare it with `===` between `null`/`undefined`). */
 export interface AppConfig {
   secure_screen: boolean;
+  locale?: string;
 }
 
 /**
@@ -43,6 +49,24 @@ export async function getAppConfig(): Promise<AppConfig> {
  */
 export async function setSecureScreen(enabled: boolean): Promise<void> {
   await invoke("set_secure_screen", { enabled });
+}
+
+/**
+ * Persist the display-language preference (`set_locale_pref`). `null` clears
+ * the override (track system); `"en"` / `"zh-CN"` pin it. Returns the updated
+ * config.
+ */
+export async function setLocalePref(locale: string | null): Promise<AppConfig> {
+  return invoke<AppConfig>("set_locale_pref", { locale });
+}
+
+/**
+ * The authoritative locale the app should render in (explicit override if set
+ * and supported, else the normalized system locale). The frontend reconciles
+ * against the best-effort injected value at boot via this command.
+ */
+export async function resolvedLocale(): Promise<string> {
+  return invoke<string>("resolved_locale");
 }
 
 /**

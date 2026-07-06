@@ -22,13 +22,13 @@ import {
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
 } from "./composables";
-import CreatePage from "./pages/CreatePage.vue";
-import EntryDetailPage from "./pages/EntryDetailPage.vue";
-import EntryListPage from "./pages/EntryListPage.vue";
-import GeneratePasswordPage from "./pages/GeneratePasswordPage.vue";
-import HistoryPage from "./pages/HistoryPage.vue";
-import SettingsPage from "./pages/SettingsPage.vue";
-import SetupPage from "./pages/SetupPage.vue";
+import {
+  currentLocale,
+  DEFAULT_LOCALE,
+  i18n,
+  loadBundle,
+  reconcileLocaleFromBackend,
+} from "./i18n";
 
 // App-shell singletons — created once here (the composition root), provided
 // app-wide, and held by direct ref where non-setup code needs them. The router
@@ -44,41 +44,53 @@ const toastState = createToast();
 // credentials — the router guard sets Android FLAG_SECURE on these (when the
 // user's master toggle is on). The entry list (names only) and history
 // (commit signatures) carry no secret content and stay capturable.
+//
+// Route components are lazy so each page's JS chunk (and its message bundle,
+// loaded by the `beforeEach` guard) loads on demand — keeping the initial
+// payload small.
 const routes = [
   { path: "/", redirect: "/entries" },
   {
     path: "/setup",
     name: "setup",
-    component: SetupPage,
+    component: () => import("./pages/SetupPage.vue"),
     meta: { secure: true },
   },
-  { path: "/entries", name: "entries", component: EntryListPage },
+  {
+    path: "/entries",
+    name: "entries",
+    component: () => import("./pages/EntryListPage.vue"),
+  },
   {
     path: "/create",
     name: "create",
-    component: CreatePage,
+    component: () => import("./pages/CreatePage.vue"),
     meta: { secure: true },
   },
   {
     path: "/generate",
     name: "generate",
-    component: GeneratePasswordPage,
+    component: () => import("./pages/GeneratePasswordPage.vue"),
     meta: { secure: true },
   },
   {
     path: "/entry/:pathMatch(.*)",
     name: "entry",
-    component: EntryDetailPage,
+    component: () => import("./pages/EntryDetailPage.vue"),
     props: true,
     meta: { secure: true },
   },
   {
     path: "/settings",
     name: "settings",
-    component: SettingsPage,
+    component: () => import("./pages/SettingsPage.vue"),
     meta: { secure: true },
   },
-  { path: "/history", name: "history", component: HistoryPage },
+  {
+    path: "/history",
+    name: "history",
+    component: () => import("./pages/HistoryPage.vue"),
+  },
 ];
 
 const router = createRouter({
@@ -96,10 +108,13 @@ const router = createRouter({
 //  - `beforeEach` RAISES the flag to cover BOTH the route being left and the one
 //    entered (awaited before the target page mounts/paints). A secret route we
 //    failed to secure is never rendered — the nav aborts and a global toast
-//    explains why.
+//    explains why. With lazy routes the raise still precedes the paint: it runs
+//    here in `beforeEach`, before the component chunk even resolves.
 //  - `afterEach` SETTLES the flag to the arriving route's own level AFTER the
 //    new page has painted (`nextTick`), so clearing the flag never happens while
-//    a departing secret page is still on screen.
+//    a departing secret page is still on screen. Lazy routes extend the time
+//    between raise and settle but not the ordering — the `secureGen` token still
+//    drops any settle superseded by a newer navigation.
 router.beforeEach(async (to, from) => {
   if (to.name !== "setup") {
     try {
@@ -117,6 +132,14 @@ router.beforeEach(async (to, from) => {
   if (to.meta?.secure && !secureOk) {
     toastState.toast.danger("Couldn't secure screen — try again");
     return false;
+  }
+  // Load the arriving route's message bundle for the current locale, alongside
+  // the (lazy) component chunk. Fire-and-forget — securing above is what gates a
+  // secret page's paint, not this bundle load, and a late bundle just re-renders
+  // with `fallbackLocale` covering the gap. Never throws (loadBundle swallows a
+  // missing bundle), so it can't block or abort the navigation.
+  if (typeof to.name === "string") {
+    void loadBundle(currentLocale(), to.name);
   }
   return true;
 });
@@ -142,16 +165,33 @@ router.afterEach(async (to, _from, failure) => {
   await secureScreenState.applySecureForRoute(!!to.meta?.secure);
 });
 
-const app = createApp(App);
-app.use(router);
-// Direction tracker for the <router-view> slide transition. Registered after
-// the secure-screen guards so its afterEach runs alongside them. The
-// secure-boundary gate inside it keeps FLAG_SECURE safe (see useNavDirection).
-const navDirection = createNavDirection(router);
-app.provide(LOCK_KEY, lockState);
-app.provide(APP_LOCK_KEY, appLockStore);
-app.provide(NAV_DIRECTION_KEY, navDirection);
-app.provide(SECURE_SCREEN_KEY, secureScreenState);
-app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);
-app.provide(TOAST_KEY, toastState);
-app.mount("#app");
+// Bootstrap. Wrapped async so the boot locale's `common` bundle can load before
+// the first paint when the boot locale isn't the default (whose `common` is
+// already inlined in `createI18n`) — that keeps nav/button strings in the right
+// language on the first frame for, e.g., a Chinese-system user. After mount the
+// backend reconcile corrects a pinned preference within one frame.
+void (async () => {
+  const app = createApp(App);
+  app.use(router);
+  app.use(i18n);
+  // Direction tracker for the <router-view> slide transition. Registered after
+  // the secure-screen guards so its afterEach runs alongside them. The
+  // secure-boundary gate inside it keeps FLAG_SECURE safe (see useNavDirection).
+  const navDirection = createNavDirection(router);
+  app.provide(LOCK_KEY, lockState);
+  app.provide(APP_LOCK_KEY, appLockStore);
+  app.provide(NAV_DIRECTION_KEY, navDirection);
+  app.provide(SECURE_SCREEN_KEY, secureScreenState);
+  app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);
+  app.provide(TOAST_KEY, toastState);
+
+  const boot = currentLocale();
+  if (boot !== DEFAULT_LOCALE) {
+    // loadBundle already swallows a missing bundle; the `.catch` makes the
+    // bootstrap robust against any future awaited call landing here — a
+    // translation load must never prevent mount (and a blank first frame).
+    await loadBundle(boot, "common").catch(() => {});
+  }
+  app.mount("#app");
+  void reconcileLocaleFromBackend();
+})();
