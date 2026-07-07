@@ -163,13 +163,13 @@ const ppAck = ref(false);
 const ppModalTitle = computed(() => {
   switch (passphraseModal.value) {
     case "set":
-      return "Set Passphrase";
+      return t("settings.passphrase.modal.set.title");
     case "change":
-      return "Change Passphrase";
+      return t("settings.passphrase.modal.change.title");
     case "enable-biometric":
-      return "Enable Biometric Unlock";
+      return t("settings.passphrase.modal.enableBiometric.title");
     case "enable-auto-unlock":
-      return "Enable Identity Auto-Unlock";
+      return t("settings.passphrase.modal.enableAutoUnlock.title");
     default:
       return "";
   }
@@ -177,13 +177,13 @@ const ppModalTitle = computed(() => {
 const ppSubmitLabel = computed(() => {
   switch (passphraseModal.value) {
     case "set":
-      return "Encrypt Identity";
+      return t("settings.passphrase.modal.set.submit");
     case "change":
-      return "Change Passphrase";
+      return t("settings.passphrase.modal.change.submit");
     case "enable-biometric":
-      return "Enable Biometric";
+      return t("settings.passphrase.modal.enableBiometric.submit");
     case "enable-auto-unlock":
-      return "Enable";
+      return t("settings.passphrase.modal.enableAutoUnlock.submit");
     default:
       return "";
   }
@@ -266,27 +266,32 @@ const { secureScreen, secureAvailable, setSecureScreen } = useSecureScreen();
 const lockLoading = ref(false);
 
 // App auto-lock presets. "Immediate" (no-cache, per-op) is the default.
-const LOCK_PRESETS: { label: string; value: LockMode }[] = [
-  { label: "Immediate", value: "immediate" },
-  { label: "1 min", value: { idle: 60 } },
-  { label: "5 min", value: { idle: 300 } },
-  { label: "15 min", value: { idle: 900 } },
-  { label: "30 min", value: { idle: 1800 } },
-  { label: "Never", value: "never" },
-];
+// Computed (not a plain const) so the labels can resolve through t().
+const LOCK_PRESETS = computed<{ label: string; value: LockMode }[]>(() => [
+  { label: t("settings.lock.immediate"), value: "immediate" },
+  { label: t("settings.lock.minutes", { count: 1 }), value: { idle: 60 } },
+  { label: t("settings.lock.minutes", { count: 5 }), value: { idle: 300 } },
+  { label: t("settings.lock.minutes", { count: 15 }), value: { idle: 900 } },
+  { label: t("settings.lock.minutes", { count: 30 }), value: { idle: 1800 } },
+  { label: t("settings.lock.never"), value: "never" },
+]);
 // View-clear presets. A `null` value clears the override (tracks the default).
-const VIEW_CLEAR_PRESETS: { label: string; value: number | null }[] = [
-  { label: "10s", value: 10 },
-  { label: "45s · default", value: null },
-  { label: "3 min", value: 180 },
-  { label: "Never", value: 0 },
-];
+const VIEW_CLEAR_PRESETS = computed<{ label: string; value: number | null }[]>(
+  () => [
+    { label: t("settings.clear.seconds", { count: 10 }), value: 10 },
+    { label: t("settings.clear.default", { count: 45 }), value: null },
+    { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
+    { label: t("settings.lock.never"), value: 0 },
+  ],
+);
 // Clipboard-clear presets. Same `null` ⇒ default convention.
-const CLIPBOARD_CLEAR_PRESETS: { label: string; value: number | null }[] = [
-  { label: "45s · default", value: null },
-  { label: "3 min", value: 180 },
-  { label: "Never", value: 0 },
-];
+const CLIPBOARD_CLEAR_PRESETS = computed<
+  { label: string; value: number | null }[]
+>(() => [
+  { label: t("settings.clear.default", { count: 45 }), value: null },
+  { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
+  { label: t("settings.lock.never"), value: 0 },
+]);
 
 const rawLockMode = computed<LockMode>(
   () => config.value?.lock_mode ?? "immediate",
@@ -366,7 +371,7 @@ async function loadConfig() {
     commitDefault.value = await getCommitIdentityDefault();
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to load config";
+    error.value = appError?.message || t("settings.commit.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -384,11 +389,11 @@ async function onSaveCommitIdentity(): Promise<boolean> {
     // Re-sync from the response (trimmed) so a successful Save clears dirty.
     commitName.value = updated.commit_user_name ?? "";
     commitEmail.value = updated.commit_user_email ?? "";
-    toast.success("Commit identity saved");
+    toast.success(t("settings.commit.saved"));
     return true;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to save commit identity";
+    error.value = appError?.message || t("settings.commit.saveFailed");
     return false;
   } finally {
     commitLoading.value = false;
@@ -398,7 +403,7 @@ async function onSaveCommitIdentity(): Promise<boolean> {
 async function onSecureScreenChange(enabled: boolean) {
   const ok = await setSecureScreen(enabled);
   if (!ok) {
-    toast.danger("Couldn't save screen-capture setting — try again");
+    toast.danger(t("settings.secureScreen.saveFailed"));
     return;
   }
   // Disarming protection while a secret is still on screen would expose it, so
@@ -411,8 +416,8 @@ async function onSecureScreenChange(enabled: boolean) {
   }
   toast.success(
     enabled
-      ? "Screen capture blocked on sensitive pages"
-      : "Screen capture allowed",
+      ? t("settings.secureScreen.blockedToast")
+      : t("settings.secureScreen.allowedToast"),
   );
 }
 
@@ -425,7 +430,7 @@ async function onLockModeChange(mode: LockMode) {
     config.value = updated;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to set auto-lock mode";
+    error.value = appError?.message || t("settings.lock.setModeFailed");
   } finally {
     lockLoading.value = false;
   }
@@ -442,7 +447,7 @@ async function onAutosyncChange(enabled: boolean) {
     config.value = updated;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to set AutoSync";
+    error.value = appError?.message || t("settings.autosync.setFailed");
   } finally {
     lockLoading.value = false;
   }
@@ -458,7 +463,7 @@ async function onViewClearChange(secs: number | null) {
     applySecurityConfig(updated);
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to set view auto-clear";
+    error.value = appError?.message || t("settings.clear.setViewFailed");
   } finally {
     lockLoading.value = false;
   }
@@ -473,7 +478,7 @@ async function onClipboardClearChange(secs: number | null) {
     config.value = updated;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to set clipboard auto-clear";
+    error.value = appError?.message || t("settings.clear.setClipboardFailed");
   } finally {
     lockLoading.value = false;
   }
@@ -487,17 +492,12 @@ async function showPublicKey() {
     showPublic.value = true;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to get public key";
+    error.value = appError?.message || t("settings.ssh.publicFailed");
   }
 }
 
 async function exportPrivateKey() {
-  if (
-    !confirm(
-      "This will display your private SSH key. Make sure no one is watching. Continue?",
-    )
-  )
-    return;
+  if (!confirm(t("settings.ssh.exportConfirm"))) return;
   error.value = "";
   try {
     const result = await exportSshPrivateKey();
@@ -505,14 +505,14 @@ async function exportPrivateKey() {
     showPrivate.value = true;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to export private key";
+    error.value = appError?.message || t("settings.ssh.exportFailed");
   }
 }
 
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success("✓ Copied to clipboard");
+    toast.success(t("settings.toast.copied"));
   } catch {
     toast.danger(t("common.toast.copyFailed"));
   }
@@ -541,11 +541,11 @@ async function onPassphraseSubmit() {
   if (!mode) return;
   error.value = "";
   if (mode === "change" && !ppCurrent.value) {
-    error.value = "Current passphrase is required";
+    error.value = t("settings.passphrase.currentRequired");
     return;
   }
   if (ppShowCurrent.value && !ppCurrent.value) {
-    error.value = "Passphrase is required";
+    error.value = t("settings.passphrase.required");
     return;
   }
   // set / change enter the new passphrase via PassphraseField (with a confirm
@@ -555,8 +555,7 @@ async function onPassphraseSubmit() {
     // but this guards a future refactor that wraps the modal in a <form> (where
     // Enter could submit past a disabled button).
     if (!!ppNew.value && !ppAck.value) {
-      error.value =
-        "Please acknowledge that this passphrase cannot be recovered.";
+      error.value = t("settings.passphrase.ackRequired");
       return;
     }
     const passphraseError = ppField.value?.validate() ?? null;
@@ -572,19 +571,19 @@ async function onPassphraseSubmit() {
       isIdentityEncrypted.value = true;
       // Setting a passphrase can invalidate a previously-sealed biometric unlock.
       biometricEnabled.value = await isBiometricUnlockEnabled();
-      toast.success("✓ Passphrase set — your private key is now encrypted");
+      toast.success(t("settings.passphrase.setToast"));
     } else if (mode === "change") {
       await changePassphrase(ppCurrent.value, ppNew.value);
       biometricEnabled.value = await isBiometricUnlockEnabled();
-      toast.success("✓ Passphrase changed");
+      toast.success(t("settings.passphrase.changedToast"));
     } else if (mode === "enable-biometric") {
       await enableBiometricUnlock(ppCurrent.value);
       biometricEnabled.value = true;
-      toast.success("✓ Biometric unlock enabled");
+      toast.success(t("settings.biometric.enabledToast"));
     } else {
       await enableIdentityAutoUnlock(ppCurrent.value);
       identityAutoUnlockEnabled.value = true;
-      toast.success("✓ Identity auto-unlock enabled");
+      toast.success(t("settings.appLock.autoUnlock.enabledToast"));
     }
     closePassphraseModal();
   } catch (e) {
@@ -593,23 +592,23 @@ async function onPassphraseSubmit() {
       if (err.code === "BIOMETRIC_CANCELLED") {
         // User cancelled the biometric prompt — keep the modal open for retry.
       } else if (err.code === "WRONG_PASSPHRASE") {
-        error.value = "Wrong passphrase";
+        error.value = t("settings.passphrase.wrongPassphrase");
       } else {
-        error.value = err.message || "Failed to enable biometric";
+        error.value = err.message || t("settings.passphrase.biometricFailed");
       }
     } else if (mode === "enable-auto-unlock") {
       const err = asAppLockError(e) as AppLockError;
       error.value =
         err.code === "WRONG_PASSPHRASE"
-          ? "Wrong passphrase"
-          : err.message || "Failed to enable identity auto-unlock";
+          ? t("settings.passphrase.wrongPassphrase")
+          : err.message || t("settings.passphrase.autoUnlockFailed");
     } else {
       const appError = e as AppError;
       error.value =
         appError?.message ||
         (mode === "set"
-          ? "Failed to set passphrase"
-          : "Failed to change passphrase");
+          ? t("settings.passphrase.setFailed")
+          : t("settings.passphrase.changeFailed"));
     }
   } finally {
     passphraseLoading.value = false;
@@ -619,7 +618,7 @@ async function onPassphraseSubmit() {
 async function onDisableBiometric() {
   await disableBiometricUnlock();
   biometricEnabled.value = false;
-  toast.success("Biometric unlock disabled");
+  toast.success(t("settings.biometric.disabledToast"));
 }
 
 // ── App-launch biometric gate (RFC 0028) ─────────────────────────────────
@@ -629,13 +628,13 @@ async function onEnableAppLock() {
   try {
     await enableBiometricAppLock();
     appLockEnabled.value = true;
-    toast.success("✓ App lock enabled");
+    toast.success(t("settings.appLock.enabledToast"));
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
     if (err.code === "BIOMETRIC_CANCELLED") {
       // User cancelled the migration prompt — no error toast.
     } else {
-      error.value = err.message || "Failed to enable app lock";
+      error.value = err.message || t("settings.appLock.enableFailed");
     }
   } finally {
     appLockLoading.value = false;
@@ -650,13 +649,13 @@ async function onDisableAppLock() {
     appLockEnabled.value = false;
     // Disabling the gate makes identity auto-unlock moot.
     identityAutoUnlockEnabled.value = false;
-    toast.success("App lock disabled");
+    toast.success(t("settings.appLock.disabledToast"));
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
     if (err.code === "BIOMETRIC_CANCELLED") {
       // User cancelled — stays enabled.
     } else {
-      error.value = err.message || "Failed to disable app lock";
+      error.value = err.message || t("settings.appLock.disableFailed");
     }
   } finally {
     appLockLoading.value = false;
@@ -666,7 +665,7 @@ async function onDisableAppLock() {
 async function onDisableIdentityAutoUnlock() {
   await disableIdentityAutoUnlock();
   identityAutoUnlockEnabled.value = false;
-  toast.success("Identity auto-unlock disabled");
+  toast.success(t("settings.appLock.autoUnlock.disabledToast"));
 }
 
 // ── Repository authenticity ──────────────────────────────────────────────
@@ -683,7 +682,7 @@ async function loadAuthConfig() {
     gpgWarnings.value = warnings;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to load authenticity config";
+    error.value = appError?.message || t("settings.auth.loadConfigFailed");
   }
 }
 
@@ -697,12 +696,11 @@ async function onModeChange(mode: VerifyMode) {
   } catch (e) {
     const appError = e as AppError;
     if (mode === "enforce") {
-      error.value =
-        "Add a trusted signing key before enabling Enforce (it would block every pull).";
+      error.value = t("settings.auth.enforceNeedsKey");
       // Revert the radio to the current effective mode.
       authConfig.value.mode = authConfig.value.mode;
     } else {
-      error.value = appError?.message || "Failed to set mode";
+      error.value = appError?.message || t("settings.auth.setModeFailed");
     }
   } finally {
     authLoading.value = false;
@@ -713,7 +711,7 @@ async function onAddKey(): Promise<boolean> {
   error.value = "";
   const key = newPublicKey.value.trim();
   if (!key) {
-    error.value = "Paste a signing public key (SSH one-liner or GPG armor)";
+    error.value = t("settings.auth.pasteKeyPrompt");
     return false;
   }
   authLoading.value = true;
@@ -725,12 +723,12 @@ async function onAddKey(): Promise<boolean> {
     newPublicKey.value = "";
     newKeyLabel.value = "";
     showAddKey.value = false;
-    toast.success("✓ Trusted signing key added");
+    toast.success(t("settings.auth.addedToast"));
     await loadAuthConfig();
     return true;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to add key";
+    error.value = appError?.message || t("settings.auth.addFailed");
     return false;
   } finally {
     authLoading.value = false;
@@ -738,7 +736,7 @@ async function onAddKey(): Promise<boolean> {
 }
 
 async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
-  if (!confirm("Remove this trusted signing key?")) return;
+  if (!confirm(t("settings.auth.removeConfirm"))) return;
   authLoading.value = true;
   try {
     if (kind === "gpg") {
@@ -746,11 +744,11 @@ async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
     } else {
       await removeTrustedKey(fingerprint);
     }
-    toast.success("Trusted key removed");
+    toast.success(t("settings.auth.removedToast"));
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to remove key";
+    error.value = appError?.message || t("settings.auth.removeFailed");
   } finally {
     authLoading.value = false;
   }
@@ -759,40 +757,33 @@ async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
 async function onImportGpgKey() {
   // Prompt for a label up front; the backend pre-fills from the filename when
   // this is blank, so empty is fine too.
-  const label = window.prompt(
-    "Label for the imported GPG key? (Leave blank to use the filename.)",
-    "",
-  );
+  const label = window.prompt(t("settings.auth.importGpgPrompt"), "");
   if (label === null) return;
   authLoading.value = true;
   error.value = "";
   try {
     await importTrustedGpgKeyFile(label.trim());
-    toast.success("✓ GPG key imported");
+    toast.success(t("settings.auth.importGpgToast"));
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to import GPG key";
+    error.value = appError?.message || t("settings.auth.importGpgFailed");
   } finally {
     authLoading.value = false;
   }
 }
 
 async function onTrustHead() {
-  const label = window.prompt(
-    "Trust this repo's current signer?\nEnter a label:",
-    "signer",
-  );
+  const label = window.prompt(t("settings.auth.trustHeadPrompt"), "signer");
   if (label === null) return;
   authLoading.value = true;
   try {
     await trustHeadSigner(label.trim() || "signer");
-    toast.success("✓ HEAD signer trusted");
+    toast.success(t("settings.auth.trustHeadToast"));
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
-    error.value =
-      appError?.message || "HEAD is not SSH-signed — paste a key instead";
+    error.value = appError?.message || t("settings.auth.trustHeadFailed");
   } finally {
     authLoading.value = false;
   }
@@ -834,7 +825,7 @@ async function doReset() {
     if (failure) window.location.reload();
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Reset failed";
+    error.value = appError?.message || t("settings.reset.failed");
     resetOpen.value = false;
   } finally {
     isResetting = false;
@@ -967,48 +958,64 @@ onMounted(() => {
     <div v-else-if="config" class="flex flex-col gap-4">
       <!-- Repo info -->
       <BaseCard as="section">
-        <h2 class="text-sm font-medium mb-2">Repository</h2>
+        <h2 class="text-sm font-medium mb-2">{{ t("settings.repo.title") }}</h2>
         <div class="text-sm text-muted break-all">{{ config.url }}</div>
         <div class="text-xs text-muted mt-1">
-          Auth: {{ isSsh ? "SSH Key" : config.pat ? "PAT" : "None (public)" }}
+          {{
+            isSsh
+              ? t("settings.repo.auth.ssh")
+              : config.pat
+                ? t("settings.repo.auth.pat")
+                : t("settings.repo.auth.none")
+          }}
         </div>
       </BaseCard>
 
       <!-- Commit identity -->
       <BaseCard as="section" :border="commitDirty ? 'accent' : 'edge'">
         <h2 class="text-sm font-medium mb-2">
-          Commit Identity
+          {{ t("settings.commit.title") }}
           <span
             v-if="commitDirty"
             class="ml-1 text-xs font-normal"
             style="color: var(--color-accent)"
-            >Unsaved changes</span
+            >{{ t("settings.commit.unsaved") }}</span
           >
         </h2>
         <p class="text-xs text-muted mb-3">
-          Name and email written to each git commit. Leave blank to use the
-          default<span v-if="commitDefault">
-            ({{ commitDefault.name }} &lt;{{ commitDefault.email }}&gt;)</span
-          >.
+          {{
+            t("settings.commit.hint", {
+              default: commitDefault
+                ? t("settings.commit.default", {
+                    name: commitDefault.name,
+                    email: commitDefault.email,
+                  })
+                : "",
+            })
+          }}
         </p>
         <div class="flex flex-col gap-1 mb-3">
-          <label for="commit-name" class="text-xs text-muted">Name</label>
+          <label for="commit-name" class="text-xs text-muted">{{
+            t("settings.commit.nameLabel")
+          }}</label>
           <BaseInput
             id="commit-name"
             v-model="commitName"
             type="text"
-            placeholder="Name"
+            :placeholder="t('settings.commit.namePlaceholder')"
             autocomplete="off"
             :disabled="commitLoading"
           />
         </div>
         <div class="flex flex-col gap-1 mb-3">
-          <label for="commit-email" class="text-xs text-muted">Email</label>
+          <label for="commit-email" class="text-xs text-muted">{{
+            t("settings.commit.emailLabel")
+          }}</label>
           <BaseInput
             id="commit-email"
             v-model="commitEmail"
             type="email"
-            placeholder="Email"
+            :placeholder="t('settings.commit.emailPlaceholder')"
             autocomplete="off"
             :disabled="commitLoading"
           />
@@ -1018,25 +1025,27 @@ onMounted(() => {
           :loading="commitLoading"
           @click="onSaveCommitIdentity"
         >
-          Save
+          {{ t("settings.commit.save") }}
         </BaseButton>
       </BaseCard>
 
       <!-- SSH key management -->
       <BaseCard as="section" v-if="isSsh">
-        <h2 class="text-sm font-medium mb-3">SSH Key</h2>
+        <h2 class="text-sm font-medium mb-3">{{ t("settings.ssh.title") }}</h2>
 
         <!-- Show public key -->
         <div class="flex flex-col gap-2">
           <BaseButton variant="action" @click="showPublicKey">
-            <BaseIcon :icon="KeyRound" /> Show Public Key
+            <BaseIcon :icon="KeyRound" /> {{ t("settings.ssh.showPublic") }}
           </BaseButton>
 
           <div v-if="showPublic" class="mt-2 flex flex-col gap-2">
             <div class="flex justify-between items-center">
-              <span class="text-xs text-muted">Public key</span>
+              <span class="text-xs text-muted">{{
+                t("settings.ssh.publicKeyLabel")
+              }}</span>
               <button class="btn-copy" @click="copyText(publicKey)">
-                <BaseIcon :icon="Copy" /> Copy
+                <BaseIcon :icon="Copy" /> {{ t("settings.ssh.copy") }}
               </button>
             </div>
             <pre class="key-display">{{ publicKey }}</pre>
@@ -1046,7 +1055,7 @@ onMounted(() => {
         <!-- Export private key -->
         <div class="flex flex-col gap-2 mt-3">
           <BaseButton variant="action-danger" @click="exportPrivateKey">
-            <BaseIcon :icon="LockOpen" /> Export Private Key
+            <BaseIcon :icon="LockOpen" /> {{ t("settings.ssh.exportPrivate") }}
           </BaseButton>
 
           <div v-if="showPrivate" class="mt-2 flex flex-col gap-2">
@@ -1056,12 +1065,11 @@ onMounted(() => {
                 :size="14"
                 class="inline-block align-middle"
               />
-              Private key is now visible. Copy it to a safe place and close this
-              screen.
+              {{ t("settings.ssh.privateVisible") }}
             </BaseAlert>
             <div class="flex justify-end">
               <button class="btn-copy" @click="copyText(privateKey)">
-                <BaseIcon :icon="Copy" /> Copy
+                <BaseIcon :icon="Copy" /> {{ t("settings.ssh.copy") }}
               </button>
             </div>
             <pre class="key-display private-key-display">{{ privateKey }}</pre>
@@ -1073,7 +1081,7 @@ onMounted(() => {
                 privateKey = '';
               "
             >
-              Hide Private Key
+              {{ t("settings.ssh.hidePrivate") }}
             </BaseButton>
           </div>
         </div>
@@ -1083,16 +1091,17 @@ onMounted(() => {
            their own native passphrase protection). Set / change run in the
            shared passphrase modal, which is the commit boundary. -->
       <BaseCard as="section" v-if="!isSshIdentity">
-        <h2 class="text-sm font-medium mb-3">Passphrase</h2>
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.passphrase.title") }}
+        </h2>
 
         <!-- Not encrypted: set passphrase -->
         <template v-if="!isIdentityEncrypted">
           <p class="text-xs text-muted mb-2">
-            Your private key is stored in plaintext. Set a passphrase to encrypt
-            it.
+            {{ t("settings.passphrase.plaintextHint") }}
           </p>
           <BaseButton variant="action" @click="openPassphraseModal('set')">
-            <BaseIcon :icon="Lock" /> Set Passphrase
+            <BaseIcon :icon="Lock" /> {{ t("settings.passphrase.set") }}
           </BaseButton>
         </template>
 
@@ -1100,61 +1109,64 @@ onMounted(() => {
         <template v-else>
           <p class="text-xs text-muted mb-2 flex items-center gap-1">
             <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
-            Your private key is passphrase-encrypted.
+            {{ t("settings.passphrase.encryptedHint") }}
           </p>
           <BaseButton variant="action" @click="openPassphraseModal('change')">
-            <BaseIcon :icon="KeyRound" /> Change Passphrase
+            <BaseIcon :icon="KeyRound" /> {{ t("settings.passphrase.change") }}
           </BaseButton>
         </template>
       </BaseCard>
 
       <!-- SSH key identities are not encrypted by gpm -->
       <BaseCard as="section" v-else>
-        <h2 class="text-sm font-medium mb-3">Passphrase</h2>
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.passphrase.titleEncrypted") }}
+        </h2>
         <p class="text-xs text-muted">
-          SSH key identities rely on their own native passphrase protection and
-          are not re-encrypted by gpm.
+          {{ t("settings.passphrase.sshIdentityHint") }}
         </p>
       </BaseCard>
 
       <!-- Biometric unlock (only meaningful when the identity is encrypted) -->
       <BaseCard as="section" v-if="isIdentityEncrypted">
-        <h2 class="text-sm font-medium mb-3">Biometric Unlock</h2>
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.biometric.title") }}
+        </h2>
 
         <p v-if="!biometricAvailable" class="text-xs text-muted">
-          Biometric unlock isn't available on this device (requires Android 11+
-          with a fingerprint or face enrolled).
+          {{ t("settings.biometric.unavailable") }}
         </p>
 
         <template v-else-if="!biometricEnabled">
           <p class="text-xs text-muted mb-2">
-            Unlock with fingerprint or face instead of typing your passphrase on
-            every launch.
+            {{ t("settings.biometric.enableHint") }}
           </p>
           <BaseButton
             variant="action"
             :disabled="biometricLoading"
             @click="openPassphraseModal('enable-biometric')"
           >
-            Enable Biometric
+            {{ t("settings.biometric.enable") }}
           </BaseButton>
         </template>
 
         <template v-else>
-          <p class="text-xs text-muted mb-2">✓ Biometric unlock is enabled.</p>
+          <p class="text-xs text-muted mb-2">
+            {{ t("settings.biometric.enabledHint") }}
+          </p>
           <BaseButton variant="action-danger" @click="onDisableBiometric">
-            Disable Biometric
+            {{ t("settings.biometric.disable") }}
           </BaseButton>
         </template>
       </BaseCard>
 
       <!-- App-launch biometric gate (RFC 0028) -->
       <BaseCard as="section" v-if="appLockAvailable">
-        <h2 class="text-sm font-medium mb-3">App Lock</h2>
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.appLock.title") }}
+        </h2>
         <p class="text-xs text-muted mb-3">
-          Require biometric every time you open or return to gpm. When on, your
-          app key is sealed behind your fingerprint — the repository can't be
-          opened until you authenticate.
+          {{ t("settings.appLock.description") }}
         </p>
 
         <!-- App lock enable/disable -->
@@ -1164,21 +1176,21 @@ onMounted(() => {
             :loading="appLockLoading"
             @click="onEnableAppLock"
           >
-            <BaseIcon :icon="Lock" /> Enable App Lock
+            <BaseIcon :icon="Lock" /> {{ t("settings.appLock.enable") }}
           </BaseButton>
         </template>
 
         <template v-else>
           <p class="text-xs text-muted mb-2 flex items-center gap-1">
             <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
-            App lock is enabled.
+            {{ t("settings.appLock.enabledHint") }}
           </p>
           <BaseButton
             variant="action-danger"
             :disabled="appLockLoading"
             @click="onDisableAppLock"
           >
-            Disable App Lock
+            {{ t("settings.appLock.disable") }}
           </BaseButton>
 
           <!-- Identity auto-unlock opt-in (req3): separate from the auto-lock
@@ -1188,10 +1200,11 @@ onMounted(() => {
             v-if="isIdentityEncrypted"
             class="mt-4 pt-4 border-t border-edge"
           >
-            <h3 class="text-sm font-medium mb-1">Identity Auto-Unlock</h3>
+            <h3 class="text-sm font-medium mb-1">
+              {{ t("settings.appLock.autoUnlock.title") }}
+            </h3>
             <p class="text-xs text-muted mb-3">
-              Also unlock your passwords when you unlock the app — one biometric
-              prompt does both. Optional and off by default.
+              {{ t("settings.appLock.autoUnlock.description") }}
             </p>
             <template v-if="!identityAutoUnlockEnabled">
               <BaseButton
@@ -1199,19 +1212,19 @@ onMounted(() => {
                 :disabled="appLockLoading"
                 @click="openPassphraseModal('enable-auto-unlock')"
               >
-                Enable Auto-Unlock
+                {{ t("settings.appLock.autoUnlock.enable") }}
               </BaseButton>
             </template>
             <template v-else>
               <p class="text-xs text-muted mb-2">
-                ✓ Identity unlocks together with the app.
+                {{ t("settings.appLock.autoUnlock.enabledHint") }}
               </p>
               <BaseButton
                 variant="action-danger"
                 :disabled="appLockLoading"
                 @click="onDisableIdentityAutoUnlock"
               >
-                Disable Auto-Unlock
+                {{ t("settings.appLock.autoUnlock.disable") }}
               </BaseButton>
             </template>
           </div>
@@ -1220,29 +1233,30 @@ onMounted(() => {
 
       <!-- Screen capture protection (Android FLAG_SECURE) — Android only -->
       <BaseCard as="section" v-if="secureAvailable">
-        <h2 class="text-sm font-medium mb-2">Screen capture protection</h2>
+        <h2 class="text-sm font-medium mb-2">
+          {{ t("settings.secureScreen.title") }}
+        </h2>
         <p class="text-xs text-muted mb-3">
-          Block screenshots and screen recording on pages that show secrets
-          (setup, create, generate, entry, settings — including the SSH key
-          export). Android only.
+          {{ t("settings.secureScreen.description") }}
         </p>
         <BaseSegmentedControl
           name="secure-screen"
-          legend="Block screen capture"
+          :legend="t('settings.secureScreen.legend')"
           :model-value="secureScreen"
           :options="[
-            { label: 'On', value: true },
-            { label: 'Off', value: false },
+            { label: t('settings.secureScreen.on'), value: true },
+            { label: t('settings.secureScreen.off'), value: false },
           ]"
           @change="onSecureScreenChange"
         >
           <template #hint>
             <p class="text-xs text-muted mt-1">
-              <template v-if="secureScreen"
-                >Sensitive pages block capture; the entry list and history stay
-                capturable.</template
-              >
-              <template v-else>No page blocks screen capture.</template>
+              <template v-if="secureScreen">{{
+                t("settings.secureScreen.onHint")
+              }}</template>
+              <template v-else>{{
+                t("settings.secureScreen.offHint")
+              }}</template>
             </p>
           </template>
         </BaseSegmentedControl>
@@ -1250,30 +1264,27 @@ onMounted(() => {
 
       <!-- AutoSync -->
       <BaseCard as="section" v-if="config">
-        <h2 class="text-sm font-medium mb-3">AutoSync</h2>
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.autosync.title") }}
+        </h2>
         <BaseSegmentedControl
           class="mb-3"
           name="autosync"
-          legend="Publish on every save"
+          :legend="t('settings.autosync.legend')"
           :model-value="autosyncEnabled"
           :options="[
-            { label: 'On', value: true },
-            { label: 'Off', value: false },
+            { label: t('settings.autosync.on'), value: true },
+            { label: t('settings.autosync.off'), value: false },
           ]"
           :disabled="lockLoading"
           @change="onAutosyncChange"
         >
           <template #hint>
             <p class="text-xs text-muted mt-1">
-              <template v-if="autosyncEnabled"
-                >Each save pulls, commits, and pushes automatically.</template
-              >
-              <template v-else
-                >Saves stay local until you sync (swipe down on the list).
-                Direct collisions show a resolve prompt; rarely, an edit from an
-                out-of-date view can overwrite a newer change without a prompt —
-                recoverable in git history.</template
-              >
+              <template v-if="autosyncEnabled">{{
+                t("settings.autosync.onHint")
+              }}</template>
+              <template v-else>{{ t("settings.autosync.offHint") }}</template>
             </p>
           </template>
         </BaseSegmentedControl>
@@ -1281,17 +1292,18 @@ onMounted(() => {
 
       <!-- Auto-lock & auto-clear -->
       <BaseCard as="section" v-if="config">
-        <h2 class="text-sm font-medium mb-3">Auto-Lock &amp; Auto-Clear</h2>
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.lock.title") }}
+        </h2>
         <p class="text-xs text-muted mb-3">
-          Control when the identity locks and how long secrets stay in the
-          clipboard / on screen.
+          {{ t("settings.lock.description") }}
         </p>
 
         <!-- App auto-lock mode -->
         <BaseSegmentedControl
           class="mb-3"
           name="lock-mode"
-          legend="Auto-lock"
+          :legend="t('settings.lock.autoLockLegend')"
           wrap
           :model-value="rawLockMode"
           :by="lockModeEq"
@@ -1301,17 +1313,13 @@ onMounted(() => {
         >
           <template #hint>
             <p class="text-xs text-muted mt-1">
-              <template v-if="lockModeActive('immediate')"
-                >Per-operation: re-authenticate each copy/show/create. Strongest
-                default.</template
-              >
-              <template v-else-if="lockModeActive('never')"
-                >Never auto-lock; the identity stays cached until you lock
-                manually.</template
-              >
-              <template v-else
-                >Session: stay unlocked, lock after the idle period.</template
-              >
+              <template v-if="lockModeActive('immediate')">{{
+                t("settings.lock.immediateHint")
+              }}</template>
+              <template v-else-if="lockModeActive('never')">{{
+                t("settings.lock.neverHint")
+              }}</template>
+              <template v-else>{{ t("settings.lock.idleHint") }}</template>
             </p>
           </template>
         </BaseSegmentedControl>
@@ -1320,7 +1328,7 @@ onMounted(() => {
         <BaseSegmentedControl
           class="mb-3"
           name="view-clear"
-          legend="Password view auto-clear"
+          :legend="t('settings.lock.viewClearLegend')"
           wrap
           :model-value="rawViewClear"
           :options="VIEW_CLEAR_PRESETS"
@@ -1331,7 +1339,7 @@ onMounted(() => {
         <!-- Clipboard auto-clear -->
         <BaseSegmentedControl
           name="clipboard-clear"
-          legend="Clipboard auto-clear"
+          :legend="t('settings.lock.clipboardClearLegend')"
           wrap
           :model-value="rawClipboardClear"
           :options="CLIPBOARD_CLEAR_PRESETS"
@@ -1347,24 +1355,23 @@ onMounted(() => {
         :border="addKeyDirty ? 'accent' : 'edge'"
       >
         <h2 class="text-sm font-medium mb-3">
-          Repository Authenticity
+          {{ t("settings.auth.title") }}
           <span
             v-if="addKeyDirty"
             class="ml-1 text-xs font-normal"
             style="color: var(--color-accent)"
-            >Unsaved changes</span
+            >{{ t("settings.auth.unsaved") }}</span
           >
         </h2>
         <p class="text-xs text-muted mb-3">
-          Verify SSH-signed commits on every pull to detect a compromised remote
-          feeding validly encrypted but wrong entries.
+          {{ t("settings.auth.description") }}
         </p>
 
         <!-- Mode selector -->
         <BaseSegmentedControl
           class="mb-3"
           name="verify-mode"
-          legend="Verification"
+          :legend="t('settings.auth.legend')"
           :model-value="authConfig.mode"
           :options="VERIFY_MODES"
           :disabled="authLoading"
@@ -1372,20 +1379,20 @@ onMounted(() => {
         >
           <template #hint>
             <p class="text-xs text-muted mt-1">
-              <template v-if="authConfig.mode === 'off'"
-                >No verification.</template
-              >
-              <template v-else-if="authConfig.mode === 'audit'"
-                >Verify and warn, but always pull.</template
-              >
-              <template v-else>Block pulls with unverified commits.</template>
+              <template v-if="authConfig.mode === 'off'">{{
+                t("settings.auth.offHint")
+              }}</template>
+              <template v-else-if="authConfig.mode === 'audit'">{{
+                t("settings.auth.auditHint")
+              }}</template>
+              <template v-else>{{ t("settings.auth.enforceHint") }}</template>
             </p>
           </template>
         </BaseSegmentedControl>
 
         <!-- Trusted signing keys (SSH + GPG combined; GPG entries tagged) -->
         <div class="text-xs text-muted mb-1">
-          Trusted signing keys ({{ trustedKeyRows.length }})
+          {{ t("settings.auth.trustedKeys", { count: trustedKeyRows.length }) }}
         </div>
         <ul v-if="trustedKeyRows.length" class="flex flex-col gap-1 mb-2">
           <li
@@ -1407,20 +1414,18 @@ onMounted(() => {
               class="btn-copy"
               @click="onRemoveKey(row.fingerprint, row.kind)"
             >
-              Remove
+              {{ t("settings.auth.remove") }}
             </button>
           </li>
         </ul>
         <p v-else class="text-xs text-muted mb-2">
-          No trusted keys yet. Trust this repo's signer, paste a key, or import
-          a GPG .asc file below.
+          {{ t("settings.auth.noTrustedKeys") }}
         </p>
         <p
           v-if="gpgWarnings.length"
           class="text-xs text-warning mb-2 break-words"
         >
-          {{ gpgWarnings.length }} trusted GPG key(s) failed to load — re-add or
-          remove to restore verification.
+          {{ t("settings.auth.gpgWarning", { count: gpgWarnings.length }) }}
         </p>
 
         <div class="flex flex-col gap-2">
@@ -1429,14 +1434,14 @@ onMounted(() => {
             variant="action"
             @click="onTrustHead"
           >
-            <BaseIcon :icon="KeyRound" /> Trust this repo's signer (HEAD)
+            <BaseIcon :icon="KeyRound" /> {{ t("settings.auth.trustHead") }}
           </BaseButton>
           <BaseButton
             v-if="!showAddKey"
             variant="action"
             @click="showAddKey = true"
           >
-            <BaseIcon :icon="Plus" /> Add a signing public key
+            <BaseIcon :icon="Plus" /> {{ t("settings.auth.addKey") }}
           </BaseButton>
           <BaseButton
             v-if="!showAddKey"
@@ -1444,19 +1449,19 @@ onMounted(() => {
             :disabled="authLoading"
             @click="onImportGpgKey"
           >
-            <BaseIcon :icon="FileUp" /> Import GPG key file (.asc)
+            <BaseIcon :icon="FileUp" /> {{ t("settings.auth.importGpg") }}
           </BaseButton>
           <div v-if="showAddKey" class="flex flex-col gap-2">
             <BaseTextarea
               v-model="newPublicKey"
               rows="3"
-              placeholder="ssh-ed25519 AAAA… [comment]  — or paste a GPG public key block"
+              :placeholder="t('settings.auth.keyPlaceholder')"
               class="font-mono text-xs"
             />
             <BaseInput
               v-model="newKeyLabel"
               type="text"
-              placeholder="Label (e.g. Alice — laptop)"
+              :placeholder="t('settings.auth.labelPlaceholder')"
             />
             <div class="flex gap-2">
               <BaseButton
@@ -1465,7 +1470,7 @@ onMounted(() => {
                 :disabled="authLoading"
                 @click="onAddKey"
               >
-                Save key
+                {{ t("settings.auth.saveKey") }}
               </BaseButton>
               <BaseButton
                 variant="action"
@@ -1476,24 +1481,26 @@ onMounted(() => {
                   newKeyLabel = '';
                 "
               >
-                Cancel
+                {{ t("common.button.cancel") }}
               </BaseButton>
             </div>
           </div>
           <BaseButton variant="action" @click="openHistory">
-            <BaseIcon :icon="History" /> View commit history &amp; signatures
+            <BaseIcon :icon="History" /> {{ t("settings.auth.viewHistory") }}
           </BaseButton>
         </div>
       </BaseCard>
 
       <!-- Danger zone -->
       <BaseCard as="section" border="danger">
-        <h2 class="text-sm font-medium mb-2 text-danger">Danger Zone</h2>
+        <h2 class="text-sm font-medium mb-2 text-danger">
+          {{ t("settings.reset.title") }}
+        </h2>
         <BaseButton variant="action-danger" @click="resetConfig">
-          <BaseIcon :icon="Trash2" /> Reset All Data
+          <BaseIcon :icon="Trash2" /> {{ t("settings.reset.button") }}
         </BaseButton>
         <p class="text-xs text-muted mt-1">
-          Remove all local data and configuration.
+          {{ t("settings.reset.description") }}
         </p>
       </BaseCard>
     </div>
@@ -1504,19 +1511,19 @@ onMounted(() => {
       variant="center"
       :z="80"
       role="alertdialog"
-      aria-label="Reset all data"
+      :aria-label="t('settings.reset.ariaLabel')"
       @close="resetOpen = false"
     >
-      <h2 class="text-lg font-medium text-danger mb-3">Reset all data?</h2>
+      <h2 class="text-lg font-medium text-danger mb-3">
+        {{ t("settings.reset.modalTitle") }}
+      </h2>
       <BaseAlert variant="danger" class="mb-4">
-        This permanently removes every secret, the signing identity, and all
-        configuration from this device. Your passphrase cannot recover a reset
-        store — you would need to set gpm up again.
+        {{ t("settings.reset.modalBody") }}
       </BaseAlert>
       <div class="flex flex-col gap-1 mb-4">
-        <label class="text-sm font-medium" for="reset-confirm"
-          >Type RESET to confirm</label
-        >
+        <label class="text-sm font-medium" for="reset-confirm">{{
+          t("settings.reset.typeReset")
+        }}</label>
         <BaseInput
           id="reset-confirm"
           v-model="resetConfirmText"
@@ -1529,7 +1536,7 @@ onMounted(() => {
           t("common.button.cancel")
         }}</BaseButton>
         <BaseButton variant="danger" :disabled="!resetReady" @click="doReset">
-          <BaseIcon :icon="Trash2" /> Reset all data
+          <BaseIcon :icon="Trash2" /> {{ t("settings.reset.confirm") }}
         </BaseButton>
       </div>
     </BaseModalShell>
@@ -1547,9 +1554,9 @@ onMounted(() => {
     >
       <h2 class="text-lg font-medium mb-3">{{ ppModalTitle }}</h2>
       <div v-if="ppShowCurrent" class="flex flex-col gap-1 mb-3">
-        <label for="pp-current" class="text-xs text-muted"
-          >Current passphrase</label
-        >
+        <label for="pp-current" class="text-xs text-muted">{{
+          t("settings.passphrase.currentLabel")
+        }}</label>
         <BaseInput
           id="pp-current"
           v-model="ppCurrent"
@@ -1563,8 +1570,12 @@ onMounted(() => {
         ref="ppField"
         id="pp-new"
         v-model="ppNew"
-        :label="passphraseModal === 'change' ? 'New passphrase' : 'Passphrase'"
-        placeholder="New passphrase"
+        :label="
+          passphraseModal === 'change'
+            ? t('settings.passphrase.newLabel')
+            : t('settings.passphrase.plainLabel')
+        "
+        :placeholder="t('settings.passphrase.newPlaceholder')"
         :optional="false"
         :disabled="passphraseLoading"
         class="mb-3"
@@ -1598,23 +1609,24 @@ onMounted(() => {
       variant="sheet"
       :z="50"
       role="alertdialog"
-      aria-label="Unsaved changes"
+      :aria-label="t('settings.unsaved.ariaLabel')"
       @close="resolveUnsaved('cancel')"
     >
-      <h2 class="text-lg font-medium mb-2">Unsaved changes</h2>
-      <p class="text-sm text-muted mb-4">
-        You have edits that haven't been saved. Save them before leaving, or
-        discard and leave.
-      </p>
+      <h2 class="text-lg font-medium mb-2">
+        {{ t("settings.unsaved.title") }}
+      </h2>
+      <p class="text-sm text-muted mb-4">{{ t("settings.unsaved.body") }}</p>
       <div class="flex flex-col gap-2">
-        <BaseButton variant="action" @click="resolveUnsaved('save')"
-          >Save and leave</BaseButton
-        >
-        <BaseButton variant="secondary" @click="resolveUnsaved('cancel')"
-          >Keep editing</BaseButton
-        >
-        <BaseButton variant="action-danger" @click="resolveUnsaved('discard')"
-          >Discard and leave</BaseButton
+        <BaseButton variant="action" @click="resolveUnsaved('save')">{{
+          t("settings.unsaved.save")
+        }}</BaseButton>
+        <BaseButton variant="secondary" @click="resolveUnsaved('cancel')">{{
+          t("settings.unsaved.keep")
+        }}</BaseButton>
+        <BaseButton
+          variant="action-danger"
+          @click="resolveUnsaved('discard')"
+          >{{ t("settings.unsaved.discard") }}</BaseButton
         >
       </div>
     </BaseModalShell>

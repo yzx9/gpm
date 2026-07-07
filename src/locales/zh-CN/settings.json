@@ -9,5 +9,208 @@
     "chinese": "中文",
     "applied": "显示语言已更新",
     "failed": "无法保存显示语言 —— 请重试"
+  },
+  "repo": {
+    "title": "仓库",
+    "auth": {
+      "ssh": "认证：SSH 密钥",
+      "pat": "认证：PAT",
+      "none": "认证：无（公开）"
+    }
+  },
+  "commit": {
+    "title": "提交身份",
+    "unsaved": "未保存的更改",
+    "hint": "写入每次 git 提交的姓名和邮箱。留空则使用默认值{default}。",
+    "default": "（{name} <{email}>）",
+    "nameLabel": "姓名",
+    "namePlaceholder": "姓名",
+    "emailLabel": "邮箱",
+    "emailPlaceholder": "邮箱",
+    "save": "保存",
+    "saved": "提交身份已保存",
+    "saveFailed": "保存提交身份失败",
+    "loadFailed": "加载配置失败"
+  },
+  "ssh": {
+    "title": "SSH 密钥",
+    "showPublic": "显示公钥",
+    "publicKeyLabel": "公钥",
+    "copy": "复制",
+    "exportPrivate": "导出私钥",
+    "exportConfirm": "这将显示你的 SSH 私钥。请确保没有旁人窥视。是否继续？",
+    "privateVisible": "私钥现已可见。请将其复制到安全位置并关闭此页面。",
+    "hidePrivate": "隐藏私钥",
+    "publicFailed": "获取公钥失败",
+    "exportFailed": "导出私钥失败"
+  },
+  "passphrase": {
+    "title": "口令",
+    "titleEncrypted": "口令",
+    "plaintextHint": "你的私钥以明文存储。请设置口令进行加密。",
+    "set": "设置口令",
+    "encryptedHint": "你的私钥已使用口令加密。",
+    "change": "修改口令",
+    "sshIdentityHint": "SSH 密钥身份依赖其自身的原生口令保护，不会被 gpm 重新加密。",
+    "modal": {
+      "set": {
+        "title": "设置口令",
+        "submit": "加密身份"
+      },
+      "change": {
+        "title": "修改口令",
+        "submit": "修改口令"
+      },
+      "enableBiometric": {
+        "title": "启用生物识别解锁",
+        "submit": "启用生物识别"
+      },
+      "enableAutoUnlock": {
+        "title": "启用身份自动解锁",
+        "submit": "启用"
+      }
+    },
+    "currentLabel": "当前口令",
+    "newLabel": "新口令",
+    "newPlaceholder": "新口令",
+    "plainLabel": "口令",
+    "currentRequired": "必须输入当前口令",
+    "required": "必须输入口令",
+    "ackRequired": "请确认你已了解此口令无法恢复。",
+    "setToast": "✓ 口令已设置 —— 你的私钥现已加密",
+    "changedToast": "✓ 口令已修改",
+    "setFailed": "设置口令失败",
+    "changeFailed": "修改口令失败",
+    "wrongPassphrase": "口令错误",
+    "biometricFailed": "启用生物识别失败",
+    "autoUnlockFailed": "启用身份自动解锁失败"
+  },
+  "biometric": {
+    "title": "生物识别解锁",
+    "unavailable": "此设备不支持生物识别解锁（需 Android 11+ 并已录入指纹或面部）。",
+    "enableHint": "使用指纹或面部解锁，免去每次启动时输入口令。",
+    "enable": "启用生物识别",
+    "enabledHint": "✓ 生物识别解锁已启用。",
+    "disable": "禁用生物识别",
+    "enabledToast": "✓ 生物识别解锁已启用",
+    "disabledToast": "生物识别解锁已禁用"
+  },
+  "appLock": {
+    "title": "应用锁",
+    "description": "每次打开或返回 gpm 时要求生物识别。开启后，应用密钥将以指纹封存 —— 在你完成认证前无法打开仓库。",
+    "enable": "启用应用锁",
+    "enabledHint": "应用锁已启用。",
+    "disable": "禁用应用锁",
+    "enabledToast": "✓ 应用锁已启用",
+    "disabledToast": "应用锁已禁用",
+    "enableFailed": "启用应用锁失败",
+    "disableFailed": "禁用应用锁失败",
+    "autoUnlock": {
+      "title": "身份自动解锁",
+      "description": "解锁应用时同时解锁你的密码 —— 一次生物识别即可完成两者。可选，默认关闭。",
+      "enable": "启用自动解锁",
+      "enabledHint": "✓ 身份与应用一同解锁。",
+      "disable": "禁用自动解锁",
+      "disabledToast": "身份自动解锁已禁用",
+      "enabledToast": "✓ 身份自动解锁已启用"
+    }
+  },
+  "secureScreen": {
+    "title": "截屏保护",
+    "description": "在显示敏感信息的页面（设置、创建、生成、条目、设置 —— 含 SSH 密钥导出）阻止截屏与录屏。仅 Android 可用。",
+    "legend": "阻止截屏",
+    "on": "开",
+    "off": "关",
+    "onHint": "敏感页面已阻止截屏；条目列表与历史记录仍可截取。",
+    "offHint": "无页面阻止截屏。",
+    "saveFailed": "无法保存截屏设置 —— 请重试",
+    "blockedToast": "敏感页面已阻止截屏",
+    "allowedToast": "已允许截屏"
+  },
+  "autosync": {
+    "title": "自动同步",
+    "legend": "每次保存时发布",
+    "on": "开",
+    "off": "关",
+    "onHint": "每次保存将自动拉取、提交并推送。",
+    "offHint": "保存将保留在本地，直到你手动同步（在列表上下拉）。直接冲突会显示解决提示；少数情况下，基于过期视图的编辑可能在无提示的情况下覆盖较新的远端更改 —— 可通过 git 历史恢复。",
+    "setFailed": "设置自动同步失败"
+  },
+  "lock": {
+    "title": "自动锁定与自动清除",
+    "description": "控制身份何时锁定，以及机密内容在剪贴板 / 屏幕上的留存时长。",
+    "autoLockLegend": "自动锁定",
+    "viewClearLegend": "密码查看自动清除",
+    "clipboardClearLegend": "剪贴板自动清除",
+    "immediate": "立即",
+    "minutes": "{count} 分钟",
+    "never": "从不",
+    "immediateHint": "按操作：每次复制 / 查看 / 创建时重新认证。默认最严格。",
+    "neverHint": "从不自动锁定；身份将保持缓存，直到你手动锁定。",
+    "idleHint": "会话：保持解锁，在空闲时段后锁定。",
+    "setModeFailed": "设置自动锁定模式失败"
+  },
+  "clear": {
+    "seconds": "{count} 秒",
+    "default": "{count} 秒 · 默认",
+    "setViewFailed": "设置查看自动清除失败",
+    "setClipboardFailed": "设置剪贴板自动清除失败"
+  },
+  "auth": {
+    "title": "仓库真实性",
+    "unsaved": "未保存的更改",
+    "description": "在每次拉取时校验 SSH 签名的提交，以检测被入侵的远端投递有效加密但内容错误的条目。",
+    "legend": "验证",
+    "offHint": "不验证。",
+    "auditHint": "验证并警告，但始终拉取。",
+    "enforceHint": "阻止未验证提交的拉取。",
+    "enforceNeedsKey": "启用 Enforce 前请先添加受信签名密钥（否则会阻止所有拉取）。",
+    "setModeFailed": "设置模式失败",
+    "trustedKeys": "受信签名密钥（{count}）",
+    "noTrustedKeys": "暂无受信密钥。可在下方信任本仓库签名者、粘贴密钥或导入 GPG .asc 文件。",
+    "gpgWarning": "{count} 个受信 GPG 密钥加载失败 —— 请重新添加或移除以恢复验证。",
+    "remove": "移除",
+    "removeConfirm": "移除此受信签名密钥？",
+    "trustHead": "信任本仓库签名者（HEAD）",
+    "addKey": "添加签名公钥",
+    "importGpg": "导入 GPG 密钥文件（.asc）",
+    "keyPlaceholder": "ssh-ed25519 AAAA… [备注]  —— 或粘贴 GPG 公钥块",
+    "labelPlaceholder": "标签（例如 Alice —— 笔记本）",
+    "saveKey": "保存密钥",
+    "viewHistory": "查看提交历史与签名",
+    "addedToast": "✓ 已添加受信签名密钥",
+    "removedToast": "受信密钥已移除",
+    "addFailed": "添加密钥失败",
+    "removeFailed": "移除密钥失败",
+    "pasteKeyPrompt": "粘贴签名公钥（SSH 单行或 GPG armor）",
+    "importGpgPrompt": "导入的 GPG 密钥的标签？（留空则使用文件名。）",
+    "trustHeadPrompt": "信任本仓库当前签名者？\n请输入标签：",
+    "importGpgToast": "✓ GPG 密钥已导入",
+    "importGpgFailed": "导入 GPG 密钥失败",
+    "trustHeadToast": "✓ HEAD 签名者已信任",
+    "trustHeadFailed": "HEAD 未使用 SSH 签名 —— 请改为粘贴密钥",
+    "loadConfigFailed": "加载真实性配置失败"
+  },
+  "reset": {
+    "title": "危险区",
+    "button": "重置所有数据",
+    "description": "移除所有本地数据与配置。",
+    "ariaLabel": "重置所有数据",
+    "modalTitle": "重置所有数据？",
+    "modalBody": "此操作将永久移除本设备上的所有机密、签名身份及全部配置。你的口令无法恢复已重置的仓库 —— 你需要重新设置 gpm。",
+    "typeReset": "输入 RESET 以确认",
+    "confirm": "重置所有数据",
+    "failed": "重置失败"
+  },
+  "unsaved": {
+    "ariaLabel": "未保存的更改",
+    "title": "未保存的更改",
+    "body": "你有尚未保存的更改。请在离开前保存，或放弃并离开。",
+    "save": "保存并离开",
+    "keep": "继续编辑",
+    "discard": "放弃并离开"
+  },
+  "toast": {
+    "copied": "✓ 已复制到剪贴板"
   }
 }

@@ -8,6 +8,7 @@ import enEntries from "@/locales/en/entries.json";
 import enEntry from "@/locales/en/entry.json";
 import enGenerate from "@/locales/en/generate.json";
 import enHistory from "@/locales/en/history.json";
+import enSettings from "@/locales/en/settings.json";
 import { createI18n } from "vue-i18n";
 
 /**
@@ -44,6 +45,7 @@ export function createTestI18n() {
         create: enCreate,
         generate: enGenerate,
         history: enHistory,
+        settings: enSettings,
       },
     },
   });

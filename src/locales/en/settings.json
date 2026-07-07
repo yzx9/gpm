@@ -9,5 +9,208 @@
     "chinese": "中文",
     "applied": "Display language updated",
     "failed": "Couldn't save display language — try again"
+  },
+  "repo": {
+    "title": "Repository",
+    "auth": {
+      "ssh": "Auth: SSH Key",
+      "pat": "Auth: PAT",
+      "none": "Auth: None (public)"
+    }
+  },
+  "commit": {
+    "title": "Commit Identity",
+    "unsaved": "Unsaved changes",
+    "hint": "Name and email written to each git commit. Leave blank to use the default{default}.",
+    "default": " ({name} <{email}>)",
+    "nameLabel": "Name",
+    "namePlaceholder": "Name",
+    "emailLabel": "Email",
+    "emailPlaceholder": "Email",
+    "save": "Save",
+    "saved": "Commit identity saved",
+    "saveFailed": "Failed to save commit identity",
+    "loadFailed": "Failed to load config"
+  },
+  "ssh": {
+    "title": "SSH Key",
+    "showPublic": "Show Public Key",
+    "publicKeyLabel": "Public key",
+    "copy": "Copy",
+    "exportPrivate": "Export Private Key",
+    "exportConfirm": "This will display your private SSH key. Make sure no one is watching. Continue?",
+    "privateVisible": "Private key is now visible. Copy it to a safe place and close this screen.",
+    "hidePrivate": "Hide Private Key",
+    "publicFailed": "Failed to get public key",
+    "exportFailed": "Failed to export private key"
+  },
+  "passphrase": {
+    "title": "Passphrase",
+    "titleEncrypted": "Passphrase",
+    "plaintextHint": "Your private key is stored in plaintext. Set a passphrase to encrypt it.",
+    "set": "Set Passphrase",
+    "encryptedHint": "Your private key is passphrase-encrypted.",
+    "change": "Change Passphrase",
+    "sshIdentityHint": "SSH key identities rely on their own native passphrase protection and are not re-encrypted by gpm.",
+    "modal": {
+      "set": {
+        "title": "Set Passphrase",
+        "submit": "Encrypt Identity"
+      },
+      "change": {
+        "title": "Change Passphrase",
+        "submit": "Change Passphrase"
+      },
+      "enableBiometric": {
+        "title": "Enable Biometric Unlock",
+        "submit": "Enable Biometric"
+      },
+      "enableAutoUnlock": {
+        "title": "Enable Identity Auto-Unlock",
+        "submit": "Enable"
+      }
+    },
+    "currentLabel": "Current passphrase",
+    "newLabel": "New passphrase",
+    "newPlaceholder": "New passphrase",
+    "plainLabel": "Passphrase",
+    "currentRequired": "Current passphrase is required",
+    "required": "Passphrase is required",
+    "ackRequired": "Please acknowledge that this passphrase cannot be recovered.",
+    "setToast": "✓ Passphrase set — your private key is now encrypted",
+    "changedToast": "✓ Passphrase changed",
+    "setFailed": "Failed to set passphrase",
+    "changeFailed": "Failed to change passphrase",
+    "wrongPassphrase": "Wrong passphrase",
+    "biometricFailed": "Failed to enable biometric",
+    "autoUnlockFailed": "Failed to enable identity auto-unlock"
+  },
+  "biometric": {
+    "title": "Biometric Unlock",
+    "unavailable": "Biometric unlock isn't available on this device (requires Android 11+ with a fingerprint or face enrolled).",
+    "enableHint": "Unlock with fingerprint or face instead of typing your passphrase on every launch.",
+    "enable": "Enable Biometric",
+    "enabledHint": "✓ Biometric unlock is enabled.",
+    "disable": "Disable Biometric",
+    "enabledToast": "✓ Biometric unlock enabled",
+    "disabledToast": "Biometric unlock disabled"
+  },
+  "appLock": {
+    "title": "App Lock",
+    "description": "Require biometric every time you open or return to gpm. When on, your app key is sealed behind your fingerprint — the repository can't be opened until you authenticate.",
+    "enable": "Enable App Lock",
+    "enabledHint": "App lock is enabled.",
+    "disable": "Disable App Lock",
+    "enabledToast": "✓ App lock enabled",
+    "disabledToast": "App lock disabled",
+    "enableFailed": "Failed to enable app lock",
+    "disableFailed": "Failed to disable app lock",
+    "autoUnlock": {
+      "title": "Identity Auto-Unlock",
+      "description": "Also unlock your passwords when you unlock the app — one biometric prompt does both. Optional and off by default.",
+      "enable": "Enable Auto-Unlock",
+      "enabledHint": "✓ Identity unlocks together with the app.",
+      "disable": "Disable Auto-Unlock",
+      "disabledToast": "Identity auto-unlock disabled",
+      "enabledToast": "✓ Identity auto-unlock enabled"
+    }
+  },
+  "secureScreen": {
+    "title": "Screen capture protection",
+    "description": "Block screenshots and screen recording on pages that show secrets (setup, create, generate, entry, settings — including the SSH key export). Android only.",
+    "legend": "Block screen capture",
+    "on": "On",
+    "off": "Off",
+    "onHint": "Sensitive pages block capture; the entry list and history stay capturable.",
+    "offHint": "No page blocks screen capture.",
+    "saveFailed": "Couldn't save screen-capture setting — try again",
+    "blockedToast": "Screen capture blocked on sensitive pages",
+    "allowedToast": "Screen capture allowed"
+  },
+  "autosync": {
+    "title": "AutoSync",
+    "legend": "Publish on every save",
+    "on": "On",
+    "off": "Off",
+    "onHint": "Each save pulls, commits, and pushes automatically.",
+    "offHint": "Saves stay local until you sync (swipe down on the list). Direct collisions show a resolve prompt; rarely, an edit from an out-of-date view can overwrite a newer change without a prompt — recoverable in git history.",
+    "setFailed": "Failed to set AutoSync"
+  },
+  "lock": {
+    "title": "Auto-Lock & Auto-Clear",
+    "description": "Control when the identity locks and how long secrets stay in the clipboard / on screen.",
+    "autoLockLegend": "Auto-lock",
+    "viewClearLegend": "Password view auto-clear",
+    "clipboardClearLegend": "Clipboard auto-clear",
+    "immediate": "Immediate",
+    "minutes": "{count} min",
+    "never": "Never",
+    "immediateHint": "Per-operation: re-authenticate each copy/show/create. Strongest default.",
+    "neverHint": "Never auto-lock; the identity stays cached until you lock manually.",
+    "idleHint": "Session: stay unlocked, lock after the idle period.",
+    "setModeFailed": "Failed to set auto-lock mode"
+  },
+  "clear": {
+    "seconds": "{count}s",
+    "default": "{count}s · default",
+    "setViewFailed": "Failed to set view auto-clear",
+    "setClipboardFailed": "Failed to set clipboard auto-clear"
+  },
+  "auth": {
+    "title": "Repository Authenticity",
+    "unsaved": "Unsaved changes",
+    "description": "Verify SSH-signed commits on every pull to detect a compromised remote feeding validly encrypted but wrong entries.",
+    "legend": "Verification",
+    "offHint": "No verification.",
+    "auditHint": "Verify and warn, but always pull.",
+    "enforceHint": "Block pulls with unverified commits.",
+    "enforceNeedsKey": "Add a trusted signing key before enabling Enforce (it would block every pull).",
+    "setModeFailed": "Failed to set mode",
+    "trustedKeys": "Trusted signing keys ({count})",
+    "noTrustedKeys": "No trusted keys yet. Trust this repo's signer, paste a key, or import a GPG .asc file below.",
+    "gpgWarning": "{count} trusted GPG key(s) failed to load — re-add or remove to restore verification.",
+    "remove": "Remove",
+    "removeConfirm": "Remove this trusted signing key?",
+    "trustHead": "Trust this repo's signer (HEAD)",
+    "addKey": "Add a signing public key",
+    "importGpg": "Import GPG key file (.asc)",
+    "keyPlaceholder": "ssh-ed25519 AAAA… [comment]  — or paste a GPG public key block",
+    "labelPlaceholder": "Label (e.g. Alice — laptop)",
+    "saveKey": "Save key",
+    "viewHistory": "View commit history & signatures",
+    "addedToast": "✓ Trusted signing key added",
+    "removedToast": "Trusted key removed",
+    "addFailed": "Failed to add key",
+    "removeFailed": "Failed to remove key",
+    "pasteKeyPrompt": "Paste a signing public key (SSH one-liner or GPG armor)",
+    "importGpgPrompt": "Label for the imported GPG key? (Leave blank to use the filename.)",
+    "trustHeadPrompt": "Trust this repo's current signer?\nEnter a label:",
+    "importGpgToast": "✓ GPG key imported",
+    "importGpgFailed": "Failed to import GPG key",
+    "trustHeadToast": "✓ HEAD signer trusted",
+    "trustHeadFailed": "HEAD is not SSH-signed — paste a key instead",
+    "loadConfigFailed": "Failed to load authenticity config"
+  },
+  "reset": {
+    "title": "Danger Zone",
+    "button": "Reset All Data",
+    "description": "Remove all local data and configuration.",
+    "ariaLabel": "Reset all data",
+    "modalTitle": "Reset all data?",
+    "modalBody": "This permanently removes every secret, the signing identity, and all configuration from this device. Your passphrase cannot recover a reset store — you would need to set gpm up again.",
+    "typeReset": "Type RESET to confirm",
+    "confirm": "Reset all data",
+    "failed": "Reset failed"
+  },
+  "unsaved": {
+    "ariaLabel": "Unsaved changes",
+    "title": "Unsaved changes",
+    "body": "You have edits that haven't been saved. Save them before leaving, or discard and leave.",
+    "save": "Save and leave",
+    "keep": "Keep editing",
+    "discard": "Discard and leave"
+  },
+  "toast": {
+    "copied": "✓ Copied to clipboard"
   }
 }
