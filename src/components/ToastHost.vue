@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import { useToast } from "@/composables";
 import { X } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseIcon from "./base/BaseIcon.vue";
 
@@ -14,24 +15,25 @@ import BaseIcon from "./base/BaseIcon.vue";
 // banners; this component owns only the queue layout, enter/leave motion, and
 // the optional × button (shown when an item is `closable`).
 const { toasts, toast } = useToast();
+const { t } = useI18n();
 </script>
 
 <template>
   <div class="toast-host" :class="{ 'toast-host--empty': !toasts.length }">
     <TransitionGroup name="toast">
       <BaseAlert
-        v-for="t in toasts"
-        :key="t.id"
-        :variant="t.variant"
+        v-for="item in toasts"
+        :key="item.id"
+        :variant="item.variant"
         class="toast-host__item flex items-center gap-2"
       >
-        <span class="flex-1">{{ t.message }}</span>
+        <span class="flex-1">{{ item.message }}</span>
         <button
-          v-if="t.closable"
+          v-if="item.closable"
           type="button"
           class="toast-host__close"
-          aria-label="Close"
-          @click="toast.dismiss(t.id)"
+          :aria-label="t('common.toast.closeLabel')"
+          @click="toast.dismiss(item.id)"
         >
           <BaseIcon :icon="X" :size="14" />
         </button>

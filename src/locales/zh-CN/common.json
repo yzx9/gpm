@@ -7,7 +7,8 @@
   "toast": {
     "secureScreenFailed": "无法保护屏幕 —— 请重试",
     "copyFailed": "复制失败",
-    "copied": "已复制 —— 剪贴板将自动清空"
+    "copied": "已复制 —— 剪贴板将自动清空",
+    "closeLabel": "关闭"
   },
   "signature": {
     "verified": "已验证",
@@ -66,5 +67,45 @@
   "passphraseAck": {
     "warning": "你的口令无法找回。gpm 不提供重置 —— 一旦丢失，你的密钥将永久丢失。请在继续前将其保存在安全的地方（例如密码管理器）。",
     "ack": "我了解此口令无法找回，丢失它将使我永久无法访问自己的密钥。"
+  },
+  "divergence": {
+    "sheetAriaLabel": "本地与远端已分叉",
+    "headingSave": "你的修改与较新的远端冲突",
+    "headingOther": "本地与远端已分叉",
+    "aheadHint": "你的分支领先 {count} 个{noun}。",
+    "nounCommitSingular": "提交",
+    "nounCommitPlural": "提交",
+    "saveHint": "采用远端将丢弃你的本地修改；保留本地可能会覆盖下方的远端条目。",
+    "syncHint": "采用远端将丢弃下方的本地独有改动；保留本地将推送它们（并可能覆盖远端条目）。",
+    "blockDeleted": "将被删除",
+    "blockOverwritten": "将被覆盖",
+    "blockOther": "其他本地改动",
+    "nothingDiffers": "本地没有差异。",
+    "adoptRemote": "采用远端（丢弃本地）",
+    "keepMine": "保留本地（推送本地）",
+    "confirmAriaLabelAdopt": "丢弃你的本地提交",
+    "confirmAriaLabelPush": "推送并覆盖远端",
+    "confirmHeadingAdopt": "丢弃你的本地{noun}？",
+    "confirmHeadingPush": "推送并覆盖远端？",
+    "confirmAdoptLine1": "你的 {count} 个本地{noun}将被丢失，包括：",
+    "confirmAdoptFooter": "将保留远端版本。",
+    "confirmPushLine1": "你的本地改动将被推送。这可能会覆盖以下远端版本：",
+    "confirmPushNoShared": "没有共享条目存在差异 —— 仅推送你的本地独有条目。",
+    "verbIs": "被",
+    "verbAre": "被",
+    "discarding": "丢弃中……",
+    "pushing": "推送中……",
+    "discardMyCommit": "丢弃我的提交",
+    "pushOverwrite": "推送并覆盖"
+  },
+  "authenticity": {
+    "ariaLabel": "同步被阻止",
+    "heading": "同步被阻止",
+    "body": "强制模式拒绝更新仓库 —— HEAD 未前进。请先解决签名问题，然后再同步。",
+    "gpgNotice": "GPG 签名的提交 {hash} 由一位你尚未信任的签名者作出。GPG 签名不内嵌公钥，请打开 {link} 并添加（或导入）该签名者的装甲公钥以验证它。",
+    "gpgNoticeLink": "设置 → 受信任的签名密钥",
+    "unverifiedFingerprint": "签发者指纹：",
+    "trustSigner": "信任此签名者",
+    "switchToAudit": "切换到审计模式"
   }
 }

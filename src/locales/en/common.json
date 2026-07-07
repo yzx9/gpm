@@ -7,7 +7,8 @@
   "toast": {
     "secureScreenFailed": "Couldn't secure screen — try again",
     "copyFailed": "Copy failed",
-    "copied": "Copied — clipboard clears automatically"
+    "copied": "Copied — clipboard clears automatically",
+    "closeLabel": "Close"
   },
   "signature": {
     "verified": "Verified",
@@ -66,5 +67,45 @@
   "passphraseAck": {
     "warning": "Your passphrase cannot be recovered. gpm has no reset — if you lose it, your secrets are permanently lost. Store it somewhere safe (e.g. a password manager) before continuing.",
     "ack": "I understand this passphrase cannot be recovered, and losing it will permanently lock me out of my secrets."
+  },
+  "divergence": {
+    "sheetAriaLabel": "Local and remote have diverged",
+    "headingSave": "Your edit conflicts with a newer remote",
+    "headingOther": "Local and remote have diverged",
+    "aheadHint": "Your branch is {count} {noun} ahead.",
+    "nounCommitSingular": "commit",
+    "nounCommitPlural": "commits",
+    "saveHint": "Adopting discards your local edit; keeping it may overwrite the remote entries below.",
+    "syncHint": "Adopting discards the local-only changes below; keeping pushes them (and may overwrite the remote entries).",
+    "blockDeleted": "Will be deleted",
+    "blockOverwritten": "Will be overwritten",
+    "blockOther": "Other local changes",
+    "nothingDiffers": "Nothing differs locally.",
+    "adoptRemote": "Adopt remote (discard local)",
+    "keepMine": "Keep mine (push local)",
+    "confirmAriaLabelAdopt": "Discard your local commit",
+    "confirmAriaLabelPush": "Push and overwrite remote",
+    "confirmHeadingAdopt": "Discard your local {noun}?",
+    "confirmHeadingPush": "Push & overwrite remote?",
+    "confirmAdoptLine1": "Your {count} local {noun} {verb} lost, including:",
+    "confirmAdoptFooter": "The remote versions will be kept.",
+    "confirmPushLine1": "Your local changes will be pushed. This may overwrite the remote version of:",
+    "confirmPushNoShared": "No shared entries differ — only your local-only entries are pushed.",
+    "verbIs": "is",
+    "verbAre": "are",
+    "discarding": "Discarding…",
+    "pushing": "Pushing…",
+    "discardMyCommit": "Discard my commit",
+    "pushOverwrite": "Push & overwrite"
+  },
+  "authenticity": {
+    "ariaLabel": "Sync blocked",
+    "heading": "Sync blocked",
+    "body": "Enforce mode refused to update the store — HEAD did not advance. Resolve the signature issue, then sync again.",
+    "gpgNotice": "GPG-signed commit {hash} was made by a signer you haven't trusted. GPG signatures don't embed the public key, so open {link} and add (or import) that signer's armored public key to verify it.",
+    "gpgNoticeLink": "Settings → Trusted signing keys",
+    "unverifiedFingerprint": "Issuer fingerprint:",
+    "trustSigner": "Trust this signer",
+    "switchToAudit": "Switch to Audit mode"
   }
 }

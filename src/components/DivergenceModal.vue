@@ -12,9 +12,12 @@
 <script setup lang="ts">
 import type { DivergenceChoice, SyncDivergence } from "@/api";
 import { computed, nextTick, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 import BaseSpinner from "./base/BaseSpinner.vue";
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
@@ -42,11 +45,18 @@ const headingEl = ref<HTMLHeadingElement | null>(null);
 const isSave = computed(() => props.context === "save");
 const heading = computed(() =>
   isSave.value
-    ? "Your edit conflicts with a newer remote"
-    : "Local and remote have diverged",
+    ? t("common.divergence.headingSave")
+    : t("common.divergence.headingOther"),
 );
 const aheadNoun = computed(() =>
-  props.divergence && props.divergence.local_ahead === 1 ? "commit" : "commits",
+  props.divergence && props.divergence.local_ahead === 1
+    ? t("common.divergence.nounCommitSingular")
+    : t("common.divergence.nounCommitPlural"),
+);
+const aheadVerb = computed(() =>
+  props.divergence && props.divergence.local_ahead === 1
+    ? t("common.divergence.verbIs")
+    : t("common.divergence.verbAre"),
 );
 /** Everything "adopt remote" discards — the union of all local-only changes. */
 const adoptLosses = computed<string[]>(() => {
@@ -106,7 +116,7 @@ watch(
     v-if="divergence"
     variant="sheet"
     role="alertdialog"
-    aria-label="Local and remote have diverged"
+    :aria-label="t('common.divergence.sheetAriaLabel')"
     :dismiss-on-back="!pendingChoice"
     @close="cancelAll"
   >
@@ -118,14 +128,17 @@ watch(
       {{ heading }}
     </h2>
     <p class="text-xs text-muted mb-3">
-      Your branch is {{ divergence.local_ahead }} {{ aheadNoun }} ahead.
+      {{
+        t("common.divergence.aheadHint", {
+          count: divergence.local_ahead,
+          noun: aheadNoun,
+        })
+      }}
       <template v-if="isSave">
-        Adopting discards your local edit; keeping it may overwrite the remote
-        entries below.
+        {{ t("common.divergence.saveHint") }}
       </template>
       <template v-else>
-        Adopting discards the local-only changes below; keeping pushes them (and
-        may overwrite the remote entries).
+        {{ t("common.divergence.syncHint") }}
       </template>
     </p>
 
@@ -135,7 +148,8 @@ watch(
         class="div-block div-danger"
       >
         <div class="div-head text-danger">
-          Will be deleted · {{ divergence.local_only_entries.length }}
+          {{ t("common.divergence.blockDeleted") }} ·
+          {{ divergence.local_only_entries.length }}
         </div>
         <ul class="div-list">
           <li v-for="n in divergence.local_only_entries" :key="n">
@@ -145,7 +159,8 @@ watch(
       </div>
       <div v-if="divergence.modified_entries.length" class="div-block div-warn">
         <div class="div-head text-warning">
-          Will be overwritten · {{ divergence.modified_entries.length }}
+          {{ t("common.divergence.blockOverwritten") }} ·
+          {{ divergence.modified_entries.length }}
         </div>
         <ul class="div-list">
           <li v-for="n in divergence.modified_entries" :key="n">
@@ -158,7 +173,8 @@ watch(
         class="div-block div-muted"
       >
         <div class="div-head text-muted">
-          Other local changes · {{ divergence.other_changed_files.length }}
+          {{ t("common.divergence.blockOther") }} ·
+          {{ divergence.other_changed_files.length }}
         </div>
         <ul class="div-list">
           <li v-for="n in divergence.other_changed_files" :key="n">
@@ -167,7 +183,9 @@ watch(
         </ul>
       </div>
     </div>
-    <p v-else class="text-xs text-muted mb-3">Nothing differs locally.</p>
+    <p v-else class="text-xs text-muted mb-3">
+      {{ t("common.divergence.nothingDiffers") }}
+    </p>
 
     <p v-if="error" class="text-xs text-danger mb-2" role="alert">
       {{ error }}
@@ -175,13 +193,13 @@ watch(
 
     <div class="flex flex-col gap-2">
       <button class="btn-danger" @click="openConfirm('adopt_remote')">
-        Adopt remote (discard local)
+        {{ t("common.divergence.adoptRemote") }}
       </button>
       <BaseButton variant="outline" block @click="openConfirm('keep_mine')">
-        Keep mine (push local)
+        {{ t("common.divergence.keepMine") }}
       </BaseButton>
       <BaseButton size="sm" :disabled="resolving" @click="cancelAll">
-        Cancel
+        {{ t("common.button.cancel") }}
       </BaseButton>
     </div>
   </BaseModalShell>
@@ -194,8 +212,8 @@ watch(
     role="alertdialog"
     :aria-label="
       pendingChoice === 'adopt_remote'
-        ? 'Discard your local commit'
-        : 'Push and overwrite remote'
+        ? t('common.divergence.confirmAriaLabelAdopt')
+        : t('common.divergence.confirmAriaLabelPush')
     "
     :dismiss-on-back="!resolving"
     :dismiss-on-backdrop="!resolving"
@@ -207,35 +225,41 @@ watch(
       tabindex="-1"
     >
       <template v-if="pendingChoice === 'adopt_remote'">
-        Discard your local {{ aheadNoun }}?
+        {{ t("common.divergence.confirmHeadingAdopt", { noun: aheadNoun }) }}
       </template>
-      <template v-else>Push &amp; overwrite remote?</template>
+      <template v-else>{{
+        t("common.divergence.confirmHeadingPush")
+      }}</template>
     </h2>
 
     <template v-if="pendingChoice === 'adopt_remote'">
       <p class="text-sm mb-2">
-        Your {{ divergence!.local_ahead }} local {{ aheadNoun }}
-        {{ divergence!.local_ahead === 1 ? "is" : "are" }} lost, including:
+        {{
+          t("common.divergence.confirmAdoptLine1", {
+            count: divergence!.local_ahead,
+            noun: aheadNoun,
+            verb: aheadVerb,
+          })
+        }}
       </p>
       <ul v-if="adoptLosses.length" class="div-list mb-3">
         <li v-for="n in adoptLosses" :key="n">
           <code>{{ n }}</code>
         </li>
       </ul>
-      <p class="text-xs text-muted mb-3">The remote versions will be kept.</p>
+      <p class="text-xs text-muted mb-3">
+        {{ t("common.divergence.confirmAdoptFooter") }}
+      </p>
     </template>
     <template v-else>
-      <p class="text-sm mb-2">
-        Your local changes will be pushed. This may overwrite the remote version
-        of:
-      </p>
+      <p class="text-sm mb-2">{{ t("common.divergence.confirmPushLine1") }}</p>
       <ul v-if="keepOverwrites.length" class="div-list mb-3">
         <li v-for="n in keepOverwrites" :key="n">
           <code>{{ n }}</code>
         </li>
       </ul>
       <p v-if="!keepOverwrites.length" class="text-xs text-muted mb-3">
-        No shared entries differ — only your local-only entries are pushed.
+        {{ t("common.divergence.confirmPushNoShared") }}
       </p>
     </template>
 
@@ -243,18 +267,22 @@ watch(
       <button class="btn-danger" :disabled="resolving" @click="confirm">
         <BaseSpinner v-if="resolving" />
         <template v-if="resolving">
-          {{ pendingChoice === "adopt_remote" ? "Discarding…" : "Pushing…" }}
+          {{
+            pendingChoice === "adopt_remote"
+              ? t("common.divergence.discarding")
+              : t("common.divergence.pushing")
+          }}
         </template>
         <template v-else>
           {{
             pendingChoice === "adopt_remote"
-              ? "Discard my commit"
-              : "Push & overwrite"
+              ? t("common.divergence.discardMyCommit")
+              : t("common.divergence.pushOverwrite")
           }}
         </template>
       </button>
       <BaseButton size="sm" :disabled="resolving" @click="cancelConfirm">
-        Cancel
+        {{ t("common.button.cancel") }}
       </BaseButton>
     </div>
   </BaseModalShell>

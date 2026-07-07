@@ -58,14 +58,13 @@ const unverifiedSignerFp = computed(() => {
     v-if="issues"
     variant="sheet"
     role="alertdialog"
-    aria-label="Sync blocked"
+    :aria-label="t('common.authenticity.ariaLabel')"
     @close="emit('close')"
   >
-    <h2 class="text-base font-medium mb-1 text-danger">Sync blocked</h2>
-    <p class="text-xs text-muted mb-3">
-      Enforce mode refused to update the store — HEAD did not advance. Resolve
-      the signature issue, then sync again.
-    </p>
+    <h2 class="text-base font-medium mb-1 text-danger">
+      {{ t("common.authenticity.heading") }}
+    </h2>
+    <p class="text-xs text-muted mb-3">{{ t("common.authenticity.body") }}</p>
     <ul class="flex flex-col gap-2 mb-3">
       <li
         v-for="c in issues"
@@ -79,26 +78,34 @@ const unverifiedSignerFp = computed(() => {
       </li>
     </ul>
     <div class="flex flex-col gap-2">
-      <p v-if="unverifiedIssue" class="text-xs text-muted mb-1 break-words">
-        GPG-signed commit
-        <code class="text-xs">{{ unverifiedIssue.short_hash }}</code> was made
-        by a signer you haven't trusted. GPG signatures don't embed the public
-        key, so open <strong>Settings → Trusted signing keys</strong> and add
-        (or import) that signer's armored public key to verify it.
-        <span v-if="unverifiedSignerFp">
-          Issuer fingerprint:
-          <code class="break-all">{{ unverifiedSignerFp }}</code>
-        </span>
+      <i18n-t
+        v-if="unverifiedIssue"
+        keypath="common.authenticity.gpgNotice"
+        tag="p"
+        class="text-xs text-muted mb-1 break-words"
+        :params="{ hash: unverifiedIssue.short_hash }"
+      >
+        <code class="text-xs">{{ unverifiedIssue.short_hash }}</code>
+        <template #link>
+          <strong>{{ t("common.authenticity.gpgNoticeLink") }}</strong>
+        </template>
+      </i18n-t>
+      <p
+        v-if="unverifiedIssue && unverifiedSignerFp"
+        class="text-xs text-muted mb-1 break-words"
+      >
+        {{ t("common.authenticity.unverifiedFingerprint") }}
+        <code class="break-all">{{ unverifiedSignerFp }}</code>
       </p>
       <BaseButton
         v-if="untrustedIssue"
         size="sm"
         @click="emit('trust-signer', untrustedIssue)"
       >
-        Trust this signer
+        {{ t("common.authenticity.trustSigner") }}
       </BaseButton>
       <BaseButton size="sm" @click="emit('switch-to-audit')">
-        Switch to Audit mode
+        {{ t("common.authenticity.switchToAudit") }}
       </BaseButton>
       <BaseButton size="sm" @click="emit('close')">{{
         t("common.button.cancel")
