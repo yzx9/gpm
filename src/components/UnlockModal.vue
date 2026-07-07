@@ -16,6 +16,7 @@ import {
 } from "@/api";
 import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
 import { computed, nextTick, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
@@ -23,6 +24,8 @@ import BaseInput from "./base/BaseInput.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
 const emit = defineEmits<{ (e: "close"): void }>();
+
+const { t } = useI18n();
 
 const passphrase = ref("");
 const loading = ref(false);
@@ -54,10 +57,10 @@ const biometricUsable = computed(
 const lockMode = ref<LockMode>("immediate");
 const lockHint = computed(() => describeLockMode(lockMode.value));
 function describeLockMode(m: LockMode): string {
-  if (m === "immediate") return "Identity is cleared after every action.";
-  if (m === "never") return "Identity stays unlocked until you lock manually.";
+  if (m === "immediate") return t("common.unlock.lockModeImmediate");
+  if (m === "never") return t("common.unlock.lockModeNever");
   const mins = Math.round(m.idle / 60);
-  return `Identity auto-locks after ${mins} min of inactivity.`;
+  return t("common.unlock.lockModeIdle", { mins });
 }
 
 // Single path into passphrase mode — used by both the switch tap and the
@@ -93,24 +96,25 @@ async function tryBiometricUnlock() {
         // ghost switch is the way to the other method; no notice needed.
         break;
       case "BIOMETRIC_KEY_INVALIDATED":
-        biometricNotice.value =
-          "Biometric was reset (new fingerprint?) — re-enable it in Settings.";
+        biometricNotice.value = t("common.unlock.biometricResetNotice");
         await disableBiometricUnlock();
         biometricEnabled.value = false;
         // Biometric is no longer viable — land on the passphrase form.
         enterPassphraseMode();
         break;
       case "WRONG_PASSPHRASE":
-        biometricNotice.value =
-          "Stored passphrase is invalid — re-enable biometric in Settings.";
+        biometricNotice.value = t("common.unlock.biometricStaleNotice");
         await disableBiometricUnlock();
         biometricEnabled.value = false;
         enterPassphraseMode();
         break;
       default:
         // Transient/unavailable (LOCKOUT, FAILED, …): keep biometric available
-        // so the user can retry, or switch manually via the ghost button.
-        biometricNotice.value = err.message || "Biometric unlock failed";
+        // so the user can retry, or switch manually via the ghost button. The
+        // backend's localized message surfaces as-is (the LOCKOUT test asserts
+        // it), falling back to a generic notice.
+        biometricNotice.value =
+          err.message || t("common.unlock.biometricUnlockFailed");
     }
   } finally {
     biometricLoading.value = false;
@@ -121,7 +125,7 @@ async function onUnlock() {
   error.value = "";
 
   if (!passphrase.value) {
-    error.value = "Passphrase is required";
+    error.value = t("common.unlock.errRequired");
     return;
   }
 
@@ -133,9 +137,9 @@ async function onUnlock() {
   } catch (e) {
     const appError = e as { code?: string; message?: string };
     if (appError?.code === "WRONG_PASSPHRASE") {
-      error.value = "Wrong passphrase — please try again";
+      error.value = t("common.unlock.errWrong");
     } else {
-      error.value = appError?.message || "Unlock failed";
+      error.value = appError?.message || t("common.unlock.errUnlockFailed");
     }
   } finally {
     loading.value = false;
@@ -175,14 +179,14 @@ onMounted(async () => {
   <BaseModalShell
     variant="center"
     :z="60"
-    aria-label="Unlock identity"
+    :aria-label="t('common.unlock.title')"
     @close="emit('close')"
   >
     <div class="title-row relative mb-1">
       <button
         type="button"
         class="close-x"
-        aria-label="Close"
+        :aria-label="t('common.unlock.close')"
         @click="emit('close')"
       >
         <BaseIcon :icon="X" :size="18" />
@@ -196,22 +200,21 @@ onMounted(async () => {
           class="help-btn"
           :class="{ active: showHelp }"
           :aria-expanded="showHelp"
-          aria-label="What is this passphrase?"
+          :aria-label="t('common.unlock.helpLabel')"
           @click="showHelp = !showHelp"
         >
           <BaseIcon :icon="HelpCircle" :size="16" />
         </button>
       </h1>
     </div>
-    <p class="text-center text-muted text-sm mb-1">Identity is locked</p>
+    <p class="text-center text-muted text-sm mb-1">
+      {{ t("common.unlock.locked") }}
+    </p>
     <p class="text-center text-muted text-xs mb-6">{{ lockHint }}</p>
 
     <!-- What is the passphrase? (toggleable) -->
     <BaseAlert v-if="showHelp" variant="info" class="mb-4">
-      Your passphrase decrypts the identity that guards your secrets. It lives
-      only on this device — gpm cannot recover or reset it for you. If you lose
-      it, your secrets are permanently lost; you would need to reset gpm
-      (Settings → Danger Zone) and set it up again.
+      {{ t("common.unlock.help") }}
     </BaseAlert>
 
     <!-- Biometric notice (reset / stale / failure) -->
@@ -235,11 +238,13 @@ onMounted(async () => {
       >
         <BaseIcon v-if="!biometricLoading" :icon="ScanFace" />
         <span>{{
-          biometricLoading ? "Unlocking…" : "Unlock with biometric"
+          biometricLoading
+            ? t("common.unlock.unlocking")
+            : t("common.unlock.unlockWithBiometric")
         }}</span>
       </BaseButton>
       <BaseButton variant="ghost" block @click="enterPassphraseMode">
-        Unlock with passphrase
+        {{ t("common.unlock.unlockWithPassphrase") }}
       </BaseButton>
     </div>
 
@@ -250,26 +255,30 @@ onMounted(async () => {
       class="flex flex-col gap-4"
     >
       <div class="flex flex-col gap-1">
-        <label for="passphrase" class="text-sm font-medium">Passphrase</label>
+        <label for="passphrase" class="text-sm font-medium">{{
+          t("common.unlock.passphraseLabel")
+        }}</label>
         <BaseInput
           id="passphrase"
           ref="passphraseInputRef"
           v-model="passphrase"
           type="password"
-          placeholder="Enter your passphrase"
+          :placeholder="t('common.unlock.placeholder')"
           required
           autocomplete="off"
           :disabled="loading"
         />
-        <small class="text-xs text-muted"
-          >Enter the passphrase to unlock your identity</small
-        >
+        <small class="text-xs text-muted">{{
+          t("common.unlock.passphraseHint")
+        }}</small>
       </div>
 
       <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
       <BaseButton variant="primary" type="submit" block :loading="loading">{{
-        loading ? "Decrypting…" : "Unlock"
+        loading
+          ? t("common.unlock.decrypting")
+          : t("common.unlock.unlockButton")
       }}</BaseButton>
 
       <BaseButton
@@ -278,7 +287,7 @@ onMounted(async () => {
         block
         @click="switchToBiometric"
       >
-        Unlock with biometric
+        {{ t("common.unlock.unlockWithBiometric") }}
       </BaseButton>
     </form>
   </BaseModalShell>

@@ -8,12 +8,15 @@ import { appUnlock, asAppLockError } from "@/api";
 import { useAppLockState } from "@/composables";
 import { LockKeyhole, ScanFace } from "@lucide/vue";
 import { onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
 const { setUnlockInFlight } = useAppLockState();
+
+const { t } = useI18n();
 
 const loading = ref(false);
 const notice = ref("");
@@ -47,11 +50,10 @@ async function tryUnlock() {
         // unreachable. The only path is to wipe gpm at the OS level and set it
         // up again. (Uninstall also purges the stale Keystore aliases; "Clear
         // data" overwrites them on next setup — both work.)
-        notice.value =
-          "All fingerprints were removed, so gpm can no longer unlock your app key. Clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again.";
+        notice.value = t("common.appLock.keyInvalidatedNotice");
         break;
       default:
-        notice.value = err.message || "Unlock failed";
+        notice.value = err.message || t("common.appLock.unlockFailed");
     }
   } finally {
     setUnlockInFlight(false);
@@ -65,13 +67,19 @@ onMounted(() => {
 </script>
 
 <template>
-  <BaseModalShell variant="center" :z="70" aria-label="App locked">
+  <BaseModalShell
+    variant="center"
+    :z="70"
+    :aria-label="t('common.appLock.title')"
+  >
     <h1
       class="text-center text-display mb-1 flex items-center justify-center gap-2"
     >
       <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
     </h1>
-    <p class="text-center text-muted text-sm mb-6">App is locked</p>
+    <p class="text-center text-muted text-sm mb-6">
+      {{ t("common.appLock.locked") }}
+    </p>
 
     <BaseAlert v-if="notice" variant="danger" role="status" class="mb-4">
       {{ notice }}
@@ -79,7 +87,11 @@ onMounted(() => {
 
     <BaseButton variant="primary" :loading="loading" @click="tryUnlock">
       <BaseIcon v-if="!loading" :icon="ScanFace" />
-      <span>{{ loading ? "Unlocking…" : "Unlock with biometric" }}</span>
+      <span>{{
+        loading
+          ? t("common.appLock.unlocking")
+          : t("common.appLock.unlockWithBiometric")
+      }}</span>
     </BaseButton>
   </BaseModalShell>
 </template>

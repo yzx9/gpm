@@ -18,5 +18,53 @@
     "unsupportedFormat": "Unsupported ({format})",
     "unknown": "Unknown",
     "ignored": "ignored"
+  },
+  "unlock": {
+    "title": "Unlock identity",
+    "close": "Close",
+    "helpLabel": "What is this passphrase?",
+    "locked": "Identity is locked",
+    "help": "Your passphrase decrypts the identity that guards your secrets. It lives only on this device — gpm cannot recover or reset it for you. If you lose it, your secrets are permanently lost; you would need to reset gpm (Settings → Danger Zone) and set it up again.",
+    "passphraseLabel": "Passphrase",
+    "placeholder": "Enter your passphrase",
+    "passphraseHint": "Enter the passphrase to unlock your identity",
+    "unlockButton": "Unlock",
+    "unlocking": "Unlocking…",
+    "decrypting": "Decrypting…",
+    "unlockWithBiometric": "Unlock with biometric",
+    "unlockWithPassphrase": "Unlock with passphrase",
+    "errRequired": "Passphrase is required",
+    "errWrong": "Wrong passphrase — please try again",
+    "errUnlockFailed": "Unlock failed",
+    "biometricResetNotice": "Biometric was reset (new fingerprint?) — re-enable it in Settings.",
+    "biometricStaleNotice": "Stored passphrase is invalid — re-enable biometric in Settings.",
+    "biometricUnlockFailed": "Biometric unlock failed",
+    "lockModeImmediate": "Identity is cleared after every action.",
+    "lockModeNever": "Identity stays unlocked until you lock manually.",
+    "lockModeIdle": "Identity auto-locks after {mins} min of inactivity."
+  },
+  "appLock": {
+    "title": "App locked",
+    "locked": "App is locked",
+    "unlocking": "Unlocking…",
+    "unlockWithBiometric": "Unlock with biometric",
+    "unlockFailed": "Unlock failed",
+    "keyInvalidatedNotice": "All fingerprints were removed, so gpm can no longer unlock your app key. Clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again."
+  },
+  "passphraseField": {
+    "label": "Passphrase",
+    "placeholder": "Passphrase",
+    "confirmLabel": "Confirm passphrase",
+    "confirmPlaceholder": "Re-enter the passphrase",
+    "show": "Show passphrase",
+    "hide": "Hide passphrase",
+    "mismatch": "Passphrases do not match",
+    "errRequired": "{label} is required",
+    "errConfirm": "Please confirm your passphrase",
+    "errMismatch": "Passphrases do not match"
+  },
+  "passphraseAck": {
+    "warning": "Your passphrase cannot be recovered. gpm has no reset — if you lose it, your secrets are permanently lost. Store it somewhere safe (e.g. a password manager) before continuing.",
+    "ack": "I understand this passphrase cannot be recovered, and losing it will permanently lock me out of my secrets."
   }
 }

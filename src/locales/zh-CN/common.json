@@ -18,5 +18,53 @@
     "unsupportedFormat": "不支持（{format}）",
     "unknown": "未知",
     "ignored": "已忽略"
+  },
+  "unlock": {
+    "title": "解锁身份",
+    "close": "关闭",
+    "helpLabel": "这个口令是什么？",
+    "locked": "身份已锁定",
+    "help": "你的口令用于解密守护你密钥的身份。它只存在于本设备上 —— gpm 无法为你找回或重置。一旦丢失，你的密钥将永久丢失；你需要重置 gpm（设置 → 危险区域）并重新配置。",
+    "passphraseLabel": "口令",
+    "placeholder": "输入你的口令",
+    "passphraseHint": "输入口令以解锁你的身份",
+    "unlockButton": "解锁",
+    "unlocking": "解锁中……",
+    "decrypting": "解密中……",
+    "unlockWithBiometric": "使用生物识别解锁",
+    "unlockWithPassphrase": "使用口令解锁",
+    "errRequired": "口令为必填项",
+    "errWrong": "口令错误 —— 请重试",
+    "errUnlockFailed": "解锁失败",
+    "biometricResetNotice": "生物识别已重置（更换了指纹？）—— 请在设置中重新启用。",
+    "biometricStaleNotice": "已保存的口令无效 —— 请在设置中重新启用生物识别。",
+    "biometricUnlockFailed": "生物识别解锁失败",
+    "lockModeImmediate": "身份会在每次操作后清除。",
+    "lockModeNever": "身份将保持解锁，直到你手动锁定。",
+    "lockModeIdle": "身份将在 {mins} 分钟无操作后自动锁定。"
+  },
+  "appLock": {
+    "title": "应用已锁定",
+    "locked": "应用已锁定",
+    "unlocking": "解锁中……",
+    "unlockWithBiometric": "使用生物识别解锁",
+    "unlockFailed": "解锁失败",
+    "keyInvalidatedNotice": "所有指纹已被移除，因此 gpm 无法再解锁你的应用密钥。请在 Android 设置中清除 gpm 的应用数据（或卸载后重新安装）以重新配置。"
+  },
+  "passphraseField": {
+    "label": "口令",
+    "placeholder": "口令",
+    "confirmLabel": "确认口令",
+    "confirmPlaceholder": "再次输入口令",
+    "show": "显示口令",
+    "hide": "隐藏口令",
+    "mismatch": "口令不一致",
+    "errRequired": "{label}为必填项",
+    "errConfirm": "请确认你的口令",
+    "errMismatch": "口令不一致"
+  },
+  "passphraseAck": {
+    "warning": "你的口令无法找回。gpm 不提供重置 —— 一旦丢失，你的密钥将永久丢失。请在继续前将其保存在安全的地方（例如密码管理器）。",
+    "ack": "我了解此口令无法找回，丢失它将使我永久无法访问自己的密钥。"
   }
 }

@@ -7,6 +7,9 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import { Eye, EyeOff } from "@lucide/vue";
 import { computed, ref, useId, watch } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
@@ -15,6 +18,11 @@ const props = withDefaults(
      *  Falls back to a generated id when omitted. Keeping it stable lets callers
      *  (and tests) address each field by id. */
     id?: string;
+    /** Override the main field label; defaults to the localized "Passphrase".
+     *  Plain-string override (no default) so `withDefaults` does not reference
+     *  `t()` — `<script setup>` hoists `defineProps` out of `setup()`, so the
+     *  default must not call into `useI18n()`. The localized fallback is
+     *  resolved via {@link labelText}. */
     label?: string;
     placeholder?: string;
     confirmLabel?: string;
@@ -26,14 +34,28 @@ const props = withDefaults(
     optional?: boolean;
   }>(),
   {
-    label: "Passphrase",
-    placeholder: "Passphrase",
-    confirmLabel: "Confirm passphrase",
-    confirmPlaceholder: "Re-enter the passphrase",
     autocomplete: "new-password",
     disabled: false,
     optional: false,
   },
+);
+
+// Localized fallbacks for the optional label/placeholder props. Resolved here
+// (not via `withDefaults`) because `<script setup>` hoists `defineProps` out of
+// `setup()`, so the defaults cannot call `useI18n()`. Each falls back to the
+// `common.passphraseField.*` value when the caller leaves the prop unset.
+const labelText = computed(
+  () => props.label ?? t("common.passphraseField.label"),
+);
+const placeholderText = computed(
+  () => props.placeholder ?? t("common.passphraseField.placeholder"),
+);
+const confirmLabelText = computed(
+  () => props.confirmLabel ?? t("common.passphraseField.confirmLabel"),
+);
+const confirmPlaceholderText = computed(
+  () =>
+    props.confirmPlaceholder ?? t("common.passphraseField.confirmPlaceholder"),
 );
 
 const emit = defineEmits<{ "update:modelValue": [string] }>();
@@ -81,10 +103,12 @@ defineExpose({
    *  `validate(): string | null` convention so callers gate submit the same way. */
   validate(): string | null {
     if (props.modelValue === "") {
-      return props.optional ? null : `${props.label} is required`;
+      return props.optional
+        ? null
+        : t("common.passphraseField.errRequired", { label: labelText.value });
     }
-    if (confirm.value === "") return "Please confirm your passphrase";
-    if (mismatch.value) return "Passphrases do not match";
+    if (confirm.value === "") return t("common.passphraseField.errConfirm");
+    if (mismatch.value) return t("common.passphraseField.errMismatch");
     return null;
   },
   /** Clear the confirm field + re-hide — call on context switches (identity-kind
@@ -98,13 +122,13 @@ defineExpose({
 
 <template>
   <div class="flex flex-col gap-1">
-    <label :for="mainId" class="text-sm font-medium">{{ label }}</label>
+    <label :for="mainId" class="text-sm font-medium">{{ labelText }}</label>
     <div class="relative">
       <BaseInput
         :id="mainId"
         :model-value="modelValue"
         :type="show ? 'text' : 'password'"
-        :placeholder="placeholder"
+        :placeholder="placeholderText"
         :autocomplete="autocomplete"
         :disabled="disabled"
         class="w-full"
@@ -114,7 +138,11 @@ defineExpose({
       <button
         type="button"
         class="absolute inset-y-0 right-0 px-3 text-muted hover:text-accent active:text-accent transition-colors"
-        :aria-label="show ? 'Hide passphrase' : 'Show passphrase'"
+        :aria-label="
+          show
+            ? t('common.passphraseField.hide')
+            : t('common.passphraseField.show')
+        "
         @click="show = !show"
       >
         <BaseIcon :icon="show ? EyeOff : Eye" :size="18" />
@@ -123,14 +151,14 @@ defineExpose({
 
     <template v-if="showConfirmField">
       <label :for="confirmId" class="text-sm font-medium mt-1">{{
-        confirmLabel
+        confirmLabelText
       }}</label>
       <div class="relative">
         <BaseInput
           :id="confirmId"
           :model-value="confirm"
           :type="show ? 'text' : 'password'"
-          :placeholder="confirmPlaceholder"
+          :placeholder="confirmPlaceholderText"
           :autocomplete="autocomplete"
           :disabled="disabled"
           class="w-full"
@@ -140,9 +168,9 @@ defineExpose({
           "
         />
       </div>
-      <small v-if="inlineError" class="text-xs text-danger"
-        >Passphrases do not match</small
-      >
+      <small v-if="inlineError" class="text-xs text-danger">{{
+        t("common.passphraseField.mismatch")
+      }}</small>
     </template>
 
     <slot name="help" />

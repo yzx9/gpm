@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Relative timestamps in the entry list and history — like "5 minutes ago" or "Mar 15" — now follow your display language instead of always being English.
+- The unlock and app-lock screens, the passphrase fields on Settings and Setup, and the "this passphrase cannot be recovered" acknowledgment now follow your display language, so the security-critical prompts are translated alongside the rest of the app.
 - The Android clipboard-clear notification now shows how long until the secret auto-clears (for example, "auto-clears in 45s"), so the timeout is visible right in the notification shade instead of only in Settings. The tap-to-clear action is unchanged.
 
 ## [v0.10.0] - 2026-07-06
