@@ -5,14 +5,13 @@ gpm is an Android-first, age-only gopass password client built with Tauri v2 + R
 ## Commands
 
 ```bash
-just test              # Run all tests (backend + frontend)
+just test              # Run all tests (backend + frontend + plugin)
 just lint              # Clippy -D warnings + vue-tsc --noEmit
 just fmt               # rustfmt + prettier
 just dev               # Desktop dev server with hot reload
 just android-debug     # Build debug APK
-just android-release   # Build release APK (signed if keystore.properties exists)
 just android-dev       # Android dev server (requires device/emulator)
-just kotlin-check      # Fast Kotlin compile gate (catches Android/Kotlin errors before the full build)
+just kotlin-check      # Fast Kotlin compile gate (catches Android/Kotlin errors)
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
