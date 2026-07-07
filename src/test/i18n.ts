@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import enCommon from "@/locales/en/common.json";
+import enEntries from "@/locales/en/entries.json";
 import { createI18n } from "vue-i18n";
 
 /**
@@ -16,9 +17,12 @@ import { createI18n } from "vue-i18n";
  * per-test mock that the back-button tests (`BaseModalShell`,
  * `useOverlayBackHandler`) install for themselves. That constraint is also why
  * this lives in its own file rather than `appTestUtils.ts` — that module pulls
- * `@/composables`, which reaches `@/api` for the same reason. Only `en/common`
- * is inlined, so `t("common.…")` resolves while page-bundle keys resolve to
- * their key strings (existing assertions don't target those).
+ * `@/composables`, which reaches `@/api` for the same reason.
+ *
+ * The default-locale bundles that tested components render are inlined here so
+ * their `t()` calls resolve in tests (page-bundle keys that no test asserts on
+ * still resolve to their key strings). Add a page's `en` bundle when its test
+ * asserts on its text.
  *
  * A test that needs a locale-aware mount can override the global via
  * `mount(comp, { global: { plugins: [createTestI18n()] } })`.
@@ -28,6 +32,6 @@ export function createTestI18n() {
     legacy: false,
     locale: "en",
     fallbackLocale: "en",
-    messages: { en: { common: enCommon } },
+    messages: { en: { common: enCommon, entries: enEntries } },
   });
 }

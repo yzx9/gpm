@@ -64,12 +64,14 @@ import {
   ref,
   watch,
 } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { runWithAuth, overlayUp } = useLockState();
 const { appLocked } = useAppLockState();
 const { toast } = useToast();
+const { t } = useI18n();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
 // not the whole store. `displayedEntries` accumulates appended pages; `total`
@@ -120,7 +122,7 @@ const badge = computed<{ icon: LucideIcon; cls: string; title: string }>(() => {
     return {
       icon: Circle,
       cls: "badge-off",
-      title: "Signature verification off",
+      title: t("entries.badgeOff"),
     };
   }
   switch (s.head_status.kind) {
@@ -128,19 +130,21 @@ const badge = computed<{ icon: LucideIcon; cls: string; title: string }>(() => {
       return {
         icon: CircleCheck,
         cls: "badge-ok",
-        title: "HEAD signed by a trusted key",
+        title: t("entries.badgeTrustedHead"),
       };
     case "unknown":
       return {
         icon: CircleDashed,
         cls: "badge-none",
-        title: "Signature not checked yet",
+        title: t("entries.badgeUnchecked"),
       };
     default:
       return {
         icon: CircleAlert,
         cls: "badge-warn",
-        title: `${statusLabel(s.head_status)} — tap to review`,
+        title: t("entries.badgeReviewHead", {
+          status: statusLabel(s.head_status),
+        }),
       };
   }
 });
@@ -252,7 +256,11 @@ function onPullProgress(p: GitProgressEvent) {
     );
   }
   pullProgressText.value =
-    p.message ?? `${p.received_objects} / ${p.total_objects} objects`;
+    p.message ??
+    t("entries.objectsProgress", {
+      received: p.received_objects,
+      total: p.total_objects,
+    });
 }
 
 /** User-initiated cancel of an in-flight sync. */
@@ -282,7 +290,7 @@ async function syncRepo() {
       return;
     }
     if (result.changed) {
-      pullResult.value = `Updated to ${result.head}`;
+      pullResult.value = t("entries.toastUpdatedTo", { head: result.head });
       await fetchPage(search.value.trim(), 0, true);
       lastSyncTime.value = Date.now();
     } else {
@@ -397,7 +405,7 @@ function cancelDivergence() {
 async function ignoreIssue(commit: CommitSigInfo) {
   try {
     await ignoreCommitIssue(commit.hash);
-    toast.success("Ignored this commit's issue");
+    toast.success(t("entries.toastIgnored"));
     // Remove it from the modal list.
     if (auditIssues.value) {
       auditIssues.value = auditIssues.value.filter(
@@ -407,36 +415,36 @@ async function ignoreIssue(commit: CommitSigInfo) {
     }
   } catch (e) {
     const appError = e as AppError;
-    toast.danger(appError?.message || "Failed to ignore");
+    toast.danger(appError?.message || t("entries.toastIgnoreFailed"));
   }
 }
 
 async function trustBlockSigner(commit: CommitSigInfo) {
   const label = window.prompt(
-    "Trust this signer? Enter a label:",
+    t("entries.trustSignerPrompt"),
     commit.short_hash,
   );
   if (label === null) return;
   try {
     await trustCommitSigner(commit.hash, label.trim() || commit.short_hash);
-    toast.success("✓ Signer trusted — pull again");
+    toast.success(t("entries.toastTrusted"));
     blockIssues.value = null;
     await loadAuthState();
   } catch (e) {
     const appError = e as AppError;
-    toast.danger(appError?.message || "Failed to trust signer");
+    toast.danger(appError?.message || t("entries.toastTrustFailed"));
   }
 }
 
 async function switchToAudit() {
   try {
     await setVerificationMode("audit");
-    toast.info("Switched to Audit — pull again");
+    toast.info(t("entries.toastSwitchedAudit"));
     blockIssues.value = null;
     await loadAuthState();
   } catch (e) {
     const appError = e as AppError;
-    toast.danger(appError?.message || "Failed to switch mode");
+    toast.danger(appError?.message || t("entries.toastSwitchFailed"));
   }
 }
 
@@ -519,16 +527,16 @@ defineExpose({ syncRepo });
       <div class="flex gap-2 items-center">
         <BaseButton
           size="sm"
-          aria-label="Create a new secret"
-          title="Create a new secret"
+          :aria-label="t('entries.createSecret')"
+          :title="t('entries.createSecret')"
           @click="openCreate"
         >
           <BaseIcon :icon="Plus" />
         </BaseButton>
         <BaseButton
           size="sm"
-          aria-label="Settings"
-          title="Settings"
+          :aria-label="t('entries.settings')"
+          :title="t('entries.settings')"
           @click="openSettings"
         >
           <BaseIcon :icon="Settings" />
@@ -563,8 +571,8 @@ defineExpose({ syncRepo });
         </div>
         <button
           class="cancel-sync"
-          aria-label="Cancel sync"
-          title="Cancel sync"
+          :aria-label="t('entries.cancelSync')"
+          :title="t('entries.cancelSync')"
           @click="cancelSync"
         >
           <BaseIcon :icon="X" :size="16" />
@@ -581,14 +589,14 @@ defineExpose({ syncRepo });
       aria-live="polite"
       role="status"
     >
-      Last synced {{ lastSyncLabel }}
+      {{ t("entries.lastSynced", { time: lastSyncLabel }) }}
     </div>
 
     <div class="mb-4">
       <BaseInput
         v-model="search"
         type="search"
-        placeholder="Search entries..."
+        :placeholder="t('entries.searchPlaceholder')"
         class="w-full"
       />
     </div>
@@ -599,7 +607,7 @@ defineExpose({ syncRepo });
       class="flex justify-between items-center mb-3"
     >
       {{ error }}
-      <button @click="retry" class="btn-retry">Retry</button>
+      <button @click="retry" class="btn-retry">{{ t("entries.retry") }}</button>
     </BaseAlert>
     <BaseAlert v-if="pullResult" variant="info" class="mb-3">
       {{ pullResult }}
@@ -610,7 +618,7 @@ defineExpose({ syncRepo });
       class="flex items-center justify-center gap-2 text-center text-muted py-8"
     >
       <BaseSpinner />
-      <span>Loading entries...</span>
+      <span>{{ t("entries.loadingEntries") }}</span>
     </div>
     <div
       v-else-if="displayedEntries.length === 0 && !error"
@@ -622,7 +630,7 @@ defineExpose({ syncRepo });
           :size="40"
           class="block mb-2 mx-auto text-muted"
         />
-        <p>No matches for "{{ search }}"</p>
+        <p>{{ t("entries.noMatches", { query: search }) }}</p>
       </template>
       <template v-else>
         <BaseIcon
@@ -630,9 +638,9 @@ defineExpose({ syncRepo });
           :size="40"
           class="block mb-2 mx-auto text-muted"
         />
-        <p>No passwords yet</p>
+        <p>{{ t("entries.empty") }}</p>
         <p class="text-xs text-muted mt-1">
-          Swipe down to sync, or check your repository
+          {{ t("entries.emptyHint") }}
         </p>
       </template>
     </div>
@@ -643,7 +651,7 @@ defineExpose({ syncRepo });
           class="flex items-center gap-2 p-[0.6rem_0.75rem] md:p-[0.8rem_1rem] bg-surface rounded-md transition-colors duration-150 min-h-12 hover:bg-hover cursor-pointer active:bg-hover"
           tabindex="0"
           role="button"
-          :aria-label="`Open ${entry.name}`"
+          :aria-label="t('entries.openEntry', { name: entry.name })"
           @click="openEntry(entry)"
           @keydown.enter="openEntry(entry)"
           @keydown.space.prevent="openEntry(entry)"
@@ -673,10 +681,14 @@ defineExpose({ syncRepo });
         size="sm"
         :loading="loading"
         :disabled="loading"
-        aria-label="Load more entries"
+        :aria-label="t('entries.loadMoreAria')"
         @click="loadMore"
       >
-        {{ loading ? "Loading…" : `Load more (${remaining} more)` }}
+        {{
+          loading
+            ? t("entries.loadMoreLoading")
+            : t("entries.loadMore", { count: remaining })
+        }}
       </BaseButton>
     </div>
     <!-- Sentinel the IntersectionObserver watches to auto-load the next page -->
@@ -686,15 +698,13 @@ defineExpose({ syncRepo });
     <BaseModalShell
       v-if="auditIssues"
       variant="sheet"
-      aria-label="Signature check"
+      :aria-label="t('entries.auditTitle')"
       :dismiss-on-backdrop="false"
       @close="auditIssues = null"
     >
-      <h2 class="text-base font-medium mb-1">Signature check</h2>
+      <h2 class="text-base font-medium mb-1">{{ t("entries.auditTitle") }}</h2>
       <p class="text-xs text-muted mb-3">
-        Pulled {{ auditIssues.length }}
-        {{ auditIssues.length === 1 ? "commit has" : "commits have" }} a
-        signature issue:
+        {{ t("entries.auditPreamble", { count: auditIssues.length }) }}
       </p>
       <ul class="flex flex-col gap-2 mb-3">
         <li
@@ -710,7 +720,7 @@ defineExpose({ syncRepo });
       </ul>
       <div class="flex gap-2">
         <BaseButton size="sm" class="flex-1" @click="openHistory">
-          Review in history
+          {{ t("entries.auditReview") }}
         </BaseButton>
         <BaseButton
           v-if="auditIssues.length === 1"
@@ -718,10 +728,10 @@ defineExpose({ syncRepo });
           class="flex-1"
           @click="ignoreIssue(auditIssues[0]!)"
         >
-          Ignore this commit
+          {{ t("entries.auditIgnore") }}
         </BaseButton>
         <BaseButton size="sm" class="flex-1" @click="auditIssues = null">
-          Dismiss
+          {{ t("entries.auditDismiss") }}
         </BaseButton>
       </div>
     </BaseModalShell>
