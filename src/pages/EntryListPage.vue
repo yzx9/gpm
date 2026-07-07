@@ -35,12 +35,12 @@ import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
   useAppLockState,
+  useCommitSignature,
   useLockState,
   usePullToRefresh,
   useToast,
 } from "@/composables";
 import { formatRelativeTime } from "@/utils/format";
-import { statusLabel } from "@/utils/signature";
 import type { LucideIcon } from "@lucide/vue";
 import {
   ChevronRight,
@@ -72,6 +72,7 @@ const { runWithAuth, overlayUp } = useLockState();
 const { appLocked } = useAppLockState();
 const { toast } = useToast();
 const { t, locale } = useI18n();
+const { signatureLabel } = useCommitSignature();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
 // not the whole store. `displayedEntries` accumulates appended pages; `total`
@@ -143,7 +144,7 @@ const badge = computed<{ icon: LucideIcon; cls: string; title: string }>(() => {
         icon: CircleAlert,
         cls: "badge-warn",
         title: t("entries.badgeReviewHead", {
-          status: statusLabel(s.head_status),
+          status: signatureLabel(s.head_status),
         }),
       };
   }
@@ -715,7 +716,7 @@ defineExpose({ syncRepo });
           <CommitSigIndicator :status="c.status" />
           <code class="text-xs text-muted">{{ c.short_hash }}</code>
           <span class="flex-1 truncate">{{ c.subject }}</span>
-          <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
+          <span class="text-xs text-muted">{{ signatureLabel(c.status) }}</span>
         </li>
       </ul>
       <div class="flex gap-2">

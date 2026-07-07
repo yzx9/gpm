@@ -8,5 +8,15 @@
     "secureScreenFailed": "无法保护屏幕 —— 请重试",
     "copyFailed": "复制失败",
     "copied": "已复制 —— 剪贴板将自动清空"
+  },
+  "signature": {
+    "verified": "已验证",
+    "untrustedSigner": "不受信任的签名者",
+    "unverifiedSignature": "未验证的签名",
+    "unsigned": "未签名",
+    "badSignature": "签名错误",
+    "unsupportedFormat": "不支持（{format}）",
+    "unknown": "未知",
+    "ignored": "已忽略"
   }
 }

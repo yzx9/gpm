@@ -15,9 +15,12 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
-import { useToast } from "@/composables";
+import {
+  isSignatureIgnorable,
+  signatureSignerFp,
+  useToast,
+} from "@/composables";
 import { formatRelativeTime } from "@/utils/format";
-import { isIgnorable, signerFp } from "@/utils/signature";
 import {
   GitCommitHorizontal,
   History,
@@ -68,7 +71,7 @@ function closeDetail() {
 }
 
 async function onTrust(commit: CommitSigInfo) {
-  const fp = signerFp(commit.status);
+  const fp = signatureSignerFp(commit.status);
   const suggested = fp
     ? fp.replace("SHA256:", "").slice(0, 12)
     : t("history.signerDefault");
@@ -268,9 +271,11 @@ onBeforeUnmount(() => {
           class="text-xs text-muted break-words"
         >
           {{ t("history.unverifiedNote") }}
-          <span v-if="signerFp(selected.status)">
+          <span v-if="signatureSignerFp(selected.status)">
             {{ t("history.issuerFp") }}
-            <code class="break-all">{{ signerFp(selected.status) }}</code>
+            <code class="break-all">{{
+              signatureSignerFp(selected.status)
+            }}</code>
           </span>
         </p>
         <BaseButton
@@ -282,7 +287,7 @@ onBeforeUnmount(() => {
           {{ t("history.trustSigner") }}
         </BaseButton>
         <BaseButton
-          v-if="isIgnorable(selected.status) && !selected.ignored"
+          v-if="isSignatureIgnorable(selected.status) && !selected.ignored"
           variant="action"
           :disabled="actionLoading"
           @click="onIgnore(selected)"

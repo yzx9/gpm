@@ -8,5 +8,15 @@
     "secureScreenFailed": "Couldn't secure screen — try again",
     "copyFailed": "Copy failed",
     "copied": "Copied — clipboard clears automatically"
+  },
+  "signature": {
+    "verified": "Verified",
+    "untrustedSigner": "Untrusted signer",
+    "unverifiedSignature": "Unverified signature",
+    "unsigned": "Unsigned",
+    "badSignature": "Bad signature",
+    "unsupportedFormat": "Unsupported ({format})",
+    "unknown": "Unknown",
+    "ignored": "ignored"
   }
 }

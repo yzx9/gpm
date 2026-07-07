@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import type { CommitSigStatus } from "@/api";
 import BaseIcon from "@/components/base/BaseIcon.vue";
-import { signerFp, statusLabel } from "@/utils/signature";
+import { signatureSignerFp, useCommitSignature } from "@/composables";
 import type { LucideIcon } from "@lucide/vue";
 import {
   CircleAlert,
@@ -14,6 +14,10 @@ import {
   CircleQuestionMark,
   CircleX,
 } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
+const { signatureLabel } = useCommitSignature();
 
 type Tone = "success" | "warning" | "danger";
 
@@ -33,7 +37,7 @@ const props = withDefaults(
 /** kind → icon. Circle set keeps the row of status indicators visually
  * consistent. Every kind is listed explicitly so a future `CommitSigStatus`
  * variant forces a compile error here, matching the exhaustive `tone()` switch
- * and `statusLabel`. */
+ * and the `signatureLabel` switch in `useCommitSignature`. */
 const ICON: Record<CommitSigStatus["kind"], LucideIcon> = {
   verified: CircleCheck,
   untrusted_key: CircleAlert,
@@ -49,7 +53,7 @@ const ICON: Record<CommitSigStatus["kind"], LucideIcon> = {
  * `statusClass`/`statusBgClass` helpers (verified→green, bad_signature→red,
  * everything else→amber). Every kind is listed explicitly (no `default`) so a
  * future `CommitSigStatus` variant forces a compile error here, matching the
- * exhaustive `ICON` map and `statusLabel` switch. */
+ * exhaustive `ICON` map and the `signatureLabel` switch in `useCommitSignature`. */
 function tone(status: CommitSigStatus): Tone {
   switch (status.kind) {
     case "verified":
@@ -91,15 +95,18 @@ const BANNER_TONE: Record<Tone, string> = {
   >
     <BaseIcon :icon="ICON[props.status.kind]" :size="18" />
     <div class="flex-1 min-w-0">
-      <div class="font-medium">{{ statusLabel(props.status) }}</div>
-      <div v-if="signerFp(props.status)" class="text-xs text-muted break-all">
-        {{ signerFp(props.status) }}
+      <div class="font-medium">{{ signatureLabel(props.status) }}</div>
+      <div
+        v-if="signatureSignerFp(props.status)"
+        class="text-xs text-muted break-all"
+      >
+        {{ signatureSignerFp(props.status) }}
       </div>
     </div>
     <span
       v-if="props.ignored"
       class="text-[0.6rem] text-default px-1 rounded-sm bg-edge shrink-0"
-      >ignored</span
+      >{{ t("common.signature.ignored") }}</span
     >
   </div>
 </template>

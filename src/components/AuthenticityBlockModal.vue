@@ -9,7 +9,7 @@
 
 <script setup lang="ts">
 import type { CommitSigInfo } from "@/api";
-import { statusLabel } from "@/utils/signature";
+import { useCommitSignature } from "@/composables";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
@@ -17,6 +17,7 @@ import BaseModalShell from "./base/BaseModalShell.vue";
 import CommitSigIndicator from "./CommitSigIndicator.vue";
 
 const { t } = useI18n();
+const { signatureLabel } = useCommitSignature();
 
 const props = defineProps<{
   /** Non-null shows the modal. */
@@ -74,7 +75,7 @@ const unverifiedSignerFp = computed(() => {
         <CommitSigIndicator :status="c.status" class="shrink-0" />
         <code class="text-xs text-muted">{{ c.short_hash }}</code>
         <span class="flex-1 truncate">{{ c.subject }}</span>
-        <span class="text-xs text-muted">{{ statusLabel(c.status) }}</span>
+        <span class="text-xs text-muted">{{ signatureLabel(c.status) }}</span>
       </li>
     </ul>
     <div class="flex flex-col gap-2">
