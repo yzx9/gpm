@@ -33,8 +33,10 @@ import {
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Eye } from "@lucide/vue";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const { onLock, runWithAuth } = useLockState();
@@ -54,6 +56,12 @@ const { password, notes, revealed, reveal, clear } = useSecretReveal();
 const { viewClearSecs } = useSecuritySettings();
 const loading = ref(false);
 const error = ref("");
+// True only while the alert shows a reveal/edit decrypt failure, so the
+// "check your age identity" hint can be gated locale-independently (the old
+// `error.includes("ecrypt")` substring match broke once the fallback string
+// was translated). Reset alongside `error` at the start of every action and
+// set in the two decrypt-path catches.
+const decryptError = ref(false);
 const deleting = ref(false);
 
 // ── Edit mode ──────────────────────────────────────────────────────────────
@@ -89,13 +97,15 @@ async function showPassword() {
   }
   loading.value = true;
   error.value = "";
+  decryptError.value = false;
   try {
     const result = await runWithAuth(() => showPasswordCmd(entryPath));
     reveal(result);
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
-    error.value = appError?.message || "Decryption failed";
+    decryptError.value = true;
+    error.value = appError?.message || t("entry.decryptFailed");
   } finally {
     loading.value = false;
   }
@@ -103,36 +113,37 @@ async function showPassword() {
 
 async function copyPassword() {
   error.value = "";
+  decryptError.value = false;
   try {
     await ensureClipboardNotifyPermission();
     const result = await runWithAuth(() => copyPasswordCmd(entryPath));
     clear();
     toast.success(
-      `✓ Copied ${result.entry_name} (${result.cleared_after_secs}s auto-clear)`,
+      t("entry.copied", {
+        name: result.entry_name,
+        secs: result.cleared_after_secs,
+      }),
     );
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
-    error.value = appError?.message || "Copy failed";
+    error.value = appError?.message || t("common.toast.copyFailed");
   }
 }
 
 async function deleteSecret() {
   if (deleting.value) return;
-  if (
-    !confirm(
-      `Delete ${entryName}? This removes it everywhere on the next sync. gpm has no in-app undo — recovery is only possible via git history with external tooling.`,
-    )
-  ) {
+  if (!confirm(t("entry.deleteConfirm", { name: entryName }))) {
     return;
   }
   deleting.value = true;
   error.value = "";
+  decryptError.value = false;
   try {
     const outcome = await deleteSecretCmd(entryName);
     if (outcome.kind === "written") {
       clear();
-      toast.success(`✓ Deleted (commit ${outcome.commit})`);
+      toast.success(t("entry.deleted", { commit: outcome.commit }));
       // Pop to entries (the opener). The deleted-entry page becomes forward
       // history, which Android system back can't reopen.
       navBack(router, { name: "entries" });
@@ -145,12 +156,11 @@ async function deleteSecret() {
       divergeError.value = "";
     } else {
       // authenticity_blocked — pre-write pull refused under Enforce.
-      error.value =
-        "Delete blocked: the remote failed signature verification under Enforce mode. Review in History, then pull to sync and retry.";
+      error.value = t("entry.deleteBlocked");
     }
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Delete failed";
+    error.value = appError?.message || t("entry.deleteFailed");
   } finally {
     deleting.value = false;
   }
@@ -186,6 +196,7 @@ const canSave = computed(
 async function enterEdit() {
   if (editing.value) return;
   error.value = "";
+  decryptError.value = false;
   let pw = password.value;
   let nt = notes.value;
   if (pw === null) {
@@ -198,7 +209,8 @@ async function enterEdit() {
     } catch (e) {
       if (isAuthCancelled(e)) return;
       const appError = e as AppError;
-      error.value = appError?.message || "Decryption failed";
+      decryptError.value = true;
+      error.value = appError?.message || t("entry.decryptFailed");
       return;
     } finally {
       loading.value = false;
@@ -227,10 +239,11 @@ async function saveEdit() {
   if (!canSave.value) return;
   saving.value = true;
   error.value = "";
+  decryptError.value = false;
   try {
     const outcome = await editSecret(entryName, editBody.value);
     if (outcome.kind === "written") {
-      toast.success(`✓ Saved (commit ${outcome.commit})`);
+      toast.success(t("entry.saved", { commit: outcome.commit }));
       // Exit to the read-only view; the user can Show to verify. Don't
       // auto-reveal the password post-save.
       exitEdit();
@@ -243,12 +256,11 @@ async function saveEdit() {
       divergeError.value = "";
     } else {
       // authenticity_blocked — pre-write pull refused under Enforce.
-      error.value =
-        "Save blocked: the remote failed signature verification under Enforce mode. Review via Sync, then retry.";
+      error.value = t("entry.saveBlocked");
     }
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Save failed";
+    error.value = appError?.message || t("entry.saveFailed");
   } finally {
     saving.value = false;
   }
@@ -283,9 +295,9 @@ async function resolveDivergence(choice: DivergenceChoice) {
     divergence.value = null;
     exitEdit();
     if (choice === "adopt_remote") {
-      toast.info("Adopted the remote version");
+      toast.info(t("entry.adoptedRemote"));
     } else {
-      toast.success(`✓ Kept mine (commit ${result.head})`);
+      toast.success(t("entry.keptMine", { head: result.head }));
     }
     // Pop to entries; the resolved-divergence UI becomes forward history.
     navBack(router, { name: "entries" });
@@ -294,11 +306,10 @@ async function resolveDivergence(choice: DivergenceChoice) {
     const appError = e as AppError;
     if (appError?.code === "PULL_FF_FAILED") {
       divergence.value = null;
-      toast.info("The remote changed since you reviewed this — rechecking…");
+      toast.info(t("entry.remoteChanged"));
       navBack(router, { name: "entries" });
     } else {
-      divergeError.value =
-        appError?.message || "Could not resolve the divergence";
+      divergeError.value = appError?.message || t("entry.resolveFailed");
     }
   } finally {
     resolving.value = false;
@@ -331,9 +342,9 @@ function handleKeydown(e: KeyboardEvent) {
       <button
         @click="goBack"
         class="bg-transparent border-none text-base cursor-pointer text-accent p-1 min-w-12 min-h-12 inline-flex items-center gap-1"
-        aria-label="Back"
+        :aria-label="t('common.back')"
       >
-        <BaseIcon :icon="ArrowLeft" /> Back
+        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
       </button>
       <h1
         class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
@@ -344,11 +355,8 @@ function handleKeydown(e: KeyboardEvent) {
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">
       {{ error }}
-      <span
-        v-if="error.includes('ecrypt')"
-        class="block text-xs opacity-80 mt-1"
-      >
-        Check your age identity and try again
+      <span v-if="decryptError" class="block text-xs opacity-80 mt-1">
+        {{ t("entry.checkIdentityHint") }}
       </span>
     </BaseAlert>
     <!-- Read-only view -->
@@ -358,20 +366,22 @@ function handleKeydown(e: KeyboardEvent) {
           variant="primary"
           class="flex-1"
           :disabled="loading || deleting"
-          aria-label="Copy password to clipboard"
+          :aria-label="t('entry.copyAria')"
           @click="copyPassword"
         >
-          <BaseIcon :icon="Copy" /> Copy Password
+          <BaseIcon :icon="Copy" /> {{ t("entry.copyLabel") }}
         </BaseButton>
         <BaseButton
           variant="outline"
           class="flex-1"
           :disabled="loading || deleting"
-          :aria-label="revealed ? 'Password is showing' : 'Show password'"
+          :aria-label="
+            revealed ? t('entry.showingAria') : t('entry.showPasswordAria')
+          "
           @click="showPassword"
         >
           <BaseIcon :icon="Eye" />
-          {{ revealed ? "Showing..." : "Show Password" }}
+          {{ revealed ? t("entry.showingLabel") : t("entry.showLabel") }}
         </BaseButton>
       </div>
 
@@ -380,10 +390,10 @@ function handleKeydown(e: KeyboardEvent) {
         block
         class="mb-3"
         :disabled="loading || deleting"
-        :aria-label="`Edit ${entryName}`"
+        :aria-label="t('entry.editAria', { name: entryName })"
         @click="enterEdit"
       >
-        ✎ Edit
+        {{ t("entry.editLabel") }}
       </BaseButton>
 
       <BaseButton
@@ -391,10 +401,10 @@ function handleKeydown(e: KeyboardEvent) {
         block
         class="mb-6"
         :disabled="deleting || loading"
-        :aria-label="`Delete ${entryName}`"
+        :aria-label="t('entry.deleteAria', { name: entryName })"
         @click="deleteSecret"
       >
-        {{ deleting ? "Deleting…" : "Delete" }}
+        {{ deleting ? t("entry.deleting") : t("entry.deleteLabel") }}
       </BaseButton>
 
       <div
@@ -402,7 +412,7 @@ function handleKeydown(e: KeyboardEvent) {
         class="flex items-center justify-center gap-2 text-center text-muted py-4"
       >
         <BaseSpinner />
-        <span>Decrypting...</span>
+        <span>{{ t("entry.decrypting") }}</span>
       </div>
 
       <div
@@ -412,7 +422,7 @@ function handleKeydown(e: KeyboardEvent) {
         <div class="mb-4">
           <label
             class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
-            >Password</label
+            >{{ t("entry.password") }}</label
           >
           <div
             class="font-mono text-lg p-2 bg-accent-ring rounded-sm break-all select-all"
@@ -424,7 +434,7 @@ function handleKeydown(e: KeyboardEvent) {
         <div v-if="notes" class="mb-2">
           <label
             class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
-            >Notes</label
+            >{{ t("entry.notes") }}</label
           >
 
           <!-- prettier-ignore -->
@@ -436,8 +446,8 @@ function handleKeydown(e: KeyboardEvent) {
         <p class="text-center text-xs text-muted mt-3">
           {{
             viewClearSecs > 0
-              ? `Auto-clears in ${viewClearSecs}s`
-              : "Stays visible until hidden or locked"
+              ? t("entry.autoClearsIn", { secs: viewClearSecs })
+              : t("entry.staysVisible")
           }}
         </p>
       </div>
@@ -446,7 +456,9 @@ function handleKeydown(e: KeyboardEvent) {
     <!-- Edit form -->
     <form v-else class="flex flex-col gap-4 mb-6" @submit.prevent="saveEdit">
       <div class="flex flex-col gap-1">
-        <label for="e-password" class="text-sm font-medium">Password</label>
+        <label for="e-password" class="text-sm font-medium">{{
+          t("entry.password")
+        }}</label>
         <BaseInput
           id="e-password"
           v-model="editPassword"
@@ -457,16 +469,16 @@ function handleKeydown(e: KeyboardEvent) {
         />
       </div>
       <div class="flex flex-col gap-1">
-        <label for="e-notes" class="text-sm font-medium">Notes</label>
+        <label for="e-notes" class="text-sm font-medium">{{
+          t("entry.notes")
+        }}</label>
         <BaseTextarea
           id="e-notes"
           v-model="editNotes"
           rows="6"
           autocomplete="off"
         />
-        <small class="text-xs text-muted"
-          >First line is the password; the rest is notes.</small
-        >
+        <small class="text-xs text-muted">{{ t("entry.firstLineHint") }}</small>
       </div>
       <div class="flex gap-3">
         <BaseButton
@@ -474,19 +486,19 @@ function handleKeydown(e: KeyboardEvent) {
           type="submit"
           class="flex-1"
           :disabled="!canSave"
-          aria-label="Save changes"
+          :aria-label="t('entry.saveAria')"
         >
-          {{ saving ? "Saving…" : "Save" }}
+          {{ saving ? t("entry.saving") : t("entry.saveLabel") }}
         </BaseButton>
         <BaseButton
           variant="outline"
           type="button"
           class="flex-1"
           :disabled="saving"
-          aria-label="Cancel edit"
+          :aria-label="t('entry.cancelEditAria')"
           @click="cancelEdit"
         >
-          Cancel
+          {{ t("common.button.cancel") }}
         </BaseButton>
       </div>
     </form>
