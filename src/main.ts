@@ -130,7 +130,7 @@ router.beforeEach(async (to, from) => {
   const cover = !!(to.meta?.secure || from.meta?.secure);
   const secureOk = await secureScreenState.raiseSecureForRoute(cover);
   if (to.meta?.secure && !secureOk) {
-    toastState.toast.danger("Couldn't secure screen — try again");
+    toastState.toast.danger(i18n.global.t("common.toast.secureScreenFailed"));
     return false;
   }
   // Load the arriving route's message bundle for the current locale, alongside

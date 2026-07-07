@@ -514,7 +514,7 @@ async function copyText(text: string) {
     await navigator.clipboard.writeText(text);
     toast.success("✓ Copied to clipboard");
   } catch {
-    toast.danger("Copy failed");
+    toast.danger(t("common.toast.copyFailed"));
   }
 }
 
@@ -1525,9 +1525,9 @@ onMounted(() => {
         />
       </div>
       <div class="flex gap-2 justify-end">
-        <BaseButton variant="secondary" @click="resetOpen = false"
-          >Cancel</BaseButton
-        >
+        <BaseButton variant="secondary" @click="resetOpen = false">{{
+          t("common.button.cancel")
+        }}</BaseButton>
         <BaseButton variant="danger" :disabled="!resetReady" @click="doReset">
           <BaseIcon :icon="Trash2" /> Reset all data
         </BaseButton>
@@ -1579,7 +1579,7 @@ onMounted(() => {
           variant="secondary"
           :disabled="passphraseLoading"
           @click="closePassphraseModal"
-          >Cancel</BaseButton
+          >{{ t("common.button.cancel") }}</BaseButton
         >
         <BaseButton
           variant="action"

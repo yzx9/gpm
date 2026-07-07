@@ -11,9 +11,12 @@
 import type { CommitSigInfo } from "@/api";
 import { statusLabel } from "@/utils/signature";
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 import CommitSigIndicator from "./CommitSigIndicator.vue";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** Non-null shows the modal. */
@@ -96,7 +99,9 @@ const unverifiedSignerFp = computed(() => {
       <BaseButton size="sm" @click="emit('switch-to-audit')">
         Switch to Audit mode
       </BaseButton>
-      <BaseButton size="sm" @click="emit('close')">Cancel</BaseButton>
+      <BaseButton size="sm" @click="emit('close')">{{
+        t("common.button.cancel")
+      }}</BaseButton>
     </div>
   </BaseModalShell>
 </template>

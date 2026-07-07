@@ -1,4 +1,12 @@
 {
   "back": "Back",
-  "loading": "Loading..."
+  "loading": "Loading...",
+  "button": {
+    "cancel": "Cancel"
+  },
+  "toast": {
+    "secureScreenFailed": "Couldn't secure screen — try again",
+    "copyFailed": "Copy failed",
+    "copied": "Copied — clipboard clears automatically"
+  }
 }
