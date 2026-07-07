@@ -83,9 +83,10 @@ const unverifiedSignerFp = computed(() => {
         keypath="common.authenticity.gpgNotice"
         tag="p"
         class="text-xs text-muted mb-1 break-words"
-        :params="{ hash: unverifiedIssue.short_hash }"
       >
-        <code class="text-xs">{{ unverifiedIssue.short_hash }}</code>
+        <template #hash>
+          <code class="text-xs">{{ unverifiedIssue.short_hash }}</code>
+        </template>
         <template #link>
           <strong>{{ t("common.authenticity.gpgNoticeLink") }}</strong>
         </template>
