@@ -47,4 +47,4 @@ Option 2 (modify SetupPage). Least new code. If config exists, pre-fill the form
 
 ## Depends on
 
-None — independent of other plans.
+None — independent of other rfcs.

@@ -10,8 +10,7 @@
 //! The `0026` base-version-aware clobber caveat (a stale edit silently
 //! overwriting a teammate's newer same-name change) now applies at the
 //! orchestrator's pre-write pull, not in bare `update` — it is pinned in
-//! `sync_resolve.rs` against `autosync_write`. See
-//! `.plans/0026-edit-base-version-aware.md`.
+//! `sync_resolve.rs` against `autosync_write`.
 
 mod common;
 

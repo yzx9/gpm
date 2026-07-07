@@ -760,7 +760,7 @@ impl Store {
     /// divergence surface; calling `set` directly skips that serialization, so
     /// it is for tests and the orchestrator only.
     ///
-    /// **Limitation (unchanged — see `.plans/0026-edit-base-version-aware.md`):**
+    /// **Limitation:**
     /// with no base-version check, a write built on a prior read can silently
     /// overwrite a teammate's newer same-name change. Decoupling does not fix
     /// this; `autosync_write`'s pre-write pull can fast-forward over the remote
@@ -835,7 +835,7 @@ impl Store {
     ///   (local-ahead is common after any unpushed commit; the write still lands
     ///   on HEAD and the push decides). Only an Enforce authenticity block
     ///   aborts, and it does so before the write runs, so the repo is untouched.
-    ///   The push is **not** cancellable today (see `.plans/0032-cancellable-saves.md`);
+    ///   The push is **not** cancellable today;
     ///   it is bounded by git's SSH/HTTP timeout. A `PUSH_REJECTED` is a real
     ///   divergence; a network failure leaves the local commit in place to sync
     ///   later.

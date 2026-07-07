@@ -76,9 +76,9 @@ Backend tests are in-module (`#[cfg(test)]` next to the code) plus integration t
 - The Android debug build sets `applicationIdSuffix = ".debug"` (installs as `xyz.yzx9.gpm.debug`) so it coexists with the release — install a debug build for diagnostics without uninstalling.
 - Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
 
-## Design RFCs — `.plans/`
+## Design RFCs
 
-`.plans/` holds lightweight design RFCs. It is the parking lot for work that is deliberately out of the current PR or phase: ideas discovered during implementation, deferred scope, and larger future improvements. An RFC captures the **problem, the design decision, and the rationale** — not the implementation.
+`docs/rfcs` holds lightweight design RFCs. It is the parking lot for work that is deliberately out of the current PR or phase: ideas discovered during implementation, deferred scope, and larger future improvements. An RFC captures the **problem, the design decision, and the rationale** — not the implementation.
 
 Write an RFC when:
 
@@ -90,7 +90,7 @@ Write an RFC when:
 ### How to write one
 
 - One file per RFC: `NNNN-kebab-title.md`.
-- `NNNN` is 4-digit zero-padded; **next number = current max + 1**. The "current max" is the highest `NNNN` on **any branch** (local or remote), not just the local checkout — scan every branch tip's `.plans/` (e.g. `git ls-tree -r --name-only <ref> -- .plans/` over each `git branch -a` ref), since an in-flight branch may already hold a higher number than your local `main`.
+- `NNNN` is 4-digit zero-padded; **next number = current max + 1**. The "current max" is the highest `NNNN` on **any branch** (local or remote), not just the local checkout — scan every branch tip's `docs/rfcs/` (e.g. `git ls-tree -r --name-only <ref> -- docs/rfcs/` over each `git branch -a` ref), since an in-flight branch may already hold a higher number than your local `main`.
 - Follow the template in `0000-rfc-template.md`.
 - If an RFC is completed or superseded, it may be removed.
 

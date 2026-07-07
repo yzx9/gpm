@@ -12,7 +12,7 @@
 //! tap is a broadcast that clears the clipboard natively and emits the
 //! `clipboard-cleared` event so the Rust side can cancel the armed clear
 //! timer (otherwise the timer would later clobber unrelated clipboard content
-//! the user placed after the tap — see RFC 0037 + `.plans/0037`).
+//! the user placed after the tap).
 //!
 //! On non-Android targets the plugin is registered but inert: every operation
 //! is a no-op (`post`/`dismiss` return `Ok(())`, `are_enabled` reports `true`

@@ -9,8 +9,7 @@
 //! save in the per-device autosync policy via [`Store::autosync_write`]: a
 //! pull → write → push when `autosync` is on (the default), or a plain local
 //! commit when it's off. The pull phase is cancellable through the global cancel
-//! slot (mirroring `pull_repo`); the push is not yet cancellable (see
-//! `.plans/0032-cancellable-saves.md`).
+//! slot (mirroring `pull_repo`); the push is not yet cancellable.
 //!
 //! ## Outcome shape
 //!

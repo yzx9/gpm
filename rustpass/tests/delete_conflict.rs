@@ -6,8 +6,7 @@
 //! commit the removal on the current branch. No sync, no push, no rollback. The
 //! autosync orchestrator (`Store::autosync_write`) wraps this in pull → delete →
 //! push and routes a rejected push to the sync-time divergence surface (covered
-//! in `sync_resolve.rs`). See `.plans/0021-delete-secrets.md` and
-//! `.plans/0028-decoupled-writes-autosync.md`.
+//! in `sync_resolve.rs`).
 
 mod common;
 

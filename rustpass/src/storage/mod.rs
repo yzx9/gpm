@@ -501,7 +501,7 @@ pub struct CommitIdentity {
 ///   under Enforce signature verification (HEAD did not advance); the carried
 ///   [`AuthenticityResult`] reuses the pull path's block-issue UI.
 ///
-/// **Limitation (unchanged — see `.plans/0026-edit-base-version-aware.md`):**
+/// **Limitation:**
 /// this only catches the push-rejection *race*. A write built on a stale read
 /// can still fast-forward over a newer remote change and push cleanly — no
 /// modal — silently overwriting it (recoverable in git history). That limitation
