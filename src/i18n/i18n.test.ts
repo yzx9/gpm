@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import enCommon from "@/locales/en/common.json";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -119,6 +120,28 @@ describe("setLocale", () => {
     await setLocale("zh-CN");
     expect(currentLocale()).toBe("zh-CN");
     expect(document.documentElement.lang).toBe("zh-CN");
+  });
+
+  it("reloads the previously-loaded page namespaces for the new locale", async () => {
+    // Reset to a known state: en has only the inlined `common`; zh-CN is empty.
+    i18n.global.setLocaleMessage("en", { common: enCommon });
+    i18n.global.setLocaleMessage("zh-CN", {});
+    i18n.global.locale.value = "zh-CN";
+    // Simulate the user having visited the entry list (zh-CN `entries` loaded).
+    i18n.global.mergeLocaleMessage("zh-CN", { entries: { createSecret: "x" } });
+    const mergeSpy = vi.spyOn(i18n.global, "mergeLocaleMessage");
+
+    await setLocale("en");
+
+    // The switch copies the previous locale's loaded namespaces into the new
+    // one — `entries` was loaded for zh-CN, so it must load for en too. This is
+    // the path that translates the visible page in place on a locale switch; a
+    // regression would silently leave the page in the old language.
+    expect(mergeSpy).toHaveBeenCalledWith(
+      "en",
+      expect.objectContaining({ entries: expect.any(Object) }),
+    );
+    mergeSpy.mockRestore();
   });
 });
 

@@ -2,9 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import { setLocale } from "@/i18n";
 import { mountWithApp } from "@/test/appTestUtils";
 import { invoke } from "@tauri-apps/api/core";
-import { flushPromises } from "@vue/test-utils";
+import { flushPromises, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "./SettingsPage.vue";
 
@@ -25,6 +27,14 @@ const { mockPush, mockReplace, mockOnBeforeRouteLeave } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core");
+
+// Stub @/i18n so the language-picker tests don't mutate the real i18n singleton
+// (SettingsPage imports setLocale/normalizeSupported directly from it; `t()`
+// still comes from the test plugin in setup.ts, which is unaffected).
+vi.mock("@/i18n", () => ({
+  setLocale: vi.fn().mockResolvedValue(undefined),
+  normalizeSupported: vi.fn((tag: string) => tag),
+}));
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),
   createWebHashHistory: vi.fn(),
@@ -1242,6 +1252,73 @@ describe("SettingsPage", () => {
         "set_commit_identity",
         expect.anything(),
       );
+    });
+  });
+
+  describe("display-language picker", () => {
+    function findLanguagePicker(wrapper: ReturnType<typeof mountPage>) {
+      // findAllComponents is typed as DOMWrapper[] in this @vue/test-utils
+      // build but really returns VueWrapper[] at runtime — cast through unknown.
+      return (
+        wrapper.findAllComponents(
+          BaseSegmentedControl,
+        ) as unknown as VueWrapper<any>[]
+      ).find((c) => c.props("name") === "display-language");
+    }
+
+    it("applies a pinned locale in-memory first, then persists it", async () => {
+      when("get_app_config", { secure_screen: true }); // no locale ⇒ "system"
+      const { wrapper, toast } = mountWithApp(SettingsPage);
+      await flushPromises();
+
+      const picker = findLanguagePicker(wrapper)!;
+      picker.vm.$emit("change", "zh-CN");
+      await flushPromises();
+
+      // Apply-then-persist: a persist failure can't leave app.json pinned to a
+      // locale the picker already reverted from.
+      expect(setLocale).toHaveBeenCalledWith("zh-CN");
+      expect(invoke).toHaveBeenCalledWith("set_locale_pref", {
+        locale: "zh-CN",
+      });
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("Display language")),
+      ).toBe(true);
+    });
+
+    it("rolls back to the prior selection when persisting fails", async () => {
+      when("get_app_config", { secure_screen: true, locale: "en" }); // prior = en
+      reject("set_locale_pref", { code: "CONFIG_ERROR", message: "no" });
+      const { wrapper, toast } = mountWithApp(SettingsPage);
+      await flushPromises();
+
+      const picker = findLanguagePicker(wrapper)!;
+      picker.vm.$emit("change", "zh-CN");
+      await flushPromises();
+
+      // Picker reverted to the prior selection; a danger toast explains.
+      expect(picker?.props("modelValue")).toBe("en");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("Couldn't save display language"),
+        ),
+      ).toBe(true);
+    });
+
+    it("'system' resolves through the backend and clears the override", async () => {
+      when("get_app_config", { secure_screen: true, locale: "en" });
+      when("resolved_locale", "zh-CN");
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const picker = findLanguagePicker(wrapper)!;
+      picker.vm.$emit("change", "system");
+      await flushPromises();
+
+      // "Track system" applies the backend's resolved locale and clears the pin.
+      expect(invoke).toHaveBeenCalledWith("resolved_locale");
+      expect(setLocale).toHaveBeenCalledWith("zh-CN"); // normalizeSupported passthrough
+      expect(invoke).toHaveBeenCalledWith("set_locale_pref", { locale: null });
     });
   });
 });
