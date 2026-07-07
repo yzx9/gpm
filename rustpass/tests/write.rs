@@ -7,9 +7,9 @@ mod common;
 use std::path::Path;
 
 use common::*;
-use rustpass::store::{DivergenceChoice, Store, WriteOutcome, WriteResult};
 use rustpass::VerifyMode;
 use rustpass::store::{AuthenticityResult, SyncDivergence};
+use rustpass::store::{DivergenceChoice, Store, WriteOutcome, WriteResult};
 
 /// Count commits reachable from a repo's HEAD.
 fn head_commit_count(repo_path: &Path) -> usize {
