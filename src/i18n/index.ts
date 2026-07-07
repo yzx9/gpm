@@ -37,10 +37,11 @@ export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 export const DEFAULT_LOCALE: SupportedLocale = "en";
 
 /**
- * Message schema — currently only the inlined default-locale `common` bundle.
- * Page bundles load lazily and are not in the static schema, so only `common`
- * keys are compile-checked; `t("settings.…")` etc. resolve at runtime against
- * the loaded page bundle (with `fallbackLocale` covering misses).
+ * Message schema — only the inlined default-locale `common` bundle. Page bundles
+ * load lazily (to keep the initial payload small, per the RFC), so vue-i18n's
+ * typing can't type-check their keys without inlining them — a deliberate
+ * trade-off: `common` keys are compile-checked, `t("settings.…")` etc. resolve at
+ * runtime against the loaded page bundle with `fallbackLocale` covering misses.
  */
 type MessageSchema = { common: typeof enCommon };
 
@@ -131,6 +132,17 @@ export function currentLocale(): SupportedLocale {
  */
 export async function setLocale(locale: SupportedLocale): Promise<void> {
   await loadBundle(locale, "common");
+  // Reload the page bundles the user is already viewing (the namespaces loaded
+  // for the previous locale) so a locale switch translates the current page in
+  // place, not just on the next navigation.
+  const prev = i18n.global.locale.value;
+  if (prev !== locale) {
+    const loaded = i18n.global.getLocaleMessage(prev) as Record<
+      string,
+      unknown
+    >;
+    await Promise.all(Object.keys(loaded).map((ns) => loadBundle(locale, ns)));
+  }
   i18n.global.locale.value = locale;
   document.documentElement.lang = locale;
 }

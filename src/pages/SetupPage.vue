@@ -8,9 +8,11 @@ import CloneFlow from "@/components/setup/CloneFlow.vue";
 import CreateFlow from "@/components/setup/CreateFlow.vue";
 import { LockKeyhole } from "@lucide/vue";
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const { t } = useI18n();
 
 // Mode switch. Defaults to "clone" so CloneFlow mounts immediately on
 // first render — this preserves the existing SetupPage test contract, which
@@ -39,20 +41,22 @@ function onDone() {
         <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
       </h1>
       <p class="text-center text-muted text-sm mb-6">
-        Age-only gopass password client
+        {{ t("setup.tagline") }}
       </p>
 
       <!-- Mode switch (a <select>, not buttons — see script comment). -->
       <div class="flex flex-col gap-1 mb-6">
-        <label for="setup-mode" class="text-sm font-medium">Mode</label>
+        <label for="setup-mode" class="text-sm font-medium">{{
+          t("setup.mode")
+        }}</label>
         <select
           id="setup-mode"
           v-model="mode"
           class="input-base"
           autocomplete="off"
         >
-          <option value="clone">Clone an existing store</option>
-          <option value="create">Create a new store</option>
+          <option value="clone">{{ t("setup.clone") }}</option>
+          <option value="create">{{ t("setup.create") }}</option>
         </select>
       </div>
 

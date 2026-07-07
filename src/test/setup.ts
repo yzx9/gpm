@@ -2,7 +2,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import enCommon from "@/locales/en/common.json";
+import { config } from "@vue/test-utils";
 import { vi } from "vitest";
+import { createI18n } from "vue-i18n";
+
+// Minimal i18n for component tests, installed globally so any component calling
+// useI18n() resolves against it. We deliberately do NOT import the real @/i18n
+// module here: it would eagerly import @/api → system.ts → @tauri-apps/api/app
+// and cache the simple mock below, stealing the richer per-test mock that the
+// back-button tests (BaseModalShell, useOverlayBackHandler) install for
+// themselves. `en/common` is inlined so `t("common.…")` resolves; page-bundle
+// keys resolve to their key strings (existing assertions don't target those).
+const testI18n = createI18n({
+  legacy: false,
+  locale: "en",
+  fallbackLocale: "en",
+  messages: { en: { common: enCommon } },
+});
+config.global.plugins = [testI18n];
 
 // Mock Tauri invoke — default no-op, tests override per-call
 vi.mock("@tauri-apps/api/core", () => ({

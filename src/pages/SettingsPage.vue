@@ -25,6 +25,7 @@ import {
   enableBiometricUnlock,
   enableIdentityAutoUnlock,
   exportSshPrivateKey,
+  getAppConfig,
   getAuthState,
   getAuthenticityConfig,
   getCommitIdentityDefault,
@@ -37,9 +38,11 @@ import {
   isBiometricUnlockEnabled,
   removeTrustedGpgKey,
   removeTrustedKey,
+  resolvedLocale,
   setAutosync,
   setClipboardClearSecs,
   setCommitIdentity,
+  setLocalePref,
   setLockMode,
   setPassphrase,
   setVerificationMode,
@@ -62,6 +65,7 @@ import {
   useSecuritySettings,
   useToast,
 } from "@/composables";
+import { normalizeSupported, setLocale } from "@/i18n";
 import { navBack } from "@/utils/nav";
 import {
   ArrowLeft,
@@ -78,11 +82,51 @@ import {
   TriangleAlert,
 } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
 
 const router = useRouter();
 const { onLock } = useLockState();
 const { toast } = useToast();
+const { t } = useI18n();
+
+// Display-language preference: "system" (track the device locale) or a pinned
+// locale. Loaded from app.json on mount; the picker applies it live.
+const localeSelection = ref<"system" | "en" | "zh-CN">("system");
+
+async function loadLocalePref(): Promise<void> {
+  try {
+    const app = await getAppConfig();
+    localeSelection.value =
+      app.locale === "en" || app.locale === "zh-CN" ? app.locale : "system";
+  } catch {
+    // No app config yet — leave "system".
+  }
+}
+
+async function onLocaleChange(selection: string): Promise<void> {
+  const prev = localeSelection.value;
+  try {
+    // Apply the locale in-memory first and persist only on success, so a
+    // failure can't leave app.json pinned to a locale the picker reverted to.
+    if (selection === "system") {
+      // "Track system" resolves through the backend, which normalizes the
+      // device locale — apply that immediately so the switch is visible.
+      await setLocale(normalizeSupported(await resolvedLocale()));
+      await setLocalePref(null);
+    } else if (selection === "en" || selection === "zh-CN") {
+      await setLocale(selection);
+      await setLocalePref(selection);
+    } else {
+      return; // unknown option — ignore
+    }
+    localeSelection.value = selection as "system" | "en" | "zh-CN";
+    toast.success(t("settings.language.applied"));
+  } catch {
+    localeSelection.value = prev; // roll back the picker on failure
+    toast.danger(t("settings.language.failed"));
+  }
+}
 
 const config = ref<RepoConfig | null>(null);
 const loading = ref(false);
@@ -877,6 +921,7 @@ onBeforeRouteLeave(async () => {
 onMounted(() => {
   loadConfig();
   loadAuthConfig();
+  loadLocalePref();
 });
 </script>
 
@@ -884,14 +929,36 @@ onMounted(() => {
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-6" role="banner">
       <h1 class="text-xl flex items-center gap-1">
-        <BaseIcon :icon="Settings" :size="24" /> Settings
+        <BaseIcon :icon="Settings" :size="24" /> {{ t("settings.title") }}
       </h1>
-      <BaseButton size="sm" aria-label="Back" @click="goBack">
-        <BaseIcon :icon="ArrowLeft" /> Back
+      <BaseButton size="sm" :aria-label="t('common.back')" @click="goBack">
+        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
       </BaseButton>
     </header>
 
-    <div v-if="loading" class="text-center text-muted py-8">Loading...</div>
+    <BaseCard as="section" class="mb-4">
+      <h2 class="text-sm font-medium mb-2">
+        {{ t("settings.language.title") }}
+      </h2>
+      <p class="text-xs text-muted mb-3">
+        {{ t("settings.language.description") }}
+      </p>
+      <BaseSegmentedControl
+        name="display-language"
+        :legend="t('settings.language.legend')"
+        :model-value="localeSelection"
+        :options="[
+          { label: t('settings.language.system'), value: 'system' },
+          { label: t('settings.language.english'), value: 'en' },
+          { label: t('settings.language.chinese'), value: 'zh-CN' },
+        ]"
+        @change="onLocaleChange"
+      />
+    </BaseCard>
+
+    <div v-if="loading" class="text-center text-muted py-8">
+      {{ t("common.loading") }}
+    </div>
 
     <BaseAlert v-else-if="error" variant="danger" class="mb-4">
       {{ error }}

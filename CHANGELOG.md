@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- You can now choose gpm's display language — English, 中文, or “System default” to follow your device — under Settings. The app ships English and Chinese to start, remembers your choice across launches and repository resets, and follows your device language by default.
+
 ### Changed
 
 - The Android clipboard-clear notification now shows how long until the secret auto-clears (for example, "auto-clears in 45s"), so the timeout is visible right in the notification shade instead of only in Settings. The tap-to-clear action is unchanged.

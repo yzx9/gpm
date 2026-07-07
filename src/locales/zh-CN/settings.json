@@ -1,0 +1,13 @@
+{
+  "title": "设置",
+  "language": {
+    "title": "显示语言",
+    "legend": "语言",
+    "description": "选择应用的显示语言。“跟随系统”将跟随你的设备语言。",
+    "system": "跟随系统",
+    "english": "English",
+    "chinese": "中文",
+    "applied": "显示语言已更新",
+    "failed": "无法保存显示语言 —— 请重试"
+  }
+}

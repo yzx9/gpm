@@ -1,0 +1,13 @@
+{
+  "title": "Settings",
+  "language": {
+    "title": "Display Language",
+    "legend": "Language",
+    "description": "Choose the app's display language. “System default” follows your device language.",
+    "system": "System default",
+    "english": "English",
+    "chinese": "中文",
+    "applied": "Display language updated",
+    "failed": "Couldn't save display language — try again"
+  }
+}
