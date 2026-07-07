@@ -27,8 +27,10 @@ import {
   X,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
+const { t } = useI18n();
 const router = useRouter();
 const { toast } = useToast();
 
@@ -51,7 +53,7 @@ async function loadHistory() {
     commits.value = await listCommitSignatures(50);
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to load commit history";
+    error.value = appError?.message || t("history.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -67,18 +69,20 @@ function closeDetail() {
 
 async function onTrust(commit: CommitSigInfo) {
   const fp = signerFp(commit.status);
-  const suggested = fp ? fp.replace("SHA256:", "").slice(0, 12) : "signer";
-  const label = window.prompt("Label for this trusted signer:", suggested);
+  const suggested = fp
+    ? fp.replace("SHA256:", "").slice(0, 12)
+    : t("history.signerDefault");
+  const label = window.prompt(t("history.trustPrompt"), suggested);
   if (label === null) return;
   actionLoading.value = true;
   try {
     await trustCommitSigner(commit.hash, label.trim() || suggested);
-    toast.success(`✓ Trusted ${label || suggested}`);
+    toast.success(t("history.trustedToast", { label: label || suggested }));
     await loadHistory();
     selected.value = null;
   } catch (e) {
     const appError = e as AppError;
-    toast.danger(appError?.message || "Failed to trust signer");
+    toast.danger(appError?.message || t("history.trustFailed"));
   } finally {
     actionLoading.value = false;
   }
@@ -88,12 +92,12 @@ async function onIgnore(commit: CommitSigInfo) {
   actionLoading.value = true;
   try {
     await ignoreCommitIssue(commit.hash);
-    toast.success("Issue ignored for this commit");
+    toast.success(t("history.ignoredToast"));
     await loadHistory();
     selected.value = null;
   } catch (e) {
     const appError = e as AppError;
-    toast.danger(appError?.message || "Failed to ignore");
+    toast.danger(appError?.message || t("history.ignoreFailed"));
   } finally {
     actionLoading.value = false;
   }
@@ -102,9 +106,9 @@ async function onIgnore(commit: CommitSigInfo) {
 async function copyHash(commit: CommitSigInfo) {
   try {
     await navigator.clipboard.writeText(commit.hash);
-    toast.success("✓ Hash copied");
+    toast.success(t("history.hashCopied"));
   } catch {
-    toast.danger("Copy failed");
+    toast.danger(t("common.toast.copyFailed"));
   }
 }
 
@@ -134,28 +138,29 @@ onBeforeUnmount(() => {
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <header class="flex justify-between items-center mb-4" role="banner">
       <h1 class="text-xl flex items-center gap-1">
-        <BaseIcon :icon="History" :size="24" /> History
+        <BaseIcon :icon="History" :size="24" /> {{ t("history.title") }}
       </h1>
       <div class="flex gap-2">
         <BaseButton
           size="sm"
           :disabled="loading"
           @click="loadHistory"
-          aria-label="Re-check signatures"
-          title="Re-check signatures"
+          :aria-label="t('history.recheckAria')"
+          :title="t('history.recheckAria')"
         >
-          <BaseIcon :icon="RefreshCw" /> Re-check
+          <BaseIcon :icon="RefreshCw" /> {{ t("history.recheck") }}
         </BaseButton>
-        <BaseButton size="sm" @click="openSettings" aria-label="Settings">
+        <BaseButton
+          size="sm"
+          @click="openSettings"
+          :aria-label="t('history.settingsAria')"
+        >
           <BaseIcon :icon="Settings" />
         </BaseButton>
       </div>
     </header>
 
-    <p class="text-xs text-muted mb-4">
-      Recent commits and their signature status (SSH or GPG). Tap a commit to
-      review, trust, or resolve its signer.
-    </p>
+    <p class="text-xs text-muted mb-4">{{ t("history.preamble") }}</p>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">
       {{ error }}
@@ -166,7 +171,7 @@ onBeforeUnmount(() => {
       class="flex items-center justify-center gap-2 text-center text-muted py-8"
     >
       <BaseSpinner />
-      <span>Loading history...</span>
+      <span>{{ t("history.loading") }}</span>
     </div>
     <div
       v-else-if="commits.length === 0 && !error"
@@ -177,7 +182,7 @@ onBeforeUnmount(() => {
         :size="40"
         class="block mb-2 mx-auto text-muted"
       />
-      <p>No commits found</p>
+      <p>{{ t("history.empty") }}</p>
     </div>
 
     <ul v-else class="list-none flex flex-col gap-0.5" role="list">
@@ -196,7 +201,7 @@ onBeforeUnmount(() => {
         />
         <div class="flex-1 min-w-0 flex flex-col gap-0.5">
           <span class="font-medium wrap-break-word line-clamp-2">{{
-            commit.subject || "(no message)"
+            commit.subject || t("history.noMessage")
           }}</span>
           <div class="flex items-center gap-1.5 text-xs text-muted min-w-0">
             <code class="shrink-0">{{ commit.short_hash }}</code>
@@ -211,7 +216,7 @@ onBeforeUnmount(() => {
         <span
           v-if="commit.ignored"
           class="text-[0.6rem] text-default shrink-0 mt-0.5 px-1 rounded-sm bg-edge"
-          >ignored</span
+          >{{ t("history.ignoredBadge") }}</span
         >
       </li>
     </ul>
@@ -220,18 +225,22 @@ onBeforeUnmount(() => {
     <BaseModalShell
       v-if="selected"
       variant="sheet"
-      aria-label="Commit detail"
+      :aria-label="t('history.detailAria')"
       @close="closeDetail"
     >
       <div class="flex justify-between items-start mb-2">
         <code class="text-xs text-muted">{{ selected.short_hash }}</code>
-        <button class="btn-copy" @click="closeDetail" aria-label="Close">
+        <button
+          class="btn-copy"
+          @click="closeDetail"
+          :aria-label="t('history.closeAria')"
+        >
           <BaseIcon :icon="X" />
         </button>
       </div>
 
       <h2 class="text-base font-medium wrap-break-word">
-        {{ selected.subject || "(no message)" }}
+        {{ selected.subject || t("history.noMessage") }}
       </h2>
       <p class="text-xs text-muted mt-1 wrap-break-word">
         {{ selected.author }}
@@ -250,11 +259,7 @@ onBeforeUnmount(() => {
         class="text-xs text-danger mt-2 flex gap-1"
       >
         <BaseIcon :icon="TriangleAlert" :size="14" class="shrink-0 mt-px" />
-        <span
-          >This commit's signature does not validate — the commit object may
-          have been altered after signing. It cannot be ignored in Enforce
-          mode.</span
-        >
+        <span>{{ t("history.badSigNote") }}</span>
       </p>
 
       <div class="flex flex-col gap-2 mt-4">
@@ -262,11 +267,9 @@ onBeforeUnmount(() => {
           v-if="selected.status.kind === 'unverified_signature'"
           class="text-xs text-muted break-words"
         >
-          GPG-signed by an untrusted signer — GPG signatures don't embed the
-          public key, so add (or import) that signer's armored public key in
-          <strong>Settings → Trusted signing keys</strong> to verify it.
+          {{ t("history.unverifiedNote") }}
           <span v-if="signerFp(selected.status)">
-            Issuer fingerprint:
+            {{ t("history.issuerFp") }}
             <code class="break-all">{{ signerFp(selected.status) }}</code>
           </span>
         </p>
@@ -276,7 +279,7 @@ onBeforeUnmount(() => {
           :disabled="actionLoading"
           @click="onTrust(selected)"
         >
-          Trust this signer
+          {{ t("history.trustSigner") }}
         </BaseButton>
         <BaseButton
           v-if="isIgnorable(selected.status) && !selected.ignored"
@@ -284,10 +287,10 @@ onBeforeUnmount(() => {
           :disabled="actionLoading"
           @click="onIgnore(selected)"
         >
-          Ignore this issue
+          {{ t("history.ignoreIssue") }}
         </BaseButton>
         <BaseButton variant="action" @click="copyHash(selected)">
-          Copy hash
+          {{ t("history.copyHash") }}
         </BaseButton>
       </div>
     </BaseModalShell>
