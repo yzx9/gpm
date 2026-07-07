@@ -132,8 +132,9 @@ pub(crate) async fn set_secure_screen(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::tempdir;
+
+    use super::*;
 
     fn store_at(dir: &Path) -> AppConfigStore {
         AppConfigStore::new(dir)

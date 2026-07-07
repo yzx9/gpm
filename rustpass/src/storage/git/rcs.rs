@@ -39,7 +39,7 @@
 use std::collections::HashMap;
 #[cfg(target_os = "android")]
 use std::ffi::c_int;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "android")]
@@ -1221,7 +1221,6 @@ fn is_age_entry(path: &Path) -> bool {
 /// paths sourced from a (possibly remote) tree diff, so it asserts containment
 /// before any filesystem write/delete, mirroring `Store::assert_within_repo`.
 fn rel_within_repo(rel: &str) -> Result<(), Error> {
-    use std::path::Component;
     let outside = Path::new(rel)
         .components()
         .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir));
@@ -1609,9 +1608,12 @@ fn short_hash(oid: &git2::Oid) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
+
+    use crate::recipient::RECIPIENTS_FILE;
+
+    use super::*;
 
     /// Shared test signature used across tests.
     fn test_signature() -> git2::Signature<'static> {
@@ -1914,7 +1916,6 @@ mod tests {
 
     #[test]
     fn init_repo_and_commit_initial_create_first_commit_no_parent() {
-        use crate::recipient::RECIPIENTS_FILE;
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         init_repo(dir.path()).expect("init_repo");
 

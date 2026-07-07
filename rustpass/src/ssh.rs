@@ -162,8 +162,9 @@ pub fn to_unencrypted_pem(pem: &str, passphrase: &str) -> Result<Zeroizing<Strin
 
 #[cfg(test)]
 mod tests {
-    use age::{Decryptor, Encryptor, ssh};
     use std::io::{Read, Write};
+
+    use age::{Decryptor, Encryptor, ssh};
 
     use super::*;
 

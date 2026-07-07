@@ -827,8 +827,12 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use pgp::composed::{ArmorOptions, DetachedSignature, KeyType, SecretKeyParamsBuilder};
+    use pgp::crypto::hash::HashAlgorithm;
+    use pgp::types::Password;
     use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
+
+    use super::*;
 
     // ── git fixture helpers ───────────────────────────────────────────────
 
@@ -1434,9 +1438,6 @@ mod tests {
     // (extract_signature -> classify -> openpgp::verify_detached). This is an
     // rpgp-only round-trip (proves the plumbing); GnuPG-produced interop
     // fixtures land separately (RFC 0009 D5).
-    use pgp::composed::{ArmorOptions, DetachedSignature, KeyType, SecretKeyParamsBuilder};
-    use pgp::crypto::hash::HashAlgorithm;
-    use pgp::types::Password;
 
     /// Generate a throwaway Ed25519 signing keypair for GPG tests (fast).
     fn test_gpg_secret_key() -> pgp::composed::SignedSecretKey {

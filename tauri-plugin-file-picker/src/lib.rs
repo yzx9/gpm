@@ -13,6 +13,8 @@
 
 #[cfg(target_os = "android")]
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+#[cfg(target_os = "android")]
+use tauri::plugin::mobile::PluginInvokeError;
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
 #[cfg(not(target_os = "android"))]
@@ -47,8 +49,7 @@ pub struct FilePickerError {
 /// Map a Tauri mobile-plugin invoke error into a [`FilePickerError`],
 /// preserving the Kotlin-supplied code (e.g. `CANCELLED`) when present.
 #[cfg(target_os = "android")]
-fn map_invoke_err(err: tauri::plugin::mobile::PluginInvokeError) -> FilePickerError {
-    use tauri::plugin::mobile::PluginInvokeError;
+fn map_invoke_err(err: PluginInvokeError) -> FilePickerError {
     match err {
         PluginInvokeError::InvokeRejected(resp) => FilePickerError {
             code: resp.code.unwrap_or_else(|| "PICK_FAILED".to_string()),

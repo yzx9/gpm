@@ -32,6 +32,8 @@
 //! back to plaintext at-rest storage (documented asymmetry).
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "android")]
+use tauri::plugin::mobile::PluginInvokeError;
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
 
@@ -71,8 +73,7 @@ impl SecureKeystoreError {
 /// Map a Tauri mobile-plugin invoke error into a [`SecureKeystoreError`],
 /// preserving the Kotlin-supplied code when present.
 #[cfg(target_os = "android")]
-fn map_invoke_err(err: tauri::plugin::mobile::PluginInvokeError) -> SecureKeystoreError {
-    use tauri::plugin::mobile::PluginInvokeError;
+fn map_invoke_err(err: PluginInvokeError) -> SecureKeystoreError {
     match err {
         PluginInvokeError::InvokeRejected(resp) => SecureKeystoreError {
             code: resp

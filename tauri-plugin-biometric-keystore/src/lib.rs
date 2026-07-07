@@ -18,6 +18,8 @@
 //! passphrase form.
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "android")]
+use tauri::plugin::mobile::PluginInvokeError;
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
 
@@ -57,8 +59,7 @@ impl KeystoreError {
 /// Map a Tauri mobile-plugin invoke error into a [`KeystoreError`],
 /// preserving the Kotlin-supplied `BIOMETRIC_*` code when present.
 #[cfg(target_os = "android")]
-fn map_invoke_err(err: tauri::plugin::mobile::PluginInvokeError) -> KeystoreError {
-    use tauri::plugin::mobile::PluginInvokeError;
+fn map_invoke_err(err: PluginInvokeError) -> KeystoreError {
     match err {
         PluginInvokeError::InvokeRejected(resp) => KeystoreError {
             code: resp.code.unwrap_or_else(|| "BIOMETRIC_FAILED".to_string()),

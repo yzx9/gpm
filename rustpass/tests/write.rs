@@ -7,7 +7,9 @@ mod common;
 use std::path::Path;
 
 use common::*;
-use rustpass::store::{Store, WriteOutcome, WriteResult};
+use rustpass::store::{DivergenceChoice, Store, WriteOutcome, WriteResult};
+use rustpass::VerifyMode;
+use rustpass::store::{AuthenticityResult, SyncDivergence};
 
 /// Count commits reachable from a repo's HEAD.
 fn head_commit_count(repo_path: &Path) -> usize {
@@ -263,9 +265,6 @@ async fn set_overwrites_existing_entry() {
 /// struct fields alongside the `kind` tag (Verified here for all three variants).
 #[test]
 fn write_outcome_serializes_tagged() {
-    use rustpass::VerifyMode;
-    use rustpass::store::{AuthenticityResult, SyncDivergence};
-
     // Written flattens WriteResult.commit alongside the kind tag.
     let written = WriteOutcome::Written(WriteResult {
         commit: "abc1234".into(),
@@ -308,7 +307,6 @@ fn write_outcome_serializes_tagged() {
 /// `resolve_sync_divergence` command argument.
 #[test]
 fn divergence_choice_round_trips_snake_case() {
-    use rustpass::store::DivergenceChoice;
     for (choice, s) in [
         (DivergenceChoice::AdoptRemote, "\"adopt_remote\""),
         (DivergenceChoice::KeepMine, "\"keep_mine\""),

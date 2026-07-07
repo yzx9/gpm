@@ -5,8 +5,9 @@
 mod common;
 
 mod tests {
-    use super::common::*;
     use rustpass::store;
+
+    use super::common::*;
 
     #[test]
     fn search_entries_empty_query_returns_all_alpha_sorted() {
