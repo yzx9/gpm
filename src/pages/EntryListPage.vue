@@ -71,7 +71,7 @@ const router = useRouter();
 const { runWithAuth, overlayUp } = useLockState();
 const { appLocked } = useAppLockState();
 const { toast } = useToast();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
 // not the whole store. `displayedEntries` accumulates appended pages; `total`
@@ -151,7 +151,7 @@ const badge = computed<{ icon: LucideIcon; cls: string; title: string }>(() => {
 
 const lastSyncLabel = computed(() => {
   if (!lastSyncTime.value) return null;
-  return formatRelativeTime(now.value, lastSyncTime.value);
+  return formatRelativeTime(now.value, lastSyncTime.value, locale.value);
 });
 
 const remaining = computed(() =>

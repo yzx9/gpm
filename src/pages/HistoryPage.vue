@@ -30,7 +30,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const router = useRouter();
 const { toast } = useToast();
 
@@ -209,7 +209,7 @@ onBeforeUnmount(() => {
             <span class="truncate min-w-0">{{ commit.author }}</span>
             <span aria-hidden="true" class="shrink-0">·</span>
             <span class="shrink-0">{{
-              formatRelativeTime(relativeNow, Date.parse(commit.date))
+              formatRelativeTime(relativeNow, Date.parse(commit.date), locale)
             }}</span>
           </div>
         </div>

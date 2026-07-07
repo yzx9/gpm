@@ -186,6 +186,11 @@ void (async () => {
   app.provide(TOAST_KEY, toastState);
 
   const boot = currentLocale();
+  // Mirror the boot locale to <html lang> for accessibility and :lang() CSS.
+  // `setLocale` does this on every switch, but the boot locale is never switched
+  // to (the reconcile is a no-op when it already matches), so set it once here
+  // or the first frame renders without a lang attribute.
+  document.documentElement.lang = boot;
   if (boot !== DEFAULT_LOCALE) {
     // loadBundle already swallows a missing bundle; the `.catch` makes the
     // bootstrap robust against any future awaited call landing here — a
