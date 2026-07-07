@@ -21,8 +21,10 @@ import {
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Dices } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
+const { t } = useI18n();
 const router = useRouter();
 const { onLock } = useLockState();
 const { toast } = useToast();
@@ -44,7 +46,7 @@ let generateToken = 0;
 // fixed 4-word passphrase — word-count is a different unit, so hide the field.
 const showLength = computed(() => mode.value !== "xkcd");
 const lengthLabel = computed(() =>
-  mode.value === "memorable" ? "Length (minimum)" : "Length",
+  mode.value === "memorable" ? t("generate.lengthMin") : t("generate.length"),
 );
 
 // Number inputs can momentarily hold "" / NaN while editing; coerce before IPC
@@ -85,7 +87,7 @@ async function onGenerate() {
   } catch (e) {
     if (myToken !== generateToken) return;
     const appError = e as AppError;
-    error.value = appError?.message || "Could not generate passwords";
+    error.value = appError?.message || t("generate.genFailed");
   } finally {
     if (myToken === generateToken) generating.value = false;
   }
@@ -96,10 +98,10 @@ async function onCopyRow(pw: string) {
   try {
     await ensureClipboardNotifyPermission();
     await copyGeneratedPassword(pw);
-    toast.success("Copied — clipboard clears automatically");
+    toast.success(t("common.toast.copied"));
   } catch (e) {
     const appError = e as AppError;
-    toast.danger(appError?.message || "Could not copy");
+    toast.danger(appError?.message || t("common.toast.copyFailed"));
   }
 }
 
@@ -126,11 +128,11 @@ onBeforeUnmount(() => {
       <button
         @click="goBack"
         class="back-btn inline-flex items-center gap-1"
-        aria-label="Back"
+        :aria-label="t('common.back')"
       >
-        <BaseIcon :icon="ArrowLeft" /> Back
+        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
       </button>
-      <h1 class="text-lg flex-1">Generate password</h1>
+      <h1 class="text-lg flex-1">{{ t("generate.title") }}</h1>
     </header>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
@@ -139,17 +141,19 @@ onBeforeUnmount(() => {
 
     <form class="controls" @submit.prevent="onGenerate">
       <div class="flex flex-col gap-1">
-        <label for="g-mode" class="text-sm font-medium">Style</label>
+        <label for="g-mode" class="text-sm font-medium">{{
+          t("generate.style")
+        }}</label>
         <select
           id="g-mode"
           v-model="mode"
           class="gen-select"
           :disabled="generating"
-          aria-label="Password style"
+          :aria-label="t('generate.passwordStyleAria')"
         >
-          <option value="random">Random</option>
-          <option value="memorable">Memorable</option>
-          <option value="xkcd">Passphrase</option>
+          <option value="random">{{ t("generate.genRandom") }}</option>
+          <option value="memorable">{{ t("generate.genMemorable") }}</option>
+          <option value="xkcd">{{ t("generate.genPassphrase") }}</option>
         </select>
       </div>
 
@@ -164,12 +168,14 @@ onBeforeUnmount(() => {
           min="1"
           max="256"
           :disabled="generating"
-          aria-label="Length"
+          :aria-label="t('generate.lengthAria')"
         />
       </div>
 
       <div class="flex flex-col gap-1">
-        <label for="g-count" class="text-sm font-medium">How many</label>
+        <label for="g-count" class="text-sm font-medium">{{
+          t("generate.howMany")
+        }}</label>
         <BaseInput
           id="g-count"
           v-model.number="count"
@@ -177,13 +183,13 @@ onBeforeUnmount(() => {
           min="1"
           max="32"
           :disabled="generating"
-          aria-label="How many"
+          :aria-label="t('generate.howManyAria')"
         />
       </div>
 
       <BaseButton variant="primary" type="submit" :disabled="generating">
         <BaseIcon v-if="!generating" :icon="Dices" />
-        {{ generating ? "Generating…" : "Generate" }}
+        {{ generating ? t("generate.generating") : t("generate.generate") }}
       </BaseButton>
     </form>
 
@@ -193,7 +199,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="icon-btn"
-          aria-label="Copy"
+          :aria-label="t('generate.copyAria')"
           @click="onCopyRow(pw)"
         >
           <BaseIcon :icon="Copy" />

@@ -1,0 +1,17 @@
+{
+  "title": "生成密码",
+  "style": "样式",
+  "passwordStyleAria": "密码样式",
+  "genRandom": "随机",
+  "genMemorable": "易记",
+  "genPassphrase": "短语",
+  "length": "长度",
+  "lengthMin": "长度（最小）",
+  "lengthAria": "长度",
+  "howMany": "数量",
+  "howManyAria": "数量",
+  "generate": "生成",
+  "generating": "生成中……",
+  "copyAria": "复制",
+  "genFailed": "无法生成密码"
+}

@@ -1,0 +1,17 @@
+{
+  "title": "Generate password",
+  "style": "Style",
+  "passwordStyleAria": "Password style",
+  "genRandom": "Random",
+  "genMemorable": "Memorable",
+  "genPassphrase": "Passphrase",
+  "length": "Length",
+  "lengthMin": "Length (minimum)",
+  "lengthAria": "Length",
+  "howMany": "How many",
+  "howManyAria": "How many",
+  "generate": "Generate",
+  "generating": "Generating…",
+  "copyAria": "Copy",
+  "genFailed": "Could not generate passwords"
+}
