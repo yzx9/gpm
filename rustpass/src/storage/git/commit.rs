@@ -303,7 +303,7 @@ pub(super) fn remote_add(repo_path: &Path, name: &str, url: &str) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use crate::recipient::RECIPIENTS_FILE;
+    use crate::crypto::RECIPIENTS_FILE;
     use crate::storage::git::test_support::{create_empty_commit, test_signature};
 
     use super::*;

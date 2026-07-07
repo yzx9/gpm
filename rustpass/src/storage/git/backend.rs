@@ -16,9 +16,9 @@ use async_trait::async_trait;
 use tokio::fs;
 use tokio::task::spawn_blocking;
 
+use crate::crypto::SecretExt;
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
-use crate::recipient;
 use crate::storage::{
     CancelToken, CommitKind, GitAuth, KeepLocalOutcome, ProgressSender, StorageBackend, StorageCtx,
     SyncDivergence, SyncOutcome, SyncResult,
@@ -26,8 +26,7 @@ use crate::storage::{
 use crate::template;
 
 use super::worktree::{
-    assert_within_repo, ensure_within_repo, list_entries, passfile_rel, resolve_entry_path,
-    write_atomic,
+    assert_within_repo, ensure_within_repo, list_entries, resolve_entry_path, write_atomic,
 };
 use super::{commit, divergence, pull};
 
@@ -37,16 +36,15 @@ pub struct GitStorage;
 
 #[async_trait]
 impl StorageBackend for GitStorage {
-    async fn list(&self, repo_path: &Path) -> Result<Vec<Entry>, Error> {
+    async fn list(&self, repo_path: &Path, ext: SecretExt) -> Result<Vec<Entry>, Error> {
         let repo_path = repo_path.to_path_buf();
-        // WalkDir is synchronous (blocking I/O) — offload it.
-        spawn_blocking(move || list_entries(&repo_path)).await?
+        // WalkDir is synchronous (blocking I/O) — offload it. SecretExt is Copy.
+        spawn_blocking(move || list_entries(&repo_path, ext)).await?
     }
 
-    async fn get(&self, repo_path: &Path, name: &str) -> Result<Vec<u8>, Error> {
-        let passfile = passfile_rel(name);
-        ensure_within_repo(&passfile)?;
-        let file_path = resolve_entry_path(repo_path, &passfile)?;
+    async fn get(&self, repo_path: &Path, passfile: &str) -> Result<Vec<u8>, Error> {
+        ensure_within_repo(passfile)?;
+        let file_path = resolve_entry_path(repo_path, passfile)?;
         fs::read(&file_path).await.map_err(|e| {
             Error::new(
                 ErrorCode::IoError,
@@ -55,13 +53,12 @@ impl StorageBackend for GitStorage {
         })
     }
 
-    async fn set(&self, repo_path: &Path, name: &str, ciphertext: &[u8]) -> Result<(), Error> {
-        let passfile = passfile_rel(name);
+    async fn set(&self, repo_path: &Path, passfile: &str, ciphertext: &[u8]) -> Result<(), Error> {
         // Reject `..` / absolute names BEFORE any fs op — the trait is `pub`, so
         // a caller that skips `Store::validate_secret_name` still can't mkdir or
         // write outside the repo. (`assert_within_repo` below is the 2nd layer.)
-        ensure_within_repo(&passfile)?;
-        let file_path = repo_path.join(&passfile);
+        ensure_within_repo(passfile)?;
+        let file_path = repo_path.join(passfile);
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
         }
@@ -69,29 +66,73 @@ impl StorageBackend for GitStorage {
         write_atomic(&file_path, ciphertext).await
     }
 
-    async fn delete(&self, repo_path: &Path, name: &str) -> Result<(), Error> {
-        let passfile = passfile_rel(name);
-        ensure_within_repo(&passfile)?;
+    async fn delete(&self, repo_path: &Path, passfile: &str) -> Result<(), Error> {
+        ensure_within_repo(passfile)?;
         // Existence + within-repo guard before any mutation.
-        resolve_entry_path(repo_path, &passfile)?;
-        let file_path = repo_path.join(&passfile);
+        resolve_entry_path(repo_path, passfile)?;
+        let file_path = repo_path.join(passfile);
         assert_within_repo(repo_path, file_path.parent().unwrap_or(Path::new("")))?;
         match fs::remove_file(&file_path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::new(
                 ErrorCode::EntryNotFound,
-                format!("Entry not found: {name}"),
+                format!("Entry not found: {passfile}"),
             )),
             Err(e) => Err(e.into()),
         }
     }
 
-    async fn list_recipients(&self, repo_path: &Path) -> Result<Vec<recipient::Recipient>, Error> {
-        recipient::list_recipients(repo_path).await
+    async fn read_file(&self, repo_path: &Path, rel_path: &str) -> Result<Vec<u8>, Error> {
+        ensure_within_repo(rel_path)?;
+        // resolve_entry_path checks existence + within-repo (canonicalize) in one
+        // step — no caller-level exists-then-read, so no TOCTOU that could shrink
+        // the recipient set.
+        let file_path = resolve_entry_path(repo_path, rel_path)?;
+        fs::read(&file_path).await.map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Error::new(
+                ErrorCode::EntryNotFound,
+                format!("File not found: {rel_path}"),
+            ),
+            _ => Error::new(ErrorCode::IoError, format!("Failed to read file: {e}")),
+        })
     }
 
-    async fn write_recipients(&self, repo_path: &Path, recipients: &[String]) -> Result<(), Error> {
-        recipient::write_recipients(repo_path, recipients).await
+    async fn write_file_atomic(
+        &self,
+        repo_path: &Path,
+        rel_path: &str,
+        bytes: &[u8],
+    ) -> Result<(), Error> {
+        ensure_within_repo(rel_path)?;
+        let file_path = repo_path.join(rel_path);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        assert_within_repo(repo_path, file_path.parent().unwrap_or(Path::new("")))?;
+        write_atomic(&file_path, bytes).await
+    }
+
+    async fn list_dir(&self, repo_path: &Path, rel_prefix: &str) -> Result<Vec<String>, Error> {
+        ensure_within_repo(rel_prefix)?;
+        let dir = resolve_entry_path(repo_path, rel_prefix)?;
+        let mut out: Vec<String> = Vec::new();
+        let mut entries = fs::read_dir(&dir).await.map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                Error::new(ErrorCode::EntryNotFound, format!("Not found: {rel_prefix}"))
+            }
+            _ => Error::new(ErrorCode::IoError, format!("Failed to list dir: {e}")),
+        })?;
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_type().await?.is_file() {
+                continue;
+            }
+            if let Some(name) = entry.file_name().to_str() {
+                // Return repo-relative paths (prefix + "/" + filename) — the
+                // form callers re-use in `read_file`.
+                out.push(format!("{rel_prefix}/{name}"));
+            }
+        }
+        Ok(out)
     }
 
     async fn lookup_template(&self, repo_path: &Path, name: &str) -> Result<Option<String>, Error> {
@@ -299,10 +340,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage = GitStorage;
         storage
-            .set(dir.path(), "cloud/aws", b"ciphertext-bytes")
+            .set(dir.path(), "cloud/aws.age", b"ciphertext-bytes")
             .await
             .unwrap();
-        let got = storage.get(dir.path(), "cloud/aws").await.unwrap();
+        let got = storage.get(dir.path(), "cloud/aws.age").await.unwrap();
         assert_eq!(got, b"ciphertext-bytes");
     }
 
@@ -314,12 +355,12 @@ mod tests {
         // runs — so no directory is created outside the repo, and the error is
         // the within-repo rejection (ENTRY_NOT_FOUND), not an I/O error.
         let err = storage
-            .set(dir.path(), "../escape", b"x")
+            .set(dir.path(), "../escape.age", b"x")
             .await
             .unwrap_err();
         assert_eq!(err.code, "ENTRY_NOT_FOUND");
         let err = storage
-            .set(dir.path(), "legit/../escape", b"x")
+            .set(dir.path(), "legit/../escape.age", b"x")
             .await
             .unwrap_err();
         assert_eq!(err.code, "ENTRY_NOT_FOUND");
@@ -330,12 +371,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage = GitStorage;
         assert_eq!(
-            storage.get(dir.path(), "../escape").await.unwrap_err().code,
+            storage
+                .get(dir.path(), "../escape.age")
+                .await
+                .unwrap_err()
+                .code,
             "ENTRY_NOT_FOUND"
         );
         assert_eq!(
             storage
-                .delete(dir.path(), "../escape")
+                .delete(dir.path(), "../escape.age")
                 .await
                 .unwrap_err()
                 .code,
@@ -347,7 +392,156 @@ mod tests {
     async fn delete_missing_returns_entry_not_found() {
         let dir = tempfile::tempdir().unwrap();
         let storage = GitStorage;
-        let err = storage.delete(dir.path(), "nope").await.unwrap_err();
+        let err = storage.delete(dir.path(), "nope.age").await.unwrap_err();
         assert_eq!(err.code, "ENTRY_NOT_FOUND");
+    }
+
+    /// The recipients-index read/write path now goes through the generic file
+    /// ops (storage owns the bytes; crypto owns the format). Round-trips through
+    /// `write_file_atomic` + `read_file`, not the dropped
+    /// `list_recipients`/`write_recipients` pair.
+    #[tokio::test]
+    async fn write_file_atomic_then_read_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        storage
+            .write_file_atomic(dir.path(), ".age-recipients", b"age1abc\n")
+            .await
+            .unwrap();
+        let got = storage
+            .read_file(dir.path(), ".age-recipients")
+            .await
+            .unwrap();
+        assert_eq!(got, b"age1abc\n");
+    }
+
+    /// `read_file` returns `EntryNotFound` for a missing file — the no-TOCTOU
+    /// contract (no separate `exists` step the caller could race).
+    #[tokio::test]
+    async fn read_file_missing_returns_entry_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        let err = storage
+            .read_file(dir.path(), ".age-recipients")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+    }
+
+    /// Plumbing proof (learning: behavior-preserving-refactor-plumbing-test):
+    /// `list(ext)` actually filters on the extension — a `.gpg` file is NOT
+    /// returned when `ext` is `.age`. An all-`.age` fixture set would pass even
+    /// if `ext` were silently ignored, so this negative case is what proves the
+    /// plumbing carries the extension through.
+    #[tokio::test]
+    #[allow(clippy::indexing_slicing)]
+    async fn list_extension_filter_excludes_other_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        storage
+            .set(dir.path(), "age-entry.age", b"x")
+            .await
+            .unwrap();
+        storage
+            .write_file_atomic(dir.path(), "gpg-entry.gpg", b"x")
+            .await
+            .unwrap();
+        let entries = storage.list(dir.path(), SecretExt::AGE).await.unwrap();
+        assert_eq!(
+            entries.len(),
+            1,
+            ".gpg must be excluded when listing with ext=.age"
+        );
+        assert_eq!(entries[0].name, "age-entry");
+    }
+
+    /// `list_dir` returns repo-relative paths (`prefix/<name>`) for files under
+    /// the prefix, non-recursive — subdirectories are skipped, not descended.
+    #[tokio::test]
+    async fn list_dir_returns_repo_relative_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        storage
+            .write_file_atomic(dir.path(), "pk/a", b"x")
+            .await
+            .unwrap();
+        storage
+            .write_file_atomic(dir.path(), "pk/b", b"x")
+            .await
+            .unwrap();
+        std::fs::create_dir(dir.path().join("pk/sub")).unwrap();
+        let mut got = storage.list_dir(dir.path(), "pk").await.unwrap();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["pk/a", "pk/b"],
+            "files only, repo-relative; subdirs skipped"
+        );
+    }
+
+    /// `list_dir` rejects a `..` prefix lexically before any fs op, matching the
+    /// within-repo guard the other storage methods apply.
+    #[tokio::test]
+    async fn list_dir_rejects_path_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        assert_eq!(
+            storage
+                .list_dir(dir.path(), "../escape")
+                .await
+                .unwrap_err()
+                .code,
+            "ENTRY_NOT_FOUND"
+        );
+    }
+
+    /// `read_file`'s generic surface rejects a `..` path — the recipients-index
+    /// and auxiliary-file read path, not just the `get`/`set`/`delete` secret
+    /// paths already covered above.
+    #[tokio::test]
+    async fn read_file_rejects_path_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        assert_eq!(
+            storage
+                .read_file(dir.path(), "../escape")
+                .await
+                .unwrap_err()
+                .code,
+            "ENTRY_NOT_FOUND"
+        );
+    }
+
+    /// `write_file_atomic`'s generic surface rejects a `..` path — the
+    /// recipients write path (and `.public-keys/` in Phase 3), not just `set`.
+    #[tokio::test]
+    async fn write_file_atomic_rejects_path_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        assert_eq!(
+            storage
+                .write_file_atomic(dir.path(), "../escape", b"x")
+                .await
+                .unwrap_err()
+                .code,
+            "ENTRY_NOT_FOUND"
+        );
+    }
+
+    /// `RepoFiles<'a>` adapts `&dyn StorageBackend` + `repo_path` into the
+    /// [`RepoFileView`] the crypto backend consumes (Phase 1.2+). Pins the wiring
+    /// + the borrow-lifetime invariant while the seam has no production caller.
+    #[tokio::test]
+    async fn repo_files_view_round_trips_through_storage() {
+        use crate::storage::{RepoFileView, RepoFiles};
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        storage
+            .write_file_atomic(dir.path(), ".age-recipients", b"age1abc\n")
+            .await
+            .unwrap();
+        let view = RepoFiles::new(&storage, dir.path());
+        let v: &dyn RepoFileView = &view;
+        assert_eq!(v.read(".age-recipients").await.unwrap(), b"age1abc\n");
     }
 }

@@ -27,9 +27,9 @@ use std::sync::atomic::AtomicBool;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::crypto::SecretExt;
 use crate::entry::Entry;
 use crate::error::Error;
-use crate::recipient::Recipient;
 use crate::signing::{AuthenticityConfig, CommitSigInfo, VerifyMode};
 
 /// The git storage backend (the sole `StorageBackend` implementation today).
@@ -197,23 +197,28 @@ pub enum CommitKind {
 /// setup/teardown, not content access.
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    /// List every `.age` entry under `repo_path` (alpha-sorted, `.git` skipped).
+    /// List every secret entry under `repo_path` whose extension is `ext`
+    /// (alpha-sorted, `.git` skipped). `ext` is the crypto backend's typed
+    /// [`SecretExt`](crate::crypto::SecretExt) — storage is extension-agnostic
+    /// and matches whatever the caller passes.
     ///
     /// # Errors
     ///
     /// Returns [`crate::error::ErrorCode::NoRepo`] if `repo_path` doesn't exist.
-    async fn list(&self, repo_path: &Path) -> Result<Vec<Entry>, Error>;
+    async fn list(&self, repo_path: &Path, ext: SecretExt) -> Result<Vec<Entry>, Error>;
 
-    /// Read the `.age` bytes for entry `name`.
+    /// Read the bytes of a secret's `passfile` (a repo-relative path like
+    /// `cloud/aws.age`). The caller builds `passfile` from the crypto backend's
+    /// extension; storage never names an extension itself, so it can't typo one.
     ///
     /// # Errors
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if the entry is missing or the
     /// resolved path escapes the repo; [`crate::error::ErrorCode::IoError`] on a
     /// read failure.
-    async fn get(&self, repo_path: &Path, name: &str) -> Result<Vec<u8>, Error>;
+    async fn get(&self, repo_path: &Path, passfile: &str) -> Result<Vec<u8>, Error>;
 
-    /// Atomically write `ciphertext` to `<repo>/<name>.age`, creating parent
+    /// Atomically write `ciphertext` to `<repo>/<passfile>`, creating parent
     /// directories. Temp-file + rename so a failure can't leave a half-written
     /// secret behind.
     ///
@@ -221,34 +226,52 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if the resolved path escapes
     /// the repo; otherwise an I/O error.
-    async fn set(&self, repo_path: &Path, name: &str, ciphertext: &[u8]) -> Result<(), Error>;
+    async fn set(&self, repo_path: &Path, passfile: &str, ciphertext: &[u8]) -> Result<(), Error>;
 
-    /// Remove entry `name`'s `.age` file.
+    /// Remove entry `passfile`.
     ///
     /// # Errors
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if missing or the path escapes
     /// the repo; otherwise an I/O error.
-    async fn delete(&self, repo_path: &Path, name: &str) -> Result<(), Error>;
+    async fn delete(&self, repo_path: &Path, passfile: &str) -> Result<(), Error>;
 
-    /// Read + parse the store's `.age-recipients` recipients file. **Temporary
-    /// surface** — recipients semantics
-    /// stay in `crypto` (crypto owns the semantics; storage owns the file);
-    /// this returns the parsed list for now and moves to raw bytes when a second
-    /// backend informs the split.
+    /// Read an arbitrary repo-relative file (`.age-recipients`, `.gpg-id`,
+    /// `.public-keys/<fpr>`, …) — the recipients index and any crypto-owned
+    /// auxiliary files. **No `exists` step** — returns
+    /// [`crate::error::ErrorCode::EntryNotFound`] for a missing file, avoiding
+    /// the exists-then-read TOCTOU that could silently shrink the recipient set.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file exists but can't be read.
-    async fn list_recipients(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error>;
+    /// [`crate::error::ErrorCode::EntryNotFound`] if missing or the path escapes
+    /// the repo; [`crate::error::ErrorCode::IoError`] on a read failure.
+    async fn read_file(&self, repo_path: &Path, rel_path: &str) -> Result<Vec<u8>, Error>;
 
-    /// Write `recipients` to `<repo>/.age-recipients` atomically.
+    /// Atomically write `bytes` to an arbitrary repo-relative file, creating
+    /// parent directories. The recipients-index write path (setup / add
+    /// recipient) and `.public-keys/<fpr>` writes go through here.
     ///
     /// # Errors
     ///
-    /// Returns an error if the directory can't be created or the file can't be
-    /// written.
-    async fn write_recipients(&self, repo_path: &Path, recipients: &[String]) -> Result<(), Error>;
+    /// [`crate::error::ErrorCode::EntryNotFound`] if the path escapes the repo;
+    /// otherwise an I/O error.
+    async fn write_file_atomic(
+        &self,
+        repo_path: &Path,
+        rel_path: &str,
+        bytes: &[u8],
+    ) -> Result<(), Error>;
+
+    /// List repo-relative file paths under `rel_prefix` (non-recursive), for
+    /// enumerating a crypto-owned directory such as GPG's `.public-keys/`.
+    /// Returns relative paths including the prefix.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::ErrorCode::EntryNotFound`] if the prefix is missing or
+    /// escapes the repo; otherwise an I/O error.
+    async fn list_dir(&self, repo_path: &Path, rel_prefix: &str) -> Result<Vec<String>, Error>;
 
     /// Look up the `.pass-template` that applies to `name`, walking up the tree
     /// (gopass `LookupTemplate`). `Ok(None)` when no template applies.
@@ -406,6 +429,53 @@ pub trait StorageBackend: Send + Sync {
     /// [`ErrorCode::NoRepo`] if no repo at `repo_path`;
     /// [`ErrorCode::PullFfFailed`] if HEAD is unborn.
     async fn current_head(&self, repo_path: &Path) -> Result<String, Error>;
+}
+
+/// Read-only view of repo working-tree files, bound to a specific `repo_path`.
+///
+/// Built by `Store` per-op and passed to the crypto backend (which has no other
+/// way to name repo files — it knows nothing of `repo_path`). The crypto
+/// backend's recipient resolution (age reads the recipients index; GPG reads
+/// `.gpg-id` + enumerates `.public-keys/`) goes through this. Writes do NOT —
+/// those stay `Store` → [`StorageBackend::write_file_atomic`] so storage keeps
+/// its exclusive-write invariant.
+#[async_trait]
+pub trait RepoFileView: Send + Sync {
+    /// Read a repo-relative file. Returns
+    /// [`ErrorCode::EntryNotFound`](crate::error::ErrorCode) for a missing file
+    /// — no `exists`-then-`read` race.
+    async fn read(&self, rel_path: &str) -> Result<Vec<u8>, Error>;
+    /// List repo-relative paths under `rel_prefix` (non-recursive).
+    async fn list_dir(&self, rel_prefix: &str) -> Result<Vec<String>, Error>;
+}
+
+/// A [`RepoFileView`] bound to `storage` at `repo_path`.
+///
+/// `Store` constructs one per-op (cheap — two borrows) and hands
+/// `&RepoFiles as &dyn RepoFileView` to the crypto backend. Borrowed over `'a`,
+/// so the caller must hold `storage` + `repo_path` across the await (Store
+/// does — it owns both for the op's lifetime).
+#[allow(missing_debug_implementations)]
+pub struct RepoFiles<'a> {
+    storage: &'a dyn StorageBackend,
+    repo_path: &'a Path,
+}
+
+impl<'a> RepoFiles<'a> {
+    /// Bind a read-only file view to `storage` at `repo_path`.
+    pub fn new(storage: &'a dyn StorageBackend, repo_path: &'a Path) -> Self {
+        RepoFiles { storage, repo_path }
+    }
+}
+
+#[async_trait]
+impl RepoFileView for RepoFiles<'_> {
+    async fn read(&self, rel_path: &str) -> Result<Vec<u8>, Error> {
+        self.storage.read_file(self.repo_path, rel_path).await
+    }
+    async fn list_dir(&self, rel_prefix: &str) -> Result<Vec<String>, Error> {
+        self.storage.list_dir(self.repo_path, rel_prefix).await
+    }
 }
 
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.

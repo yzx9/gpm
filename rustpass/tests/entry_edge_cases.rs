@@ -5,13 +5,14 @@
 mod common;
 
 use common::*;
+use rustpass::crypto::SecretExt;
 use rustpass::store;
 
 /// Empty store directory (no files at all) should return empty list.
 #[test]
 fn list_empty_directory() {
     let dir = tempfile::tempdir().unwrap();
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert!(
         entries.is_empty(),
         "empty directory should return no entries"
@@ -27,7 +28,7 @@ fn list_deeply_nested_entries() {
         &recipient,
     );
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "a/b/c/d/e/f/secret");
 }
@@ -41,7 +42,7 @@ fn list_mixed_extensions() {
     std::fs::write(dir.path().join("data.json"), b"{}").unwrap();
     std::fs::write(dir.path().join("backup.gpg"), b"gpg data").unwrap();
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "valid");
 }
@@ -59,7 +60,7 @@ fn list_special_characters_in_names() {
         &recipient,
     );
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 3);
     assert!(entries.iter().any(|e| e.name == "my entry"));
     assert!(entries.iter().any(|e| e.name == "with-dash"));
@@ -79,7 +80,7 @@ fn list_unicode_filenames() {
         &recipient,
     );
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 3);
     assert!(entries.iter().any(|e| e.name == "日本語/銀行"));
     assert!(entries.iter().any(|e| e.name == "中文/密码"));
@@ -101,7 +102,7 @@ fn list_many_entries_sorted() {
         std::fs::write(&file_path, encrypted).unwrap();
     }
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 120);
 
     // Verify sorted order (case-insensitive)
@@ -128,7 +129,7 @@ fn list_includes_hidden_directories() {
         &recipient,
     );
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     // .hidden directory entries should be included (gopass behavior)
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().any(|e| e.name == ".hidden/secret"));
@@ -143,7 +144,7 @@ fn list_skips_age_recipients_file() {
     // Write a .age-recipients file (gopass metadata, not an entry)
     std::fs::write(dir.path().join(".age-recipients"), "age1abc123...").unwrap();
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "real");
 }

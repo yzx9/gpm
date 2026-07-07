@@ -14,8 +14,8 @@ use age::x25519::{Identity, Recipient};
 use rustpass::{SyncOutcome, SyncResult};
 
 /// The recipients filename integration tests seed (gopass's `.age-recipients`).
-/// One test-side source of truth so fixtures cannot drift from the filename
-/// `rustpass::recipient::list_recipients` actually reads.
+/// One test-side source of truth so fixtures cannot drift from the filename the
+/// age crypto backend's `profile().recipients_filename` returns.
 pub const TEST_RECIPIENTS_FILE: &str = ".age-recipients";
 
 /// Unwrap a [`SyncOutcome::FastForwarded`] to its inner [`SyncResult`],

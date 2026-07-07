@@ -20,23 +20,29 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use walkdir::WalkDir;
 
+use crate::crypto::SecretExt;
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 
-/// Walk a gopass store directory and return all `.age` entries.
+/// Walk a gopass store directory and return all entries with the `ext`
+/// extension (`.age` / `.gpg` — the crypto backend's secret extension).
 ///
-/// Skips the `.git` directory. Only returns files with a `.age` extension.
+/// Skips the `.git` directory. Only returns files whose extension matches `ext`.
 ///
 /// # Errors
 ///
 /// Returns an error if the repository path does not exist.
-pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, Error> {
+pub fn list_entries(repo_path: &Path, ext: SecretExt) -> Result<Vec<Entry>, Error> {
     if !repo_path.exists() {
         return Err(Error::new(
             ErrorCode::NoRepo,
             "Repository path does not exist",
         ));
     }
+    // `ext` is the backend's typed SecretExt; the file-extension comparison is
+    // dotless + ASCII-case.
+    let s = ext.as_str();
+    let want = s.trim_start_matches('.').to_ascii_lowercase();
 
     let mut entries: Vec<Entry> = WalkDir::new(repo_path)
         .into_iter()
@@ -46,14 +52,14 @@ pub fn list_entries(repo_path: &Path) -> Result<Vec<Entry>, Error> {
             e.file_name().to_str().is_some_and(|name| {
                 Path::new(name)
                     .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
+                    .is_some_and(|x| x.eq_ignore_ascii_case(&want))
             })
         })
         .filter(|e| !e.path().components().any(|c| c.as_os_str() == ".git"))
         .filter_map(|e| {
             let rel = e.path().strip_prefix(repo_path).ok()?;
             let rel_str = rel.to_str()?.to_string();
-            let name = rel_str.trim_end_matches(".age").to_string();
+            let name = rel_str.trim_end_matches(s).to_string();
             Some(Entry {
                 path: rel_str,
                 name,
@@ -138,12 +144,31 @@ pub(super) fn ensure_within_repo(passfile: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Atomic write: write to a temp file beside the target, then rename over it.
-///
-/// Mirrors [`Config`'s](crate::config::Config) atomic write so a failed write
-/// can never leave a half-written ciphertext behind.
+/// Build a temp-file path beside `target` with an unpredictable suffix, in the
+/// same parent so the rename onto `target` stays atomic (same filesystem). The
+/// random suffix means a malicious clone can't pre-plant this exact path as a
+/// symlink — a path-derived `.tmp` name is predictable, and `fs::write` follows
+/// a symlink planted there, writing outside the repo — and two concurrent
+/// writes to the same target can't collide on one temp name.
+pub(super) fn random_temp_sibling(target: &Path) -> PathBuf {
+    let suffix = rand::random::<u64>();
+    let name = match target.file_name() {
+        Some(n) => format!("{}.tmp.{suffix}", n.to_string_lossy()),
+        None => format!(".tmp.{suffix}"),
+    };
+    match target.parent() {
+        Some(parent) => parent.join(name),
+        None => PathBuf::from(name),
+    }
+}
+
+/// Atomic write: write to a randomly-named temp file beside the target, then
+/// rename over it. Mirrors [`Config`'s](crate::config::Config) atomic write so a
+/// failed write can never leave a half-written ciphertext behind; the temp name
+/// is randomized (see [`random_temp_sibling`]) so it can't be pre-planted as a
+/// symlink or collide with a concurrent write.
 pub(super) async fn write_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
-    let temp_path = path.with_extension("tmp");
+    let temp_path = random_temp_sibling(path);
     fs::write(&temp_path, data).await?;
     fs::rename(&temp_path, path).await?;
     Ok(())
@@ -151,16 +176,35 @@ pub(super) async fn write_atomic(path: &Path, data: &[u8]) -> Result<(), Error> 
 
 /// The on-disk relative path for a secret named `name` (gopass `passfile`).
 ///
-/// A leading `/` is stripped; if the name already ends in `.age` it is kept
-/// as-is, otherwise `.age` is appended. Matches the resolution `get` uses.
-pub(crate) fn passfile_rel(name: &str) -> String {
+/// A leading `/` is stripped; if the name already ends in `ext`
+/// (ASCII-case-insensitive, matching the legacy `eq_ignore_ascii_case("age")`
+/// behavior so `set("foo.AGE")` round-trips instead of producing a stray
+/// `foo.AGE.age`) it is kept as-is, otherwise `ext` is appended. `ext` is the
+/// crypto backend's secret extension (`.age` / `.gpg`). Matches the resolution
+/// `get` uses.
+pub(crate) fn passfile_rel(name: &str, ext: SecretExt) -> String {
     let name = name.trim_start_matches('/');
-    if Path::new(name)
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("age"))
-    {
+    let s = ext.as_str();
+    if name.to_ascii_lowercase().ends_with(&s.to_ascii_lowercase()) {
         name.to_string()
     } else {
-        format!("{name}.age")
+        format!("{name}{s}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: `passfile_rel` extension match stays ASCII-case-insensitive
+    /// (the legacy `eq_ignore_ascii_case("age")` behavior), so a name already
+    /// ending in `.AGE` is kept as-is rather than producing a stray `.age`
+    /// append that would break `get` round-trips.
+    #[test]
+    fn passfile_rel_case_insensitive_extension_match() {
+        assert_eq!(passfile_rel("foo.AGE", SecretExt::AGE), "foo.AGE");
+        assert_eq!(passfile_rel("foo.age", SecretExt::AGE), "foo.age");
+        assert_eq!(passfile_rel("foo", SecretExt::AGE), "foo.age");
+        assert_eq!(passfile_rel("dir/up.AGE", SecretExt::AGE), "dir/up.AGE");
     }
 }

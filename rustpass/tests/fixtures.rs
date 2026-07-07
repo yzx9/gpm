@@ -25,7 +25,7 @@ fn test_list_entries_finds_age_files() {
         &recipient,
     );
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 3);
     assert!(entries.iter().any(|e| e.name == "gmail/personal"));
     assert!(entries.iter().any(|e| e.name == "work/vpn"));
@@ -39,7 +39,7 @@ fn test_list_entries_skips_gpg_files() {
     // Add a .gpg file
     std::fs::write(dir.path().join("legacy.gpg"), b"encrypted-gpg-data").unwrap();
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "valid");
 }
@@ -52,7 +52,7 @@ fn test_list_entries_skips_git_dir() {
     std::fs::create_dir_all(dir.path().join(".git")).unwrap();
     std::fs::write(dir.path().join(".git/config.age"), b"should-be-skipped").unwrap();
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "real");
 }
@@ -68,7 +68,7 @@ fn test_list_entries_nested_paths() {
         &recipient,
     );
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().any(|e| e.path == "cloud/aws/root.age"));
     assert!(entries.iter().any(|e| e.path == "cloud/gcp/admin.age"));
@@ -82,7 +82,7 @@ fn test_list_entries_sorted_case_insensitive() {
         &recipient,
     );
 
-    let entries = store::list_entries(dir.path()).unwrap();
+    let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();
     assert_eq!(entries[0].name, "alpha");
     assert_eq!(entries[1].name, "Beta");
     assert_eq!(entries[2].name, "Zebra");

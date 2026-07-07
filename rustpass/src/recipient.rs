@@ -2,22 +2,24 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Recipient discovery and identity validation for age-encrypted stores.
+//! Recipient parsing/serialization and identity validation for age-encrypted
+//! stores.
 //!
-//! Reads the `.age-recipients` file from a cloned repository and provides
-//! utilities to validate that an age identity matches a known recipient.
+//! Pure bytes-in/bytes-out over the recipients-index format — file I/O lives in
+//! the storage layer ([`StorageBackend`](crate::storage::StorageBackend)'s
+//! `read_file` / `write_file_atomic`); this module consumes already-read bytes.
+//! Also provides utilities to validate that an age identity matches a known
+//! recipient.
 //!
 //! Supports both native x25519 age keys (`age1...` / `AGE-SECRET-KEY-...`)
 //! and SSH keys (`ssh-ed25519` / `ssh-rsa` as recipients, OpenSSH private
 //! keys as identities).
 
 use std::io::BufReader;
-use std::path::Path;
 use std::str::FromStr;
 
 use age::{ssh, x25519};
 use serde::Serialize;
-use tokio::fs;
 
 use crate::error::{Error, ErrorCode};
 
@@ -59,80 +61,30 @@ pub struct Recipient {
     pub key_type: KeyType,
 }
 
-/// The gopass age-backend recipient-list filename — the single file gopass
-/// reads and writes for an age store (its `crypto.IDFile()`, `.age-recipients`).
-/// `list_recipients` reads it, `write_recipients` writes it (target + temp),
-/// and store init commits it. One source of truth so the filename cannot drift
-/// across the read/write/commit sites.
-pub(crate) const RECIPIENTS_FILE: &str = ".age-recipients";
-
-/// Read recipients from a cloned gopass repository's `.age-recipients` file.
-///
-/// Returns an empty list if the file does not exist (an uninitialized store —
-/// the user can still proceed with setup).
-///
-/// # Errors
-///
-/// Returns an error if the file exists but cannot be read.
-pub async fn list_recipients(repo_path: &Path) -> Result<Vec<Recipient>, Error> {
-    let recipients_path = repo_path.join(RECIPIENTS_FILE);
-    // Read directly and treat "not found" as an uninitialized store, rather than
-    // checking exists() first. A check-then-read race could otherwise let a
-    // concurrent git pull land `.age-recipients` between the check and the read,
-    // silently shrinking the recipient set we encrypt the next secret to.
-    let content = match fs::read_to_string(&recipients_path).await {
-        Ok(content) => content,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(e.into()),
-    };
-    Ok(parse_recipients(&content))
-}
-
-/// Write `recipients` to `<repo_path>/.age-recipients`, one recipient per line.
-///
-/// This is the gopass-canonical init marker: a store counts as initialized iff
-/// this file exists at its root. The format is one recipient per line with a
-/// trailing newline — exactly what gopass and the bare `age` CLI expect.
-///
-/// For SSH recipients the string is the OpenSSH public key (`ssh-ed25519 …` /
-/// `ssh-rsa …`); [`parse_recipients`] discards any trailing inline comment, so a
-/// written SSH recipient round-trips through [`list_recipients`].
-///
-/// Written atomically (temp file + rename) so a failed write can never leave a
-/// half-written recipients file behind — which would corrupt the store's init
-/// marker.
-///
-/// # Errors
-///
-/// Returns an error if the repo directory cannot be created or the file cannot
-/// be written.
-pub async fn write_recipients(repo_path: &Path, recipients: &[String]) -> Result<(), Error> {
+/// Serialize `recipients` to the on-disk recipients-index format: one trimmed
+/// recipient per line, trailing newline — exactly what gopass and the bare `age`
+/// CLI expect, and what [`parse_recipients`] reads back. The file write itself
+/// (atomic, at the backend's `recipients_filename`) is the storage layer's job;
+/// this is the pure-bytes step so the crypto backend owns the format.
+#[must_use]
+pub fn serialize_recipients(recipients: &[String]) -> Vec<u8> {
     let mut content = String::new();
     for recipient in recipients {
         content.push_str(recipient.trim());
         content.push('\n');
     }
-
-    let target = repo_path.join(RECIPIENTS_FILE);
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-
-    let temp = repo_path.join(format!("{RECIPIENTS_FILE}.tmp"));
-    fs::write(&temp, content.as_bytes()).await?;
-    fs::rename(&temp, &target).await?;
-    Ok(())
+    content.into_bytes()
 }
 
-/// Parse recipients from file content.
-///
-/// Each line can be:
+/// Parse recipients from file content (the recipients-index bytes, already read
+/// by the storage layer). Pure — no file I/O. Each line can be:
 /// - An age public key (`age1...`), optionally followed by `# comment`
 /// - An SSH public key (`ssh-ed25519 ...` or `ssh-rsa ...`), optionally
 ///   followed by `# comment` or with an inline comment after the key data
 /// - A comment line starting with `#`
 /// - Empty (skipped)
-fn parse_recipients(content: &str) -> Vec<Recipient> {
+#[must_use]
+pub fn parse_recipients(content: &str) -> Vec<Recipient> {
     content
         .lines()
         .filter_map(|line| {
@@ -654,69 +606,27 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
         assert!(recipients.is_empty());
     }
 
-    #[tokio::test]
-    async fn list_recipients_from_age_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(".age-recipients"), "age1key1\n").unwrap();
-
-        let recipients = list_recipients(dir.path()).await.unwrap();
-        assert_eq!(recipients.len(), 1);
-    }
-
-    /// gopass uses `.age-recipients` only; a stray `.gopass-recipients` file
-    /// (which neither gopass nor gpm ever writes) must be ignored, not honored
-    /// as a recipient source. Seeding only that file reads as an uninitialized
-    /// store, matching gopass.
-    #[tokio::test]
-    async fn list_recipients_ignores_gopass_recipients_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(".gopass-recipients"),
-            "age1key1 # Alice\nage1key2\n",
-        )
-        .unwrap();
-
-        let recipients = list_recipients(dir.path()).await.unwrap();
-        assert!(recipients.is_empty());
-    }
-
-    /// With both files present, `.age-recipients` (the gopass-canonical name)
-    /// wins and `.gopass-recipients` is ignored — gpm never honors the fallback.
-    #[tokio::test]
-    async fn list_recipients_reads_age_recipients_when_both_present() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(".gopass-recipients"), "age1gopass\n").unwrap();
-        std::fs::write(dir.path().join(".age-recipients"), "age1age\n").unwrap();
-
-        let recipients = list_recipients(dir.path()).await.unwrap();
-        assert_eq!(recipients.len(), 1);
-        assert_eq!(recipients.first().unwrap().public_key, "age1age");
-    }
-
-    #[tokio::test]
-    async fn list_recipients_no_file_returns_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let recipients = list_recipients(dir.path()).await.unwrap();
-        assert!(recipients.is_empty());
-    }
-
-    #[tokio::test]
+    /// `serialize_recipients` → `parse_recipients` round-trips age + SSH
+    /// recipients, preserving the SSH inline comment. Pure (no file I/O — that
+    /// is storage's job now); the file selection / no-fallback behavior the old
+    /// `list_recipients` tests covered is structural now (Store reads exactly the
+    /// backend's `recipients_filename`, no fallback path exists).
+    #[test]
     #[allow(clippy::indexing_slicing)]
-    async fn write_recipients_round_trips_through_list_recipients() {
-        let dir = tempfile::tempdir().unwrap();
+    fn serialize_parse_recipients_roundtrips() {
         let recipients = vec![
             "age1abcdefghijklmnopqrstuvwxyz".to_string(),
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsKLqeplhpW+uObz5dvMgjz1OxfM/XXUB+VHtZ6isGN alice@host"
                 .to_string(),
         ];
 
-        write_recipients(dir.path(), &recipients).await.unwrap();
-
-        let read_back = list_recipients(dir.path()).await.unwrap();
+        let bytes = serialize_recipients(&recipients);
+        let content = std::str::from_utf8(&bytes).unwrap();
+        let read_back = parse_recipients(content);
         assert_eq!(
             read_back.len(),
             2,
-            "both recipients must be written + parsed"
+            "both recipients must be serialized + parsed"
         );
         assert_eq!(read_back[0].public_key, "age1abcdefghijklmnopqrstuvwxyz");
         assert_eq!(read_back[0].key_type, KeyType::X25519);
@@ -725,21 +635,6 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
         assert!(read_back[1].public_key.starts_with("ssh-ed25519 "));
         // The trailing inline comment is parsed back as the recipient's comment.
         assert_eq!(read_back[1].comment.as_deref(), Some("alice@host"));
-    }
-
-    #[tokio::test]
-    #[allow(clippy::indexing_slicing)]
-    async fn write_recipients_overwrites_existing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(".age-recipients"), "age1stale\n").unwrap();
-
-        write_recipients(dir.path(), &["age1fresh".to_string()])
-            .await
-            .unwrap();
-
-        let read_back = list_recipients(dir.path()).await.unwrap();
-        assert_eq!(read_back.len(), 1);
-        assert_eq!(read_back[0].public_key, "age1fresh");
     }
 
     #[test]

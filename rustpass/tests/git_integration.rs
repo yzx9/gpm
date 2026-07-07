@@ -235,7 +235,8 @@ async fn full_workflow_clone_list_decrypt() {
         .await
         .expect("clone should succeed");
 
-    let found = store::list_entries(dest.path()).expect("list_entries should succeed");
+    let found = store::list_entries(dest.path(), rustpass::crypto::SecretExt::AGE)
+        .expect("list_entries should succeed");
     assert_eq!(
         found.len(),
         entries.len(),

@@ -9,9 +9,11 @@
 //! implementation today is [`AgeBackend`] (in [`age`]); `Store` holds a
 //! `Box<dyn CryptoBackend>` and never touches the age library directly.
 //!
-//! Recipients *file* I/O (`list_recipients` / `write_recipients`) lives on the
-//! [`StorageBackend`](crate::storage::StorageBackend), not here — crypto owns
-//! recipient *semantics*, storage owns the recipients file.
+//! Recipients *file* I/O is generic file I/O on
+//! [`StorageBackend`](crate::storage::StorageBackend) (`read_file` /
+//! `write_file_atomic`), not specific recipient methods — crypto owns the
+//! recipient *format* (serialize/parse), storage owns the file. The parsed
+//! recipients view is [`Store::list_recipients`].
 //!
 //! For now the age functions are also re-exported here so existing `crypto::`
 //! callers (the Tauri command layer's `generate_age_identity`, the seal
@@ -37,6 +39,70 @@ pub mod openpgp;
 // `Config` layer). `Store` itself routes through `AgeBackend`, not these.
 pub use age::*;
 
+// ── Per-backend profile ───────────────────────────────────────────────────
+
+/// Which crypto backend a store uses. Phase 0-1 has only [`BackendKind::Age`]
+/// (hardwired in `Store::new`); Phase 3 persists this in `repo.json` for
+/// construction-time selection — which requires late binding, because the
+/// master key is withheld until app unlock so sealed `repo.json` is unreadable
+/// at `Store::new`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendKind {
+    /// The age (X25519 / SSH) crypto backend — the sole implementation today.
+    Age,
+    /// The GPG/OpenPGP crypto backend (RFC 0036; lands once the trait reshape
+    /// is in). `#[allow(dead_code)]` until `GpgBackend` exists.
+    #[allow(dead_code)]
+    Gpg,
+}
+
+/// A crypto backend's secret-file extension — a typed wrapper so a bare
+/// `".age"` string can't be typo'd at a storage call site. Constructed from a
+/// [`CryptoProfile`] (`profile.secret_extension`) or a well-known const
+/// ([`SecretExt::AGE`]); there is no public string constructor, so the on-disk
+/// value stays the backend's single source of truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SecretExt(&'static str);
+
+impl SecretExt {
+    /// The age secret extension (`.age`). The canonical age value —
+    /// [`AgeBackend::profile`] reuses this so the on-disk extension has one
+    /// source. Tests reference this const instead of a raw string.
+    pub const AGE: Self = Self(".age");
+
+    /// The dotted extension, e.g. `.age` / `.gpg`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+/// Per-backend storage-facing naming properties (gopass `crypto` profile).
+///
+/// Grouped behind [`CryptoBackend::profile`] so storage consumes one struct
+/// rather than N accessors, and so a second backend's naming (`.gpg`,
+/// `.gpg-id`, `.public-keys/`) lands in one place (RFC 0036). Runtime state
+/// (held identity, keyring) lives on the backend struct, never here.
+#[derive(Debug, Clone, Copy)]
+pub struct CryptoProfile {
+    /// Which backend this is.
+    pub backend_kind: BackendKind,
+    /// Secret-file extension (`.age` / `.gpg`), typed so a bare string can't be
+    /// typo'd at a storage call site.
+    pub secret_extension: SecretExt,
+    /// Recipients-index filename — gopass `crypto.IDFile()`
+    /// (`.age-recipients` / `.gpg-id`).
+    pub recipients_filename: &'static str,
+    /// Armored-recipient pubkey directory (GPG's `.public-keys/`); `None` for
+    /// backends whose recipient strings are self-describing (age).
+    pub public_keys_dir: Option<&'static str>,
+}
+
+/// The age backend's recipients-index filename — gopass's canonical name.
+/// Referenced by [`AgeBackend::profile`] so it is the single source of truth
+/// (production code + in-crate tests cannot drift).
+pub(crate) const RECIPIENTS_FILE: &str = ".age-recipients";
+
 /// Swappable crypto backend (gopass `internal/backend/crypto.go` analogue).
 ///
 /// Owns everything age-specific: encrypt/decrypt, recipient derivation, and
@@ -51,6 +117,12 @@ pub use age::*;
 /// [`CryptoBackend::is_ssh_identity_encrypted`]) stay synchronous.
 #[async_trait]
 pub trait CryptoBackend: Send + Sync {
+    /// Per-backend storage-facing naming (extension, recipients filename,
+    /// `.public-keys/` dir, kind). Storage consumes this to map entry names to
+    /// `<name><ext>` and to locate the recipients index — kept on the backend
+    /// (not the facade) so each backend owns its on-disk format.
+    fn profile(&self) -> CryptoProfile;
+
     /// Encrypt `plaintext` to every recipient in `recipients`, returning binary
     /// (unarmored) age ciphertext — the on-disk gopass secret format.
     ///
@@ -145,6 +217,15 @@ impl CryptoBackend for AgeBackend {
     // fn, NOT this trait method — methods need a `self.` receiver — so these
     // are plain delegation, not recursion. Sync CPU work is wrapped in
     // `spawn_blocking`.
+
+    fn profile(&self) -> CryptoProfile {
+        CryptoProfile {
+            backend_kind: BackendKind::Age,
+            secret_extension: SecretExt::AGE,
+            recipients_filename: RECIPIENTS_FILE,
+            public_keys_dir: None,
+        }
+    }
 
     async fn encrypt_to_recipients(
         &self,

@@ -18,11 +18,11 @@ use tokio::task::spawn_blocking;
 use zeroize::Zeroizing;
 
 use crate::config::{Config, LockMode, RepoConfig};
-use crate::crypto::{AgeBackend, CryptoBackend};
+use crate::crypto::{AgeBackend, CryptoBackend, SecretExt};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity, validate_identity_format};
-use crate::recipient::{RECIPIENTS_FILE, Recipient};
+use crate::recipient::{Recipient, parse_recipients, serialize_recipients};
 use crate::secret::Secret;
 use crate::signing::{
     self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedGpgKey, TrustedKey, VerifyMode,
@@ -144,6 +144,96 @@ impl Store {
             cached_identity: RwLock::new(None),
             write_mu: Mutex::new(()),
         }
+    }
+
+    /// The crypto backend's typed secret-file extension (`.age` today; `.gpg`
+    /// once the GPG backend lands). Returned as [`SecretExt`] so a bare string
+    /// can't be typo'd at a storage call site. `Store` threads this into `list`
+    /// and builds passfile paths with it; `get`/`set`/`delete` take the built
+    /// passfile, so they never name an extension.
+    fn secret_ext(&self) -> SecretExt {
+        self.crypto.profile().secret_extension
+    }
+
+    /// The crypto backend's recipients-index filename (`.age-recipients` today).
+    fn recipients_file(&self) -> &'static str {
+        self.crypto.profile().recipients_filename
+    }
+
+    /// Read + parse the recipients index at `repo_path`. Returns empty for a
+    /// genuinely-missing file (an uninitialized store); every other failure is a
+    /// hard error.
+    ///
+    /// The index is `lstat`-checked first (without following symlinks) so a
+    /// symlink a malicious clone planted at the recipients path — dangling, or
+    /// pointing outside the checkout — is rejected as tampering rather than read
+    /// as "uninitialized." Treating such a plant as empty would make the encrypt
+    /// paths `ensureOurKeyID` and silently re-encrypt to only the local key,
+    /// shrinking the recipient set and pushing the result.
+    async fn read_recipients_raw(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error> {
+        let recipients_path = repo_path.join(self.recipients_file());
+        match fs::symlink_metadata(&recipients_path).await {
+            // The index is absent. Distinguish a genuine uninitialized store
+            // (the repo dir exists, just no recipients index yet → empty, so
+            // first-time setup proceeds) from a configured-but-missing checkout
+            // (repo_path itself gone → hard error). The latter must NOT read as
+            // empty, or `save_identity` would accept any identity against a
+            // store whose checkout it can't even see.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if fs::symlink_metadata(repo_path).await.is_err() {
+                    return Err(Error::new(
+                        ErrorCode::StoreError,
+                        "configured repository checkout is missing",
+                    ));
+                }
+                return Ok(Vec::new());
+            }
+            Err(e) => {
+                return Err(Error::new(
+                    ErrorCode::IoError,
+                    format!("Failed to read recipients index: {e}"),
+                ));
+            }
+            Ok(meta) => {
+                if !meta.is_file() {
+                    // A symlink (dangling or escaping), directory, or other
+                    // non-regular file is not a valid recipients index — reject
+                    // loudly. See the doc comment for why "empty" is unsafe here.
+                    return Err(Error::new(
+                        ErrorCode::StoreError,
+                        "recipients index is not a regular file — possible tampering",
+                    ));
+                }
+            }
+        }
+        // Regular file: read through storage (its within-repo guard still applies
+        // as defense-in-depth). Propagate a non-UTF-8 index as a hard error:
+        // parsing `""` → empty set would `ensureOurKeyID` to only our key and
+        // silently drop every other recipient on the next encrypt.
+        let bytes = self
+            .storage
+            .read_file(repo_path, self.recipients_file())
+            .await?;
+        let content = str::from_utf8(&bytes).map_err(|e| {
+            Error::new(
+                ErrorCode::StoreError,
+                format!("recipients index is not valid UTF-8: {e}"),
+            )
+        })?;
+        Ok(parse_recipients(content))
+    }
+
+    /// The recipient public-key strings at `repo_path` (read + parse + map).
+    /// The encrypt paths (`encrypt_and_write`, keep-mine re-encrypt) consume
+    /// `String` recipients; the pub [`list_recipients`](Self::list_recipients)
+    /// keeps the parsed [`Recipient`] for the UI.
+    async fn read_recipient_keys(&self, repo_path: &Path) -> Result<Vec<String>, Error> {
+        Ok(self
+            .read_recipients_raw(repo_path)
+            .await?
+            .into_iter()
+            .map(|r| r.public_key)
+            .collect())
     }
 
     /// Replace the seal master key at runtime. The app-launch biometric lock
@@ -458,12 +548,13 @@ impl Store {
         let bootstrap = async {
             self.storage.init_repo(&repo_dir).await?;
 
+            let recipients_bytes = serialize_recipients(&[recipient.to_string()]);
             self.storage
-                .write_recipients(&repo_dir, &[recipient.to_string()])
+                .write_file_atomic(&repo_dir, self.recipients_file(), &recipients_bytes)
                 .await?;
 
             let message = format!("Initialized Store for {recipient}");
-            let rel_paths = vec![RECIPIENTS_FILE.to_string()];
+            let rel_paths = vec![self.recipients_file().to_string()];
             self.storage
                 .commit_initial(&repo_dir, &rel_paths, &message)
                 .await?;
@@ -492,14 +583,17 @@ impl Store {
 
     /// Read recipients from the cloned repository.
     ///
+    /// Returns an empty list when the recipients index is absent (an
+    /// uninitialized store) — matching gopass, so setup can proceed.
+    ///
     /// # Errors
     ///
     /// Returns an error if the repo is not configured or the recipients file
-    /// cannot be read.
+    /// exists but cannot be read.
     pub async fn list_recipients(&self) -> Result<Vec<Recipient>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        self.storage.list_recipients(repo_path).await
+        self.read_recipients_raw(repo_path).await
     }
 
     /// Save the age identity.
@@ -539,7 +633,18 @@ impl Store {
             .crypto
             .identity_to_recipient(identity, recipient_passphrase)?;
 
-        let known_recipients = self.list_recipients().await.unwrap_or_default();
+        // Read the recipients to match the identity against. A tampered/corrupt
+        // index on a configured repo (symlink, non-UTF-8, I/O error) must FAIL
+        // here — the old `unwrap_or_default()` swallowed it to empty, skipping
+        // the match and accepting any pasted identity against a store whose
+        // recipients we could not actually read. The only tolerated case is
+        // NO_REPO (no store configured yet — nothing to match against); a
+        // genuine fresh store also reads as `Ok(empty)` (missing index).
+        let known_recipients = match self.list_recipients().await {
+            Ok(r) => r,
+            Err(e) if e.code == "NO_REPO" => Vec::new(),
+            Err(e) => return Err(e),
+        };
         if !known_recipients.is_empty() {
             let matches = known_recipients
                 .iter()
@@ -665,7 +770,7 @@ impl Store {
     pub async fn list(&self) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        self.storage.list(repo_path).await
+        self.storage.list(repo_path, self.secret_ext()).await
     }
 
     /// Fuzzy-search the configured repository's entries by `query`, ranked by
@@ -683,7 +788,7 @@ impl Store {
     pub async fn search(&self, query: &str) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage.list(&repo_path).await?;
+        let entries = self.storage.list(&repo_path, self.secret_ext()).await?;
         let q = query.to_string();
         Ok(spawn_blocking(move || rank_entries(entries, &q)).await?)
     }
@@ -707,7 +812,7 @@ impl Store {
     ) -> Result<RankedPage, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage.list(&repo_path).await?;
+        let entries = self.storage.list(&repo_path, self.secret_ext()).await?;
         let q = query.to_string();
         Ok(spawn_blocking(move || slice_page(rank_entries(entries, &q), offset, limit)).await?)
     }
@@ -737,7 +842,10 @@ impl Store {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
 
-        let encrypted = self.storage.get(repo_path, name).await?;
+        let encrypted = self
+            .storage
+            .get(repo_path, &passfile_rel(name, self.secret_ext()))
+            .await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let decrypted = self
             .crypto
@@ -804,12 +912,12 @@ impl Store {
     /// from the underlying remove/commit.
     pub async fn delete(&self, name: &str) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
-        let passfile = passfile_rel(name);
+        let passfile = passfile_rel(name, self.secret_ext());
         let rcs = self.rcs_ctx().await?;
 
         // Existence + within-repo guard + remove the worktree file. The index
         // removal is staged in the commit below.
-        self.storage.delete(&rcs.repo_path, name).await?;
+        self.storage.delete(&rcs.repo_path, &passfile).await?;
 
         let head = self
             .commit_local(
@@ -917,7 +1025,7 @@ impl Store {
         // Existence gate: a local typo guard so edit can't create a stray entry.
         // resolve_entry_path also guards path traversal (used identically by `get`
         // and `delete`). NOT a remote-state check.
-        resolve_entry_path(&repo_path, &passfile_rel(name))?;
+        resolve_entry_path(&repo_path, &passfile_rel(name, self.secret_ext()))?;
         // Raw write primitive (no template), local-only via `set`.
         self.set(name, plaintext).await
     }
@@ -1032,13 +1140,7 @@ impl Store {
 
         // 4. Re-encrypt to the CURRENT (remote-tip) recipients + our own key
         //    (our_recipient derived once during decrypt, above).
-        let mut recipients: Vec<String> = self
-            .storage
-            .list_recipients(&rcs.repo_path)
-            .await?
-            .into_iter()
-            .map(|r| r.public_key)
-            .collect();
+        let mut recipients: Vec<String> = self.read_recipient_keys(&rcs.repo_path).await?;
         if !recipients.contains(&our_recipient) {
             recipients.push(our_recipient);
         }
@@ -1201,16 +1303,14 @@ impl Store {
         plaintext: &[u8],
         repo_path: &Path,
     ) -> Result<String, Error> {
-        let passfile = passfile_rel(name);
+        let passfile = passfile_rel(name, self.secret_ext());
 
         // Recipients: everyone in the store, plus our own key (ensureOurKeyID).
-        let recipients = self.storage.list_recipients(repo_path).await?;
+        let mut recipients_str: Vec<String> = self.read_recipient_keys(repo_path).await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let identity_str = str::from_utf8(&identity_bytes)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
         let our_recipient = self.crypto.identity_to_recipient(identity_str, None)?;
-        let mut recipients_str: Vec<String> =
-            recipients.iter().map(|r| r.public_key.clone()).collect();
         if !recipients_str.iter().any(|r| r == &our_recipient) {
             recipients_str.push(our_recipient);
         }
@@ -1220,7 +1320,7 @@ impl Store {
             .encrypt_to_recipients(plaintext, &recipients_str)
             .await?;
 
-        self.storage.set(repo_path, name, &ciphertext).await?;
+        self.storage.set(repo_path, &passfile, &ciphertext).await?;
         Ok(passfile)
     }
 
@@ -2081,8 +2181,12 @@ pub fn rank_entries(entries: Vec<Entry>, query: &str) -> Vec<Entry> {
 /// # Errors
 ///
 /// Returns an error if the repository path does not exist (via [`list_entries`]).
-pub fn search_entries_in(repo_path: &Path, query: &str) -> Result<Vec<Entry>, Error> {
-    Ok(rank_entries(list_entries(repo_path)?, query))
+pub fn search_entries_in(
+    repo_path: &Path,
+    ext: SecretExt,
+    query: &str,
+) -> Result<Vec<Entry>, Error> {
+    Ok(rank_entries(list_entries(repo_path, ext)?, query))
 }
 
 /// One page of a ranked entry set: a slice of up to `limit` entries starting at
@@ -2249,11 +2353,93 @@ mod tests {
         assert!(err.message.contains("outside repository"));
     }
 
+    /// A symlink planted at the recipients index (dangling, or pointing outside
+    /// the repo) must be rejected as tampering — not read as "uninitialized" →
+    /// empty → silent recipient-set shrink on the next encrypt. The `lstat` guard
+    /// in `read_recipients_raw` catches both symlink shapes without following
+    /// them. Hits the private method directly (same module), so no `repo.json`
+    /// setup is needed.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn read_recipients_raw_rejects_symlinked_index() {
+        // Dangling symlink: lstat sees the symlink itself (not its missing
+        // target) → not a regular file → hard error.
+        let repo_dir = tempfile::tempdir().unwrap();
+        let store = Store::new(repo_dir.path().to_path_buf(), None);
+        symlink(
+            "/nonexistent/gpm-dangling",
+            repo_dir.path().join(".age-recipients"),
+        )
+        .unwrap();
+        let err = store
+            .read_recipients_raw(repo_dir.path())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "STORE_ERROR",
+            "dangling symlink must be tampering, not an empty set"
+        );
+
+        // Out-of-repo symlink: lstat does not follow, so the regular-file check
+        // rejects it before `read_file` could resolve + read the victim.
+        let repo_dir2 = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let external_file = external.path().join("victim");
+        fs::write(&external_file, b"age1stolen\n").unwrap();
+        symlink(&external_file, repo_dir2.path().join(".age-recipients")).unwrap();
+        let store2 = Store::new(repo_dir2.path().to_path_buf(), None);
+        let err = store2
+            .read_recipients_raw(repo_dir2.path())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "STORE_ERROR",
+            "escaping symlink must be tampering, not adopted"
+        );
+
+        // Sanity: a regular recipients index still reads (the lstat guard must
+        // not reject a normal file).
+        let repo_dir3 = tempfile::tempdir().unwrap();
+        fs::write(repo_dir3.path().join(".age-recipients"), b"age1abc\n").unwrap();
+        let store3 = Store::new(repo_dir3.path().to_path_buf(), None);
+        let got = store3.read_recipients_raw(repo_dir3.path()).await.unwrap();
+        assert_eq!(got.len(), 1, "regular index still parses");
+
+        // Missing index → empty (uninitialized store), unchanged.
+        let repo_dir4 = tempfile::tempdir().unwrap();
+        let store4 = Store::new(repo_dir4.path().to_path_buf(), None);
+        assert!(
+            store4
+                .read_recipients_raw(repo_dir4.path())
+                .await
+                .unwrap()
+                .is_empty(),
+            "missing index is an uninitialized store, not an error"
+        );
+
+        // Configured-but-missing checkout (repo.json pointed at a dir that's
+        // gone): a bare "index absent" must NOT read as empty here — that would
+        // let save_identity accept any identity against a store whose checkout
+        // it can't see. Hard error instead.
+        let missing_checkout = PathBuf::from("/tmp/gpm_no_such_checkout_12345_age_recipients");
+        assert!(!missing_checkout.exists());
+        let store5 = Store::new(missing_checkout.clone(), None);
+        assert_eq!(
+            store5
+                .read_recipients_raw(&missing_checkout)
+                .await
+                .unwrap_err()
+                .code,
+            "STORE_ERROR",
+            "a missing configured checkout is an anomaly, not an empty store"
+        );
+    }
+
     #[test]
     fn list_entries_nonexistent_dir() {
         let missing = PathBuf::from("/tmp/gpm_no_such_dir_12345");
         assert!(!missing.exists());
-        let result = list_entries(&missing);
+        let result = list_entries(&missing, SecretExt::AGE);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, "NO_REPO");
     }
