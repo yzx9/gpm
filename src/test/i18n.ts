@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import enCommon from "@/locales/en/common.json";
+import enCreate from "@/locales/en/create.json";
 import enEntries from "@/locales/en/entries.json";
 import enEntry from "@/locales/en/entry.json";
 import { createI18n } from "vue-i18n";
@@ -33,6 +34,13 @@ export function createTestI18n() {
     legacy: false,
     locale: "en",
     fallbackLocale: "en",
-    messages: { en: { common: enCommon, entries: enEntries, entry: enEntry } },
+    messages: {
+      en: {
+        common: enCommon,
+        entries: enEntries,
+        entry: enEntry,
+        create: enCreate,
+      },
+    },
   });
 }

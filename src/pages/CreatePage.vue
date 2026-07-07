@@ -31,8 +31,10 @@ import { isAuthCancelled, useLockState, useToast } from "@/composables";
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Dices, Eye, EyeOff } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
+const { t } = useI18n();
 const router = useRouter();
 const { onLock, runWithAuth } = useLockState();
 const { toast } = useToast();
@@ -102,7 +104,7 @@ async function onGeneratePassword(f: PresetField) {
   } catch (e) {
     if (myToken !== generateToken) return;
     const appError = e as AppError;
-    toast.danger(appError?.message || "Could not generate a password");
+    toast.danger(appError?.message || t("create.genFailed"));
   } finally {
     if (myToken === generateToken) generating.value = false;
   }
@@ -114,7 +116,7 @@ async function loadPresets() {
     presets.value = await listCreatePresets();
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to load presets";
+    error.value = appError?.message || t("create.presetsFailed");
   } finally {
     presetsLoading.value = false;
   }
@@ -213,7 +215,7 @@ async function submit() {
     );
 
     if (outcome.kind === "written") {
-      toast.success(`✓ Saved (commit ${outcome.commit})`);
+      toast.success(t("create.saved", { commit: outcome.commit }));
       // Pop to entries (the opener). The finished compose form becomes forward
       // history, which Android system back can't reopen.
       navBack(router, { name: "entries" });
@@ -228,13 +230,12 @@ async function submit() {
     } else {
       // authenticity_blocked — the pre-write pull was refused under Enforce.
       // Stay on the form; the user resolves signatures via the Sync screen.
-      error.value =
-        "Save blocked: the remote failed signature verification under Enforce mode. Review in History, then pull to sync and retry.";
+      error.value = t("create.saveBlocked");
     }
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
-    error.value = appError?.message || "Failed to create secret";
+    error.value = appError?.message || t("create.createFailed");
   } finally {
     submitting.value = false;
   }
@@ -270,10 +271,10 @@ async function resolveDivergence(choice: DivergenceChoice) {
         : await resolveSyncDivergence(expectedRemoteOid, choice);
     divergence.value = null;
     if (choice === "adopt_remote") {
-      toast.info("Adopted the remote version");
+      toast.info(t("create.adoptedRemote"));
     } else {
       // keep_mine pushed the local entries — the head is now published.
-      toast.success(`✓ Kept mine (commit ${result.head})`);
+      toast.success(t("create.keptMine", { head: result.head }));
     }
     navBack(router, { name: "entries" });
   } catch (e) {
@@ -282,11 +283,10 @@ async function resolveDivergence(choice: DivergenceChoice) {
     if (appError?.code === "PULL_FF_FAILED") {
       // The remote moved since the user reviewed — recheck from the entries list.
       divergence.value = null;
-      toast.info("The remote changed since you reviewed this — rechecking…");
+      toast.info(t("create.remoteChanged"));
       navBack(router, { name: "entries" });
     } else {
-      divergeError.value =
-        appError?.message || "Could not resolve the divergence";
+      divergeError.value = appError?.message || t("create.resolveFailed");
     }
   } finally {
     resolving.value = false;
@@ -310,11 +310,11 @@ onBeforeUnmount(() => {
       <button
         @click="goBack"
         class="back-btn inline-flex items-center gap-1"
-        aria-label="Back"
+        :aria-label="t('common.back')"
       >
-        <BaseIcon :icon="ArrowLeft" /> Back
+        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
       </button>
-      <h1 class="text-lg flex-1">New secret</h1>
+      <h1 class="text-lg flex-1">{{ t("create.title") }}</h1>
     </header>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
@@ -323,36 +323,38 @@ onBeforeUnmount(() => {
 
     <!-- Step 1: pick a type -->
     <section v-if="mode === 'pick'">
-      <p class="text-sm text-muted mb-3">
-        Choose a type of secret to create, or generate a one-off password.
-      </p>
-      <div v-if="presetsLoading" class="loading"><BaseSpinner /> Loading…</div>
+      <p class="text-sm text-muted mb-3">{{ t("create.pickHint") }}</p>
+      <div v-if="presetsLoading" class="loading">
+        <BaseSpinner /> {{ t("create.loading") }}
+      </div>
       <ul v-else class="list-none flex flex-col gap-2" role="list">
         <li v-for="p in presets" :key="p.id">
           <button class="type-card" @click="pickPreset(p)">
             <span class="block text-base font-medium">{{ p.label }}</span>
             <span class="block text-xs text-muted"
-              >Saved under {{ p.prefix }}/</span
+              >{{ t("create.savedUnder") }} {{ p.prefix }}/</span
             >
           </button>
         </li>
         <li>
           <button class="type-card" @click="pickCustom">
-            <span class="block text-base font-medium">Custom secret</span>
-            <span class="block text-xs text-muted"
-              >Any path and content you choose</span
-            >
+            <span class="block text-base font-medium">{{
+              t("create.customLabel")
+            }}</span>
+            <span class="block text-xs text-muted">{{
+              t("create.customHint")
+            }}</span>
           </button>
         </li>
         <li>
           <button class="type-card" @click="openGenerate">
             <span class="flex items-center gap-2 text-base font-medium">
               <BaseIcon :icon="Dices" :size="18" />
-              Generate password
+              {{ t("create.generateLabel") }}
             </span>
-            <span class="block text-xs text-muted"
-              >Copy a random password without saving</span
-            >
+            <span class="block text-xs text-muted">{{
+              t("create.generateHint")
+            }}</span>
           </button>
         </li>
       </ul>
@@ -361,7 +363,7 @@ onBeforeUnmount(() => {
     <!-- Step 2a: preset form -->
     <section v-else-if="mode === 'preset' && activePreset">
       <p class="text-sm text-muted mb-3">
-        Saved under <code>{{ activePreset.prefix }}/…</code>
+        {{ t("create.savedUnder") }} <code>{{ activePreset.prefix }}/…</code>
       </p>
       <form class="flex flex-col gap-4" @submit.prevent="submit">
         <div
@@ -391,18 +393,20 @@ onBeforeUnmount(() => {
               v-model="genMode"
               class="gen-select"
               :disabled="generating"
-              aria-label="Password style"
+              :aria-label="t('create.passwordStyleAria')"
             >
-              <option value="random">Random</option>
-              <option value="memorable">Memorable</option>
-              <option value="xkcd">Passphrase</option>
+              <option value="random">{{ t("create.genRandom") }}</option>
+              <option value="memorable">{{ t("create.genMemorable") }}</option>
+              <option value="xkcd">{{ t("create.genPassphrase") }}</option>
             </select>
             <button
               v-if="f.type === 'password'"
               type="button"
               class="icon-btn"
               :disabled="generating"
-              :aria-label="revealed[f.key] ? 'Hide' : 'Show'"
+              :aria-label="
+                revealed[f.key] ? t('create.hide') : t('create.show')
+              "
               @click="revealed[f.key] = !revealed[f.key]"
             >
               <BaseIcon :icon="revealed[f.key] ? EyeOff : Eye" />
@@ -412,7 +416,7 @@ onBeforeUnmount(() => {
               type="button"
               class="icon-btn"
               :disabled="generating"
-              aria-label="Generate password"
+              :aria-label="t('create.generateAria')"
               @click="onGeneratePassword(f)"
             >
               <BaseIcon :icon="Dices" />
@@ -420,7 +424,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <BaseButton variant="primary" type="submit" :disabled="!canSubmit">{{
-          submitting ? "Saving…" : "Save secret"
+          submitting ? t("create.saving") : t("create.saveSecret")
         }}</BaseButton>
       </form>
     </section>
@@ -430,22 +434,22 @@ onBeforeUnmount(() => {
       <form class="flex flex-col gap-4" @submit.prevent="submit">
         <div class="flex flex-col gap-1">
           <label for="c-name" class="text-sm font-medium">
-            Path / name<span aria-hidden="true">*</span>
+            {{ t("create.pathName") }}<span aria-hidden="true">*</span>
           </label>
           <BaseInput
             id="c-name"
             v-model="customName"
             type="text"
-            placeholder="e.g. servers/db1"
+            :placeholder="t('create.pathPlaceholder')"
             autocomplete="off"
           />
-          <small class="text-xs text-muted"
-            >First line of the content becomes the password.</small
-          >
+          <small class="text-xs text-muted">{{
+            t("create.firstLineHint")
+          }}</small>
         </div>
         <div class="flex flex-col gap-1">
           <label for="c-content" class="text-sm font-medium">
-            Content<span aria-hidden="true">*</span>
+            {{ t("create.content") }}<span aria-hidden="true">*</span>
           </label>
           <BaseTextarea
             id="c-content"
@@ -455,12 +459,11 @@ onBeforeUnmount(() => {
           />
         </div>
         <BaseAlert v-if="hasTemplate" variant="info">
-          A <code>.pass-template</code> applies to this location — what's shown
-          below is what will be stored.
+          {{ t("create.templateHint") }}
         </BaseAlert>
         <pre v-if="preview" class="preview">{{ preview }}</pre>
         <BaseButton variant="primary" type="submit" :disabled="!canSubmit">{{
-          submitting ? "Saving…" : "Save secret"
+          submitting ? t("create.saving") : t("create.saveSecret")
         }}</BaseButton>
       </form>
     </section>
