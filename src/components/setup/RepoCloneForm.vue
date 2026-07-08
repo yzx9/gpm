@@ -19,12 +19,11 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import { useToast } from "@/composables";
 import { computed, onBeforeUnmount, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl } from "./url";
 
-const emit = defineEmits<{
-  done: [];
-}>();
+const { t } = useI18n();
 
 // Auth fields are owned by CloneFlow (hoisted) so they survive the 1↔2 step
 // transition — needed for IdentitySetupForm's "Use my SSH key for decryption".
@@ -32,6 +31,10 @@ const repoUrl = defineModel<string>("repoUrl", { required: true });
 const pat = defineModel<string>("pat", { required: true });
 const sshKey = defineModel<string>("sshKey", { required: true });
 const sshPassphrase = defineModel<string>("sshPassphrase", { required: true });
+
+const emit = defineEmits<{
+  done: [];
+}>();
 
 const { toast } = useToast();
 
@@ -95,7 +98,7 @@ async function cancelClone() {
     // re-enable the button for a retry.
     cancelling.value = false;
     const appError = e as AppError;
-    toast.danger(appError?.message || "Could not cancel the clone");
+    toast.danger(appError?.message || t("setup.clone.cancelFailed"));
   }
 }
 
@@ -117,15 +120,16 @@ async function onAdvancedToggle(e: Event) {
 }
 
 function validateStep1(): string | null {
-  if (!repoUrl.value.trim()) return "Repository URL is required";
+  if (!repoUrl.value.trim())
+    return t("setup.clone.validation.errRepoUrlRequired");
   const url = repoUrl.value.trim();
   const isHttps = url.startsWith("https://");
   const isSsh = isSshRepoUrl(url);
   if (!isHttps && !isSsh) {
-    return "URL must be HTTPS or SSH format (e.g. git@host:user/repo.git)";
+    return t("setup.clone.validation.errUrlFormat");
   }
   if (isSsh && !sshKey.value.trim()) {
-    return "SSH private key is required for SSH URLs";
+    return t("setup.clone.validation.errSshKeyRequired");
   }
   return null;
 }
@@ -140,7 +144,7 @@ async function onClone() {
   }
 
   loading.value = true;
-  progressText.value = "Cloning repository…";
+  progressText.value = t("setup.clone.cloning");
   progressPercent.value = 0;
   receivedBytes.value = 0;
   progressUnlisten ??= await subscribeGitProgress(onProgress);
@@ -171,7 +175,7 @@ async function onClone() {
       // User-initiated abort — surface as a neutral status, not an error.
       cancelled.value = true;
     } else {
-      error.value = appError?.message || "Clone failed";
+      error.value = appError?.message || t("setup.clone.errCloneFailed");
     }
   } finally {
     progressUnlisten?.();
@@ -197,33 +201,40 @@ async function onClone() {
     <!-- Advanced: commit identity -->
     <details @toggle="onAdvancedToggle">
       <summary class="text-sm text-muted cursor-pointer select-none">
-        Advanced Settings
+        {{ t("setup.clone.advancedSummary") }}
       </summary>
       <div class="flex flex-col gap-3 mt-3">
         <p class="text-xs text-muted">
-          Name and email written to each git commit. Leave blank to use the
-          default<span v-if="commitDefault">
-            ({{ commitDefault.name }} &lt;{{ commitDefault.email }}&gt;)</span
-          >.
+          {{
+            t("setup.clone.advancedHint", {
+              suffix: commitDefault
+                ? ` (${commitDefault.name} <${commitDefault.email}>)`
+                : "",
+            })
+          }}
         </p>
         <div class="flex flex-col gap-1">
-          <label for="su-commit-name" class="text-xs text-muted">Name</label>
+          <label for="su-commit-name" class="text-xs text-muted">{{
+            t("setup.clone.nameLabel")
+          }}</label>
           <BaseInput
             id="su-commit-name"
             v-model="commitName"
             type="text"
-            placeholder="Name"
+            :placeholder="t('setup.clone.namePlaceholder')"
             autocomplete="off"
             :disabled="loading"
           />
         </div>
         <div class="flex flex-col gap-1">
-          <label for="su-commit-email" class="text-xs text-muted">Email</label>
+          <label for="su-commit-email" class="text-xs text-muted">{{
+            t("setup.clone.emailLabel")
+          }}</label>
           <BaseInput
             id="su-commit-email"
             v-model="commitEmail"
             type="email"
-            placeholder="Email"
+            :placeholder="t('setup.clone.emailPlaceholder')"
             autocomplete="off"
             :disabled="loading"
           />
@@ -241,7 +252,9 @@ async function onClone() {
           :disabled="cancelling"
           @click="cancelClone"
         >
-          {{ cancelling ? "Cancelling…" : "Cancel" }}
+          {{
+            cancelling ? t("setup.clone.cancelling") : t("common.button.cancel")
+          }}
         </button>
       </div>
       <div
@@ -257,18 +270,20 @@ async function onClone() {
         ></div>
       </div>
       <div v-if="formatBytes(receivedBytes)" class="text-xs text-muted">
-        {{ formatBytes(receivedBytes) }} received
+        {{
+          t("setup.clone.bytesReceived", { bytes: formatBytes(receivedBytes) })
+        }}
       </div>
     </div>
 
     <div v-if="cancelled" class="text-sm text-muted" role="status">
-      Clone cancelled.
+      {{ t("setup.clone.cancelled") }}
     </div>
 
     <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
     <BaseButton variant="primary" type="submit" :loading="loading">{{
-      loading ? "Cloning…" : "Clone Repository"
+      loading ? t("setup.clone.buttonLoading") : t("setup.clone.buttonClone")
     }}</BaseButton>
   </form>
 </template>

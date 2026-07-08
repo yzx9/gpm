@@ -107,5 +107,12 @@
     "unverifiedFingerprint": "Issuer fingerprint:",
     "trustSigner": "Trust this signer",
     "switchToAudit": "Switch to Audit mode"
+  },
+  "setup": {
+    "introAppKey": "To open your repository, gpm keeps an app key on this device — your private key plus the git credentials.",
+    "storedLocally": "Stored locally. Nothing leaves your device."
+  },
+  "clipboard": {
+    "notifyPrompt": "Allow notifications? gpm shows a small notification while a password is on the clipboard so you can clear it early."
   }
 }

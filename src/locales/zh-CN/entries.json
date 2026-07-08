@@ -30,5 +30,8 @@
   "toastSwitchFailed": "无法切换模式",
   "toastUpdatedTo": "已更新到 {head}",
   "objectsProgress": "{received} / {total} 个对象",
-  "trustSignerPrompt": "信任此签名者？请输入标签："
+  "trustSignerPrompt": "信任此签名者？请输入标签：",
+  "loadFailed": "加载条目失败",
+  "syncFailed": "同步失败",
+  "resolveFailed": "解决冲突失败"
 }

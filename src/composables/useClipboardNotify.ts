@@ -17,6 +17,7 @@ import {
   areClipboardNotificationsEnabled,
   requestClipboardNotificationsPermission,
 } from "@/api";
+import { i18n } from "@/i18n";
 
 const ASKED_KEY = "gpm.clipboard.notify.asked";
 
@@ -35,7 +36,7 @@ export async function ensureClipboardNotifyPermission(): Promise<void> {
     if (localStorage.getItem(ASKED_KEY)) return;
 
     const wantGrant = window.confirm(
-      "Allow notifications? gpm shows a small notification while a password is on the clipboard so you can clear it early.",
+      i18n.global.t("common.clipboard.notifyPrompt"),
     );
     // Mark asked regardless of the answer so we never re-prompt. The user can
     // still grant later via Android Settings; the next copy's check sees it.

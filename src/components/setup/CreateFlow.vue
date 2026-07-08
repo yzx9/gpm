@@ -20,8 +20,11 @@ import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import { CircleCheck, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import RepoAuthFields from "./RepoAuthFields.vue";
 import { isSshUrl as isSshRepoUrl, truncateKey } from "./url";
+
+const { t } = useI18n();
 
 // The public recipient of the generated identity — the only part the frontend
 // ever holds. The secret identity itself lives in backend state (staged by
@@ -121,34 +124,34 @@ async function generate() {
     }
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Generation failed";
+    error.value = appError?.message || t("setup.create.err.errGeneration");
   } finally {
     generating.value = false;
   }
 }
 
 function validate(): string | null {
-  if (!recipient.value) return "Generate an identity first";
+  if (!recipient.value) return t("setup.create.validation.errGenerateFirst");
 
   const url = repoUrl.value.trim();
   const hasAuth = Boolean(pat.value.trim() || sshKey.value.trim());
   if (!url && hasAuth) {
-    return "Enter a repository URL, or clear the authentication fields for a local-only store";
+    return t("setup.create.validation.errUrlOrClearAuth");
   }
   if (url) {
     const isHttps = url.startsWith("https://");
     const isSsh = isSshRepoUrl(url);
     if (!isHttps && !isSsh) {
-      return "URL must be HTTPS or SSH format (e.g. git@host:user/repo.git)";
+      return t("setup.create.validation.errUrlFormat");
     }
     if (isSsh && !sshKey.value.trim()) {
-      return "SSH private key is required for SSH remote URLs";
+      return t("setup.create.validation.errSshKeyRequired");
     }
   }
   const passphraseError = pf.value?.validate() ?? null;
   if (passphraseError) return passphraseError;
   if (ackRequired.value) {
-    return "Please acknowledge that this passphrase cannot be recovered.";
+    return t("setup.create.validation.errAckRequired");
   }
   return null;
 }
@@ -183,8 +186,8 @@ async function onCreate() {
       );
 
       // The identity was staged in backend state at generate time; this consumes
-      // it (no secret crosses IPC). For SSH, reuse the passphrase that minted the
-      // key (snapshot); for age, the live field (seal encryption).
+      // it (no secret crosses IPC). For SSH, reuse the passphrase that minted
+      // the key (snapshot); for age, the live field (seal encryption).
       await completeSetupFromFile(
         identityKind.value === "ssh"
           ? mintedSshPassphrase.value
@@ -201,8 +204,8 @@ async function onCreate() {
       } catch (e) {
         const pushError = e as AppError;
         error.value =
-          (pushError?.message || "Initial push failed") +
-          " — your store is saved locally and usable; the initial sync to the remote did not complete.";
+          (pushError?.message || t("setup.create.err.errPush")) +
+          t("setup.create.err.errPushSuffix");
         return;
       }
     }
@@ -210,7 +213,7 @@ async function onCreate() {
     emit("done");
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Create failed";
+    error.value = appError?.message || t("setup.create.err.errCreate");
   } finally {
     loading.value = false;
   }
@@ -219,19 +222,15 @@ async function onCreate() {
 
 <template>
   <form @submit.prevent="onCreate" class="flex flex-col gap-4">
-    <h2 class="text-lg font-semibold">Create a new store</h2>
-    <p class="text-xs text-muted">
-      Generate an identity and seed a brand-new, gopass-compatible age store on
-      this device. A remote is optional.
-    </p>
-    <p class="text-xs text-muted">
-      To open your repository, gpm keeps an app key on this device — your
-      private key plus the git credentials.
-    </p>
+    <h2 class="text-lg font-semibold">{{ t("setup.create.heading") }}</h2>
+    <p class="text-xs text-muted">{{ t("setup.create.intro") }}</p>
+    <p class="text-xs text-muted">{{ t("common.setup.introAppKey") }}</p>
 
     <!-- Identity type -->
     <div class="flex flex-col gap-1">
-      <span class="text-sm font-medium">Identity type</span>
+      <span class="text-sm font-medium">{{
+        t("setup.create.identityTypeLabel")
+      }}</span>
       <div class="flex gap-1 border border-edge rounded-md overflow-hidden">
         <button
           type="button"
@@ -242,7 +241,7 @@ async function onCreate() {
           ]"
           @click="selectKind('age')"
         >
-          Age (x25519)
+          {{ t("setup.create.tabAge") }}
         </button>
         <button
           type="button"
@@ -253,7 +252,7 @@ async function onCreate() {
           ]"
           @click="selectKind('ssh')"
         >
-          SSH (ed25519)
+          {{ t("setup.create.tabSsh") }}
         </button>
       </div>
     </div>
@@ -263,16 +262,16 @@ async function onCreate() {
       ref="pf"
       id="create-passphrase"
       v-model="passphrase"
-      label="Passphrase (optional)"
-      placeholder="Leave empty for plaintext storage"
+      :label="t('setup.create.passphraseLabel')"
+      :placeholder="t('setup.create.passphrasePlaceholder')"
       :optional="true"
       :disabled="loading || (identityKind === 'ssh' && !!recipient)"
     >
       <template #help>
         <small class="text-xs text-muted">{{
           identityKind === "ssh"
-            ? "Encrypts the generated SSH key — set this before generating."
-            : "Encrypts the private key. Recommended for Android."
+            ? t("setup.create.passphraseHelpSsh")
+            : t("setup.create.passphraseHelpAge")
         }}</small>
       </template>
     </PassphraseField>
@@ -295,10 +294,10 @@ async function onCreate() {
       <BaseIcon v-if="!generating" :icon="KeyRound" />
       {{
         generating
-          ? "Generating…"
+          ? t("setup.create.generating")
           : identityKind === "ssh"
-            ? "Generate SSH key"
-            : "Generate identity"
+            ? t("setup.create.generateSsh")
+            : t("setup.create.generate")
       }}
     </BaseButton>
 
@@ -308,22 +307,22 @@ async function onCreate() {
       <span
         class="text-sm font-medium text-success inline-flex items-center gap-1"
       >
-        <BaseIcon :icon="CircleCheck" :size="14" /> Recipient (public key)
+        <BaseIcon :icon="CircleCheck" :size="14" />
+        {{ t("setup.create.recipientLabel") }}
       </span>
       <code class="public-key-display">{{ truncateKey(recipient) }}</code>
-      <small class="text-xs text-muted"
-        >This seeds your store's recipients file.</small
-      >
+      <small class="text-xs text-muted">{{
+        t("setup.create.recipientHint")
+      }}</small>
     </div>
 
     <!-- Optional remote -->
     <div class="flex flex-col gap-3 pt-4 border-t border-edge">
       <div>
-        <span class="text-sm font-medium">Remote (optional)</span>
-        <p class="text-xs text-muted">
-          Add a git remote to sync across devices. Without one the store is
-          local-only and can be synced later.
-        </p>
+        <span class="text-sm font-medium">{{
+          t("setup.create.remoteLabel")
+        }}</span>
+        <p class="text-xs text-muted">{{ t("setup.create.remoteHint") }}</p>
       </div>
       <div class="flex flex-col gap-4">
         <RepoAuthFields
@@ -338,7 +337,7 @@ async function onCreate() {
     </div>
 
     <BaseAlert variant="info" class="text-center">
-      Stored locally. Nothing leaves your device.
+      {{ t("common.setup.storedLocally") }}
     </BaseAlert>
 
     <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
@@ -348,7 +347,9 @@ async function onCreate() {
       type="submit"
       :loading="loading"
       :disabled="ackRequired"
-      >{{ loading ? "Creating…" : "Create Store" }}</BaseButton
+      >{{
+        loading ? t("setup.create.creating") : t("setup.create.buttonCreate")
+      }}</BaseButton
     >
   </form>
 </template>

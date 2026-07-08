@@ -107,5 +107,12 @@
     "unverifiedFingerprint": "签发者指纹：",
     "trustSigner": "信任此签名者",
     "switchToAudit": "切换到审计模式"
+  },
+  "setup": {
+    "introAppKey": "为了打开你的仓库，gpm 会在本设备上保留一个应用密钥 —— 你的私钥加上 git 凭据。",
+    "storedLocally": "仅本地保存。不会向外部发送任何数据。"
+  },
+  "clipboard": {
+    "notifyPrompt": "允许通知？当密码处于剪贴板时，gpm 会显示一条小通知，以便你提前清除它。"
   }
 }

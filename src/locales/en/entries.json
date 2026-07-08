@@ -30,5 +30,8 @@
   "toastSwitchFailed": "Failed to switch mode",
   "toastUpdatedTo": "Updated to {head}",
   "objectsProgress": "{received} / {total} objects",
-  "trustSignerPrompt": "Trust this signer? Enter a label:"
+  "trustSignerPrompt": "Trust this signer? Enter a label:",
+  "loadFailed": "Failed to load entries",
+  "syncFailed": "Sync failed",
+  "resolveFailed": "Resolve failed"
 }

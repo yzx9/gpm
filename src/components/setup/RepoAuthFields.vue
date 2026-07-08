@@ -12,7 +12,10 @@ import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import { CircleCheck, Copy, KeyRound } from "@lucide/vue";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { isSshUrl as isSshRepoUrl } from "./url";
+
+const { t } = useI18n();
 
 // Two-way bound fields. Each consumer (RepoCloneForm, future CreateFlow)
 // owns the underlying ref and passes it via v-model.
@@ -62,7 +65,7 @@ async function generateKey() {
     generatedPublicKey.value = result.public_key;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Key generation failed";
+    error.value = appError?.message || t("setup.auth.errKeyGen");
   } finally {
     generating.value = false;
   }
@@ -80,35 +83,35 @@ async function copyPublicKey() {
 <template>
   <!-- Git Repository URL — always present -->
   <div class="flex flex-col gap-1">
-    <label for="repo-url" class="text-sm font-medium">Git Repository URL</label>
+    <label for="repo-url" class="text-sm font-medium">{{
+      t("setup.auth.repoUrlLabel")
+    }}</label>
     <BaseInput
       id="repo-url"
       v-model="repoUrl"
       type="url"
-      placeholder="https://github.com/user/password-store.git"
+      :placeholder="t('setup.auth.repoUrlPlaceholder')"
       required
       autocomplete="off"
       :disabled="disabled"
     />
-    <small class="text-xs text-muted"
-      >HTTPS or SSH (e.g. git@github.com:user/repo.git)</small
-    >
+    <small class="text-xs text-muted">{{ t("setup.auth.repoUrlHint") }}</small>
   </div>
 
   <!-- PAT field (shown for HTTPS URLs) -->
   <div v-if="!isSshUrl" class="flex flex-col gap-1">
-    <label for="pat" class="text-sm font-medium">Personal Access Token</label>
+    <label for="pat" class="text-sm font-medium">{{
+      t("setup.auth.patLabel")
+    }}</label>
     <BaseInput
       id="pat"
       v-model="pat"
       type="password"
-      placeholder="Optional — for private repos"
+      :placeholder="t('setup.auth.patPlaceholder')"
       autocomplete="off"
       :disabled="disabled"
     />
-    <small class="text-xs text-muted"
-      >HTTPS PAT for git authentication. Leave empty for public repos.</small
-    >
+    <small class="text-xs text-muted">{{ t("setup.auth.patHint") }}</small>
   </div>
 
   <!-- SSH key fields (shown for SSH URLs) -->
@@ -126,7 +129,7 @@ async function copyPublicKey() {
         ]"
         @click="sshKeySource = 'paste'"
       >
-        Paste Key
+        {{ t("setup.auth.tabPasteKey") }}
       </button>
       <button
         type="button"
@@ -138,37 +141,39 @@ async function copyPublicKey() {
         ]"
         @click="sshKeySource = 'generate'"
       >
-        Generate Key
+        {{ t("setup.auth.tabGenerateKey") }}
       </button>
     </div>
 
     <!-- Paste key (or always-shown SSH block when keygen hidden) -->
     <template v-if="sshKeySource === 'paste' || !showKeygen">
       <div class="flex flex-col gap-1">
-        <label for="ssh-key" class="text-sm font-medium">SSH Private Key</label>
+        <label for="ssh-key" class="text-sm font-medium">{{
+          t("setup.auth.sshKeyLabel")
+        }}</label>
         <BaseTextarea
           id="ssh-key"
           v-model="sshKey"
           rows="5"
-          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+          :placeholder="t('setup.auth.sshKeyPlaceholder')"
           required
           autocomplete="off"
           spellcheck="false"
           :disabled="disabled"
         />
-        <small class="text-xs text-muted"
-          >Paste your SSH private key (OpenSSH or PEM format)</small
-        >
+        <small class="text-xs text-muted">{{
+          t("setup.auth.sshKeyHint")
+        }}</small>
       </div>
       <div class="flex flex-col gap-1">
-        <label for="ssh-passphrase" class="text-sm font-medium"
-          >SSH Key Passphrase</label
-        >
+        <label for="ssh-passphrase" class="text-sm font-medium">{{
+          t("setup.auth.sshPassphraseLabel")
+        }}</label>
         <BaseInput
           id="ssh-passphrase"
           v-model="sshPassphrase"
           type="password"
-          placeholder="Optional — if key is encrypted"
+          :placeholder="t('setup.auth.sshPassphrasePlaceholder')"
           autocomplete="off"
           :disabled="disabled"
         />
@@ -181,8 +186,8 @@ async function copyPublicKey() {
         ref="pf"
         id="ssh-gen-passphrase"
         v-model="sshPassphrase"
-        label="Key Passphrase (optional)"
-        placeholder="Optional — encrypt the generated key"
+        :label="t('setup.auth.genPassphraseLabel')"
+        :placeholder="t('setup.auth.genPassphrasePlaceholder')"
         :optional="true"
         :disabled="disabled || generating"
       />
@@ -193,7 +198,11 @@ async function copyPublicKey() {
         @click="generateKey"
       >
         <BaseIcon v-if="!generating" :icon="KeyRound" />
-        {{ generating ? "Generating..." : "Generate SSH Key" }}
+        {{
+          generating
+            ? t("setup.auth.genButtonLoading")
+            : t("setup.auth.genButton")
+        }}
       </BaseButton>
 
       <!-- Public key display after generation -->
@@ -202,19 +211,19 @@ async function copyPublicKey() {
           <span
             class="text-sm font-medium text-success inline-flex items-center gap-1"
           >
-            <BaseIcon :icon="CircleCheck" :size="14" /> Public Key
+            <BaseIcon :icon="CircleCheck" :size="14" />
+            {{ t("setup.auth.publicKeyLabel") }}
           </span>
           <button type="button" class="btn-copy" @click="copyPublicKey">
-            <BaseIcon :icon="Copy" /> Copy
+            <BaseIcon :icon="Copy" /> {{ t("setup.auth.publicKeyCopy") }}
           </button>
         </div>
         <pre class="public-key-display" @click="copyPublicKey">{{
           generatedPublicKey
         }}</pre>
-        <small class="text-xs text-muted"
-          >Add this public key to your Git provider (e.g. GitHub → Settings →
-          SSH keys)</small
-        >
+        <small class="text-xs text-muted">{{
+          t("setup.auth.publicKeyHint")
+        }}</small>
       </div>
     </template>
   </template>

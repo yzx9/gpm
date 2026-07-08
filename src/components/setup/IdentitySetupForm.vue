@@ -31,7 +31,10 @@ import {
   TriangleAlert,
 } from "@lucide/vue";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { truncateKey } from "./url";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** Step-1 SSH key, so the "Use my SSH key for decryption" affordance has
@@ -136,15 +139,15 @@ const statusAlert = computed<{
     case "match":
       return {
         variant: "success",
-        text: "✓ This identity matches a recipient in this repository.",
+        text: t("setup.identity.status.match"),
       };
     case "noMatch":
       return {
         variant: "warning",
-        text: "This identity doesn't match any recipient in the repository. Use a matching key, or ask the repo admin to add yours.",
+        text: t("setup.identity.noMatchWarning"),
       };
     case "deriving":
-      return { variant: "info", text: "Deriving public key…" };
+      return { variant: "info", text: t("setup.identity.status.deriving") };
     case "neutral":
       // Only prompt when there's an action to take (encrypted SSH paste,
       // pre-verify). For partial typing or the file path, stay quiet.
@@ -155,7 +158,7 @@ const statusAlert = computed<{
       ) {
         return {
           variant: "info",
-          text: "Verify your SSH key to confirm it matches.",
+          text: t("setup.identity.status.verifySshHint"),
         };
       }
       return null;
@@ -179,33 +182,34 @@ async function fetchRecipients() {
 
 function validateStep2(): string | null {
   if (identitySource.value === "file") {
-    if (!pickedFile.value) return "No identity file selected";
-    if (!pickedFile.value.recipient) return "Unlock the identity file first";
+    if (!pickedFile.value) return t("setup.identity.validation.errNoFile");
+    if (!pickedFile.value.recipient)
+      return t("setup.identity.validation.errUnlockFileFirst");
   } else {
-    if (!identity.value.trim()) return "Age identity is required";
+    if (!identity.value.trim())
+      return t("setup.identity.validation.errIdentityRequired");
     const trimmed = identity.value.trim();
     const isAgeKey = trimmed.startsWith("AGE-SECRET-KEY-");
     const isSshKey =
       trimmed.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----") ||
       trimmed.startsWith("-----BEGIN RSA PRIVATE KEY-----");
     if (!isAgeKey && !isSshKey)
-      return "Identity must be an age key (AGE-SECRET-KEY-...) or SSH private key";
-    if (malformedIdentity.value)
-      return "This doesn't look like a valid age or SSH key.";
+      return t("setup.identity.validation.errIdentityFormat");
+    if (malformedIdentity.value) return t("setup.identity.malformed");
     if (isSshIdentity.value && isIdentityEncrypted.value && !passphrase.value)
-      return "SSH key passphrase is required";
+      return t("setup.identity.validation.errSshPassRequired");
     if (
       isSshIdentity.value &&
       isIdentityEncrypted.value &&
       !derivedRecipient.value
     )
-      return "Verify your SSH key first";
+      return t("setup.identity.validation.errVerifyFirst");
     // x25519 seal passphrase confirmation (pf is null on SSH/file paths —
     // those enter an existing passphrase, not a new one to confirm).
     const passphraseError = pf.value?.validate() ?? null;
     if (passphraseError) return passphraseError;
     if (ackRequired.value) {
-      return "Please acknowledge that this passphrase cannot be recovered.";
+      return t("setup.identity.validation.errAckRequired");
     }
   }
   // Last check (mirrors the Store::save_identity backstop): hard-block a
@@ -215,7 +219,7 @@ function validateStep2(): string | null {
     derivedRecipient.value &&
     !matchedRecipient.value
   )
-    return "This identity doesn't match any recipient in the repository. Use a matching key, or ask the repo admin to add yours.";
+    return t("setup.identity.noMatchWarning");
   return null;
 }
 
@@ -237,7 +241,7 @@ async function onCompleteSetup() {
     emit("done");
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || "Setup failed";
+    error.value = appError?.message || t("setup.identity.err.errSetup");
   } finally {
     loadingIdentity.value = false;
   }
@@ -260,7 +264,7 @@ async function onPickFile() {
     const appError = e as AppError;
     // CANCELLED just means the user dismissed the picker — not an error.
     if (appError?.code !== "CANCELLED") {
-      error.value = appError?.message || "Failed to read identity file";
+      error.value = appError?.message || t("setup.identity.err.errReadFile");
     }
   } finally {
     picking.value = false;
@@ -280,8 +284,8 @@ async function onVerify() {
     // The backend abandoned the file on failure — drop it and return to paste.
     error.value =
       appError?.code === "WRONG_PASSPHRASE"
-        ? "Wrong passphrase — the file was discarded"
-        : appError?.message || "Verification failed";
+        ? t("setup.identity.err.errWrongPassFile")
+        : appError?.message || t("setup.identity.err.errVerifyFailed");
     onUsePaste();
   } finally {
     verifying.value = false;
@@ -302,8 +306,8 @@ async function onVerifyPaste() {
     const appError = e as AppError;
     error.value =
       appError?.code === "WRONG_PASSPHRASE"
-        ? "Wrong passphrase"
-        : appError?.message || "Verification failed";
+        ? t("setup.identity.err.errWrongPass")
+        : appError?.message || t("setup.identity.err.errVerifyFailed");
     derivedRecipient.value = null;
   } finally {
     verifying.value = false;
@@ -437,27 +441,20 @@ onUnmounted(clearPendingFile);
          (the back-navigation test relies on this ordering). BaseButton renders
          <button type="button"> by default, preserving that. -->
     <BaseButton variant="ghost" class="self-start" @click="goBack">
-      <BaseIcon :icon="ArrowLeft" /> Back
+      <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
     </BaseButton>
 
-    <h2 class="text-lg font-semibold">Recipients in this repository</h2>
-    <p class="text-xs text-muted">
-      This repository encrypts secrets to the recipients below. Paste the
-      identity that matches one of them.
-    </p>
-    <p class="text-xs text-muted">
-      To open your repository, gpm keeps an app key on this device — your
-      private key plus the git credentials.
-    </p>
+    <h2 class="text-lg font-semibold">{{ t("setup.identity.heading") }}</h2>
+    <p class="text-xs text-muted">{{ t("setup.identity.intro") }}</p>
+    <p class="text-xs text-muted">{{ t("common.setup.introAppKey") }}</p>
 
     <!-- Recipients list (read-only context; the match is derived, not selected) -->
     <div v-if="loadingRecipients" class="text-center py-4 text-sm text-muted">
-      Loading recipients…
+      {{ t("setup.identity.loadingRecipients") }}
     </div>
 
     <BaseAlert v-else-if="recipients.length === 0" variant="info">
-      This is a fresh repository with no recipients yet. Paste your identity —
-      it will be the first.
+      {{ t("setup.identity.noRecipientsAlert") }}
     </BaseAlert>
 
     <div v-else class="flex flex-col gap-2 max-h-56 overflow-y-auto">
@@ -491,16 +488,16 @@ onUnmounted(clearPendingFile);
               class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-edge text-muted"
               >{{
                 r.key_type === "post_quantum"
-                  ? "PQ"
+                  ? t("setup.identity.badgePq")
                   : r.key_type === "plugin"
-                    ? "Plugin"
-                    : "SSH"
+                    ? t("setup.identity.badgePlugin")
+                    : t("setup.identity.badgeSsh")
               }}</span
             >
             <span
               v-if="matchedRecipient?.public_key === r.public_key"
               class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-accent text-on-accent"
-              >your key</span
+              >{{ t("setup.identity.badgeYourKey") }}</span
             >
           </div>
           <span v-if="r.comment" class="text-xs text-muted">{{
@@ -525,16 +522,18 @@ onUnmounted(clearPendingFile);
       size="sm"
       @click="useSshKeyForIdentity"
     >
-      <BaseIcon :icon="KeyRound" /> Use my SSH key for decryption
+      <BaseIcon :icon="KeyRound" /> {{ t("setup.identity.reuseSshKey") }}
     </BaseButton>
 
     <div class="flex flex-col gap-1">
-      <label for="identity" class="text-sm font-medium">Age Identity</label>
+      <label for="identity" class="text-sm font-medium">{{
+        t("setup.identity.identityLabel")
+      }}</label>
       <BaseTextarea
         id="identity"
         v-model="identity"
         rows="5"
-        placeholder="AGE-SECRET-KEY-...&#10;or paste an SSH private key"
+        :placeholder="t('setup.identity.identityPlaceholder')"
         autocomplete="off"
         spellcheck="false"
         :disabled="loadingIdentity || identitySource === 'file'"
@@ -552,22 +551,26 @@ onUnmounted(clearPendingFile);
               :size="14"
               class="inline-block align-middle shrink-0"
             />
-            {{ pickedFile.filename || "identity file" }} ·
+            {{ pickedFile.filename || t("setup.identity.fileTypeFallback") }} ·
             {{ pickedFile.key_type
-            }}<span v-if="pickedFile.encrypted"> · encrypted</span>
+            }}<span v-if="pickedFile.encrypted">{{
+              t("setup.identity.fileEncrypted")
+            }}</span>
           </span>
           <button
             type="button"
             class="shrink-0 text-muted hover:text-danger active:text-danger transition-colors"
             @click="onUsePaste"
           >
-            Remove
+            {{ t("setup.identity.fileRemove") }}
           </button>
         </div>
 
         <!-- Public key, once usable (unencrypted, or unlocked) -->
         <div v-if="pickedFile.recipient" class="flex flex-col gap-0.5">
-          <span class="text-muted">Public key</span>
+          <span class="text-muted">{{
+            t("setup.identity.filePublicKey")
+          }}</span>
           <code class="font-mono break-all">{{
             truncateKey(pickedFile.recipient)
           }}</code>
@@ -578,7 +581,7 @@ onUnmounted(clearPendingFile);
           <BaseInput
             v-model="passphrase"
             type="password"
-            placeholder="Passphrase to unlock this file"
+            :placeholder="t('setup.identity.fileUnlockPlaceholder')"
             autocomplete="off"
             :disabled="verifying"
           />
@@ -587,18 +590,20 @@ onUnmounted(clearPendingFile);
             :disabled="verifying || !passphrase"
             @click="onVerify"
           >
-            {{ verifying ? "Verifying…" : "Unlock & verify" }}
+            {{
+              verifying
+                ? t("setup.identity.fileUnlockLoading")
+                : t("setup.identity.fileUnlockButton")
+            }}
           </BaseButton>
-          <small class="text-muted"
-            >Enter the file's passphrase to verify it and reveal its public key.
-            A wrong passphrase discards the file.</small
-          >
+          <small class="text-muted">{{
+            t("setup.identity.fileUnlockHint")
+          }}</small>
         </div>
       </div>
-      <small v-else class="text-xs text-muted"
-        >Paste your age secret key (AGE-SECRET-KEY-...) or SSH private
-        key</small
-      >
+      <small v-else class="text-xs text-muted">{{
+        t("setup.identity.identityHint")
+      }}</small>
 
       <!-- Upload via the native picker (hidden once a file is picked) -->
       <BaseButton
@@ -608,7 +613,11 @@ onUnmounted(clearPendingFile);
         :disabled="picking || loadingIdentity"
         @click="onPickFile"
       >
-        {{ picking ? "Reading…" : "📁 Upload identity file…" }}
+        {{
+          picking
+            ? t("setup.identity.uploadButtonLoading")
+            : t("setup.identity.uploadButton")
+        }}
       </BaseButton>
     </div>
 
@@ -619,7 +628,7 @@ onUnmounted(clearPendingFile);
         :size="14"
         class="inline-block align-middle"
       />
-      Post-quantum age keys aren't supported yet.
+      {{ t("setup.identity.unsupportedPq") }}
     </BaseAlert>
     <BaseAlert v-else-if="identityType === 'plugin'" variant="warning">
       <BaseIcon
@@ -627,7 +636,7 @@ onUnmounted(clearPendingFile);
         :size="14"
         class="inline-block align-middle"
       />
-      age-plugin identities aren't supported for decryption yet.
+      {{ t("setup.identity.unsupportedPlugin") }}
     </BaseAlert>
     <BaseAlert v-else-if="malformedIdentity" variant="danger">
       <BaseIcon
@@ -635,7 +644,7 @@ onUnmounted(clearPendingFile);
         :size="14"
         class="inline-block align-middle"
       />
-      This doesn't look like a valid age or SSH key.
+      {{ t("setup.identity.malformed") }}
     </BaseAlert>
 
     <!-- SSH key passphrase + Verify (paste path: required for an encrypted SSH key) -->
@@ -643,14 +652,14 @@ onUnmounted(clearPendingFile);
       v-if="identitySource === 'paste' && isSshIdentity && isIdentityEncrypted"
       class="flex flex-col gap-1"
     >
-      <label for="passphrase" class="text-sm font-medium"
-        >SSH Key Passphrase</label
-      >
+      <label for="passphrase" class="text-sm font-medium">{{
+        t("setup.identity.sshPassphraseLabel")
+      }}</label>
       <BaseInput
         id="passphrase"
         v-model="passphrase"
         type="password"
-        placeholder="Passphrase to decrypt the SSH key"
+        :placeholder="t('setup.identity.sshPassphrasePlaceholder')"
         autocomplete="off"
         :disabled="loadingIdentity || verifying"
       />
@@ -661,12 +670,15 @@ onUnmounted(clearPendingFile);
         @click="onVerifyPaste"
       >
         <BaseIcon :icon="KeyRound" />
-        {{ verifying ? "Verifying…" : "Verify" }}
+        {{
+          verifying
+            ? t("setup.identity.sshVerifyButtonLoading")
+            : t("setup.identity.sshVerifyButton")
+        }}
       </BaseButton>
-      <small class="text-xs text-muted"
-        >Enter the SSH key's passphrase and verify to confirm it matches a
-        recipient.</small
-      >
+      <small class="text-xs text-muted">{{
+        t("setup.identity.sshVerifyHint")
+      }}</small>
     </div>
 
     <!-- Optional seal encryption (paste path; x25519 keys only) -->
@@ -675,22 +687,22 @@ onUnmounted(clearPendingFile);
       ref="pf"
       id="identity-passphrase"
       v-model="passphrase"
-      label="Passphrase (optional)"
-      placeholder="Leave empty for plaintext storage"
+      :label="t('setup.identity.sealPassphraseLabel')"
+      :placeholder="t('setup.identity.sealPassphrasePlaceholder')"
       :optional="true"
       :disabled="loadingIdentity"
     >
       <template #help>
-        <small class="text-xs text-muted"
-          >Encrypts the private key. Recommended for Android.</small
-        >
+        <small class="text-xs text-muted">{{
+          t("setup.identity.sealPassphraseHelpAge")
+        }}</small>
         <BaseAlert v-if="!passphrase.trim()" variant="warning">
           <BaseIcon
             :icon="TriangleAlert"
             :size="14"
             class="inline-block align-middle"
           />
-          Without a passphrase, your private key is stored in plaintext.
+          {{ t("setup.identity.sealPassphraseWarning") }}
         </BaseAlert>
       </template>
     </PassphraseField>
@@ -707,7 +719,7 @@ onUnmounted(clearPendingFile);
     />
 
     <BaseAlert variant="info" class="text-center">
-      Stored locally. Nothing leaves your device.
+      {{ t("common.setup.storedLocally") }}
     </BaseAlert>
 
     <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
@@ -717,7 +729,11 @@ onUnmounted(clearPendingFile);
       type="submit"
       :loading="loadingIdentity"
       :disabled="ackRequired"
-      >{{ loadingIdentity ? "Verifying…" : "Complete Setup" }}</BaseButton
+      >{{
+        loadingIdentity
+          ? t("setup.identity.verifying")
+          : t("setup.identity.buttonComplete")
+      }}</BaseButton
     >
   </form>
 </template>

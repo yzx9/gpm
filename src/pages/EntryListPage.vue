@@ -184,7 +184,7 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
     searchError.value = false;
   } catch (e) {
     if (myId !== reqId) return;
-    const msg = (e as AppError)?.message || "Failed to load entries";
+    const msg = (e as AppError)?.message || t("entries.loadFailed");
     if (replace && q.trim()) {
       searchError.value = true;
       toast.danger(msg);
@@ -324,7 +324,7 @@ async function syncRepo() {
         pullResult.value = "";
       }, 3000);
     } else {
-      error.value = appError?.message || "Sync failed";
+      error.value = appError?.message || t("entries.syncFailed");
     }
   } finally {
     pullProgressUnlisten?.();
@@ -389,7 +389,7 @@ async function resolveDivergence(choice: DivergenceChoice) {
       divergence.value = null;
       await syncRepo();
     } else {
-      divergeError.value = appError?.message || "Resolve failed";
+      divergeError.value = appError?.message || t("entries.resolveFailed");
     }
   } finally {
     resolving.value = false;
