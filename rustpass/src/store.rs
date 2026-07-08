@@ -171,19 +171,6 @@ impl Store {
         self.crypto.list_recipients(&view).await
     }
 
-    /// The recipient public-key strings at `repo_path` (read + parse + map).
-    /// The encrypt paths (`encrypt_and_write`, keep-mine re-encrypt) consume
-    /// `String` recipients; the pub [`list_recipients`](Self::list_recipients)
-    /// keeps the parsed [`Recipient`] for the UI.
-    async fn read_recipient_keys(&self, repo_path: &Path) -> Result<Vec<String>, Error> {
-        Ok(self
-            .read_recipients_raw(repo_path)
-            .await?
-            .into_iter()
-            .map(|r| r.public_key)
-            .collect())
-    }
-
     /// Replace the seal master key at runtime. The app-launch biometric lock
     /// builds the store without the key (so `repo.json` is unreadable until the
     /// unlock prompt), injects it via this call after a successful biometric
@@ -1034,30 +1021,22 @@ impl Store {
 
         // 2. Decrypt each local blob to plaintext (identity). An undecryptable
         //    local entry can't be re-encrypted → refuse (adopt or cancel rather
-        //    than silently drop it). Read the identity ONCE and derive our own
-        //    recipient here — the re-encrypt step (4) reuses both. `get_identity_bytes`
-        //    returns the cached *unlocked* identity, so this works for
-        //    passphrase-protected SSH keys (the PEM is already decrypted).
+        //    than silently drop it). `get_identity_bytes` returns the cached
+        //    *unlocked* identity, so this works for passphrase-protected SSH keys
+        //    (the PEM is already decrypted); the re-encrypt step (4) reuses it.
         let identity = self.get_identity_bytes().await?;
-        let identity_str = str::from_utf8(&identity)
-            .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
-        let our_recipient = self.crypto.identity_to_recipient(identity_str, None)?;
         let mut decrypted: Vec<(String, Zeroizing<Vec<u8>>)> = Vec::with_capacity(replays.len());
         for r in replays {
-            let plaintext = self
-                .crypto
-                .decrypt_bytes(&r.blob, &identity, None)
-                .await
-                .map_err(|_| {
-                    Error::new(
-                        ErrorCode::PushRejected,
-                        format!(
-                            "Can't keep mine: \"{}\" can't be decrypted to re-encrypt. \
+            let plaintext = self.crypto.decrypt(&r.blob, &identity).await.map_err(|_| {
+                Error::new(
+                    ErrorCode::PushRejected,
+                    format!(
+                        "Can't keep mine: \"{}\" can't be decrypted to re-encrypt. \
                              Adopt the remote or cancel.",
-                            r.rel_path.trim_end_matches(".age")
-                        ),
-                    )
-                })?;
+                        r.rel_path.trim_end_matches(".age")
+                    ),
+                )
+            })?;
             decrypted.push((r.rel_path, Zeroizing::new(plaintext)));
         }
 
@@ -1070,17 +1049,13 @@ impl Store {
             .await?;
 
         // 4. Re-encrypt to the CURRENT (remote-tip) recipients + our own key
-        //    (our_recipient derived once during decrypt, above).
-        let mut recipients: Vec<String> = self.read_recipient_keys(&rcs.repo_path).await?;
-        if !recipients.contains(&our_recipient) {
-            recipients.push(our_recipient);
-        }
+        //    (ensureOurKeyID) via the backend. It re-reads the recipients index
+        //    and re-derives our recipient per entry — cheap for age, and the
+        //    replay set is small. The view binds to the advanced working tree.
+        let view = RepoFiles::new(&*self.storage, &rcs.repo_path);
         let mut ciphertexts: Vec<(String, Vec<u8>)> = Vec::with_capacity(decrypted.len());
         for (rel, plaintext) in decrypted {
-            let ct = self
-                .crypto
-                .encrypt_to_recipients(&plaintext, &recipients)
-                .await?;
+            let ct = self.crypto.encrypt(&plaintext, &identity, &view).await?;
             ciphertexts.push((rel, ct));
         }
 
