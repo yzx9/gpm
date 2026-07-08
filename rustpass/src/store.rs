@@ -274,11 +274,10 @@ impl Store {
             itype,
             IdentityType::AgeEncrypted | IdentityType::SshEd25519 | IdentityType::SshRsa
         ) {
-            let unlocked = self
+            let zeroizing = self
                 .crypto
                 .unlock_identity(&encrypted_bytes, passphrase)
                 .await?;
-            let zeroizing = Zeroizing::new(unlocked);
             let mut cache = self
                 .cached_identity
                 .write()
@@ -310,8 +309,8 @@ impl Store {
         // the decrypted private key isn't left in a non-zeroized heap buffer (this
         // is the biometric-enable gate, a common flow). An age-encrypted identity
         // has no light validator, so `unlock_identity` scrypt-decrypts to the
-        // operational key (returned + dropped). Plaintext / unencrypted: nothing
-        // to validate.
+        // operational key, returned as `Zeroizing` and dropped (wiped on drop).
+        // Plaintext / unencrypted: nothing to validate.
         match itype {
             IdentityType::AgeEncrypted => {
                 self.crypto.unlock_identity(&bytes, passphrase).await?;
@@ -1325,13 +1324,13 @@ impl Store {
         }
 
         // scrypt is intentionally slow (~100 ms+); the backend runs it on a
-        // blocking thread. Wrap the decrypted key in `Zeroizing` so it's wiped
-        // after the re-encrypt instead of lingering in the heap.
-        let plaintext = Zeroizing::new(
-            self.crypto
-                .unlock_identity(&encrypted_bytes, old_passphrase)
-                .await?,
-        );
+        // blocking thread. `unlock_identity` returns the decrypted key as
+        // `Zeroizing`, so it's wiped after the re-encrypt instead of lingering
+        // in the heap.
+        let plaintext = self
+            .crypto
+            .unlock_identity(&encrypted_bytes, old_passphrase)
+            .await?;
         self.config
             .save_identity(&plaintext, Some(new_passphrase))
             .await?;

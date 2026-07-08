@@ -139,7 +139,11 @@ pub trait CryptoBackend: Send + Sync {
     /// identity or SSH key; `InvalidIdentity` for a non-UTF-8 SSH identity;
     /// `SshKeyInvalid` for an unparseable SSH key; `DecryptFailed` for a
     /// corrupt age-encrypted blob.
-    async fn unlock_identity(&self, at_rest: &[u8], passphrase: &str) -> Result<Vec<u8>, Error>;
+    async fn unlock_identity(
+        &self,
+        at_rest: &[u8],
+        passphrase: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, Error>;
 
     /// Resolve the parsed recipients the backend can encrypt to, reading the
     /// backend's recipients index through `view`. The view carries the absolute
@@ -244,13 +248,19 @@ impl CryptoBackend for AgeBackend {
         }
     }
 
-    async fn unlock_identity(&self, at_rest: &[u8], passphrase: &str) -> Result<Vec<u8>, Error> {
+    async fn unlock_identity(
+        &self,
+        at_rest: &[u8],
+        passphrase: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, Error> {
         let itype = classify_identity(at_rest);
         if itype == IdentityType::AgeEncrypted {
             // scrypt unwrap (~100 ms KDF) runs on a blocking thread.
             let passphrase = Zeroizing::new(passphrase.to_string());
             let at_rest = at_rest.to_vec();
-            spawn_blocking(move || decrypt_identity(&passphrase, &at_rest)).await?
+            spawn_blocking(move || decrypt_identity(&passphrase, &at_rest))
+                .await?
+                .map(Zeroizing::new)
         } else if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
             // Decrypt the SSH key to an unencrypted PEM; the bcrypt KDF is
             // blocking work. This cached form is what the decrypt path consumes
@@ -267,10 +277,10 @@ impl CryptoBackend for AgeBackend {
                 crate::ssh::to_unencrypted_pem(raw, &pw)
             })
             .await??;
-            Ok(pem.as_str().as_bytes().to_vec())
+            Ok(Zeroizing::new(pem.as_str().as_bytes().to_vec()))
         } else {
             // Plaintext / unencrypted — already operational.
-            Ok(at_rest.to_vec())
+            Ok(Zeroizing::new(at_rest.to_vec()))
         }
     }
 
