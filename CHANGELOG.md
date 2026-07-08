@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Android clipboard-clear notification now shows how long until the secret auto-clears (for example, "auto-clears in 45s"), so the timeout is visible right in the notification shade instead of only in Settings. The tap-to-clear action is unchanged.
 - The entry list now shows one line per entry — just the name — instead of repeating the path underneath it, since the two were nearly identical (the path was only the name plus its file extension) and the second line added little while crowding the list. The full path now appears at the bottom of the entry detail screen, as quiet footer metadata that sits without competing with the title.
 
+### Fixed
+
+- With App Lock turned on, the password list sometimes stayed empty after you unlocked with your fingerprint or face, needing a manual pull-to-refresh before your entries appeared. The list now loads reliably as soon as the app unlocks.
+
 ## [v0.10.0] - 2026-07-06
 
 ### Added

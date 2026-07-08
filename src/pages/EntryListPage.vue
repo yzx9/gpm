@@ -82,6 +82,11 @@ const PAGE_SIZE = 50;
 const displayedEntries = ref<Entry[]>([]);
 const total = ref(0);
 const hasMore = ref(false);
+// True once the first page has been applied — "the list state is known", even if
+// that state is empty. Distinguishes a never-loaded list (cold start, or the
+// sealed fetch still in flight) from a list that loaded as empty, so the
+// app-lock recovery can reload the former and leave the latter intact.
+const hasFetchedOnce = ref(false);
 const activeQuery = ref(""); // the query the currently-displayed pages belong to
 const search = ref("");
 const searchError = ref(false);
@@ -182,6 +187,7 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
     activeQuery.value = q; // load-more continues whatever is displayed
     error.value = "";
     searchError.value = false;
+    hasFetchedOnce.value = true; // state is known (even if this page was empty)
   } catch (e) {
     if (myId !== reqId) return;
     const msg = (e as AppError)?.message || t("entries.loadFailed");
@@ -218,10 +224,19 @@ function retry() {
 // chrome + message are visible behind the (semi-transparent) AppLockOverlay.
 // Abandoning unlock leaves the message in place as a reminder. Once `appLocked`
 // flips to false the master key is back in memory, so clear the now-stale error
-// and load the list. Guarded on `error` so a resume re-lock over an
-// already-loaded list is left intact.
+// and load the list.
+//
+// The reload fires whenever the list state is NOT already known (`hasFetchedOnce`
+// false, or a stale error showing) — not only when the cold-start fetch failed.
+// The biometric AppLockOverlay auto-prompts on mount and can resolve before the
+// sealed-state fetch's rejection lands (a fast face unlock or a re-prompt), so
+// at the unlock edge the fetch may still be in flight: no error, no entries,
+// `hasFetchedOnce` still false. Reload then and let the monotonic reqId drop the
+// stale in-flight result. A resume re-lock over a list that has already loaded —
+// entries OR a genuinely-empty store — is left intact: nothing changed while
+// backgrounded, so no refetch (and no empty → spinner → empty flicker).
 watch(appLocked, (locked, prev) => {
-  if (prev && !locked && error.value) {
+  if (prev && !locked && (!hasFetchedOnce.value || error.value)) {
     error.value = "";
     void fetchPage(search.value.trim(), 0, true);
   }

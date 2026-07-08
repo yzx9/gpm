@@ -216,6 +216,117 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).not.toContain("Store is locked");
     });
 
+    it("reloads on unlock even if the cold-start fetch is still in flight (biometric race)", async () => {
+      // The biometric AppLockOverlay auto-prompts on mount and can resolve
+      // BEFORE the sealed-state list fetch's SEAL_KEY_UNAVAILABLE rejection
+      // lands (a fast face unlock or a re-prompt). At that unlock edge neither
+      // an error nor any entries exist yet, so the reload must not be gated on
+      // `error` alone — it should fire whenever the list is empty, and the
+      // monotonic reqId drops the stale in-flight result.
+      let listCall = 0;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "list_entries") {
+          listCall += 1;
+          // First (cold-start, sealed) fetch hangs — its rejection never lands
+          // before the unlock; the second (post-unlock) fetch succeeds.
+          return listCall === 1
+            ? new Promise(() => {})
+            : Promise.resolve(page(sampleEntries));
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+
+      const { wrapper, appLock } = mountWithApp(EntryListPage);
+      const appLocked = appLock.appLocked as unknown as { value: boolean };
+      appLocked.value = true;
+      await flushPromises();
+
+      // While locked: fetch in flight, no error surfaced yet, no entries.
+      expect(wrapper.text()).not.toContain("github-token");
+
+      // Biometric unlock resolves before the hung fetch — reload must fire
+      // anyway because no entries are loaded (the recovery is not error-gated).
+      appLocked.value = false;
+      await flushPromises();
+
+      expect(listCall).toBe(2); // the post-unlock reload fired
+      expect(wrapper.text()).toContain("github-token");
+    });
+
+    it("leaves an already-loaded list intact across a resume re-lock + unlock", async () => {
+      // A resume re-lock gates an already-loaded list behind the overlay; on
+      // re-unlock nothing changed while backgrounded, so the list is NOT refetched
+      // (the recovery only reloads when the list state isn't known yet).
+      let listCall = 0;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "list_entries") {
+          listCall += 1;
+          return Promise.resolve(page(sampleEntries));
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+
+      const { wrapper, appLock } = mountWithApp(EntryListPage);
+      const appLocked = appLock.appLocked as unknown as { value: boolean };
+      await flushPromises();
+      expect(listCall).toBe(1); // initial load
+      expect(wrapper.text()).toContain("github-token");
+
+      // Resume re-lock then re-unlock over the loaded list.
+      appLocked.value = true;
+      await flushPromises();
+      appLocked.value = false;
+      await flushPromises();
+
+      expect(listCall).toBe(1); // no refetch — list left intact
+      expect(wrapper.text()).toContain("github-token");
+    });
+
+    it("leaves a legitimately-empty list intact on resume re-lock (no empty→spinner→empty flicker)", async () => {
+      // A genuinely-empty store loads successfully as an empty page, so the list
+      // state IS known (empty). A resume re-lock + unlock must NOT refetch — a
+      // reload would flicker "No passwords yet" → spinner → "No passwords yet".
+      // This is the `hasFetchedOnce` distinction from a never-loaded list.
+      let listCall = 0;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "list_entries") {
+          listCall += 1;
+          return Promise.resolve(page([])); // empty store
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+
+      const { wrapper, appLock } = mountWithApp(EntryListPage);
+      const appLocked = appLock.appLocked as unknown as { value: boolean };
+      await flushPromises();
+      expect(listCall).toBe(1); // initial load succeeded (empty)
+      expect(wrapper.text()).toContain("No passwords yet");
+
+      // Resume re-lock then re-unlock over the loaded-empty list: no refetch.
+      appLocked.value = true;
+      await flushPromises();
+      appLocked.value = false;
+      await flushPromises();
+
+      expect(listCall).toBe(1); // not refetched — no flicker
+      expect(wrapper.text()).toContain("No passwords yet");
+    });
+
     it("shows empty state when no entries", async () => {
       when("list_entries", page([]));
       const wrapper = mountPage();
