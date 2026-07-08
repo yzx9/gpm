@@ -116,6 +116,41 @@ async fn set_writes_encrypts_and_commits_locally() {
     assert!(secret.body().contains("user: admin"));
 }
 
+/// Regression smoke for the DEFAULT identity: a plaintext x25519 key (no
+/// passphrase). It must round-trip through the encrypt (`set`) → decrypt
+/// (`get`) pipeline, and — because plaintext identities are never cached — the
+/// store must read as "not unlocked" before, during, and after. Pins that the
+/// CryptoBackend pipeline migration left the default identity path unchanged:
+/// the cache is untouched, so plaintext still decrypts straight from disk per
+/// op via `get_identity_bytes`.
+#[tokio::test]
+async fn plaintext_identity_round_trips_and_stays_unlocked_false() {
+    let (_bare_dir, _config_dir, store, _identity_bytes) = writable_store().await;
+    assert!(
+        !store.is_unlocked(),
+        "plaintext identity must start (and stay) not unlocked"
+    );
+
+    store
+        .set("email/work", b"correct horse battery staple")
+        .await
+        .expect("set (encrypt) must succeed with a plaintext identity");
+    assert!(
+        !store.is_unlocked(),
+        "set must not cache/unlock a plaintext identity"
+    );
+
+    let secret = store
+        .get("email/work")
+        .await
+        .expect("get (decrypt) must round-trip with a plaintext identity");
+    assert_eq!(secret.password(), "correct horse battery staple");
+    assert!(
+        !store.is_unlocked(),
+        "get must not cache/unlock a plaintext identity"
+    );
+}
+
 /// A configured commit identity flows into the LOCAL commit's author (set no
 /// longer pushes, so the author is checked on the local HEAD).
 #[tokio::test]

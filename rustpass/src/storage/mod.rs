@@ -782,4 +782,21 @@ mod tests {
             "escaping symlink must be tampering, not adopted"
         );
     }
+
+    /// A directory at the index path is not a regular file — rejected as
+    /// tampering, the same as a symlink (the docstring enumerates both).
+    #[tokio::test]
+    async fn liveness_directory_at_index_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".age-recipients"))
+            .await
+            .unwrap();
+        let err = validate_recipients_index_liveness(dir.path(), ".age-recipients")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "STORE_ERROR",
+            "a directory at the index path is tampering, not an empty set"
+        );
+    }
 }

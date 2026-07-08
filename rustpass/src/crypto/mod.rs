@@ -126,47 +126,6 @@ pub trait CryptoBackend: Send + Sync {
     /// (not the facade) so each backend owns its on-disk format.
     fn profile(&self) -> CryptoProfile;
 
-    /// Encrypt `plaintext` to every recipient in `recipients`, returning binary
-    /// (unarmored) age ciphertext — the on-disk gopass secret format.
-    ///
-    /// # Errors
-    ///
-    /// See [`age::encrypt_to_recipients`] — `InvalidIdentity` for an empty
-    /// recipient list or an unparseable recipient, `PostQuantumNotSupported`
-    /// for a post-quantum recipient, `PluginUnavailable` if a required
-    /// `age-plugin-<name>` binary is missing, `DecryptFailed` on the rare
-    /// internal age failure.
-    async fn encrypt_to_recipients(
-        &self,
-        plaintext: &[u8],
-        recipients: &[String],
-    ) -> Result<Vec<u8>, Error>;
-
-    /// Decrypt age `encrypted` bytes with `identity_bytes` (native x25519 or
-    /// SSH private key; encrypted SSH keys need `passphrase`).
-    ///
-    /// # Errors
-    ///
-    /// See [`age::decrypt_bytes`] — `InvalidIdentity` for a malformed identity,
-    /// `IdentityEncrypted` for an encrypted SSH key with no passphrase,
-    /// `DecryptFailed` for a wrong identity / corrupted ciphertext,
-    /// `PostQuantumNotSupported` for a PQ identity.
-    async fn decrypt_bytes(
-        &self,
-        encrypted: &[u8],
-        identity_bytes: &[u8],
-        passphrase: Option<&str>,
-    ) -> Result<Vec<u8>, Error>;
-
-    /// Decrypt a passphrase-encrypted (scrypt) identity blob. The scrypt KDF is
-    /// intentionally slow (~100 ms), so this runs on a blocking thread.
-    ///
-    /// # Errors
-    ///
-    /// `IdentityNotEncrypted` for an empty passphrase, `WrongPassphrase` for a
-    /// bad passphrase, `DecryptFailed` for corrupted data.
-    async fn decrypt_identity(&self, passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, Error>;
-
     /// Produce the operational identity bytes from an at-rest identity under
     /// `passphrase`. Classifies `at_rest` and returns what the encrypt/decrypt
     /// primitives consume: an age-encrypted identity is scrypt-decrypted, an
@@ -285,49 +244,13 @@ impl CryptoBackend for AgeBackend {
         }
     }
 
-    async fn encrypt_to_recipients(
-        &self,
-        plaintext: &[u8],
-        recipients: &[String],
-    ) -> Result<Vec<u8>, Error> {
-        // Wrap secret copies in `Zeroizing` so they're scrubbed on drop after the
-        // blocking op (CLAUDE.md: "All decrypted content uses Zeroizing and is
-        // wiped after use"). Deref-coercion hands `&[u8]` / `&str` to the free fn.
-        let plaintext = Zeroizing::new(plaintext.to_vec());
-        let recipients = recipients.to_vec();
-        spawn_blocking(move || encrypt_to_recipients(&plaintext, &recipients)).await?
-    }
-
-    async fn decrypt_bytes(
-        &self,
-        encrypted: &[u8],
-        identity_bytes: &[u8],
-        passphrase: Option<&str>,
-    ) -> Result<Vec<u8>, Error> {
-        let encrypted = encrypted.to_vec();
-        let identity_bytes = Zeroizing::new(identity_bytes.to_vec());
-        let passphrase = passphrase.map(|p| Zeroizing::new(p.to_string()));
-        spawn_blocking(move || {
-            decrypt_bytes(
-                &encrypted,
-                &identity_bytes,
-                passphrase.as_deref().map(String::as_str),
-            )
-        })
-        .await?
-    }
-
-    async fn decrypt_identity(&self, passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, Error> {
-        let passphrase = Zeroizing::new(passphrase.to_string());
-        let encrypted = encrypted.to_vec();
-        spawn_blocking(move || decrypt_identity(&passphrase, &encrypted)).await?
-    }
-
     async fn unlock_identity(&self, at_rest: &[u8], passphrase: &str) -> Result<Vec<u8>, Error> {
         let itype = classify_identity(at_rest);
         if itype == IdentityType::AgeEncrypted {
-            // scrypt unwrap runs on a blocking thread inside decrypt_identity.
-            self.decrypt_identity(passphrase, at_rest).await
+            // scrypt unwrap (~100 ms KDF) runs on a blocking thread.
+            let passphrase = Zeroizing::new(passphrase.to_string());
+            let at_rest = at_rest.to_vec();
+            spawn_blocking(move || decrypt_identity(&passphrase, &at_rest)).await?
         } else if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
             // Decrypt the SSH key to an unencrypted PEM; the bcrypt KDF is
             // blocking work. This cached form is what the decrypt path consumes
@@ -394,13 +317,19 @@ impl CryptoBackend for AgeBackend {
         if !recipients.iter().any(|r| r == &our_recipient) {
             recipients.push(our_recipient);
         }
-        self.encrypt_to_recipients(plaintext, &recipients).await
+        // Wrap the secret copy in `Zeroizing` (scrubbed on drop) and run the
+        // blocking age encrypt off the async thread.
+        let plaintext = Zeroizing::new(plaintext.to_vec());
+        spawn_blocking(move || encrypt_to_recipients(&plaintext, &recipients)).await?
     }
 
     async fn decrypt(&self, ciphertext: &[u8], identity: &[u8]) -> Result<Vec<u8>, Error> {
         // The caller (Store::get_identity_bytes) supplies the unlocked identity,
-        // so no passphrase — same as the existing decrypt_bytes(.., None) path.
-        self.decrypt_bytes(ciphertext, identity, None).await
+        // so no passphrase. Wrap secret copies in `Zeroizing` and run the
+        // blocking age decrypt off the async thread.
+        let ciphertext = ciphertext.to_vec();
+        let identity = Zeroizing::new(identity.to_vec());
+        spawn_blocking(move || decrypt_bytes(&ciphertext, &identity, None)).await?
     }
 
     async fn validate_ssh_key_passphrase(
