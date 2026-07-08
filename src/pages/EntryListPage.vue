@@ -662,10 +662,6 @@ defineExpose({ syncRepo });
               class="block font-medium whitespace-nowrap overflow-hidden text-ellipsis"
               >{{ entry.name }}</span
             >
-            <span
-              class="block text-xs text-muted whitespace-nowrap overflow-hidden text-ellipsis"
-              >{{ entry.path }}</span
-            >
           </div>
           <BaseIcon
             :icon="ChevronRight"

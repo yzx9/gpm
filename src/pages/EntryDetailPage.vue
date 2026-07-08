@@ -512,5 +512,10 @@ function handleKeydown(e: KeyboardEvent) {
       @resolve="resolveDivergence"
       @close="cancelDivergence"
     />
+
+    <!-- Full repository path, shown as quiet footer metadata -->
+    <p class="text-center text-xs text-muted break-all select-all mt-8">
+      {{ entryPath }}
+    </p>
   </main>
 </template>
