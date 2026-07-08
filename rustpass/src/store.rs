@@ -327,50 +327,28 @@ impl Store {
     /// Returns `NoIdentity` if no identity is configured.
     pub async fn unlock(&self, passphrase: &str) -> Result<(), Error> {
         let encrypted_bytes = self.config.load_identity().await?;
-
         let itype = classify_identity(&encrypted_bytes);
 
-        if itype == IdentityType::AgeEncrypted {
-            // Age-encrypted identity: decrypt with passphrase. scrypt is
-            // intentionally slow (~100 ms+); the backend runs it on a blocking
-            // thread.
-            let decrypted = self
+        // Only encrypted identities populate the cache. Plaintext / unencrypted
+        // identities decrypt straight from disk per-op (see `get_identity_bytes`),
+        // so they report `is_unlocked() == false` — the unlock-status signal the
+        // app's lock UI depends on. `unlock_identity` classifies again internally
+        // and produces the operational bytes; the cache gate here preserves the
+        // plaintext-never-cached invariant.
+        if matches!(
+            itype,
+            IdentityType::AgeEncrypted | IdentityType::SshEd25519 | IdentityType::SshRsa
+        ) {
+            let unlocked = self
                 .crypto
-                .decrypt_identity(passphrase, &encrypted_bytes)
+                .unlock_identity(&encrypted_bytes, passphrase)
                 .await?;
-            let zeroizing = Zeroizing::new(decrypted);
-
-            {
-                let mut cache = self
-                    .cached_identity
-                    .write()
-                    .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
-                *cache = Some(zeroizing);
-            }
-        } else if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
-            // Encrypted SSH key: decrypt once (the bcrypt KDF is blocking work)
-            // and cache the UNENCRYPTED PEM, so per-entry decrypts skip the KDF
-            // entirely — age parses the cached PEM as the no-KDF `Unencrypted`
-            // variant instead of re-deriving the key every call.
-            let pw = passphrase.to_string();
-            let decrypted_pem = spawn_blocking(move || {
-                let pem = str::from_utf8(&encrypted_bytes).map_err(|_| {
-                    Error::new(
-                        ErrorCode::InvalidIdentity,
-                        "SSH identity is not valid UTF-8",
-                    )
-                })?;
-                crate::ssh::to_unencrypted_pem(pem, &pw)
-            })
-            .await??;
-            let identity_bytes = Zeroizing::new(decrypted_pem.as_str().as_bytes().to_vec());
-            {
-                let mut cache = self
-                    .cached_identity
-                    .write()
-                    .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
-                *cache = Some(identity_bytes);
-            }
+            let zeroizing = Zeroizing::new(unlocked);
+            let mut cache = self
+                .cached_identity
+                .write()
+                .map_err(|_| Error::new(ErrorCode::StoreError, "Cache lock poisoned"))?;
+            *cache = Some(zeroizing);
         }
 
         Ok(())
@@ -391,9 +369,17 @@ impl Store {
         let bytes = self.config.load_identity().await?;
         let itype = classify_identity(&bytes);
 
+        // Prove the passphrase decrypts WITHOUT materializing key bytes where a
+        // light validator exists. SSH keys go through `validate_ssh_key_passphrase`,
+        // which decrypts in place and discards — it never serializes the PEM, so
+        // the decrypted private key isn't left in a non-zeroized heap buffer (this
+        // is the biometric-enable gate, a common flow). An age-encrypted identity
+        // has no light validator, so `unlock_identity` scrypt-decrypts to the
+        // operational key (returned + dropped). Plaintext / unencrypted: nothing
+        // to validate.
         match itype {
             IdentityType::AgeEncrypted => {
-                self.crypto.decrypt_identity(passphrase, &bytes).await?;
+                self.crypto.unlock_identity(&bytes, passphrase).await?;
             }
             IdentityType::SshEd25519 | IdentityType::SshRsa => {
                 self.crypto
@@ -1424,11 +1410,13 @@ impl Store {
         }
 
         // scrypt is intentionally slow (~100 ms+); the backend runs it on a
-        // blocking thread.
-        let plaintext = self
-            .crypto
-            .decrypt_identity(old_passphrase, &encrypted_bytes)
-            .await?;
+        // blocking thread. Wrap the decrypted key in `Zeroizing` so it's wiped
+        // after the re-encrypt instead of lingering in the heap.
+        let plaintext = Zeroizing::new(
+            self.crypto
+                .unlock_identity(&encrypted_bytes, old_passphrase)
+                .await?,
+        );
         self.config
             .save_identity(&plaintext, Some(new_passphrase))
             .await?;

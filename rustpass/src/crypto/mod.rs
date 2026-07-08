@@ -23,7 +23,8 @@ use async_trait::async_trait;
 use tokio::task::spawn_blocking;
 use zeroize::Zeroizing;
 
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
+use crate::identity::{classify_identity, IdentityType};
 
 /// The age encryption backend (the sole `CryptoBackend` implementation today).
 pub mod age;
@@ -164,6 +165,25 @@ pub trait CryptoBackend: Send + Sync {
     /// bad passphrase, `DecryptFailed` for corrupted data.
     async fn decrypt_identity(&self, passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, Error>;
 
+    /// Produce the operational identity bytes from an at-rest identity under
+    /// `passphrase`. Classifies `at_rest` and returns what the encrypt/decrypt
+    /// primitives consume: an age-encrypted identity is scrypt-decrypted, an
+    /// encrypted SSH key is decrypted to an unencrypted PEM, and anything else
+    /// (plaintext x25519, unencrypted SSH) is returned as-is. The caller decides
+    /// whether to cache the result — the backend holds no identity state.
+    ///
+    /// # Errors
+    ///
+    /// `WrongPassphrase` for an incorrect passphrase on an age-encrypted
+    /// identity or SSH key; `InvalidIdentity` for a non-UTF-8 SSH identity;
+    /// `SshKeyInvalid` for an unparseable SSH key; `DecryptFailed` for a
+    /// corrupt age-encrypted blob.
+    async fn unlock_identity(
+        &self,
+        at_rest: &[u8],
+        passphrase: &str,
+    ) -> Result<Vec<u8>, Error>;
+
     /// Validate `passphrase` against an SSH identity without producing output.
     /// Used by the biometric-enable flow to reject a wrong passphrase before
     /// sealing it. Unencrypted keys succeed with any passphrase. The SSH KDF is
@@ -263,6 +283,37 @@ impl CryptoBackend for AgeBackend {
         let passphrase = Zeroizing::new(passphrase.to_string());
         let encrypted = encrypted.to_vec();
         spawn_blocking(move || decrypt_identity(&passphrase, &encrypted)).await?
+    }
+
+    async fn unlock_identity(
+        &self,
+        at_rest: &[u8],
+        passphrase: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let itype = classify_identity(at_rest);
+        if itype == IdentityType::AgeEncrypted {
+            // scrypt unwrap runs on a blocking thread inside decrypt_identity.
+            self.decrypt_identity(passphrase, at_rest).await
+        } else if matches!(
+            itype,
+            IdentityType::SshEd25519 | IdentityType::SshRsa
+        ) {
+            // Decrypt the SSH key to an unencrypted PEM; the bcrypt KDF is
+            // blocking work. This cached form is what the decrypt path consumes
+            // via age's no-KDF `Unencrypted` variant.
+            let pw = Zeroizing::new(passphrase.to_string());
+            let at_rest = at_rest.to_vec();
+            let pem = spawn_blocking(move || {
+                let raw = str::from_utf8(&at_rest)
+                    .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "SSH identity is not valid UTF-8"))?;
+                crate::ssh::to_unencrypted_pem(raw, &pw)
+            })
+            .await??;
+            Ok(pem.as_str().as_bytes().to_vec())
+        } else {
+            // Plaintext / unencrypted — already operational.
+            Ok(at_rest.to_vec())
+        }
     }
 
     async fn validate_ssh_key_passphrase(
