@@ -1,0 +1,21 @@
+{
+  "biometric": {
+    "subtitle": "认证以访问 gpm",
+    "identity": {
+      "enrollTitle": "启用生物识别解锁",
+      "unlockTitle": "解锁 gpm",
+      "negative": "使用口令"
+    },
+    "appLock": {
+      "enrollTitle": "启用应用锁",
+      "unlockTitle": "解锁 gpm",
+      "negative": "取消"
+    }
+  },
+  "clipboard": {
+    "title": "gpm",
+    "autoClearBody": "点击清除 · {secs} 秒后自动清除",
+    "channelName": "剪贴板",
+    "channelDescription": "当剪贴板中存在机密内容时通知，以便你及时清除"
+  }
+}

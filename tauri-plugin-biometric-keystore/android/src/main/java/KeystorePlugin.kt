@@ -53,9 +53,37 @@ private val UTF_8: Charset = Charsets.UTF_8
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
 
+/** Generic BiometricPrompt fallbacks (NOT a duplicate
+ *  of native.json/en). The app name (title) and a neutral word (negative) keep
+ *  the prompt coherent when the frontend omits the localized text, instead of
+ *  bricking the biometric gate on a display bug. Subtitle is optional, so its
+ *  fallback is to omit it. */
+data class ResolvedPromptText(val title: String, val subtitle: String?, val negative: String)
+
+/** Resolve localized prompt text against the generic fallbacks. Pure (no Android
+ *  types) so it's a plain JVM unit test, not a Robolectric one. */
+fun resolvePromptText(title: String?, subtitle: String?, negative: String?): ResolvedPromptText =
+    ResolvedPromptText(
+        title = title?.takeUnless { it.isBlank() } ?: "gpm",
+        subtitle = subtitle?.takeUnless { it.isBlank() },
+        negative = negative?.takeUnless { it.isBlank() } ?: "Cancel",
+    )
+
 @InvokeArg
 class StoreArgs {
     lateinit var passphrase: String
+    /** Localized BiometricPrompt text; null ⇒ generic fallback. */
+    var title: String? = null
+    var subtitle: String? = null
+    var negative: String? = null
+}
+
+/** `retrieve` carries no secret — only the localized prompt text. */
+@InvokeArg
+class RetrieveArgs {
+    var title: String? = null
+    var subtitle: String? = null
+    var negative: String? = null
 }
 
 /**
@@ -155,13 +183,15 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     // ── PromptInfo ───────────────────────────────────────────────────────
 
-    private fun promptInfo(title: String): BiometricPrompt.PromptInfo =
-        BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle("Authenticate to access gpm")
-            .setNegativeButtonText("Use passphrase")
+    private fun promptInfo(title: String?, subtitle: String?, negative: String?): BiometricPrompt.PromptInfo {
+        val r = resolvePromptText(title, subtitle, negative)
+        val builder = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(r.title)
+            .setNegativeButtonText(r.negative)
             .setAllowedAuthenticators(strongAuthenticator)
-            .build()
+        if (r.subtitle != null) builder.setSubtitle(r.subtitle)
+        return builder.build()
+    }
 
     /** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. */
     private fun mapErrorCode(code: Int): String = when (code) {
@@ -253,7 +283,8 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
 
-        val passphrase = invoke.parseArgs(StoreArgs::class.java).passphrase
+        val args = invoke.parseArgs(StoreArgs::class.java)
+        val passphrase = args.passphrase
         val plainBytes = passphrase.toByteArray(UTF_8)
 
         val cipher = try {
@@ -295,7 +326,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             },
         )
 
-        prompt.authenticate(promptInfo("Enable biometric unlock"), BiometricPrompt.CryptoObject(cipher))
+        prompt.authenticate(promptInfo(args.title, args.subtitle, args.negative), BiometricPrompt.CryptoObject(cipher))
     }
 
     /**
@@ -311,6 +342,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
             return
         }
+        val args = invoke.parseArgs(RetrieveArgs::class.java)
 
         val (iv, ciphertext) = readCipherData() ?: run {
             invoke.reject("nothing stored", "BIOMETRIC_NOT_SET")
@@ -352,7 +384,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             },
         )
 
-        prompt.authenticate(promptInfo("Unlock gpm"), BiometricPrompt.CryptoObject(cipher))
+        prompt.authenticate(promptInfo(args.title, args.subtitle, args.negative), BiometricPrompt.CryptoObject(cipher))
     }
 
     /** Delete the Keystore key and the stored ciphertext (best-effort). */

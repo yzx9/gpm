@@ -6,6 +6,8 @@
 import type { AppLockError } from "@/api";
 import { appUnlock, asAppLockError } from "@/api";
 import { useAppLockState } from "@/composables";
+import { reconcileLocaleFromBackend } from "@/i18n";
+import { appLockUnlockPrompt } from "@/i18n/native";
 import { LockKeyhole, ScanFace } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -32,7 +34,13 @@ async function tryUnlock() {
   // Loop guard: suppress the resume re-lock while the biometric prompt is up.
   setUnlockInFlight(true);
   try {
-    await appUnlock();
+    // Authoritative locale before building prompt text: the boot locale is the
+    // system-locale guess (injected pre-paint), so a user who pinned a different
+    // language would otherwise get this cold-start prompt in the system locale.
+    // This overlay auto-prompts on mount, so it can't rely on main.ts's reconcile
+    // (fire-and-forget) to have completed first. Idempotent when already matched.
+    await reconcileLocaleFromBackend();
+    await appUnlock(appLockUnlockPrompt());
     // Success: the backend emits `app-lock-state { locked: false }`, which
     // useAppLockState mirrors and App.vue's `v-if` reacts to, unmounting this
     // overlay. Nothing to do here.

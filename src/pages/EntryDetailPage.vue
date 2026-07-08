@@ -30,6 +30,7 @@ import {
   useSecuritySettings,
   useToast,
 } from "@/composables";
+import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Eye } from "@lucide/vue";
 import { computed, ref } from "vue";
@@ -116,7 +117,9 @@ async function copyPassword() {
   decryptError.value = false;
   try {
     await ensureClipboardNotifyPermission();
-    const result = await runWithAuth(() => copyPasswordCmd(entryPath));
+    const result = await runWithAuth(() =>
+      copyPasswordCmd(entryPath, clipboardNotifyText()),
+    );
     clear();
     toast.success(
       t("entry.copied", {

@@ -132,6 +132,11 @@ export function currentLocale(): SupportedLocale {
  */
 export async function setLocale(locale: SupportedLocale): Promise<void> {
   await loadBundle(locale, "common");
+  // `native` (native-Android prompt text) is loaded for every locale too, not
+  // only the namespaces already loaded for `prev`: if its boot load failed it
+  // would be absent from `prev`'s messages and the loop below would skip it,
+  // leaving every subsequent locale switch without native text for the session.
+  await loadBundle(locale, "native");
   // Reload the page bundles the user is already viewing (the namespaces loaded
   // for the previous locale) so a locale switch translates the current page in
   // place, not just on the next navigation.

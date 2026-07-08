@@ -67,10 +67,38 @@ private const val PREF_IV = "iv"
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
 
-/** Argument for `store` / `storeBiometric`: the Base64 32-byte master key. */
+/** Generic BiometricPrompt fallbacks (NOT a duplicate of
+ *  native.json/en): the app name (title) + a neutral word (negative) keep the
+ *  prompt coherent if the frontend omits the localized text. Duplicated from
+ *  KeystorePlugin.kt because the plugins are separate Gradle modules. */
+data class ResolvedPromptText(val title: String, val subtitle: String?, val negative: String)
+
+/** Resolve localized prompt text against the generic fallbacks. Pure (no Android
+ *  types) — plain JVM unit test. */
+fun resolvePromptText(title: String?, subtitle: String?, negative: String?): ResolvedPromptText =
+    ResolvedPromptText(
+        title = title?.takeUnless { it.isBlank() } ?: "gpm",
+        subtitle = subtitle?.takeUnless { it.isBlank() },
+        negative = negative?.takeUnless { it.isBlank() } ?: "Cancel",
+    )
+
+/** Argument for `store` / `storeBiometric`: the Base64 32-byte master key. The
+ *  title/subtitle/negative fields carry localized prompt text; only
+ *  `storeBiometric` uses them (the auth-free `store` does not prompt). */
 @InvokeArg
 class StoreArgs {
     lateinit var key: String
+    var title: String? = null
+    var subtitle: String? = null
+    var negative: String? = null
+}
+
+/** `retrieveBiometric` carries no secret — only the localized prompt text. */
+@InvokeArg
+class RetrieveBiometricArgs {
+    var title: String? = null
+    var subtitle: String? = null
+    var negative: String? = null
 }
 
 /**
@@ -229,13 +257,15 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     // ── Biometric prompt plumbing (mirrors KeystorePlugin.kt) ────────────
 
-    private fun promptInfo(title: String): BiometricPrompt.PromptInfo =
-        BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle("Authenticate to access gpm")
-            .setNegativeButtonText("Cancel")
+    private fun promptInfo(title: String?, subtitle: String?, negative: String?): BiometricPrompt.PromptInfo {
+        val r = resolvePromptText(title, subtitle, negative)
+        val builder = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(r.title)
+            .setNegativeButtonText(r.negative)
             .setAllowedAuthenticators(strongAuthenticator)
-            .build()
+        if (r.subtitle != null) builder.setSubtitle(r.subtitle)
+        return builder.build()
+    }
 
     /** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. */
     private fun mapErrorCode(code: Int): String = when (code) {
@@ -394,7 +424,8 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
 
-        val keyB64 = invoke.parseArgs(StoreArgs::class.java).key
+        val args = invoke.parseArgs(StoreArgs::class.java)
+        val keyB64 = args.key
         val plain = try {
             Base64.decode(keyB64, Base64.NO_WRAP)
         } catch (e: Exception) {
@@ -444,7 +475,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         )
 
         prompt.authenticate(
-            promptInfo("Enable app lock"),
+            promptInfo(args.title, args.subtitle, args.negative),
             BiometricPrompt.CryptoObject(cipher),
         )
     }
@@ -469,6 +500,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
             return
         }
+        val args = invoke.parseArgs(RetrieveBiometricArgs::class.java)
 
         val (iv, ciphertext) = readCipherData(biometricPrefs()) ?: run {
             invoke.reject("nothing stored", "BIOMETRIC_NOT_SET")
@@ -512,7 +544,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         )
 
         prompt.authenticate(
-            promptInfo("Unlock gpm"),
+            promptInfo(args.title, args.subtitle, args.negative),
             BiometricPrompt.CryptoObject(cipher),
         )
     }

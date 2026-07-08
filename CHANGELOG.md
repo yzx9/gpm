@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The Android biometric prompts (unlocking the app and unlocking your identity) and the clipboard-clear notification — including its name in your system notification settings — now follow your display language instead of always being English.
+
 ## [v0.11.0] - 2026-07-08
 
 ### Added

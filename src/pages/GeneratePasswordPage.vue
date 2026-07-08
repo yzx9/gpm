@@ -18,6 +18,7 @@ import {
   useLockState,
   useToast,
 } from "@/composables";
+import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Dices } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
@@ -97,7 +98,7 @@ async function onGenerate() {
 async function onCopyRow(pw: string) {
   try {
     await ensureClipboardNotifyPermission();
-    await copyGeneratedPassword(pw);
+    await copyGeneratedPassword(pw, clipboardNotifyText());
     toast.success(t("common.toast.copied"));
   } catch (e) {
     const appError = e as AppError;

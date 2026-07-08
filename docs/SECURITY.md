@@ -127,17 +127,18 @@ Mitigations:
 
 ## Security Measures
 
-| Measure                 | Detail                                                                       |
-| ----------------------- | ---------------------------------------------------------------------------- |
-| Zeroizing memory        | Rust `Secret` type wraps `Zeroizing<String>`; content wiped on drop          |
-| Safe Debug output       | Custom `Debug` impl shows `[REDACTED]`, never actual secrets                 |
-| Clipboard isolation     | `copy_password` keeps password in Rust; JS receives only metadata            |
-| Lifecycle cleanup       | Vue refs cleared on timer, navigation, and unmount                           |
-| Screen capture block    | Per-route Android `FLAG_SECURE` (user toggle); see Screen capture protection |
-| Error sanitization      | Error messages contain only codes and generic descriptions                   |
-| Path traversal guard    | Resolved paths validated to stay within repository; symlink escape detection |
-| Content Security Policy | CSP restricts `script-src`, `connect-src` to `self` and IPC only             |
-| Commit signature verify | Optional SSH-signed-commit verification on every pull (see below)            |
+| Measure                  | Detail                                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zeroizing memory         | Rust `Secret` type wraps `Zeroizing<String>`; content wiped on drop                                                                                                                                     |
+| Safe Debug output        | Custom `Debug` impl shows `[REDACTED]`, never actual secrets                                                                                                                                            |
+| Clipboard isolation      | `copy_password` keeps password in Rust; JS receives only metadata                                                                                                                                       |
+| Lifecycle cleanup        | Vue refs cleared on timer, navigation, and unmount                                                                                                                                                      |
+| Screen capture block     | Per-route Android `FLAG_SECURE` (user toggle); see Screen capture protection                                                                                                                            |
+| Error sanitization       | Error messages contain only codes and generic descriptions                                                                                                                                              |
+| Path traversal guard     | Resolved paths validated to stay within repository; symlink escape detection                                                                                                                            |
+| Content Security Policy  | CSP restricts `script-src`, `connect-src` to `self` and IPC only                                                                                                                                        |
+| WebView script integrity | Secrets render as text (Vue-escaped), never as executable HTML (`v-html`/`innerHTML`); the only script in the WebView is the app's own bundle, which is why the frontend may supply native-prompt text. |
+| Commit signature verify  | Optional SSH-signed-commit verification on every pull (see below)                                                                                                                                       |
 
 ## Screen capture protection
 

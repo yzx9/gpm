@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
+
+import type { ClipboardNotifyText } from "@/i18n/native";
 import type { AuthenticityResult } from "./common";
 import type { SyncDivergence } from "./repo";
 
@@ -104,9 +106,14 @@ export async function searchEntries(
   return invoke<EntryPage>("search_entries", { query, offset, limit });
 }
 
-/** Decrypt + copy the entry's password; clipboard auto-clears after a timer. */
-export async function copyPassword(entryPath: string): Promise<CopyResult> {
-  return invoke<CopyResult>("copy_password", { entryPath });
+/** Decrypt + copy the entry's password; clipboard auto-clears after a timer.
+ *  `notify` supplies the localized notification text; when absent the
+ *  native layer falls back to a generic safety string. */
+export async function copyPassword(
+  entryPath: string,
+  notify?: ClipboardNotifyText,
+): Promise<CopyResult> {
+  return invoke<CopyResult>("copy_password", { entryPath, notifyText: notify });
 }
 
 /** Decrypt + return the entry's content for in-app reveal. */
@@ -117,8 +124,11 @@ export async function showPassword(
 }
 
 /** Copy an already-generated password string; clipboard auto-clears after 30s. */
-export async function copyGeneratedPassword(text: string): Promise<void> {
-  await invoke("copy_generated_password", { text });
+export async function copyGeneratedPassword(
+  text: string,
+  notify?: ClipboardNotifyText,
+): Promise<void> {
+  await invoke("copy_generated_password", { text, notifyText: notify });
 }
 
 /** Generate one password. The arg object is passed through verbatim. */

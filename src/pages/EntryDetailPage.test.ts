@@ -182,9 +182,10 @@ describe("EntryDetailPage", () => {
         .trigger("click");
       await flushPromises();
 
-      expect(invoke).toHaveBeenCalledWith("copy_password", {
-        entryPath: "servers/prod.age",
-      });
+      expect(invoke).toHaveBeenCalledWith(
+        "copy_password",
+        expect.objectContaining({ entryPath: "servers/prod.age" }),
+      );
       expect(
         toast.toasts.value.some((t) =>
           t.message.includes("✓ Copied prod (45s auto-clear)"),

@@ -21,16 +21,51 @@
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
 
-// Serde + PluginHandle are only used inside the `#[cfg(target_os = "android")]`
-// impl blocks; gate the imports so the desktop build doesn't see them as unused.
+// `Deserialize` is used unconditionally (the [`NotifyText`] IPC type deserializes
+// on every target); `Serialize` + `PluginHandle` are Android-only (Payloads +
+// the mobile handle).
+use serde::Deserialize;
 #[cfg(target_os = "android")]
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 #[cfg(target_os = "android")]
 use tauri::plugin::PluginHandle;
 
 /// Android package hosting the `ClipboardNotifyPlugin` Kotlin class.
 #[cfg(target_os = "android")]
 const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.clipboardnotify";
+
+// ---------------------------------------------------------------------------
+// Notification text
+// ---------------------------------------------------------------------------
+
+/// Localized clipboard-clear notification text supplied by the frontend, so the
+/// native layer never localizes. `body_template` carries a `{secs}` hole
+/// resolved against the auto-clear window at post time ([`Self::resolve_body`]).
+/// Deserialized from the frontend's `{ title, bodyTemplate, channelName,
+/// channelDescription }` shape (Tauri converts camelCase → snake_case at the
+/// boundary, so the field names match).
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotifyText {
+    pub title: Option<String>,
+    #[serde(rename = "bodyTemplate")]
+    pub body_template: Option<String>,
+    #[serde(rename = "channelName")]
+    pub channel_name: Option<String>,
+    #[serde(rename = "channelDescription")]
+    pub channel_description: Option<String>,
+}
+
+impl NotifyText {
+    /// Resolve the `{secs}` hole in `body_template` against the auto-clear
+    /// window → the final notification body. Pure (no platform code), so it's
+    /// unit-testable on desktop. `None` when no template was supplied (the
+    /// native layer then falls back to a generic safety body).
+    pub fn resolve_body(&self, secs: u64) -> Option<String> {
+        self.body_template
+            .as_ref()
+            .map(|t| t.replace("{secs}", &secs.to_string()))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Handle (cfg-gated: real on Android, inert stub elsewhere)
@@ -79,16 +114,33 @@ impl<R: Runtime> ClipboardNotify<R> {
     }
 
     /// Post (or update, by fixed ID) the sticky clipboard-clear notification
-    /// armed to fire `secs` as the displayed auto-clear window. Best-effort:
-    /// errors are swallowed (a missing notification never fails a copy).
-    pub async fn post_notification(&self, secs: u64) {
+    /// armed to fire `secs` as the displayed auto-clear window. `text` supplies
+    /// the localized title/body/channel; the body template's `{secs}`
+    /// hole is resolved here against `secs`. Best-effort: errors are swallowed
+    /// (a missing notification never fails a copy).
+    pub async fn post_notification(&self, secs: u64, text: Option<&NotifyText>) {
         #[derive(Serialize)]
         struct Payload {
             secs: u64,
+            title: Option<String>,
+            body: Option<String>,
+            #[serde(rename = "channelName")]
+            channel_name: Option<String>,
+            #[serde(rename = "channelDescription")]
+            channel_description: Option<String>,
         }
         let _ = self
             .0
-            .run_mobile_plugin_async::<()>("postClipboardNotification", Payload { secs })
+            .run_mobile_plugin_async::<()>(
+                "postClipboardNotification",
+                Payload {
+                    secs,
+                    title: text.and_then(|x| x.title.clone()),
+                    body: text.and_then(|x| x.resolve_body(secs)),
+                    channel_name: text.and_then(|x| x.channel_name.clone()),
+                    channel_description: text.and_then(|x| x.channel_description.clone()),
+                },
+            )
             .await;
     }
 
@@ -129,7 +181,7 @@ impl<R: Runtime> ClipboardNotify<R> {
         true
     }
     /// Inert no-op.
-    pub async fn post_notification(&self, _secs: u64) {}
+    pub async fn post_notification(&self, _secs: u64, _text: Option<&NotifyText>) {}
     /// Inert no-op.
     pub async fn dismiss(&self) {}
     /// Inert: reports no manual clear on desktop.
@@ -182,4 +234,50 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             Ok(())
         })
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NotifyText;
+
+    fn text(body_template: &str) -> NotifyText {
+        NotifyText {
+            title: None,
+            body_template: Some(body_template.to_string()),
+            channel_name: None,
+            channel_description: None,
+        }
+    }
+
+    #[test]
+    fn resolve_body_substitutes_secs() {
+        assert_eq!(
+            text("Tap to clear · auto-clears in {secs}s")
+                .resolve_body(45)
+                .as_deref(),
+            Some("Tap to clear · auto-clears in 45s"),
+        );
+    }
+
+    #[test]
+    fn resolve_body_none_when_no_template() {
+        let n = NotifyText {
+            title: None,
+            body_template: None,
+            channel_name: None,
+            channel_description: None,
+        };
+        assert_eq!(n.resolve_body(45), None);
+    }
+
+    #[test]
+    fn resolve_body_preserves_locale_word_order() {
+        // zh-CN puts secs BEFORE the unit; the {secs} token is the only contract,
+        // so word order is carried entirely by the template (Rust substitutes, it
+        // doesn't reorder).
+        assert_eq!(
+            text("{secs} 秒后自动清除").resolve_body(60).as_deref(),
+            Some("60 秒后自动清除"),
+        );
+    }
 }

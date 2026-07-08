@@ -31,10 +31,17 @@ vi.mock("@tauri-apps/api/core");
 // Stub @/i18n so the language-picker tests don't mutate the real i18n singleton
 // (SettingsPage imports setLocale/normalizeSupported directly from it; `t()`
 // still comes from the test plugin in setup.ts, which is unaffected).
-vi.mock("@/i18n", () => ({
-  setLocale: vi.fn().mockResolvedValue(undefined),
-  normalizeSupported: vi.fn((tag: string) => tag),
-}));
+vi.mock("@/i18n", async (importOriginal) => {
+  // Preserve the real `i18n` instance (and loadBundle etc.) — `@/i18n/native`
+  // imports it for the prompt-text builders — while stubbing the two locale
+  // functions this test drives.
+  const actual = await importOriginal<typeof import("@/i18n")>();
+  return {
+    ...actual,
+    setLocale: vi.fn().mockResolvedValue(undefined),
+    normalizeSupported: vi.fn((tag: string) => tag),
+  };
+});
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),
   createWebHashHistory: vi.fn(),
@@ -784,9 +791,10 @@ describe("SettingsPage", () => {
         .trigger("click");
       await flushPromises();
 
-      expect(invoke).toHaveBeenCalledWith("enable_biometric_unlock", {
-        passphrase: "my-pass",
-      });
+      expect(invoke).toHaveBeenCalledWith(
+        "enable_biometric_unlock",
+        expect.objectContaining({ passphrase: "my-pass" }),
+      );
       expect(
         toast.toasts.value.some((t) =>
           t.message.includes("Biometric unlock enabled"),

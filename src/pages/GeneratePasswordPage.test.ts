@@ -137,9 +137,10 @@ describe("GeneratePasswordPage", () => {
     await wrapper.find('button[aria-label="Copy"]').trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("copy_generated_password", {
-      text: "topsecret",
-    });
+    expect(invoke).toHaveBeenCalledWith(
+      "copy_generated_password",
+      expect.objectContaining({ text: "topsecret" }),
+    );
     expect(toast.toasts.value.some((t) => t.message.includes("Copied"))).toBe(
       true,
     );

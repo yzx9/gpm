@@ -29,6 +29,16 @@ vi.mock("vue-router", () => ({
   }),
 }));
 
+vi.mock("@/i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/i18n")>();
+  return {
+    ...actual,
+    // Stub the cold-start reconcile so it doesn't fire an extra invoke that
+    // would consume the test's sequenced invoke mocks.
+    reconcileLocaleFromBackend: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 // The modal only issues unlock commands; whether the overlay then hides is the
 // backend's call (it emits `identity-lock-state`), driven by `App.vue`'s `v-if`
 // and unit-tested in `useLockState.test.ts`. So these cases assert the command
@@ -46,7 +56,7 @@ describe("UnlockModal", () => {
     mount(UnlockModal);
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("biometric_unlock");
+    expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
   });
 
   it("stays in biometric mode when the prompt is cancelled (passphrase behind the switch)", async () => {
@@ -134,7 +144,7 @@ describe("UnlockModal", () => {
     await btn.trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("biometric_unlock");
+    expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
   });
 
   it("reveals the passphrase form on tap and submits to unlock", async () => {

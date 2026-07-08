@@ -1,0 +1,21 @@
+{
+  "biometric": {
+    "subtitle": "Authenticate to access gpm",
+    "identity": {
+      "enrollTitle": "Enable biometric unlock",
+      "unlockTitle": "Unlock gpm",
+      "negative": "Use passphrase"
+    },
+    "appLock": {
+      "enrollTitle": "Enable app lock",
+      "unlockTitle": "Unlock gpm",
+      "negative": "Cancel"
+    }
+  },
+  "clipboard": {
+    "title": "gpm",
+    "autoClearBody": "Tap to clear · auto-clears in {secs}s",
+    "channelName": "Clipboard",
+    "channelDescription": "Notifies when a secret is on the clipboard so you can clear it"
+  }
+}

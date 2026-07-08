@@ -54,6 +54,11 @@ internal const val ALIAS_POST_NOTIFICATIONS = "postNotifications"
 class PostClipboardNotificationArgs {
     /** Auto-clear window to advertise in the notification body, in seconds. */
     var secs: Long = 0
+    /** Localized notification text; null ⇒ generic fallback. */
+    var title: String? = null
+    var body: String? = null
+    var channelName: String? = null
+    var channelDescription: String? = null
 }
 
 /**
@@ -117,12 +122,12 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         // with a task-start reset (the prior design's microsecond race window).
         activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_MANUALLY_CLEARED, false).apply()
-        ensureChannel()
+        ensureChannel(args.channelName, args.channelDescription)
         val notif =
             NotificationCompat.Builder(activity, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_clipboard_notify)
-                .setContentTitle("gpm")
-                .setContentText("Tap to clear · auto-clears in ${args.secs}s")
+                .setContentTitle(args.title?.takeUnless { it.isBlank() } ?: "gpm")
+                .setContentText(args.body?.takeUnless { it.isBlank() } ?: "Tap to clear")
                 .setOngoing(true)
                 .setAutoCancel(false)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
@@ -165,15 +170,23 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
 
     // ── helpers ─────────────────────────────────────────────────────────
 
-    private fun ensureChannel() {
+    /**
+     * Create the notification channel if absent. The localized name/description
+     * are baked in at creation time: Android ignores
+     * name changes on an existing channel, so a locale switch does NOT recreate
+     * it (that would reset the user's per-channel settings) — the channel name
+     * reflects the locale active at first creation. Generic fallbacks (NOT a
+     * duplicate of native.json/en) when the frontend omits them.
+     */
+    private fun ensureChannel(channelName: String?, channelDescription: String?) {
         if (SDK_INT >= Build.VERSION_CODES.O) {
             val channel =
                 NotificationChannel(
                     CHANNEL_ID,
-                    "Clipboard",
+                    channelName?.takeUnless { it.isBlank() } ?: "gpm",
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "Notifies when a secret is on the clipboard so you can clear it"
+                    description = channelDescription?.takeUnless { it.isBlank() } ?: "gpm"
                 }
             NotificationManagerCompat.from(activity).createNotificationChannel(channel)
         }

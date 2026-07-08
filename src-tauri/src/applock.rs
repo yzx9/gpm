@@ -125,6 +125,7 @@ pub(crate) fn get_app_lock_state(state: State<'_, AppState>) -> AppLockState {
 pub(crate) async fn enable_biometric_app_lock(
     state: State<'_, AppState>,
     app: AppHandle,
+    prompt_text: Option<tauri_plugin_secure_keystore::PromptText>,
 ) -> Result<(), AppLockError> {
     let ks = app.secure_keystore();
     if !ks.is_biometric_available().await? {
@@ -148,7 +149,7 @@ pub(crate) async fn enable_biometric_app_lock(
 
     // Seal behind biometric FIRST (prompt). If the user cancels, the auth-free
     // key is untouched — no bricking.
-    ks.store_biometric(&b64).await?;
+    ks.store_biometric(&b64, prompt_text.as_ref()).await?;
     // Only now drop the auth-free copy and persist the flag.
     ks.delete().await?;
     state.store.set_biometric_app_lock(true).await?;
@@ -165,11 +166,12 @@ pub(crate) async fn enable_biometric_app_lock(
 pub(crate) async fn disable_biometric_app_lock(
     state: State<'_, AppState>,
     app: AppHandle,
+    prompt_text: Option<tauri_plugin_secure_keystore::PromptText>,
 ) -> Result<(), AppLockError> {
     let ks = app.secure_keystore();
     // Retrieve the master key from the biometric store (prompt DECRYPT).
     let b64 = Zeroizing::new(
-        ks.retrieve_biometric()
+        ks.retrieve_biometric(prompt_text.as_ref())
             .await?
             .ok_or_else(|| AppLockError::failed("No biometric master key to migrate back"))?,
     );
@@ -242,6 +244,7 @@ pub(crate) async fn run_seal_migrate_once(state: &AppState) {
 pub(crate) async fn app_unlock(
     state: State<'_, AppState>,
     app: AppHandle,
+    prompt_text: Option<tauri_plugin_secure_keystore::PromptText>,
 ) -> Result<(), AppLockError> {
     // Idempotent: if already unlocked (or app-lock is off), skip the biometric
     // prompt entirely. Guards against a double-call re-prompting.
@@ -250,7 +253,7 @@ pub(crate) async fn app_unlock(
     }
     let ks = app.secure_keystore();
     let b64 = Zeroizing::new(
-        ks.retrieve_biometric()
+        ks.retrieve_biometric(prompt_text.as_ref())
             .await?
             .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
     );

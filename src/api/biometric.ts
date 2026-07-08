@@ -4,6 +4,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import type { BiometricPromptText } from "@/i18n/native";
+
 /** Biometric error codes from the Kotlin plugin / Rust app layer. */
 export type BiometricErrorCode =
   /** Biometric storage unusable (desktop, Android <11, no biometric enrolled). */
@@ -67,8 +69,11 @@ export async function isBiometricUnlockEnabled(): Promise<boolean> {
  * a {@link BiometricError} on failure (e.g. `WRONG_PASSPHRASE`,
  * `BIOMETRIC_CANCELLED`).
  */
-export async function enableBiometricUnlock(passphrase: string): Promise<void> {
-  await invoke("enable_biometric_unlock", { passphrase });
+export async function enableBiometricUnlock(
+  passphrase: string,
+  prompt?: BiometricPromptText,
+): Promise<void> {
+  await invoke("enable_biometric_unlock", { passphrase, promptText: prompt });
 }
 
 /**
@@ -77,8 +82,10 @@ export async function enableBiometricUnlock(passphrase: string): Promise<void> {
  * Resolves on success; rejects with a {@link BiometricError} on cancel or
  * failure.
  */
-export async function biometricUnlock(): Promise<void> {
-  await invoke("biometric_unlock");
+export async function biometricUnlock(
+  prompt?: BiometricPromptText,
+): Promise<void> {
+  await invoke("biometric_unlock", { promptText: prompt });
 }
 
 /**

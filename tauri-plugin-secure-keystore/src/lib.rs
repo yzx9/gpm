@@ -91,6 +91,22 @@ fn map_invoke_err(err: PluginInvokeError) -> SecureKeystoreError {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt text
+// ---------------------------------------------------------------------------
+
+/// Localized `BiometricPrompt` text supplied by the frontend, so the native
+/// layer never localizes. Deserialized from the `{ title, subtitle, negative }`
+/// shape the WebView sends and forwarded to Kotlin, which falls back to a
+/// generic safety string when a field is absent. Defined here (not the app
+/// crate) so the app command's IPC param type IS the plugin's type.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PromptText {
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub negative: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Handle (cfg-gated: real on Android, stub elsewhere)
 // ---------------------------------------------------------------------------
 
@@ -192,14 +208,30 @@ impl<R: Runtime> SecureKeystore<R> {
 
     /// Seal the supplied master key (Base64) behind a biometric-gated key.
     /// **Shows a BiometricPrompt** (CryptoObject ENCRYPT). Used when enabling the
-    /// app-lock to migrate the master key from the auth-free store.
-    pub async fn store_biometric(&self, key_b64: &str) -> Result<(), SecureKeystoreError> {
+    /// app-lock to migrate the master key from the auth-free store. `prompt`
+    /// supplies the localized prompt text.
+    pub async fn store_biometric(
+        &self,
+        key_b64: &str,
+        prompt: Option<&PromptText>,
+    ) -> Result<(), SecureKeystoreError> {
         #[derive(Serialize)]
         struct Payload<'a> {
             key: &'a str,
+            title: Option<&'a str>,
+            subtitle: Option<&'a str>,
+            negative: Option<&'a str>,
         }
         self.0
-            .run_mobile_plugin_async::<()>("storeBiometric", Payload { key: key_b64 })
+            .run_mobile_plugin_async::<()>(
+                "storeBiometric",
+                Payload {
+                    key: key_b64,
+                    title: prompt.and_then(|p| p.title.as_deref()),
+                    subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
+                    negative: prompt.and_then(|p| p.negative.as_deref()),
+                },
+            )
             .await
             .map_err(map_invoke_err)
     }
@@ -207,16 +239,33 @@ impl<R: Runtime> SecureKeystore<R> {
     /// Retrieve the biometric-gated master key (Base64), or `None` if nothing is
     /// sealed. **Shows a BiometricPrompt** (CryptoObject DECRYPT). The key is
     /// returned here (Rust side only). Rejects with `BIOMETRIC_KEY_INVALIDATED`
-    /// if the key died (all biometrics removed).
-    pub async fn retrieve_biometric(&self) -> Result<Option<String>, SecureKeystoreError> {
+    /// if the key died (all biometrics removed). `prompt` supplies the localized
+    /// prompt text.
+    pub async fn retrieve_biometric(
+        &self,
+        prompt: Option<&PromptText>,
+    ) -> Result<Option<String>, SecureKeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             stored: bool,
             key: Option<String>,
         }
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            title: Option<&'a str>,
+            subtitle: Option<&'a str>,
+            negative: Option<&'a str>,
+        }
         let r = self
             .0
-            .run_mobile_plugin_async::<Resp>("retrieveBiometric", ())
+            .run_mobile_plugin_async::<Resp>(
+                "retrieveBiometric",
+                Payload {
+                    title: prompt.and_then(|p| p.title.as_deref()),
+                    subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
+                    negative: prompt.and_then(|p| p.negative.as_deref()),
+                },
+            )
             .await
             .map_err(map_invoke_err)?;
         Ok(if r.stored { r.key } else { None })
@@ -266,12 +315,19 @@ impl<R: Runtime> SecureKeystore<R> {
     }
 
     /// Inert: never succeeds — biometric is unavailable.
-    pub async fn store_biometric(&self, _key_b64: &str) -> Result<(), SecureKeystoreError> {
+    pub async fn store_biometric(
+        &self,
+        _key_b64: &str,
+        _prompt: Option<&PromptText>,
+    ) -> Result<(), SecureKeystoreError> {
         Err(SecureKeystoreError::unavailable())
     }
 
     /// Inert: nothing is ever stored.
-    pub async fn retrieve_biometric(&self) -> Result<Option<String>, SecureKeystoreError> {
+    pub async fn retrieve_biometric(
+        &self,
+        _prompt: Option<&PromptText>,
+    ) -> Result<Option<String>, SecureKeystoreError> {
         Ok(None)
     }
 

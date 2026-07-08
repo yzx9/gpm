@@ -14,6 +14,8 @@ import {
   unlock,
   type LockMode,
 } from "@/api";
+import { reconcileLocaleFromBackend } from "@/i18n";
+import { identityUnlockPrompt } from "@/i18n/native";
 import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -85,7 +87,12 @@ async function tryBiometricUnlock() {
   biometricNotice.value = "";
   biometricLoading.value = true;
   try {
-    await biometricUnlock();
+    // Authoritative locale before building prompt text — same reason as
+    // AppLockOverlay: a pinned-preference user's first prompt must use the
+    // pinned locale, not the boot/system guess. This modal auto-prompts on
+    // mount, so it can't rely on main.ts's fire-and-forget reconcile.
+    await reconcileLocaleFromBackend();
+    await biometricUnlock(identityUnlockPrompt());
     // Success: the backend emits `identity-lock-state { locked: false }`, which
     // App.vue's `v-if` reacts to and unmounts this overlay. Nothing to do here.
   } catch (e) {

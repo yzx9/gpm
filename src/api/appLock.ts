@@ -5,6 +5,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+import type { BiometricPromptText } from "@/i18n/native";
+
 /**
  * Thin wrappers over the app-launch biometric gate commands in
  * `src-tauri/src/applock.rs`. Like `biometric.ts`, the frontend never talks to
@@ -55,18 +57,24 @@ export async function getAppLockState(): Promise<AppLockState> {
 
 /**
  * Enable the gate: migrate the seal master key behind biometric. Shows a
- * BiometricPrompt; rejects with {@link AppLockError} on cancel/failure.
+ * BiometricPrompt; rejects with {@link AppLockError} on cancel/failure. `prompt`
+ * supplies the localized prompt text; when absent the native layer
+ * falls back to a generic safety string.
  */
-export async function enableBiometricAppLock(): Promise<void> {
-  await invoke("enable_biometric_app_lock");
+export async function enableBiometricAppLock(
+  prompt?: BiometricPromptText,
+): Promise<void> {
+  await invoke("enable_biometric_app_lock", { promptText: prompt });
 }
 
 /**
  * Disable the gate: migrate the master key back to the auth-free store (one last
  * BiometricPrompt). Rejects with {@link AppLockError} on cancel/failure.
  */
-export async function disableBiometricAppLock(): Promise<void> {
-  await invoke("disable_biometric_app_lock");
+export async function disableBiometricAppLock(
+  prompt?: BiometricPromptText,
+): Promise<void> {
+  await invoke("disable_biometric_app_lock", { promptText: prompt });
 }
 
 /**
@@ -74,8 +82,8 @@ export async function disableBiometricAppLock(): Promise<void> {
  * BiometricPrompt; resolves on success, rejects with {@link AppLockError} on
  * cancel/failure. Idempotent if already unlocked.
  */
-export async function appUnlock(): Promise<void> {
-  await invoke("app_unlock");
+export async function appUnlock(prompt?: BiometricPromptText): Promise<void> {
+  await invoke("app_unlock", { promptText: prompt });
 }
 
 /**

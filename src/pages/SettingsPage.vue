@@ -66,6 +66,11 @@ import {
   useToast,
 } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
+import {
+  appLockEnrollPrompt,
+  appLockUnlockPrompt,
+  identityEnrollPrompt,
+} from "@/i18n/native";
 import { navBack } from "@/utils/nav";
 import {
   ArrowLeft,
@@ -577,7 +582,7 @@ async function onPassphraseSubmit() {
       biometricEnabled.value = await isBiometricUnlockEnabled();
       toast.success(t("settings.passphrase.changedToast"));
     } else if (mode === "enable-biometric") {
-      await enableBiometricUnlock(ppCurrent.value);
+      await enableBiometricUnlock(ppCurrent.value, identityEnrollPrompt());
       biometricEnabled.value = true;
       toast.success(t("settings.biometric.enabledToast"));
     } else {
@@ -626,7 +631,7 @@ async function onEnableAppLock() {
   error.value = "";
   appLockLoading.value = true;
   try {
-    await enableBiometricAppLock();
+    await enableBiometricAppLock(appLockEnrollPrompt());
     appLockEnabled.value = true;
     toast.success(t("settings.appLock.enabledToast"));
   } catch (e) {
@@ -645,7 +650,7 @@ async function onDisableAppLock() {
   error.value = "";
   appLockLoading.value = true;
   try {
-    await disableBiometricAppLock();
+    await disableBiometricAppLock(appLockUnlockPrompt());
     appLockEnabled.value = false;
     // Disabling the gate makes identity auto-unlock moot.
     identityAutoUnlockEnabled.value = false;

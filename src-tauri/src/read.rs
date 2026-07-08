@@ -144,6 +144,7 @@ pub(crate) async fn copy_password(
     state: State<'_, AppState>,
     app: AppHandle,
     entry_path: String,
+    notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
 ) -> Result<CopyResult, Error> {
     let entry_name = entry_path.trim_end_matches(".age").to_string();
 
@@ -174,7 +175,9 @@ pub(crate) async fn copy_password(
         // best-effort: a denial or plugin error never fails the copy (the
         // notification method swallows its own errors).
         arm_clipboard_clear(&state, &app, clear_secs);
-        app.clipboard_notify().post_notification(clear_secs).await;
+        app.clipboard_notify()
+            .post_notification(clear_secs, notify_text.as_ref())
+            .await;
     } else {
         // Never: abort any in-flight clear left over from a prior shorter
         // setting so it can't fire and clear a clipboard the user asked to

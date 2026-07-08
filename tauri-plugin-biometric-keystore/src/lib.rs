@@ -75,6 +75,23 @@ fn map_invoke_err(err: PluginInvokeError) -> KeystoreError {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt text
+// ---------------------------------------------------------------------------
+
+/// Localized `BiometricPrompt` text supplied by the frontend, so the native
+/// layer never localizes. Deserialized from the `{ title, subtitle, negative }`
+/// shape the WebView sends and forwarded to Kotlin, which falls back to a
+/// generic safety string when a field is absent (a missing field never bricks
+/// the prompt). Defined here (not the app crate) so the app command's IPC param
+/// type IS the plugin's type — no cross-crate struct sharing.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PromptText {
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub negative: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Keystore handle (cfg-gated: real on Android, stub elsewhere)
 // ---------------------------------------------------------------------------
 
@@ -132,28 +149,58 @@ impl<R: Runtime> Keystore<R> {
     /// Seal `passphrase` into the Keystore. **Shows a biometric prompt**
     /// (CryptoObject ENCRYPT) — the key is `setUserAuthenticationRequired`,
     /// so encrypt needs user auth too. The `Invoke` stays open across the
-    /// prompt and is resolved only from a terminal biometric callback.
-    pub async fn store(&self, passphrase: &str) -> Result<(), KeystoreError> {
+    /// prompt and is resolved only from a terminal biometric callback. `prompt`
+    /// supplies the localized prompt text.
+    pub async fn store(
+        &self,
+        passphrase: &str,
+        prompt: Option<&PromptText>,
+    ) -> Result<(), KeystoreError> {
         #[derive(Serialize)]
         struct Payload<'a> {
             passphrase: &'a str,
+            title: Option<&'a str>,
+            subtitle: Option<&'a str>,
+            negative: Option<&'a str>,
         }
         self.0
-            .run_mobile_plugin_async::<()>("store", Payload { passphrase })
+            .run_mobile_plugin_async::<()>(
+                "store",
+                Payload {
+                    passphrase,
+                    title: prompt.and_then(|p| p.title.as_deref()),
+                    subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
+                    negative: prompt.and_then(|p| p.negative.as_deref()),
+                },
+            )
             .await
             .map_err(map_invoke_err)
     }
 
     /// Retrieve the sealed passphrase. **Shows a biometric prompt**
     /// (CryptoObject DECRYPT). The passphrase is returned here (Rust side
-    /// only) and wrapped in `Zeroizing<String>` by the caller.
-    pub async fn retrieve(&self) -> Result<String, KeystoreError> {
+    /// only) and wrapped in `Zeroizing<String>` by the caller. `prompt` supplies
+    /// the localized prompt text.
+    pub async fn retrieve(&self, prompt: Option<&PromptText>) -> Result<String, KeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             passphrase: String,
         }
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            title: Option<&'a str>,
+            subtitle: Option<&'a str>,
+            negative: Option<&'a str>,
+        }
         self.0
-            .run_mobile_plugin_async::<Resp>("retrieve", ())
+            .run_mobile_plugin_async::<Resp>(
+                "retrieve",
+                Payload {
+                    title: prompt.and_then(|p| p.title.as_deref()),
+                    subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
+                    negative: prompt.and_then(|p| p.negative.as_deref()),
+                },
+            )
             .await
             .map(|r| r.passphrase)
             .map_err(map_invoke_err)
@@ -178,12 +225,16 @@ impl<R: Runtime> Keystore<R> {
     }
 
     /// Inert: never succeeds — biometric is unavailable.
-    pub async fn store(&self, _passphrase: &str) -> Result<(), KeystoreError> {
+    pub async fn store(
+        &self,
+        _passphrase: &str,
+        _prompt: Option<&PromptText>,
+    ) -> Result<(), KeystoreError> {
         Err(KeystoreError::unavailable())
     }
 
     /// Inert: never succeeds — biometric is unavailable.
-    pub async fn retrieve(&self) -> Result<String, KeystoreError> {
+    pub async fn retrieve(&self, _prompt: Option<&PromptText>) -> Result<String, KeystoreError> {
         Err(KeystoreError::unavailable())
     }
 }

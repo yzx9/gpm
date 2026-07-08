@@ -95,6 +95,7 @@ pub(crate) async fn enable_biometric_unlock(
     state: State<'_, AppState>,
     app: AppHandle,
     passphrase: String,
+    prompt_text: Option<tauri_plugin_biometric_keystore::PromptText>,
 ) -> Result<(), BiometricError> {
     // Refuse a plaintext identity before sealing anything: biometric seals a
     // passphrase, which a plaintext identity has none of. The Settings UI hides
@@ -104,7 +105,9 @@ pub(crate) async fn enable_biometric_unlock(
     // Reject a wrong passphrase before sealing it (age or SSH).
     state.store.validate_passphrase(&passphrase).await?;
     // The Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
-    app.keystore().store(&passphrase).await?;
+    app.keystore()
+        .store(&passphrase, prompt_text.as_ref())
+        .await?;
     Ok(())
 }
 
@@ -117,9 +120,10 @@ pub(crate) async fn enable_biometric_unlock(
 pub(crate) async fn biometric_unlock(
     state: State<'_, AppState>,
     app: AppHandle,
+    prompt_text: Option<tauri_plugin_biometric_keystore::PromptText>,
 ) -> Result<(), BiometricError> {
     // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used.
-    let passphrase = Zeroizing::new(app.keystore().retrieve().await?);
+    let passphrase = Zeroizing::new(app.keystore().retrieve(prompt_text.as_ref()).await?);
 
     if let Err(e) = unlock_and_arm(&state, &app, &passphrase).await {
         if e.code == "WRONG_PASSPHRASE" {

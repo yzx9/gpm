@@ -136,6 +136,12 @@ void (async () => {
     // translation load must never prevent mount (and a blank first frame).
     await loadBundle(boot, "common").catch(() => {});
   }
+  // Native-prompt text loads for every locale — only `common` is
+  // inlined, so `native` always loads async. Awaited BEFORE mount so the
+  // cold-start AppLockOverlay's unlock button can't fire before the prompt text
+  // resolves: a fast tap would otherwise send untranslated/key strings to the
+  // native BiometricPrompt. Like `common`, a failed load never blocks mount.
+  await loadBundle(boot, "native").catch(() => {});
   app.mount("#app");
   void reconcileLocaleFromBackend();
 })();

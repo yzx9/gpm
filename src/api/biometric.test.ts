@@ -67,7 +67,7 @@ describe("biometric wrappers", () => {
   it("biometricUnlock calls the biometric_unlock command", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     await biometricUnlock();
-    expect(invoke).toHaveBeenCalledWith("biometric_unlock");
+    expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
   });
 
   it("biometricUnlock propagates rejection (e.g. cancel)", async () => {

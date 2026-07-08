@@ -33,6 +33,7 @@ pub(crate) async fn write_and_schedule_clear<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
     text: String,
+    notify_text: Option<&tauri_plugin_clipboard_notify::NotifyText>,
 ) -> Result<(), Error> {
     app.clipboard()
         .write_text(text)
@@ -45,7 +46,9 @@ pub(crate) async fn write_and_schedule_clear<R: Runtime>(
     let (spawn_clear, _cleared_after_secs) = clipboard_clear_plan(clear_secs);
     if spawn_clear {
         arm_clipboard_clear(state, app, clear_secs);
-        app.clipboard_notify().post_notification(clear_secs).await;
+        app.clipboard_notify()
+            .post_notification(clear_secs, notify_text)
+            .await;
     } else {
         // Never: abort any in-flight clear from a prior shorter setting.
         disarm_clipboard_clear(state);
@@ -70,8 +73,9 @@ pub(crate) async fn copy_generated_password(
     state: State<'_, AppState>,
     app: AppHandle,
     text: Zeroizing<String>,
+    notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
 ) -> Result<(), Error> {
-    write_and_schedule_clear(&state, &app, (*text).clone()).await
+    write_and_schedule_clear(&state, &app, (*text).clone(), notify_text.as_ref()).await
 }
 
 /// Whether the app may post notifications (Android 13+ runtime permission).
