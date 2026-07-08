@@ -22,7 +22,7 @@ use crate::crypto::{AgeBackend, CryptoBackend, SecretExt};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity, validate_identity_format};
-use crate::recipient::{Recipient, parse_recipients, serialize_recipients};
+use crate::recipient::{Recipient, serialize_recipients};
 use crate::secret::Secret;
 use crate::signing::{
     self, AuthenticityConfig, CommitSigInfo, CommitSigStatus, TrustedGpgKey, TrustedKey, VerifyMode,
@@ -30,7 +30,7 @@ use crate::signing::{
 use crate::storage::git::passfile_rel;
 use crate::storage::{
     CancelToken, CommitKind, GitAuth, GitStorage, KeepLocalOutcome, KeepLocalPlan, ProgressSender,
-    StorageBackend, StorageCtx,
+    RepoFiles, StorageBackend, StorageCtx,
 };
 use crate::template;
 
@@ -160,67 +160,15 @@ impl Store {
         self.crypto.profile().recipients_filename
     }
 
-    /// Read + parse the recipients index at `repo_path`. Returns empty for a
-    /// genuinely-missing file (an uninitialized store); every other failure is a
-    /// hard error.
-    ///
-    /// The index is `lstat`-checked first (without following symlinks) so a
-    /// symlink a malicious clone planted at the recipients path — dangling, or
-    /// pointing outside the checkout — is rejected as tampering rather than read
-    /// as "uninitialized." Treating such a plant as empty would make the encrypt
-    /// paths `ensureOurKeyID` and silently re-encrypt to only the local key,
-    /// shrinking the recipient set and pushing the result.
+    /// Read + parse the recipients index at `repo_path`, delegating the liveness
+    /// guard + read + parse to the crypto backend through a [`RepoFiles`] view.
+    /// Returns empty for a genuinely-missing file (an uninitialized store); every
+    /// other failure (tampered index, missing checkout, non-UTF-8, I/O error) is a
+    /// hard error — see [`crate::storage::validate_recipients_index_liveness`]
+    /// for why "empty" is unsafe for a tampered/escaping index.
     async fn read_recipients_raw(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error> {
-        let recipients_path = repo_path.join(self.recipients_file());
-        match fs::symlink_metadata(&recipients_path).await {
-            // The index is absent. Distinguish a genuine uninitialized store
-            // (the repo dir exists, just no recipients index yet → empty, so
-            // first-time setup proceeds) from a configured-but-missing checkout
-            // (repo_path itself gone → hard error). The latter must NOT read as
-            // empty, or `save_identity` would accept any identity against a
-            // store whose checkout it can't even see.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                if fs::symlink_metadata(repo_path).await.is_err() {
-                    return Err(Error::new(
-                        ErrorCode::StoreError,
-                        "configured repository checkout is missing",
-                    ));
-                }
-                return Ok(Vec::new());
-            }
-            Err(e) => {
-                return Err(Error::new(
-                    ErrorCode::IoError,
-                    format!("Failed to read recipients index: {e}"),
-                ));
-            }
-            Ok(meta) => {
-                if !meta.is_file() {
-                    // A symlink (dangling or escaping), directory, or other
-                    // non-regular file is not a valid recipients index — reject
-                    // loudly. See the doc comment for why "empty" is unsafe here.
-                    return Err(Error::new(
-                        ErrorCode::StoreError,
-                        "recipients index is not a regular file — possible tampering",
-                    ));
-                }
-            }
-        }
-        // Regular file: read through storage (its within-repo guard still applies
-        // as defense-in-depth). Propagate a non-UTF-8 index as a hard error:
-        // parsing `""` → empty set would `ensureOurKeyID` to only our key and
-        // silently drop every other recipient on the next encrypt.
-        let bytes = self
-            .storage
-            .read_file(repo_path, self.recipients_file())
-            .await?;
-        let content = str::from_utf8(&bytes).map_err(|e| {
-            Error::new(
-                ErrorCode::StoreError,
-                format!("recipients index is not valid UTF-8: {e}"),
-            )
-        })?;
-        Ok(parse_recipients(content))
+        let view = RepoFiles::new(&*self.storage, repo_path);
+        self.crypto.list_recipients(&view).await
     }
 
     /// The recipient public-key strings at `repo_path` (read + parse + map).

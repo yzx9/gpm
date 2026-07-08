@@ -24,7 +24,9 @@ use tokio::task::spawn_blocking;
 use zeroize::Zeroizing;
 
 use crate::error::{Error, ErrorCode};
-use crate::identity::{classify_identity, IdentityType};
+use crate::identity::{IdentityType, classify_identity};
+use crate::recipient::{Recipient, parse_recipients};
+use crate::storage::{RecipientsIndexPresence, RepoFileView, validate_recipients_index_liveness};
 
 /// The age encryption backend (the sole `CryptoBackend` implementation today).
 pub mod age;
@@ -178,11 +180,47 @@ pub trait CryptoBackend: Send + Sync {
     /// identity or SSH key; `InvalidIdentity` for a non-UTF-8 SSH identity;
     /// `SshKeyInvalid` for an unparseable SSH key; `DecryptFailed` for a
     /// corrupt age-encrypted blob.
-    async fn unlock_identity(
+    async fn unlock_identity(&self, at_rest: &[u8], passphrase: &str) -> Result<Vec<u8>, Error>;
+
+    /// Resolve the parsed recipients the backend can encrypt to, reading the
+    /// backend's recipients index through `view`. The view carries the absolute
+    /// repo root (for the liveness guard) and reads repo-relative files, so the
+    /// backend needs nothing else to locate + parse its index. A future GPG
+    /// backend resolves fingerprint recipients through its own keyring here.
+    ///
+    /// Returns an empty list for a genuinely-missing index (an uninitialized
+    /// store) — matching gopass, so setup can proceed.
+    ///
+    /// # Errors
+    ///
+    /// `StoreError` for a tampered index (non-regular file) or a missing
+    /// configured checkout; `IoError` on a metadata failure; `StoreError` for a
+    /// non-UTF-8 index.
+    async fn list_recipients(&self, view: &dyn RepoFileView) -> Result<Vec<Recipient>, Error>;
+
+    /// Encrypt `plaintext` to every recipient in the store's index plus the
+    /// identity's own recipient (gopass `ensureOurKeyID`), reading the index
+    /// through `view`. `identity` is the operational (already-unlocked) identity
+    /// bytes — the caller supplies the cached/plaintext form, so no passphrase.
+    ///
+    /// # Errors
+    ///
+    /// See [`encrypt_to_recipients`] and [`Self::list_recipients`].
+    async fn encrypt(
         &self,
-        at_rest: &[u8],
-        passphrase: &str,
+        plaintext: &[u8],
+        identity: &[u8],
+        view: &dyn RepoFileView,
     ) -> Result<Vec<u8>, Error>;
+
+    /// Decrypt `ciphertext` with `identity` (the operational, unlocked identity
+    /// bytes — native x25519, an unencrypted SSH PEM, or a plaintext key). No
+    /// passphrase: the caller unlocks encrypted identities ahead of time.
+    ///
+    /// # Errors
+    ///
+    /// See [`decrypt_bytes`] — `InvalidIdentity`, `DecryptFailed`.
+    async fn decrypt(&self, ciphertext: &[u8], identity: &[u8]) -> Result<Vec<u8>, Error>;
 
     /// Validate `passphrase` against an SSH identity without producing output.
     /// Used by the biometric-enable flow to reject a wrong passphrase before
@@ -285,27 +323,24 @@ impl CryptoBackend for AgeBackend {
         spawn_blocking(move || decrypt_identity(&passphrase, &encrypted)).await?
     }
 
-    async fn unlock_identity(
-        &self,
-        at_rest: &[u8],
-        passphrase: &str,
-    ) -> Result<Vec<u8>, Error> {
+    async fn unlock_identity(&self, at_rest: &[u8], passphrase: &str) -> Result<Vec<u8>, Error> {
         let itype = classify_identity(at_rest);
         if itype == IdentityType::AgeEncrypted {
             // scrypt unwrap runs on a blocking thread inside decrypt_identity.
             self.decrypt_identity(passphrase, at_rest).await
-        } else if matches!(
-            itype,
-            IdentityType::SshEd25519 | IdentityType::SshRsa
-        ) {
+        } else if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
             // Decrypt the SSH key to an unencrypted PEM; the bcrypt KDF is
             // blocking work. This cached form is what the decrypt path consumes
             // via age's no-KDF `Unencrypted` variant.
             let pw = Zeroizing::new(passphrase.to_string());
             let at_rest = at_rest.to_vec();
             let pem = spawn_blocking(move || {
-                let raw = str::from_utf8(&at_rest)
-                    .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "SSH identity is not valid UTF-8"))?;
+                let raw = str::from_utf8(&at_rest).map_err(|_| {
+                    Error::new(
+                        ErrorCode::InvalidIdentity,
+                        "SSH identity is not valid UTF-8",
+                    )
+                })?;
                 crate::ssh::to_unencrypted_pem(raw, &pw)
             })
             .await??;
@@ -314,6 +349,58 @@ impl CryptoBackend for AgeBackend {
             // Plaintext / unencrypted — already operational.
             Ok(at_rest.to_vec())
         }
+    }
+
+    async fn list_recipients(&self, view: &dyn RepoFileView) -> Result<Vec<Recipient>, Error> {
+        let recipients_filename = self.profile().recipients_filename;
+        let repo_path = view.repo_path();
+        // Absent index → empty (uninitialized store); every other guard failure
+        // (tampered index, missing checkout, I/O error) surfaces as a hard error.
+        if let RecipientsIndexPresence::Present =
+            validate_recipients_index_liveness(repo_path, recipients_filename).await?
+        {
+            let bytes = view.read(recipients_filename).await?;
+            // Propagate a non-UTF-8 index as a hard error: parsing `""` → empty
+            // set would `ensureOurKeyID` to only our key and silently drop every
+            // other recipient on the next encrypt.
+            let content = str::from_utf8(&bytes).map_err(|e| {
+                Error::new(
+                    ErrorCode::StoreError,
+                    format!("recipients index is not valid UTF-8: {e}"),
+                )
+            })?;
+            Ok(parse_recipients(content))
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn encrypt(
+        &self,
+        plaintext: &[u8],
+        identity: &[u8],
+        view: &dyn RepoFileView,
+    ) -> Result<Vec<u8>, Error> {
+        // Recipients: everyone in the index, plus our own key (ensureOurKeyID).
+        let mut recipients: Vec<String> = self
+            .list_recipients(view)
+            .await?
+            .into_iter()
+            .map(|r| r.public_key)
+            .collect();
+        let identity_str = str::from_utf8(identity)
+            .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
+        let our_recipient = self.identity_to_recipient(identity_str, None)?;
+        if !recipients.iter().any(|r| r == &our_recipient) {
+            recipients.push(our_recipient);
+        }
+        self.encrypt_to_recipients(plaintext, &recipients).await
+    }
+
+    async fn decrypt(&self, ciphertext: &[u8], identity: &[u8]) -> Result<Vec<u8>, Error> {
+        // The caller (Store::get_identity_bytes) supplies the unlocked identity,
+        // so no passphrase — same as the existing decrypt_bytes(.., None) path.
+        self.decrypt_bytes(ciphertext, identity, None).await
     }
 
     async fn validate_ssh_key_passphrase(

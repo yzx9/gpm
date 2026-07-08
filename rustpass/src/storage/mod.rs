@@ -26,10 +26,11 @@ use std::sync::atomic::AtomicBool;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tokio::fs;
 
 use crate::crypto::SecretExt;
 use crate::entry::Entry;
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::signing::{AuthenticityConfig, CommitSigInfo, VerifyMode};
 
 /// The git storage backend (the sole `StorageBackend` implementation today).
@@ -441,6 +442,11 @@ pub trait StorageBackend: Send + Sync {
 /// its exclusive-write invariant.
 #[async_trait]
 pub trait RepoFileView: Send + Sync {
+    /// The absolute working-tree root this view is bound to. Crypto backends use
+    /// it for the recipients-index liveness guard (a direct `lstat`), since
+    /// [`read`](Self::read) / [`list_dir`](Self::list_dir) are repo-relative and
+    /// can't name an absolute guard path.
+    fn repo_path(&self) -> &Path;
     /// Read a repo-relative file. Returns
     /// [`ErrorCode::EntryNotFound`](crate::error::ErrorCode) for a missing file
     /// — no `exists`-then-`read` race.
@@ -470,11 +476,92 @@ impl<'a> RepoFiles<'a> {
 
 #[async_trait]
 impl RepoFileView for RepoFiles<'_> {
+    fn repo_path(&self) -> &Path {
+        self.repo_path
+    }
     async fn read(&self, rel_path: &str) -> Result<Vec<u8>, Error> {
         self.storage.read_file(self.repo_path, rel_path).await
     }
     async fn list_dir(&self, rel_prefix: &str) -> Result<Vec<String>, Error> {
         self.storage.list_dir(self.repo_path, rel_prefix).await
+    }
+}
+
+/// Outcome of [`validate_recipients_index_liveness`] — whether the recipients
+/// index is safe to read, or genuinely absent (an uninitialized store).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecipientsIndexPresence {
+    /// The index doesn't exist but the checkout does — an uninitialized store.
+    /// The caller treats this as an empty recipient set (first-time setup).
+    Absent,
+    /// The index is a regular file, safe to read through
+    /// [`StorageBackend::read_file`].
+    Present,
+}
+
+/// Liveness/safety guard for the recipients index, run before any read.
+///
+/// A malicious clone can plant a symlink (dangling, or escaping the checkout) at
+/// the recipients path. Reading such a plant as "uninitialized → empty" would
+/// make the encrypt path `ensureOurKeyID` and silently re-encrypt to only the
+/// local key, shrinking the recipient set and pushing the result. So the index
+/// is `lstat`-checked (without following symlinks) before it is read.
+///
+/// Returns [`RecipientsIndexPresence::Absent`] for a genuinely-missing index
+/// (the repo dir exists, just no index yet — an uninitialized store), and
+/// [`RecipientsIndexPresence::Present`] when the index is a regular file safe to
+/// read. Every other case is a hard error: a configured-but-missing checkout
+/// (`repo_path` itself gone), a non-regular index (symlink, directory — possible
+/// tampering), or an I/O error.
+///
+/// # Errors
+///
+/// [`ErrorCode::StoreError`] for a missing configured checkout (`repo_path`
+/// itself gone) or a non-regular index (symlink, directory — possible
+/// tampering); [`ErrorCode::IoError`] on a metadata failure. A genuinely-missing
+/// index on an *existing* checkout is NOT an error — it returns
+/// [`RecipientsIndexPresence::Absent`].
+///
+/// This is a direct filesystem `lstat`, not a [`StorageBackend`] call — the
+/// guard must NOT follow symlinks, and `read_file` is repo-relative. Storage's
+/// own within-repo path guard still applies as defense-in-depth on the read.
+pub async fn validate_recipients_index_liveness(
+    repo_path: &Path,
+    recipients_rel: &str,
+) -> Result<RecipientsIndexPresence, Error> {
+    let recipients_path = repo_path.join(recipients_rel);
+    match fs::symlink_metadata(&recipients_path).await {
+        // The index is absent. Distinguish a genuine uninitialized store (repo
+        // dir exists, just no recipients index yet → absent) from a configured-
+        // but-missing checkout (repo_path itself gone → hard error): the latter
+        // must NOT read as empty, or `save_identity` would accept any identity
+        // against a store whose checkout it can't even see.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if fs::symlink_metadata(repo_path).await.is_err() {
+                return Err(Error::new(
+                    ErrorCode::StoreError,
+                    "configured repository checkout is missing",
+                ));
+            }
+            Ok(RecipientsIndexPresence::Absent)
+        }
+        Err(e) => Err(Error::new(
+            ErrorCode::IoError,
+            format!("Failed to read recipients index: {e}"),
+        )),
+        Ok(meta) => {
+            if !meta.is_file() {
+                // A symlink (dangling or escaping), directory, or other
+                // non-regular file is not a valid recipients index — reject
+                // loudly. Treating it as empty would `ensureOurKeyID` to only
+                // our key on the next encrypt.
+                return Err(Error::new(
+                    ErrorCode::StoreError,
+                    "recipients index is not a regular file — possible tampering",
+                ));
+            }
+            Ok(RecipientsIndexPresence::Present)
+        }
     }
 }
 
@@ -607,4 +694,92 @@ pub enum DivergenceChoice {
     /// same-secret conflict or an undecryptable local entry — the user must
     /// adopt or cancel.
     KeepMine,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A regular recipients index is `Present` — safe to read through storage.
+    #[tokio::test]
+    async fn liveness_regular_file_is_present() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".age-recipients"), b"age1abc\n")
+            .await
+            .unwrap();
+        let presence = validate_recipients_index_liveness(dir.path(), ".age-recipients")
+            .await
+            .unwrap();
+        assert_eq!(presence, RecipientsIndexPresence::Present);
+    }
+
+    /// A genuinely-missing index on an existing checkout is `Absent` — an
+    /// uninitialized store, not an error (so first-time setup proceeds).
+    #[tokio::test]
+    async fn liveness_missing_index_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let presence = validate_recipients_index_liveness(dir.path(), ".age-recipients")
+            .await
+            .unwrap();
+        assert_eq!(presence, RecipientsIndexPresence::Absent);
+    }
+
+    /// A configured-but-missing checkout (repo dir gone) is a hard `StoreError`,
+    /// NOT `Absent` — `save_identity` must not accept any identity against a
+    /// store whose checkout it can't see.
+    #[tokio::test]
+    async fn liveness_missing_checkout_errors() {
+        let missing =
+            std::path::PathBuf::from("/tmp/gpm_no_such_checkout_liveness_test_recipients");
+        assert!(!missing.exists());
+        let err = validate_recipients_index_liveness(&missing, ".age-recipients")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "STORE_ERROR",
+            "a missing configured checkout is an anomaly, not an empty store"
+        );
+    }
+
+    /// A dangling symlink at the index path is tampering — `lstat` sees the
+    /// symlink itself (not its missing target) → not a regular file → hard error.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn liveness_dangling_symlink_errors() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        symlink(
+            "/nonexistent/gpm-dangling-liveness",
+            dir.path().join(".age-recipients"),
+        )
+        .unwrap();
+        let err = validate_recipients_index_liveness(dir.path(), ".age-recipients")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "STORE_ERROR",
+            "dangling symlink must be tampering, not an empty set"
+        );
+    }
+
+    /// An escaping symlink (points outside the repo) is tampering — `lstat` does
+    /// not follow it, so the regular-file check rejects before any read could
+    /// resolve + read the victim.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn liveness_escaping_symlink_errors() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let victim = external.path().join("victim");
+        std::fs::write(&victim, b"age1stolen\n").unwrap();
+        symlink(&victim, dir.path().join(".age-recipients")).unwrap();
+        let err = validate_recipients_index_liveness(dir.path(), ".age-recipients")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "STORE_ERROR",
+            "escaping symlink must be tampering, not adopted"
+        );
+    }
 }
