@@ -339,6 +339,83 @@ async fn keep_mine_refuses_undecryptable_local_entry() {
     );
 }
 
+/// "Keep mine" reuses the CACHED identity across the divergence boundary — it
+/// does not wipe the cache or force a second unlock. This is the rustpass half
+/// of the deferred-wipe contract: the save orchestrator (src-tauri) defers the
+/// Immediate-mode identity wipe on a `NeedsDivergenceResolve` outcome precisely
+/// so this resolve step can reuse the cached identity without re-prompting for a
+/// passphrase / biometric. If `resolve_keep_mine` wiped the cache, an encrypted
+/// identity would fail with `IdentityEncrypted` here (no passphrase is passed to
+/// resolve), and `is_unlocked()` would read false — so the resolve succeeding
+/// AND `is_unlocked()` staying true pins both that the cache was reused and that
+/// it survived.
+///
+/// The other keep-mine tests use the DEFAULT plaintext identity, which is never
+/// cached (`is_unlocked()` is always false — it decrypts straight from disk per
+/// op via `get_identity_bytes`), so they exercise the disk-fallback path and
+/// can't observe this cache-reuse contract. This test switches to a
+/// passphrase-ENCRYPTED identity and unlocks it to populate the cache first.
+///
+/// (The wipe-on-cancel half of the contract — `discard_divergence` wiping the
+/// cache — lives in src-tauri, which calls `Store::lock()`; it is not a rustpass
+/// concern and is covered by the src-tauri in-crate tests.)
+#[tokio::test]
+async fn keep_mine_reuses_cached_identity_without_wiping() {
+    let (bare_dir, _cfg, store, recipient) = store_with_base(vec![]).await;
+    let repo_path = store.config().await.expect("config").local_path;
+
+    // Switch to a passphrase-encrypted identity, then unlock → cache populated.
+    store
+        .set_passphrase("cache-pin")
+        .await
+        .expect("set_passphrase encrypts the identity");
+    store.unlock("cache-pin").await.expect("unlock");
+    assert!(store.is_unlocked(), "baseline: cache populated by unlock");
+
+    // Diverge: an unpushed local secret (encrypted to our key) + a remote advance.
+    local_secret(
+        Path::new(&repo_path),
+        "mine.age",
+        b"mine-secret",
+        &recipient,
+        "local adds mine",
+    );
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("remote.age", b"remote-secret")],
+        &recipient,
+        "remote diverges",
+    );
+
+    let tip = bare_head_oid(bare_dir.path());
+    // Keep-mine re-encrypts the local entry — no passphrase is passed here, so
+    // success proves the cached identity was reused (no second unlock needed).
+    let result = store
+        .resolve_sync_divergence(&tip, DivergenceChoice::KeepMine)
+        .await
+        .expect("keep mine reuses the cached identity — no second unlock");
+    assert!(result.changed, "HEAD should advance");
+
+    // The cache survived the resolve boundary — not wiped mid-flight. rustpass
+    // must leave the cache intact so the orchestrator's terminal wipe is the
+    // only wipe (a premature wipe here would strand the next op without a key).
+    assert!(
+        store.is_unlocked(),
+        "keep mine must not wipe the cached identity — the deferred wipe is the caller's job"
+    );
+
+    // And the surviving cache is still functional: the kept entry decrypts
+    // without a re-unlock.
+    assert_eq!(
+        store
+            .get("mine")
+            .await
+            .expect("get reuses the surviving cache")
+            .password(),
+        "mine-secret",
+    );
+}
+
 /// `sync_divergence_preview` reports the local-vs-remote divergence on demand
 /// (without moving HEAD), matching the preview `sync()` would surface.
 #[tokio::test]
