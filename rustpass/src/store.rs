@@ -781,10 +781,7 @@ impl Store {
             .get(repo_path, &passfile_rel(name, self.secret_ext()))
             .await?;
         let identity_bytes = self.get_identity_bytes().await?;
-        let decrypted = self
-            .crypto
-            .decrypt_bytes(&encrypted, &identity_bytes, None)
-            .await?;
+        let decrypted = self.crypto.decrypt(&encrypted, &identity_bytes).await?;
         Secret::parse(&decrypted)
     }
 
@@ -1239,19 +1236,14 @@ impl Store {
     ) -> Result<String, Error> {
         let passfile = passfile_rel(name, self.secret_ext());
 
-        // Recipients: everyone in the store, plus our own key (ensureOurKeyID).
-        let mut recipients_str: Vec<String> = self.read_recipient_keys(repo_path).await?;
+        // Encrypt to the store's recipients plus our own key (ensureOurKeyID),
+        // reading the index through a view — the backend owns recipient
+        // resolution + the encrypt step now.
         let identity_bytes = self.get_identity_bytes().await?;
-        let identity_str = str::from_utf8(&identity_bytes)
-            .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
-        let our_recipient = self.crypto.identity_to_recipient(identity_str, None)?;
-        if !recipients_str.iter().any(|r| r == &our_recipient) {
-            recipients_str.push(our_recipient);
-        }
-
+        let view = RepoFiles::new(&*self.storage, repo_path);
         let ciphertext = self
             .crypto
-            .encrypt_to_recipients(plaintext, &recipients_str)
+            .encrypt(plaintext, &identity_bytes, &view)
             .await?;
 
         self.storage.set(repo_path, &passfile, &ciphertext).await?;
