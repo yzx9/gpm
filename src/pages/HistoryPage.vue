@@ -258,7 +258,7 @@ onBeforeUnmount(() => {
             commit.subject || t("history.noMessage")
           }}</span>
           <div class="flex items-center gap-1.5 text-xs text-muted min-w-0">
-            <code class="shrink-0">{{ commit.short_hash }}</code>
+            <code class="shrink-0 select-all">{{ commit.short_hash }}</code>
             <span aria-hidden="true" class="shrink-0">·</span>
             <span class="truncate min-w-0">{{ commit.author }}</span>
             <span aria-hidden="true" class="shrink-0">·</span>
