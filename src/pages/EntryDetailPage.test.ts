@@ -467,6 +467,26 @@ describe("EntryDetailPage", () => {
       ).toBe("notes here");
     });
 
+    it("wipes the edit buffer on browser back (popstate)", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "notes here",
+      });
+      const wrapper = mountPage();
+      await wrapper.find(editBtn()).trigger("click");
+      await flushPromises();
+      expect(
+        (wrapper.find("#e-password").element as HTMLInputElement).value,
+      ).toBe("s3cret");
+
+      // vue-router is mocked, so drive popstate directly (the real browser-back path).
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      await flushPromises();
+
+      // exitEdit ran (useWipeOnLeave): the edit form is gone, back to read-only.
+      expect(wrapper.find("#e-password").exists()).toBe(false);
+    });
+
     it("cold edit parks on the auth overlay when the identity is not cached", async () => {
       // unlocked:false → identity NOT cached → enterEdit's runWithAuth parks on
       // the auth overlay instead of calling show_password immediately. Without

@@ -14,3 +14,4 @@ export * from "./useSecretReveal";
 export * from "./useSecureScreen";
 export * from "./useSecuritySettings";
 export * from "./useToast";
+export * from "./useWipeOnLeave";

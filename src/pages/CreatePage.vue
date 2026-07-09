@@ -27,7 +27,12 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import { isAuthCancelled, useLockState, useToast } from "@/composables";
+import {
+  isAuthCancelled,
+  useLockState,
+  useToast,
+  useWipeOnLeave,
+} from "@/composables";
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Dices, Eye, EyeOff } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -36,7 +41,7 @@ import { useRouter } from "vue-router";
 
 const { t } = useI18n();
 const router = useRouter();
-const { onLock, runWithAuth } = useLockState();
+const { runWithAuth } = useLockState();
 const { toast } = useToast();
 
 // ── Presets + step ────────────────────────────────────────────────────────
@@ -74,17 +79,21 @@ const divergence = ref<SyncDivergence | null>(null);
 const resolving = ref(false);
 const divergeError = ref("");
 
-// The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
-// secret the moment the identity locks.
-onLock(() => {
-  // Cancel any in-flight generate so its resolved promise can't repopulate a
-  // secret after this wipe, and drop reveal state so fields don't reopen plain.
+/** Wipe any half-typed secret: form fields, reveal toggles, the custom body,
+ *  plus the in-flight generate token (a stale resolve can't repopulate a
+ *  secret). Idempotent — fires on a hard lock, browser back, and unmount. */
+function wipeSecrets() {
   generateToken++;
   generating.value = false;
   revealed.value = {};
   fields.value = {};
   customContent.value = "";
-});
+}
+
+// The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
+// secret on a hard lock, browser back, or unmount — unmount alone can't
+// guarantee a wipe.
+useWipeOnLeave(wipeSecrets);
 
 /** Generate a password for a generatable field via the backend (CSPRNG). */
 async function onGeneratePassword(f: PresetField) {
@@ -297,10 +306,6 @@ onMounted(loadPresets);
 
 onBeforeUnmount(() => {
   if (previewTimer) clearTimeout(previewTimer);
-  // Wipe any in-form secret values (e.g. an auto-lock redirect mid-create).
-  fields.value = {};
-  revealed.value = {};
-  customContent.value = "";
 });
 </script>
 

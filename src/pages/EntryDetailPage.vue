@@ -29,6 +29,7 @@ import {
   useSecretReveal,
   useSecuritySettings,
   useToast,
+  useWipeOnLeave,
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
@@ -82,10 +83,15 @@ const divergence = ref<SyncDivergence | null>(null);
 const resolving = ref(false);
 const divergeError = ref("");
 
-// Wipe edit plaintext on lock so it doesn't survive the 5-min auto-lock behind a
-// wiped identity (mirrors CreatePage's onLock wipe of the compose buffer).
+// Wipe edit plaintext on browser back, unmount, and hard lock so it doesn't
+// survive behind a wiped identity (mirrors CreatePage's compose-buffer wipe).
+// exitEdit is a hoisted function declaration, so it's safe to reference ahead of
+// its definition line below.
+useWipeOnLeave(exitEdit);
+
+// The sync-divergence payload is not a WebView secret — clear it only on a hard
+// lock, not on back/unmount (the edit buffer above covers those via useWipeOnLeave).
 onLock(() => {
-  exitEdit();
   divergence.value = null;
 });
 

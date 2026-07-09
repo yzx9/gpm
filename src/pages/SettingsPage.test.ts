@@ -515,6 +515,29 @@ describe("SettingsPage", () => {
       expect(wrapper.text()).not.toContain("secret-key-data");
     });
 
+    it("wipes the exported private key on browser back (popstate)", async () => {
+      when("get_config", sshConfig);
+      when("export_ssh_private_key", { private_key: "secret-key-data" });
+      vi.mocked(globalThis.confirm).mockReturnValue(true);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const exportBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Export Private Key"));
+      await exportBtn!.trigger("click");
+      await flushPromises();
+      expect(wrapper.text()).toContain("secret-key-data");
+
+      // vue-router is mocked, so drive popstate directly (the real browser-back
+      // path). The page had no back/unmount wipe before — this is the gap.
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("secret-key-data");
+      expect(wrapper.text()).not.toContain("Private key is now visible");
+    });
+
     it("copies public key to clipboard", async () => {
       when("get_config", sshConfig);
       when("get_ssh_public_key", { public_key: "ssh-ed25519 AAAAtest" });

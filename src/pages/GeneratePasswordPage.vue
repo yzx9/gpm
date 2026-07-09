@@ -15,19 +15,18 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import {
   ensureClipboardNotifyPermission,
-  useLockState,
   useToast,
+  useWipeOnLeave,
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
 import { ArrowLeft, Copy, Dices } from "@lucide/vue";
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
 const { t } = useI18n();
 const router = useRouter();
-const { onLock } = useLockState();
 const { toast } = useToast();
 
 // ── Generator options ─────────────────────────────────────────────────────
@@ -106,17 +105,11 @@ async function onCopyRow(pw: string) {
   }
 }
 
-// The unlock modal keeps pages mounted on auto-lock, so wipe the batch the
-// moment the identity locks (and cancel any in-flight generate).
-onLock(() => {
-  generateToken++;
-  generating.value = false;
-  generated.value = [];
-});
-
-onBeforeUnmount(() => {
-  // Invalidate any in-flight generate so a late resolve can't repopulate the
-  // batch after unmount (mirrors onLock).
+// Wipe the batch on a hard identity lock, on browser back, or on unmount. The
+// unlock modal can keep this page mounted behind the overlay on auto-lock, so
+// unmount alone can't guarantee a wipe. Bumping generateToken also rejects any
+// in-flight generate (a stale resolve can't repopulate the batch).
+useWipeOnLeave(() => {
   generateToken++;
   generating.value = false;
   generated.value = [];

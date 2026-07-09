@@ -3,17 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SensitiveContent } from "@/api";
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useLockState } from "./useLockState";
+import { ref, watch } from "vue";
 import { useSecuritySettings } from "./useSecuritySettings";
+import { useWipeOnLeave } from "./useWipeOnLeave";
 
 /**
  * Reveal sensitive content (a decrypted secret) under the app's secure-reveal
  * contract: auto-clear after the configured view-clear seconds (Never ⇒ stays
- * until manual hide / lock / unmount), wipe on unmount, wipe on browser back
- * navigation, and wipe on a _hard_ identity lock. Shared by the entry detail
- * view and the create-conflict "View existing" path so the lifecycle lives in
- * exactly one place.
+ * until manual hide / lock / unmount), plus the shared `useWipeOnLeave`
+ * lifecycle (wipe on browser back, unmount, and a _hard_ identity lock). Shared
+ * by the entry detail view and the create-conflict "View existing" path.
  *
  * The auto-clear duration comes from the shared security-settings cache, so a
  * settings change reschedules an in-flight reveal live. `onLock` fires only on a
@@ -24,7 +23,6 @@ import { useSecuritySettings } from "./useSecuritySettings";
  */
 export function useSecretReveal() {
   const { viewClearSecs } = useSecuritySettings();
-  const { onLock } = useLockState();
 
   const password = ref<string | null>(null);
   const notes = ref<string | null>(null);
@@ -64,12 +62,13 @@ export function useSecretReveal() {
     armAutoClear();
   }
 
-  // Security lifecycle: wipe on unmount and on browser back navigation.
-  onMounted(() => window.addEventListener("popstate", clear));
-  onBeforeUnmount(() => {
-    window.removeEventListener("popstate", clear);
-    clear();
-  });
+  // Security lifecycle: wipe on browser back (popstate), unmount, and a hard
+  // identity lock. The global unlock modal keeps this component mounted behind
+  // the overlay on auto-lock, so unmount alone can't guarantee a wipe — the
+  // explicit back + lock triggers close the gap. Soft wipes are excluded by
+  // useLockState's onLock contract, so a revealed secret survives a post-op soft
+  // wipe.
+  useWipeOnLeave(clear);
 
   // Reschedule an in-flight reveal if the view-clear setting changes under it.
   watch(viewClearSecs, () => {
@@ -77,11 +76,6 @@ export function useSecretReveal() {
       armAutoClear();
     }
   });
-
-  // The global unlock modal keeps this component mounted behind the overlay on
-  // auto-lock, so an unmount no longer guarantees a wipe — clear explicitly on
-  // the lock event too. (Hard lock only — soft wipe must not clear the reveal.)
-  onLock(clear);
 
   return { password, notes, revealed, reveal, clear };
 }

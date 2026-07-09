@@ -184,6 +184,25 @@ describe("GeneratePasswordPage", () => {
     expect(wrapper.findAll(".result-row")).toHaveLength(0);
   });
 
+  it("clears the batch on browser back (popstate)", async () => {
+    vi.mocked(invoke).mockImplementation(((cmd: string) => {
+      if (cmd === "generate_password_batch")
+        return Promise.resolve(["a", "b", "c"]);
+      return Promise.resolve(undefined);
+    }) as typeof invoke);
+    const { wrapper } = mountWithApp(GeneratePasswordPage);
+    await flushPromises();
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(wrapper.findAll(".result-row")).toHaveLength(3);
+
+    // vue-router is mocked, so drive popstate directly (the real browser-back path).
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await flushPromises();
+
+    expect(wrapper.findAll(".result-row")).toHaveLength(0);
+  });
+
   it("drops a stale generate result superseded by a newer one", async () => {
     let resolveFirst!: (v: string[]) => void;
     const firstCall = new Promise<string[]>((r) => {

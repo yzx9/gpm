@@ -128,6 +128,25 @@ describe("UnlockModal", () => {
     expect(invoke).toHaveBeenCalledWith("unlock", { passphrase: "secret" });
   });
 
+  it("wipes the typed passphrase on browser back (popstate)", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false) // is_biometric_available
+      .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+    const wrapper = mount(UnlockModal);
+    await flushPromises();
+
+    const input = () =>
+      wrapper.find('input[type="password"]').element as HTMLInputElement;
+    await wrapper.find('input[type="password"]').setValue("topsecret");
+    expect(input().value).toBe("topsecret");
+
+    // vue-router is mocked, so drive popstate directly (the real browser-back path).
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await flushPromises();
+
+    expect(input().value).toBe("");
+  });
+
   it("triggers biometric unlock from the biometric button", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(true) // is_biometric_available

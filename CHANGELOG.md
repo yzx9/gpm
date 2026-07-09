@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The Android biometric prompts (unlocking the app and unlocking your identity) and the clipboard-clear notification — including its name in your system notification settings — now follow your display language instead of always being English.
 - The History screen now loads in pages instead of stopping at the latest 50 commits — scroll to the bottom (or tap "Load more") to browse older commits and their signature status all the way back to the repo's first commit. An explicit "Load more" button is always available even when the browser can't observe scrolling.
+- During setup, the identity key you paste is now masked (shown as dots) instead of displayed in plain text, so it stays hidden from anyone glancing at your screen.
 
 ### Changed
 
@@ -21,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Your auto-lock timing, the password view and clipboard auto-clear timers, and the AutoSync choice are now device preferences — they stick around when you reset your repository or connect a different one, instead of being wiped along with the repository the way they used to be. The App Lock toggle in Settings also now reflects the lock's real on/off state rather than a stored flag that could drift out of sync.
 - On the App Lock screen, the "Unlock with biometric" button was shrunk to its label and left-aligned at the edge of the card. It now stretches the full width with centered text, matching the other unlock buttons.
 - On Android, tapping a button no longer flashes a solid color block that hides the button's text and rounded shape — buttons now show a clean press highlight in their own color. Long-pressing a button also no longer pops up the system text-selection menu on its label.
+- Sensitive values on a screen — an exported private key, a typed passphrase, a pasted identity, or a secret you're editing — are now cleared the moment you leave that screen (or your identity locks), instead of lingering in the app's memory until later. Previously only the entry detail screen did this consistently; Settings, the setup flow, the generator, and the unlock screen now match.
 
 ## [v0.11.0] - 2026-07-08
 

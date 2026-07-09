@@ -18,6 +18,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
+import { useWipeOnLeave } from "@/composables";
 import { CircleCheck, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -94,6 +95,22 @@ onUnmounted(() => {
   clearPendingIdentity().catch(() => {});
 });
 
+// Wipe the typed seal/SSH passphrase, the snapshot used at complete, and the
+// optional git credentials on browser back and on unmount. The generated secret
+// identity itself never enters the WebView (only the public recipient does, which
+// is left out of the wipe). No lock wiring: no identity exists during setup.
+useWipeOnLeave(
+  () => {
+    passphrase.value = "";
+    mintedSshPassphrase.value = null;
+    pat.value = "";
+    sshKey.value = "";
+    sshPassphrase.value = "";
+    pf.value?.reset();
+  },
+  { lock: false },
+);
+
 async function generate() {
   error.value = "";
   // SSH bakes the passphrase into the key at mint time — a typo there can't be
@@ -164,6 +181,15 @@ async function onCreate() {
     return;
   }
 
+  // Snapshot the seal passphrase before any await. A browser-back during the
+  // create wipes the live field via useWipeOnLeave, and completeSetupFromFile
+  // must read the value the user actually typed — mirrors the SSH
+  // mintedSshPassphrase snapshot (see generate()).
+  const sealPassphrase =
+    identityKind.value === "ssh"
+      ? mintedSshPassphrase.value
+      : passphrase.value || null;
+
   loading.value = true;
   try {
     const hasRemote = repoUrl.value.trim().length > 0;
@@ -186,13 +212,10 @@ async function onCreate() {
       );
 
       // The identity was staged in backend state at generate time; this consumes
-      // it (no secret crosses IPC). For SSH, reuse the passphrase that minted
-      // the key (snapshot); for age, the live field (seal encryption).
-      await completeSetupFromFile(
-        identityKind.value === "ssh"
-          ? mintedSshPassphrase.value
-          : passphrase.value || null,
-      );
+      // it (no secret crosses IPC). The seal passphrase is the snapshot taken
+      // above (before the awaits) — not the live field, which a browser-back
+      // during the create would have wiped.
+      await completeSetupFromFile(sealPassphrase);
     }
 
     if (hasRemote) {

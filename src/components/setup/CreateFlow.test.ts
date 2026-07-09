@@ -112,6 +112,50 @@ describe("CreateFlow", () => {
     expectNoSecretCrossedIPC();
   });
 
+  it("age seal passphrase is snapshotted before the create awaits (survives a mid-create back-wipe)", async () => {
+    // A browser-back during the create_store await fires useWipeOnLeave, which
+    // wipes the live passphrase ref. complete_setup_from_file must read the
+    // snapshot taken at onCreate start, not the now-empty live field — else the
+    // identity saves unencrypted despite the user typing a seal passphrase.
+    let resolveCreate!: () => void;
+    mockInvoke({
+      generate_identity: () => "age1recipientkey",
+      is_configured: () => false,
+      create_store: () =>
+        new Promise<void>((r) => {
+          resolveCreate = r;
+        }),
+      complete_setup_from_file: () => undefined,
+    });
+
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    await clickButton(wrapper, "Generate identity");
+
+    // Type a seal passphrase + matching confirm + ack so Create is enabled.
+    await wrapper.find("#create-passphrase").setValue("seal-secret");
+    await wrapper.find("#create-passphrase-confirm").setValue("seal-secret");
+    await wrapper.find('input[type="checkbox"]').setValue(true);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises(); // onCreate: snapshot taken, is_configured + create_store pending
+
+    // Browser-back during the create wipes the live field.
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await flushPromises();
+    expect(
+      (wrapper.find("#create-passphrase").element as HTMLInputElement).value,
+    ).toBe("");
+
+    // create_store resolves → complete_setup_from_file runs with the snapshot.
+    resolveCreate();
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("complete_setup_from_file", {
+      passphrase: "seal-secret",
+    });
+  });
+
   it("renders the public recipient but never holds a secret", async () => {
     mockInvoke({
       generate_identity: () => "age1pub",

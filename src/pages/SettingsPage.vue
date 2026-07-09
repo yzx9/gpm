@@ -62,10 +62,10 @@ import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
-  useLockState,
   useSecureScreen,
   useSecuritySettings,
   useToast,
+  useWipeOnLeave,
 } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
 import {
@@ -93,7 +93,6 @@ import { useI18n } from "vue-i18n";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
 
 const router = useRouter();
-const { onLock } = useLockState();
 const { toast } = useToast();
 const { t } = useI18n();
 
@@ -343,20 +342,29 @@ const isSshIdentity = computed(
     identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
 );
 
-// The unlock modal keeps this page mounted on auto-lock, so wipe any in-DOM
-// secret material (exported keys, typed passphrases) and close reveal panels
-// the moment the identity locks.
-onLock(() => {
+/** Wipe the exported SSH key panels (public + private). */
+function wipeKeys() {
   publicKey.value = "";
   privateKey.value = "";
   showPublic.value = false;
   showPrivate.value = false;
-  // Wipe any in-flight passphrase-modal input as defense-in-depth; the modal
-  // sits below the lock overlay and should not retain a typed secret.
+}
+
+/** Wipe every in-DOM secret: exported keys, the typed passphrase-modal inputs,
+ *  and its confirm echo. Idempotent — fires on a hard lock, browser back, and
+ *  unmount. */
+function wipeSecrets() {
+  wipeKeys();
   ppCurrent.value = "";
   ppNew.value = "";
+  ppAck.value = false;
   passphraseModal.value = null;
-});
+  ppField.value?.reset();
+}
+
+// The unlock modal keeps this page mounted on auto-lock, so unmount alone can't
+// guarantee a wipe — clear on a hard lock, on browser back, and on unmount.
+useWipeOnLeave(wipeSecrets);
 
 async function loadConfig() {
   loading.value = true;
@@ -418,12 +426,9 @@ async function onSecureScreenChange(enabled: boolean) {
     return;
   }
   // Disarming protection while a secret is still on screen would expose it, so
-  // wipe any revealed key material first (mirrors the onLock wipe above).
+  // wipe any revealed key material first (mirrors the wipe on lock/back/unmount).
   if (!enabled) {
-    publicKey.value = "";
-    privateKey.value = "";
-    showPublic.value = false;
-    showPrivate.value = false;
+    wipeKeys();
   }
   toast.success(
     enabled

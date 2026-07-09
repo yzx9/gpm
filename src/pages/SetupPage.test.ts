@@ -1047,6 +1047,56 @@ describe("SetupPage", () => {
       // Should be on step 1
       expect(wrapper.find('input[id="repo-url"]').exists()).toBe(true);
     });
+
+    it("keeps the hoisted git credentials across a step 1→2→1 round-trip", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "is_repo_ready") return false; // start at step 1
+        return undefined; // clone_repo succeeds → advance to step 2
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+      await fillStep1(wrapper, {
+        repoUrl: "https://github.com/user/repo.git",
+        pat: "keep-me",
+      });
+      await submitStep1(wrapper);
+      expect(wrapper.find('textarea[id="identity"]').exists()).toBe(true); // step 2
+
+      // Back to step 1. CloneFlow itself stays mounted (only its v-if child
+      // swaps), so the hoisted `pat` must survive — useWipeOnLeave must NOT fire
+      // on an internal step change.
+      await wrapper.find("button[type='button']").trigger("click");
+      await flushPromises();
+      expect(
+        (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,
+      ).toBe("keep-me");
+    });
+
+    it("wipes the hoisted git credentials when the clone flow is left", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "is_repo_ready") return false;
+        return undefined;
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+      await fillStep1(wrapper, {
+        repoUrl: "https://github.com/user/repo.git",
+        pat: "leak-me",
+      });
+      expect(
+        (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,
+      ).toBe("leak-me");
+
+      // Clone→Create unmounts CloneFlow (useWipeOnLeave fires the wipe); back to
+      // Clone remounts it fresh, so the wiped `pat` is gone.
+      await wrapper.find("#setup-mode").setValue("create");
+      await flushPromises();
+      await wrapper.find("#setup-mode").setValue("clone");
+      await flushPromises();
+      expect(
+        (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,
+      ).toBe("");
+    });
   });
 
   // ── SSH URL support (step 1) ──────────────────────────────────────────

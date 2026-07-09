@@ -4,6 +4,7 @@
 
 <script setup lang="ts">
 import { isRepoReady } from "@/api";
+import { useWipeOnLeave } from "@/composables";
 import { computed, onMounted, ref } from "vue";
 import IdentitySetupForm from "./IdentitySetupForm.vue";
 import RepoCloneForm from "./RepoCloneForm.vue";
@@ -24,6 +25,20 @@ const sshKey = ref("");
 const sshPassphrase = ref("");
 
 const isSshUrl = computed(() => isSshRepoUrl(repoUrl.value));
+
+// Wipe the hoisted git credentials on browser back and when CloneFlow unmounts.
+// CloneFlow owns `step` and only swaps its v-if children, so neither trigger fires
+// on the internal 1↔2 step change — the "survive the round-trip" UX is preserved.
+// (Browser-back during setup is a leave: popstate fires, then the flow unmounts.)
+// No lock wiring during setup.
+useWipeOnLeave(
+  () => {
+    pat.value = "";
+    sshKey.value = "";
+    sshPassphrase.value = "";
+  },
+  { lock: false },
+);
 
 // Auto-advance to step 2 if repo is already cloned (identity missing).
 onMounted(async () => {

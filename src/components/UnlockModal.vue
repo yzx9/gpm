@@ -14,6 +14,7 @@ import {
   unlock,
   type LockMode,
 } from "@/api";
+import { useWipeOnLeave } from "@/composables";
 import { reconcileLocaleFromBackend } from "@/i18n";
 import { identityUnlockPrompt } from "@/i18n/native";
 import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
@@ -33,6 +34,16 @@ const passphrase = ref("");
 const loading = ref(false);
 const error = ref("");
 const showHelp = ref(false);
+
+// Wipe the typed passphrase on browser back and on unmount — both exit paths
+// (success unmounts via App.vue's lock-driven v-if; dismiss via @close) — so it
+// isn't left for GC. No lock wiring: this IS the lock UI.
+useWipeOnLeave(
+  () => {
+    passphrase.value = "";
+  },
+  { lock: false },
+);
 
 // ── Unlock method ─────────────────────────────────────────────────────
 // Two modes: biometric (the default path when available) and passphrase

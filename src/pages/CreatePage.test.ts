@@ -475,4 +475,35 @@ describe("CreatePage", () => {
     await flushPromises();
     expect((input.element as HTMLInputElement).type).toBe("password");
   });
+
+  it("wipes the half-typed form on identity lock", async () => {
+    const { wrapper, lock } = await mountPage({});
+    await fillWebsiteForm(wrapper);
+    expect(
+      (wrapper.find("#f-password").element as HTMLInputElement).value,
+    ).toBe("hunter2");
+
+    lock.setLocked(true);
+    await flushPromises();
+
+    expect(
+      (wrapper.find("#f-password").element as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  it("wipes the half-typed form on browser back (popstate)", async () => {
+    const { wrapper } = await mountPage({});
+    await fillWebsiteForm(wrapper);
+    expect(
+      (wrapper.find("#f-password").element as HTMLInputElement).value,
+    ).toBe("hunter2");
+
+    // vue-router is mocked, so drive popstate directly (the real browser-back path).
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await flushPromises();
+
+    expect(
+      (wrapper.find("#f-password").element as HTMLInputElement).value,
+    ).toBe("");
+  });
 });

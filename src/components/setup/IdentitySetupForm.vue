@@ -23,6 +23,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
+import { useWipeOnLeave } from "@/composables";
 import {
   ArrowLeft,
   Check,
@@ -431,6 +432,18 @@ watch(matchedRecipient, (m) => {
   });
 });
 
+// Wipe the pasted master identity + passphrase on browser back and on unmount
+// (step 2→1 unmounts this form) so the most sensitive frontend string isn't
+// left for GC. No lock wiring: no identity exists during setup.
+useWipeOnLeave(
+  () => {
+    identity.value = "";
+    passphrase.value = "";
+    pf.value?.reset();
+  },
+  { lock: false },
+);
+
 onMounted(fetchRecipients);
 onUnmounted(clearPendingFile);
 </script>
@@ -533,6 +546,7 @@ onUnmounted(clearPendingFile);
         id="identity"
         v-model="identity"
         rows="5"
+        class="masked-secret"
         :placeholder="t('setup.identity.identityPlaceholder')"
         autocomplete="off"
         spellcheck="false"
@@ -737,3 +751,14 @@ onUnmounted(clearPendingFile);
     >
   </form>
 </template>
+
+<style scoped>
+/* The pasted identity (an AGE-SECRET-KEY-1… line or a multi-line OPENSSH PEM) is
+ * the app's most sensitive frontend string — render it masked, not in cleartext.
+ * Purely presentational: -webkit-text-security glyphs every character while the
+ * textarea stays multi-line (PEM-friendly), and the value/ref logic is
+ * untouched. Scoped + class-fallthrough applies to BaseTextarea's <textarea>. */
+.masked-secret {
+  -webkit-text-security: disc;
+}
+</style>
