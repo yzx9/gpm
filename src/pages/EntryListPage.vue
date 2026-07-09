@@ -573,6 +573,9 @@ defineExpose({ syncRepo });
 
     <div v-if="pulling" class="pull-progress">
       <div class="pull-progress-row">
+        <span class="pull-spinner" aria-hidden="true">
+          <BaseIcon :icon="RefreshCw" :size="18" />
+        </span>
         <div
           class="pull-progress-track"
           role="progressbar"
@@ -591,10 +594,10 @@ defineExpose({ syncRepo });
           :title="t('entries.cancelSync')"
           @click="cancelSync"
         >
-          <BaseIcon :icon="X" :size="16" />
+          <BaseIcon :icon="X" :size="14" />
         </button>
       </div>
-      <div class="text-xs text-muted mt-1" aria-live="polite">
+      <div class="text-xs text-muted mt-1 text-center" aria-live="polite">
         {{ pullProgressText }}
       </div>
     </div>
@@ -772,6 +775,7 @@ defineExpose({ syncRepo });
   margin-bottom: 0.75rem;
 }
 .pull-progress-track {
+  flex: 1 1 auto; /* fill the row — restores the full-width bar the pre-PTR sync used */
   height: 4px;
   background: var(--color-edge);
   border-radius: 9999px;
@@ -809,22 +813,43 @@ defineExpose({ syncRepo });
   align-items: center;
   gap: 0.5rem;
 }
+/* Spinning refresh icon = the primary "syncing" affordance, leading the row so
+   the sync reads as active work, not as a lone stop button. Uses the global
+   @keyframes spin (see src/style.css). */
+.pull-spinner {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+  animation: spin 0.8s linear infinite;
+}
+/* Secondary: a small, calm stop control trailing the bar — only turns danger-red
+   on hover/press, so the in-flight state isn't presented as an alarm. */
 .cancel-sync {
   flex: 0 0 auto;
-  width: 32px;
-  min-height: 32px;
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
   padding: 0;
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-sm);
   background: var(--color-surface);
-  color: var(--color-danger);
+  color: var(--color-muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.cancel-sync:hover {
+.cancel-sync:active {
   background: var(--color-hover);
+  color: var(--color-danger);
+}
+@media (hover: hover) {
+  .cancel-sync:hover {
+    background: var(--color-hover);
+    color: var(--color-danger);
+  }
 }
 
 /* Pull-to-refresh indicator: a centered icon whose container grows with the
@@ -837,6 +862,14 @@ defineExpose({ syncRepo });
   justify-content: center;
   overflow: hidden;
   color: var(--color-muted);
+}
+/* Lift the icon off the search box: the indicator's bottom edge is flush with
+   the search input, and `align-items: flex-end` glues the icon to that edge, so
+   without this padding the spinner sits hard against the input. The padding
+   lives on the icon wrap (not the indicator) so it only costs height while a
+   pull is in progress — at rest the indicator collapses to 0 and this is moot. */
+.ptr-icon-wrap {
+  padding-bottom: 0.5rem;
 }
 .ptr-icon-wrap.ptr-armed {
   color: var(--color-accent);
