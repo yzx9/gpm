@@ -17,14 +17,15 @@ import androidx.core.app.NotificationManagerCompat
  * only the [Context] from [onReceive] — no Activity, no WebView, no
  * foregrounding, no plugin reference.
  *
- * Dynamically registered by [ClipboardNotifyPlugin.load], so it lives for the
- * app process lifetime (the only window in which the Rust timer matters). The
- * flag is consumed by Rust's armed clear timer on wake (via
- * `consumeManualClearFlag`), so the timer self-skips instead of clobbering
- * unrelated clipboard content the user placed after this tap.
+ * Manifest-declared in this plugin's AndroidManifest.xml with exported=false, so
+ * only our own PendingIntent can reach it, and the tap still delivers after
+ * process death — the system instantiates the receiver. The flag is consumed by
+ * Rust's armed clear timer on wake (via `consumeManualClearFlag`), so the timer
+ * self-skips instead of clobbering unrelated clipboard content the user placed
+ * after this tap.
  *
- * Default no-arg constructor for safety (Android may instantiate receivers via
- * reflection even when dynamically registered).
+ * Default no-arg constructor for safety (Android instantiates manifest
+ * receivers via reflection, including after process death).
  */
 class ClipboardClearReceiver : BroadcastReceiver() {
 
