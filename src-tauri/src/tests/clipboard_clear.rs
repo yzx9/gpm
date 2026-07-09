@@ -8,6 +8,8 @@
 //! `disarm_clipboard_clear`) is the load-bearing mechanism for both the
 //! copy-overlap fix and the manual tap-clear bridge.
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -128,5 +130,45 @@ async fn stale_clipboard_task_self_disarms() {
     assert!(
         app_state.clipboard_clear_generation.load(Ordering::SeqCst) > gen_a + 1,
         "re-arm after a stale wake must bump the generation normally"
+    );
+}
+
+/// The manual-clear decision self-skips when the probe reports a manual clear
+/// (the user tapped during the window): the clear-and-dismiss must NOT fire.
+/// Injects a true-returning probe + a spy clear so the branch is reachable from
+/// a host test — the real `clipboard_notify()` bridge is an inert `false` stub
+/// off-Android, so without injection the self-skip is unreachable. Robust on
+/// headless CI: no OS clipboard involved (the spy observes fire/no-fire).
+#[tokio::test]
+async fn clipboard_clear_self_skips_when_manual_clear_probe_is_true() {
+    let fired = Arc::new(AtomicBool::new(false));
+    let clear = {
+        let fired = fired.clone();
+        move || async move {
+            fired.store(true, Ordering::SeqCst);
+        }
+    };
+    identity::run_clipboard_clear(|| async move { true }, clear).await;
+    assert!(
+        !fired.load(Ordering::SeqCst),
+        "a true manual-clear probe must self-skip — the clear must NOT fire"
+    );
+}
+
+/// The manual-clear decision fires the auto-clear when the probe reports no
+/// manual clear: the clear-and-dismiss MUST run (observed via the spy).
+#[tokio::test]
+async fn clipboard_clear_fires_when_manual_clear_probe_is_false() {
+    let fired = Arc::new(AtomicBool::new(false));
+    let clear = {
+        let fired = fired.clone();
+        move || async move {
+            fired.store(true, Ordering::SeqCst);
+        }
+    };
+    identity::run_clipboard_clear(|| async move { false }, clear).await;
+    assert!(
+        fired.load(Ordering::SeqCst),
+        "a false manual-clear probe must fire the auto-clear"
     );
 }

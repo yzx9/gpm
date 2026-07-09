@@ -41,7 +41,6 @@ class ClipboardClearReceiver : BroadcastReceiver() {
         // Set the manual-clear flag so the Rust armed timer self-skips on wake
         // (it would otherwise fire later and clobber whatever the user copies
         // next). Consumed + reset by `consumeManualClearFlag` on the Rust side.
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_MANUALLY_CLEARED, true).apply()
+        setManualClearFlag(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
     }
 }
