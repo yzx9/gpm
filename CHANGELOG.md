@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On the App Lock screen, the "Unlock with biometric" button was shrunk to its label and left-aligned at the edge of the card. It now stretches the full width with centered text, matching the other unlock buttons.
 - On Android, tapping a button no longer flashes a solid color block that hides the button's text and rounded shape — buttons now show a clean press highlight in their own color. Long-pressing a button also no longer pops up the system text-selection menu on its label.
 - Sensitive values on a screen — an exported private key, a typed passphrase, a pasted identity, or a secret you're editing — are now cleared the moment you leave that screen (or your identity locks), instead of lingering in the app's memory until later. Previously only the entry detail screen did this consistently; Settings, the setup flow, the generator, and the unlock screen now match.
+- While an unlock, sync-resolve, or other dialog was open, you could still scroll the list behind it by dragging on the dimmed background. The background now stays frozen for as long as any dialog is up.
 
 ## [v0.11.0] - 2026-07-08
 

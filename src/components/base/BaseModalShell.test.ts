@@ -2,9 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BaseModalShell from "./BaseModalShell.vue";
+
+// BaseModalShell locks the document scroller on mount (useScrollLock). Unmount
+// every wrapper after each test so the shared lock count returns to 0 instead of
+// climbing across tests that mount without an explicit unmount.
+enableAutoUnmount(afterEach);
 
 // Override the global setup.ts no-op mock with a DEFERRED onBackButtonPress so
 // tests can drive "registration completes" and "back pressed". Mirrors the

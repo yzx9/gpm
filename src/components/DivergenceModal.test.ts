@@ -3,9 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SyncDivergence } from "@/api";
-import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DivergenceModal from "./DivergenceModal.vue";
+
+// DivergenceModal mounts BaseModalShell(s), which lock the document scroller on
+// mount (useScrollLock). Unmount every wrapper after each test so the shared
+// lock count returns to 0 instead of climbing across tests that mount without an
+// explicit unmount.
+enableAutoUnmount(afterEach);
 
 // Deferred-mock (mirrors BaseModalShell.test.ts / useOverlayBackHandler.test.ts)
 // so tests can drive "back pressed". Each BaseModalShell inside DivergenceModal

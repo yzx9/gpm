@@ -4,9 +4,14 @@
 
 import type { CommitSigInfo } from "@/api";
 import { mountWithApp } from "@/test/appTestUtils";
-import { flushPromises } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { enableAutoUnmount, flushPromises } from "@vue/test-utils";
+import { afterEach, describe, expect, it } from "vitest";
 import AuthenticityBlockModal from "./AuthenticityBlockModal.vue";
+
+// AuthenticityBlockModal mounts a BaseModalShell, which locks the document
+// scroller on mount (useScrollLock). mountWithApp routes through the same
+// `mount` enableAutoUnmount patches, so this tracks its wrapper too.
+enableAutoUnmount(afterEach);
 
 const unverifiedIssue: CommitSigInfo = {
   hash: "deadbeefdeadbeef",

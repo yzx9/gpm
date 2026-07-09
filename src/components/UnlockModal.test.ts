@@ -3,9 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
-import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UnlockModal from "./UnlockModal.vue";
+
+// UnlockModal mounts a BaseModalShell, which locks the document scroller on
+// mount (useScrollLock). Unmount every wrapper after each test so the shared
+// lock count returns to 0 instead of climbing across these ~14 mounts.
+enableAutoUnmount(afterEach);
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),

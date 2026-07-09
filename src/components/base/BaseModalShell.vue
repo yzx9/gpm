@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { useOverlayBackHandler } from "@/composables";
+import { useOverlayBackHandler, useScrollLock } from "@/composables";
 import { computed, ref } from "vue";
 import BaseCard from "./BaseCard.vue";
 
@@ -49,6 +49,14 @@ function onBackdrop() {
 useOverlayBackHandler(ref(true), () => {
   if (props.dismissOnBack) emit("close");
 });
+
+// Freeze the document scroller for the shell's lifetime. The backdrop covers
+// the viewport visually, but a drag on a non-scrolling fixed layer still
+// scrolls the document behind it on touch WebViews — this locks the list/etc.
+// under every modal (unlock, app-lock, divergence, …) until the shell unmounts.
+// See useScrollLock for why `overflow: hidden` on documentElement and not
+// `touch-action: none` (which would also freeze inner modal scroll regions).
+useScrollLock();
 </script>
 
 <template>
