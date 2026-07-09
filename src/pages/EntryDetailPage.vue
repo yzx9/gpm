@@ -344,7 +344,7 @@ function handleKeydown(e: KeyboardEvent) {
     <header class="flex items-center gap-3 mb-6" role="banner">
       <button
         @click="goBack"
-        class="bg-transparent border-none text-base cursor-pointer text-accent p-1 min-w-12 min-h-12 inline-flex items-center gap-1"
+        class="bg-transparent border-none text-base cursor-pointer text-accent active:text-accent-deep p-1 min-w-12 min-h-12 inline-flex items-center gap-1"
         :aria-label="t('common.back')"
       >
         <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}

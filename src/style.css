@@ -131,17 +131,19 @@
   }
 
   /* Touch press + keyboard focus defaults.
-     Tint the native tap flash to --color-hover on every pressable so touch
-     feedback is consistent app-wide AND no element loses feedback: many
-     buttons (e.g. .back-btn, .cancel-link, kind-toggle buttons) carry no
-     themed :active rule, so stripping the native flash (transparent) would
-     leave them with zero press feedback. A themed :active on the buttons
-     that have one still gives the crisp press color; this rule is the
-     reliable fallback, especially for non-button pressables where CSS
-     :active is unreliable in Android WebView (chromium:40300816). */
+     The native tap highlight (-webkit-tap-highlight-color) is suppressed
+     (transparent): on Android WebView it paints as a separate overlay drawn
+     ON TOP of the element's content (so it covers text) and does NOT follow
+     border-radius (so it's a square block bleeding past rounded corners).
+     Every pressable owns a themed :active rule instead — which respects
+     border-radius, layers behind the text, and can transition. CAVEAT: CSS
+     :active is unreliable on NON-BUTTON pressables in Android WebView
+     (chromium:40300816); e.g. BaseSegmentedControl's .mode-pill is a <label>,
+     so verify its :active on-device and restore the tap highlight there as a
+     scoped fallback if it does not fire. */
   button,
   [role="button"] {
-    -webkit-tap-highlight-color: var(--color-hover);
+    -webkit-tap-highlight-color: transparent;
   }
   /* Keyboard focus ring — matches BaseSegmentedControl's active-pill ring. */
   button:focus-visible,
@@ -221,7 +223,7 @@
  * Shared UI utilities
  *
  * Small presentation helpers used across several pages/components that aren't
- * worth a full component (copy button, monospace key display). The interactive
+ * worth a full component (copy button, back button, monospace key display). The interactive
  * primitives (buttons/inputs/spinner/segmented control) live as Base* components
  * under src/components/base/ instead.
  * --------------------------------------------------------------------------- */
@@ -243,6 +245,23 @@
   .btn-copy:hover {
     background: var(--color-hover);
   }
+}
+
+/* Transparent accent-text back arrow used by the create/generate page headers.
+   Shared utility (not a Base* component). No background so it reads as a link,
+   not a chip; press feedback is a deeper accent. */
+.back-btn {
+  background: transparent;
+  border: none;
+  font-size: var(--text-base);
+  cursor: pointer;
+  color: var(--color-accent);
+  padding: 0.25rem 0.5rem;
+  min-width: 48px;
+  min-height: 48px;
+}
+.back-btn:active:not(:disabled) {
+  color: var(--color-accent-deep);
 }
 
 .public-key-display {

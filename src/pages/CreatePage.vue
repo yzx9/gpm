@@ -481,17 +481,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.back-btn {
-  background: transparent;
-  border: none;
-  font-size: var(--text-base);
-  cursor: pointer;
-  color: var(--color-accent);
-  padding: 0.25rem 0.5rem;
-  min-width: 48px;
-  min-height: 48px;
-}
-
 .type-card {
   display: block;
   width: 100%;

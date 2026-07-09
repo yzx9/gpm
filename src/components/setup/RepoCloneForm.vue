@@ -309,6 +309,9 @@ async function onClone() {
   color: var(--color-accent);
   cursor: pointer;
 }
+.cancel-link:active:not(:disabled) {
+  color: var(--color-accent-deep);
+}
 .cancel-link:disabled {
   color: var(--color-muted);
   cursor: default;

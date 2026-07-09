@@ -124,7 +124,7 @@ async function copyPublicKey() {
       <button
         type="button"
         :class="[
-          'flex-1 py-2 text-sm font-medium transition-colors',
+          'flex-1 py-2 text-sm font-medium transition-colors active:bg-hover',
           sshKeySource === 'paste' ? 'bg-accent text-on-accent' : 'bg-surface',
         ]"
         @click="sshKeySource = 'paste'"
@@ -134,7 +134,7 @@ async function copyPublicKey() {
       <button
         type="button"
         :class="[
-          'flex-1 py-2 text-sm font-medium transition-colors',
+          'flex-1 py-2 text-sm font-medium transition-colors active:bg-hover',
           sshKeySource === 'generate'
             ? 'bg-accent text-on-accent'
             : 'bg-surface',

@@ -71,6 +71,9 @@ const { t } = useI18n();
   color: inherit;
   cursor: pointer;
 }
+.toast-host__close:active {
+  opacity: 0.7;
+}
 
 .toast-enter-active,
 .toast-leave-active {

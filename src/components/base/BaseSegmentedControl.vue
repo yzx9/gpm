@@ -65,7 +65,7 @@ function select(v: T) {
   border-radius: var(--radius-md);
   background: var(--color-surface);
   cursor: pointer;
-  -webkit-tap-highlight-color: var(--color-hover);
+  -webkit-tap-highlight-color: transparent;
   min-height: 48px;
   display: flex;
   align-items: center;

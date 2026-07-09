@@ -107,7 +107,7 @@ const sizeClass = computed(() =>
 }
 /* Pressed (touch + mouse). BaseButton renders a real <button>, so :active is
    reliable here — this variant block is the reference pattern. The native tap
-   flash is dropped globally (main.css) so the themed :active reads clean. */
+   flash is dropped globally (src/style.css) so the themed :active reads clean. */
 .primary:active:not(:disabled) {
   background: var(--color-accent-deep);
 }

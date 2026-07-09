@@ -892,6 +892,9 @@ defineExpose({ syncRepo });
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
+.sig-light:active {
+  opacity: 0.7;
+}
 .sig-light:hover {
   opacity: 0.7;
 }
