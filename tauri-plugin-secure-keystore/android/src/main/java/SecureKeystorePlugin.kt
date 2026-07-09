@@ -82,6 +82,42 @@ fun resolvePromptText(title: String?, subtitle: String?, negative: String?): Res
         negative = negative?.takeUnless { it.isBlank() } ?: "Cancel",
     )
 
+/** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. Pure: the
+ *  `ERROR_*` constants are compile-time-inlined `static final int`, so the
+ *  extracted function carries no runtime dependency on `androidx.biometric`. */
+internal fun mapErrorCode(code: Int): String = when (code) {
+    BiometricPrompt.ERROR_USER_CANCELED,
+    BiometricPrompt.ERROR_NEGATIVE_BUTTON,
+    BiometricPrompt.ERROR_CANCELED,
+    -> "BIOMETRIC_CANCELLED"
+    BiometricPrompt.ERROR_HW_NOT_PRESENT,
+    BiometricPrompt.ERROR_HW_UNAVAILABLE,
+    BiometricPrompt.ERROR_NO_BIOMETRICS,
+    BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
+    BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
+    -> "BIOMETRIC_UNAVAILABLE"
+    BiometricPrompt.ERROR_LOCKOUT,
+    BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
+    -> "BIOMETRIC_LOCKOUT"
+    else -> "BIOMETRIC_FAILED"
+}
+
+/** Class name only — never leak crypto internals or secret data. */
+internal fun safeName(e: Throwable): String = e.javaClass.simpleName.ifEmpty { "error" }
+
+/** Base64-encode the iv + ciphertext for SharedPreferences storage. Pure. */
+internal fun encodeBlob(iv: ByteArray, ciphertext: ByteArray): Pair<String, String> =
+    Pair(Base64.encodeToString(iv, Base64.NO_WRAP), Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+
+/** Decode the stored base64 iv + ciphertext. Returns null iff either input is
+ *  null (i.e. nothing is sealed); a present-but-empty string decodes to an empty
+ *  `ByteArray` — preserving the original `readCipherData` semantics exactly
+ *  (characterization, not a behavior change). */
+internal fun decodeBlob(ivB64: String?, ctB64: String?): Pair<ByteArray, ByteArray>? {
+    if (ivB64 == null || ctB64 == null) return null
+    return Pair(Base64.decode(ivB64, Base64.NO_WRAP), Base64.decode(ctB64, Base64.NO_WRAP))
+}
+
 /** Argument for `store` / `storeBiometric`: the Base64 32-byte master key. The
  *  title/subtitle/negative fields carry localized prompt text; only
  *  `storeBiometric` uses them (the auth-free `store` does not prompt). */
@@ -123,22 +159,17 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
     private val strongAuthenticator: Int
         get() = BiometricManager.Authenticators.BIOMETRIC_STRONG
 
-    /** Class name only — never leak crypto internals or secret data. */
-    private fun safeName(e: Throwable): String = e.javaClass.simpleName.ifEmpty { "error" }
-
     private fun storeCipherData(prefs: SharedPreferences, iv: ByteArray, ciphertext: ByteArray) {
+        val (ivB64, ctB64) = encodeBlob(iv, ciphertext)
         prefs.edit().apply {
-            putString(PREF_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
-            putString(PREF_CT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+            putString(PREF_IV, ivB64)
+            putString(PREF_CT, ctB64)
         }.apply()
     }
 
     /** The stored (iv, ciphertext) pair for `prefs`, or null if nothing is sealed. */
-    private fun readCipherData(prefs: SharedPreferences): Pair<ByteArray, ByteArray>? {
-        val ivB64 = prefs.getString(PREF_IV, null) ?: return null
-        val ctB64 = prefs.getString(PREF_CT, null) ?: return null
-        return Pair(Base64.decode(ivB64, Base64.NO_WRAP), Base64.decode(ctB64, Base64.NO_WRAP))
-    }
+    private fun readCipherData(prefs: SharedPreferences): Pair<ByteArray, ByteArray>? =
+        decodeBlob(prefs.getString(PREF_IV, null), prefs.getString(PREF_CT, null))
 
     // ── Auth-free master key ─────────────────────────────────────────────
 
@@ -265,24 +296,6 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             .setAllowedAuthenticators(strongAuthenticator)
         if (r.subtitle != null) builder.setSubtitle(r.subtitle)
         return builder.build()
-    }
-
-    /** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. */
-    private fun mapErrorCode(code: Int): String = when (code) {
-        BiometricPrompt.ERROR_USER_CANCELED,
-        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
-        BiometricPrompt.ERROR_CANCELED,
-        -> "BIOMETRIC_CANCELLED"
-        BiometricPrompt.ERROR_HW_NOT_PRESENT,
-        BiometricPrompt.ERROR_HW_UNAVAILABLE,
-        BiometricPrompt.ERROR_NO_BIOMETRICS,
-        BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
-        BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
-        -> "BIOMETRIC_UNAVAILABLE"
-        BiometricPrompt.ERROR_LOCKOUT,
-        BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
-        -> "BIOMETRIC_LOCKOUT"
-        else -> "BIOMETRIC_FAILED"
     }
 
     // ── @Command surface: auth-free master key ───────────────────────────

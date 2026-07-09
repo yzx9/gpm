@@ -69,6 +69,29 @@ fun resolvePromptText(title: String?, subtitle: String?, negative: String?): Res
         negative = negative?.takeUnless { it.isBlank() } ?: "Cancel",
     )
 
+/** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. Pure: the
+ *  `ERROR_*` constants are compile-time-inlined `static final int`, so the
+ *  extracted function carries no runtime dependency on `androidx.biometric`. */
+internal fun mapErrorCode(code: Int): String = when (code) {
+    BiometricPrompt.ERROR_USER_CANCELED,
+    BiometricPrompt.ERROR_NEGATIVE_BUTTON,
+    BiometricPrompt.ERROR_CANCELED,
+    -> "BIOMETRIC_CANCELLED"
+    BiometricPrompt.ERROR_HW_NOT_PRESENT,
+    BiometricPrompt.ERROR_HW_UNAVAILABLE,
+    BiometricPrompt.ERROR_NO_BIOMETRICS,
+    BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
+    BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
+    -> "BIOMETRIC_UNAVAILABLE"
+    BiometricPrompt.ERROR_LOCKOUT,
+    BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
+    -> "BIOMETRIC_LOCKOUT"
+    else -> "BIOMETRIC_FAILED"
+}
+
+/** Class name only — never leak crypto internals or secret data. */
+internal fun safeName(e: Throwable): String = e.javaClass.simpleName.ifEmpty { "error" }
+
 @InvokeArg
 class StoreArgs {
     lateinit var passphrase: String
@@ -192,27 +215,6 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
         if (r.subtitle != null) builder.setSubtitle(r.subtitle)
         return builder.build()
     }
-
-    /** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. */
-    private fun mapErrorCode(code: Int): String = when (code) {
-        BiometricPrompt.ERROR_USER_CANCELED,
-        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
-        BiometricPrompt.ERROR_CANCELED,
-        -> "BIOMETRIC_CANCELLED"
-        BiometricPrompt.ERROR_HW_NOT_PRESENT,
-        BiometricPrompt.ERROR_HW_UNAVAILABLE,
-        BiometricPrompt.ERROR_NO_BIOMETRICS,
-        BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
-        BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
-        -> "BIOMETRIC_UNAVAILABLE"
-        BiometricPrompt.ERROR_LOCKOUT,
-        BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
-        -> "BIOMETRIC_LOCKOUT"
-        else -> "BIOMETRIC_FAILED"
-    }
-
-    /** Class name only — never leak crypto internals or secret data. */
-    private fun safeName(e: Throwable): String = e.javaClass.simpleName.ifEmpty { "error" }
 
     // ── @Command surface ─────────────────────────────────────────────────
 

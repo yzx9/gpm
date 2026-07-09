@@ -59,11 +59,14 @@ jobs:
       - name: Run frontend tests
         run: pnpm test
 
-  # Runs the safe-area plugin's Robolectric unit tests. The test is pure JVM
-  # (no NDK, no Rust artifacts), but gradle can't even configure without
-  # tauri.settings.gradle present — and that file is gitignored, generated
-  # only by `tauri android build`. So a single-ABI debug build is done first
-  # purely to produce it; the unit test itself runs on the configured project.
+  # Runs every local Android plugin's Robolectric/JVM unit tests via the
+  # aggregated `testPlugins` gradle task. The tests are pure JVM (no NDK, no Rust
+  # artifacts), but gradle can't even configure without tauri.settings.gradle
+  # present — and that file is gitignored, generated only by `tauri android
+  # build`. So a single-ABI debug build is done first purely to produce it; the
+  # unit tests then run on the configured project. A guard first verifies every
+  # local path plugin in src-tauri/Cargo.toml is included, so a stale generation
+  # can't silently skip a plugin's tests.
   android:
     runs-on: ubuntu-latest
     steps:
@@ -99,8 +102,23 @@ jobs:
       - name: Generate icons
         run: sh scripts/gen-icons.sh
 
-      - name: Build (single-ABI; produces tauri.settings.gradle for the test)
+      - name: Build single-ABI
         run: pnpm tauri android build --debug --target aarch64
 
-      - name: Run safe-area plugin unit tests
-        run: cd src-tauri/gen/android && ./gradlew :tauri-plugin-safe-area:testDebugUnitTest --console=plain
+      - name: Verify plugin inclusion + run all plugin unit tests
+        run: |
+          set -e
+          f=src-tauri/gen/android/tauri.settings.gradle
+          if ! grep -qF "$PWD" "$f"; then
+            echo "$f is stale (doesn't reference the current repo root $PWD)" >&2
+            exit 1
+          fi
+          missing=""
+          for p in $(grep -oE 'tauri-plugin-[a-z0-9_-]+ = \{' src-tauri/Cargo.toml | grep -oE 'tauri-plugin-[a-z0-9_-]+'); do
+            grep -q ":$p'" "$f" || missing="$missing $p"
+          done
+          if [ -n "$missing" ]; then
+            echo "missing from $f:$missing — stale generation" >&2
+            exit 1
+          fi
+          cd src-tauri/gen/android && ./gradlew testPlugins --console=plain

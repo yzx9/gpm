@@ -30,6 +30,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.Manifest
 import android.os.Build
 import android.os.Build.VERSION.SDK_INT
@@ -49,6 +50,37 @@ internal const val CHANNEL_ID = "clipboard-clear"
 internal const val PREFS_NAME = "gpm.clipboard.notify"
 internal const val KEY_MANUALLY_CLEARED = "manually_cleared"
 internal const val ALIAS_POST_NOTIFICATIONS = "postNotifications"
+
+/** Reset the manual-clear flag. Called by `postClipboardNotification` BEFORE
+ *  showing the notification (post always precedes any tap, so the receiver's
+ *  tap-set can't race with a task-start reset). Pure over [SharedPreferences]. */
+internal fun resetManualClearFlag(prefs: SharedPreferences) {
+    prefs.edit().putBoolean(KEY_MANUALLY_CLEARED, false).apply()
+}
+
+/** Set the manual-clear flag. Called by `ClipboardClearReceiver` AFTER clearing
+ *  the clipboard + dismissing the notification, so the armed timer self-skips on
+ *  wake instead of clobbering content the user placed after the tap. */
+internal fun setManualClearFlag(prefs: SharedPreferences) {
+    prefs.edit().putBoolean(KEY_MANUALLY_CLEARED, true).apply()
+}
+
+/** Read-then-reset the manual-clear flag: returns whether a manual clear happened
+ *  since the last reset (and resets it so). NOT transactionally atomic — it is a
+ *  `getBoolean` followed by a conditional `apply` — but sufficient because Rust
+ *  polls it once per wake on a single process. */
+internal fun takeManualClearFlag(prefs: SharedPreferences): Boolean {
+    val wasCleared = prefs.getBoolean(KEY_MANUALLY_CLEARED, false)
+    if (wasCleared) {
+        prefs.edit().putBoolean(KEY_MANUALLY_CLEARED, false).apply()
+    }
+    return wasCleared
+}
+
+/** Whether POST_NOTIFICATIONS must be requested at runtime: only on Android 13+
+ *  (TIRAMISU) and only when not already granted. Pre-13 has no such permission. */
+internal fun shouldRequestNotificationPermission(sdkInt: Int, notificationsEnabled: Boolean): Boolean =
+    sdkInt >= Build.VERSION_CODES.TIRAMISU && !notificationsEnabled
 
 @InvokeArg
 class PostClipboardNotificationArgs {
@@ -97,8 +129,10 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun requestNotificationsPermission(invoke: Invoke) {
-        if (SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            NotificationManagerCompat.from(activity).areNotificationsEnabled()
+        if (!shouldRequestNotificationPermission(
+                SDK_INT,
+                NotificationManagerCompat.from(activity).areNotificationsEnabled(),
+            )
         ) {
             resolveGranted(invoke, true)
             return
@@ -116,12 +150,9 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun postClipboardNotification(invoke: Invoke) {
         val args = invoke.parseArgs(PostClipboardNotificationArgs::class.java)
-        // Reset the manual-clear flag BEFORE showing the notification. This
-        // resets any stale flag from a prior window at post time — which always
-        // precedes any user tap — so the receiver's tap-set flag can't race
-        // with a task-start reset (the prior design's microsecond race window).
-        activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_MANUALLY_CLEARED, false).apply()
+        // Reset the manual-clear flag BEFORE showing the notification (post
+        // always precedes any user tap — see `resetManualClearFlag`).
+        resetManualClearFlag(activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
         ensureChannel(args.channelName, args.channelDescription)
         val notif =
             NotificationCompat.Builder(activity, CHANNEL_ID)
@@ -158,11 +189,8 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun consumeManualClearFlag(invoke: Invoke) {
-        val prefs = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val wasCleared = prefs.getBoolean(KEY_MANUALLY_CLEARED, false)
-        if (wasCleared) {
-            prefs.edit().putBoolean(KEY_MANUALLY_CLEARED, false).apply()
-        }
+        val wasCleared =
+            takeManualClearFlag(activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
         val ret = JSObject()
         ret.put("cleared", wasCleared)
         invoke.resolve(ret)

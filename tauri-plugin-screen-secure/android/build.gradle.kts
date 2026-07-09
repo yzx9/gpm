@@ -34,4 +34,7 @@ android {
 dependencies {
     implementation(project(":tauri-android"))
     implementation("androidx.core:core-ktx:1.9.0")
+    // No JVM unit tests by design (a thin screen-secure flag plugin). The
+    // `testPlugins` gate still sweeps `:testDebugUnitTest` here (a no-op pass);
+    // add the Robolectric/JUnit testImplementation block if tests are added.
 }

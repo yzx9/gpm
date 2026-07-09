@@ -18,6 +18,7 @@ package xyz.yzx9.gpm.filepicker
 
 import android.app.Activity
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
@@ -31,6 +32,38 @@ import app.tauri.plugin.Plugin
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+
+/** Read an entire stream into a byte array. Pure (takes an [InputStream] rather
+ *  than resolving a content URI) so it can be fed constructed inputs. */
+@Throws(IOException::class)
+internal fun readStreamFully(stream: InputStream): ByteArray {
+    stream.use {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(0xFFFF)
+        var len = it.read(buffer)
+        while (len != -1) {
+            out.write(buffer, 0, len)
+            len = it.read(buffer)
+        }
+        return out.toByteArray()
+    }
+}
+
+/** Best-effort display name from OpenableColumns, falling back to the URI tail.
+ *  Pure (takes a [Cursor] + fallback rather than resolving the URI). Preserves
+ *  the original semantics: a present column with a null value returns null (the
+ *  fallback applies only when the cursor, row, or column is absent). */
+internal fun resolveDisplayName(cursor: Cursor?, fallback: String?): String? {
+    cursor?.use {
+        if (it.moveToFirst()) {
+            val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0) {
+                return it.getString(idx)
+            }
+        }
+    }
+    return fallback
+}
 
 /**
  * Backend-only SAF file picker that reads the picked file's bytes into Rust.
@@ -92,31 +125,14 @@ class FilePickerPlugin(private val activity: Activity) : Plugin(activity) {
     @Throws(IOException::class)
     private fun readBytes(uri: Uri): ByteArray? {
         val stream: InputStream = activity.contentResolver.openInputStream(uri) ?: return null
-        stream.use {
-            val out = ByteArrayOutputStream()
-            val buffer = ByteArray(0xFFFF)
-            var len = it.read(buffer)
-            while (len != -1) {
-                out.write(buffer, 0, len)
-                len = it.read(buffer)
-            }
-            return out.toByteArray()
-        }
+        return readStreamFully(stream)
     }
 
     /** Best-effort display name from OpenableColumns, falling back to the URI tail. */
     private fun displayName(uri: Uri): String? {
-        activity.contentResolver
+        val cursor = activity.contentResolver
             .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) {
-                        return cursor.getString(idx)
-                    }
-                }
-            }
-        return uri.lastPathSegment
+        return resolveDisplayName(cursor, uri.lastPathSegment)
     }
 
     /** Class name only — never leak file contents or provider internals. */

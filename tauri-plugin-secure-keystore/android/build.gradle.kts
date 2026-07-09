@@ -29,6 +29,12 @@ android {
     kotlinOptions {
         jvmTarget = "1.8"
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -36,4 +42,8 @@ dependencies {
     // BiometricPrompt + BiometricManager for the biometric-gated master key
     // (app-lock); also brings androidx.core/fragment/appcompat transitively.
     implementation("androidx.biometric:biometric:1.1.0")
+
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("junit:junit:4.13.2")
 }

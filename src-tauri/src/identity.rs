@@ -366,6 +366,30 @@ pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<
     *timer = Some(handle);
 }
 
+/// The post-sleep clipboard-clear decision + action. Extracted from
+/// [`arm_clipboard_clear`] so the manual-clear decision is injectable: off-Android
+/// the `clipboard_notify()` bridge is an inert `false` stub, so the load-bearing
+/// self-skip branch is otherwise unreachable from `cargo test`. A host test
+/// injects a `true`/`false` probe + a spy clear to prove skip-vs-fire without
+/// the OS clipboard (unavailable on headless CI). Production wires the real
+/// probe (the `clipboard_notify()` bridge) + the real clear (`clipboard()` write
+/// + `dismiss`); the clear-and-dismiss is ONE action so the two cannot drift.
+///
+/// Generic over the probe/clear futures (mirrors the `FnOnce() -> Fut + Send`
+/// pattern in `write.rs`) so callers pass plain `async` blocks — no boxing.
+pub(crate) async fn run_clipboard_clear<P, C, PFut, CFut>(manual_clear: P, clear_and_dismiss: C)
+where
+    P: FnOnce() -> PFut + Send,
+    PFut: Future<Output = bool> + Send,
+    C: FnOnce() -> CFut + Send,
+    CFut: Future<Output = ()> + Send,
+{
+    if manual_clear().await {
+        return;
+    }
+    clear_and_dismiss().await;
+}
+
 /// (Re)arm the clipboard-clear timer to fire after `secs`, replacing any
 /// in-flight task. Mirrors [`arm_lock`]: abort the existing handle, bump the
 /// generation, and spawn a task that self-disarms if a newer arm happened
@@ -412,21 +436,25 @@ pub(crate) fn arm_clipboard_clear<R: Runtime>(
             return;
         }
 
-        // Manual-clear bridge: if the user tapped the notification during the
-        // window, the receiver already cleared the clipboard + dismissed the
-        // notification — self-skip so we don't clobber unrelated content the
-        // user placed after the tap.
-        if app_handle
-            .clipboard_notify()
-            .consume_manual_clear_flag()
-            .await
-        {
-            return;
-        }
-
-        // No manual clear — fire the auto-clear + dismiss the notification.
-        let _ = app_handle.clipboard().write_text(String::new());
-        app_handle.clipboard_notify().dismiss().await;
+        // Manual-clear bridge + auto-clear, factored into `run_clipboard_clear`
+        // so the decision is injectable for host tests. Production wires the
+        // real `clipboard_notify()` probe + the real clear-and-dismiss.
+        let app_for_probe = app_handle.clone();
+        let app_for_clear = app_handle.clone();
+        run_clipboard_clear(
+            move || async move {
+                app_for_probe
+                    .clipboard_notify()
+                    .consume_manual_clear_flag()
+                    .await
+            },
+            move || async move {
+                // No manual clear — fire the auto-clear + dismiss.
+                let _ = app_for_clear.clipboard().write_text(String::new());
+                app_for_clear.clipboard_notify().dismiss().await;
+            },
+        )
+        .await;
     });
 
     *handle = Some(task);
