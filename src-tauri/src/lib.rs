@@ -37,6 +37,7 @@ mod config;
 mod generator;
 mod git;
 mod identity;
+mod page;
 mod read;
 mod setup;
 mod write;

@@ -23,5 +23,8 @@
   "ignoredToast": "Issue ignored for this commit",
   "ignoreFailed": "Failed to ignore",
   "hashCopied": "✓ Hash copied",
-  "loadFailed": "Failed to load commit history"
+  "loadFailed": "Failed to load commit history",
+  "loadMoreAria": "Load more commits",
+  "loadMore": "Load more",
+  "loadMoreLoading": "Loading…"
 }

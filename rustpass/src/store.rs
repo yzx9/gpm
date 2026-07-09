@@ -1861,39 +1861,50 @@ impl Store {
     ///
     /// Returns an error if the commit hash is invalid, the repo cannot be
     /// opened, or the config cannot be persisted.
-    pub async fn ignore_commit_issue(&self, commit: &str) -> Result<(), Error> {
+    pub async fn ignore_commit_issue(&self, commit: &str) -> Result<CommitSigInfo, Error> {
         let repo_path = self.repo_path().await?;
         let mut rc = self.config.load_repo_config().await?;
         let trusted = signing::TrustSet::from_config(&rc.authenticity);
+        let ignored = rc.authenticity.ignored.clone();
 
-        // Recompute the commit's current status so the recorded ignore matches
-        // what verification will see later.
+        // Derive the full CommitSigInfo once (a single signature verify). Its
+        // status drives the is-issue check, and its metadata is returned to the
+        // caller so the UI can refresh the row in place without a second IPC
+        // (no write-then-re-read window).
         let commit_owned = commit.to_string();
-        let status = spawn_blocking(move || {
-            signing::status_of_commit_at(&repo_path, &commit_owned, &trusted)
+        let repo_path_for_info = repo_path.clone();
+        let info = spawn_blocking(move || {
+            signing::commit_sig_info_at(&repo_path_for_info, &commit_owned, &trusted, &ignored)
         })
         .await??;
 
-        // Nothing to ignore for a non-issue.
-        if !status.is_issue() {
-            return Ok(());
+        // Record the ignore for a real issue (idempotent). A newly-written entry
+        // means this commit is now ignored, so flip the returned flag.
+        if info.status.is_issue() {
+            let already = rc
+                .authenticity
+                .ignored
+                .iter()
+                .any(|i| i.commit == info.hash && i.status == info.status);
+            if !already {
+                let head = self.current_head_hash().await.unwrap_or_default();
+                // Store the full resolved hash (`info.hash`), not the raw caller
+                // input — `is_ignored` matches on the full OID, so a short hash or
+                // revspec input would otherwise persist an entry that never matches
+                // future verification.
+                rc.authenticity.ignored.push(signing::IgnoredIssue {
+                    commit: info.hash.clone(),
+                    status: info.status.clone(),
+                    ignored_at_commit: head,
+                });
+                self.config.save_repo_config_full(&rc).await?;
+                return Ok(CommitSigInfo {
+                    ignored: true,
+                    ..info
+                });
+            }
         }
-
-        let already = rc
-            .authenticity
-            .ignored
-            .iter()
-            .any(|i| i.commit == commit && i.status == status);
-        if !already {
-            let head = self.current_head_hash().await.unwrap_or_default();
-            rc.authenticity.ignored.push(signing::IgnoredIssue {
-                commit: commit.to_string(),
-                status,
-                ignored_at_commit: head,
-            });
-            self.config.save_repo_config_full(&rc).await?;
-        }
-        Ok(())
+        Ok(info)
     }
 
     /// The verification status of the current HEAD commit (cheap; cached
@@ -1980,13 +1991,17 @@ impl Store {
     /// # Errors
     ///
     /// Returns an error if the repo cannot be opened or HEAD cannot be read.
-    pub async fn list_commit_signatures(&self, limit: usize) -> Result<Vec<CommitSigInfo>, Error> {
+    pub async fn list_commit_signatures(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> Result<signing::CommitSigPage, Error> {
         let repo_path = self.repo_path().await?;
         let rc = self.config.load_repo_config().await?;
         let trusted = signing::TrustSet::from_config(&rc.authenticity);
         let ignored = rc.authenticity.ignored.clone();
         spawn_blocking(move || {
-            signing::list_commit_signatures_at(&repo_path, limit, &trusted, &ignored)
+            signing::list_commit_signatures_at(&repo_path, offset, limit, &trusted, &ignored)
         })
         .await?
     }

@@ -14,11 +14,23 @@ use tauri::{AppHandle, State};
 use tauri_plugin_file_picker::FilePickerExt;
 
 use crate::AppState;
+use crate::page::clamp_limit;
 use crate::setup::map_file_picker_error;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
 // ---------------------------------------------------------------------------
+
+/// One page of commit signatures delivered to the `WebView` — a slice of up to
+/// `limit` commits starting at `offset`, plus `has_more` (whether the backend
+/// walk yielded an `(offset+limit+1)`-th commit). Mirrors `rustpass`'s
+/// `CommitSigPage` at the IPC boundary.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CommitPage {
+    commits: Vec<CommitSigInfo>,
+    /// `true` when more pages remain past this slice.
+    has_more: bool,
+}
 
 /// Returned by `get_authenticity_state` — the cached snapshot for the
 /// entry-list indicator badge (mode + current HEAD verification status).
@@ -258,27 +270,36 @@ pub(crate) async fn trust_commit_signer(
     state.store.trust_commit_signer(&commit, &label).await
 }
 
-/// Dismiss a specific commit's issue (per-commit + per-status ignore).
+/// Dismiss a specific commit's issue (per-commit + per-status ignore). Returns
+/// the commit's updated signature info so the UI can refresh the row in place
+/// without a second IPC.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn ignore_commit_issue(
     state: State<'_, AppState>,
     commit: String,
-) -> Result<(), Error> {
+) -> Result<CommitSigInfo, Error> {
     state.store.ignore_commit_issue(&commit).await
 }
 
-/// List recent commits with per-commit signature status (the `/history` screen).
+/// One page of recent commits with per-commit signature status (the `/history`
+/// screen): up to `limit` commits starting at `offset`, newest first, plus
+/// `has_more`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn list_commit_signatures(
     state: State<'_, AppState>,
-    limit: Option<usize>,
-) -> Result<Vec<CommitSigInfo>, Error> {
-    state
+    offset: usize,
+    limit: usize,
+) -> Result<CommitPage, Error> {
+    let page = state
         .store
-        .list_commit_signatures(limit.unwrap_or(50))
-        .await
+        .list_commit_signatures(offset, clamp_limit(limit))
+        .await?;
+    Ok(CommitPage {
+        commits: page.commits,
+        has_more: page.has_more,
+    })
 }
 
 /// A single commit's signature detail (the per-commit detail sheet).

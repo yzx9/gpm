@@ -83,8 +83,8 @@ pub use generator::{GenerateMode, GenerateOptions, generate_password};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use secret::Secret;
 pub use signing::{
-    AuthenticityConfig, CommitSigInfo, CommitSigStatus, IgnoredIssue, TrustedGpgKey, TrustedKey,
-    VerifyMode, fingerprint_of_public_key,
+    AuthenticityConfig, CommitSigInfo, CommitSigPage, CommitSigStatus, IgnoredIssue, TrustedGpgKey,
+    TrustedKey, VerifyMode, fingerprint_of_public_key,
 };
 pub use storage::{CancelToken, GitProgress, ProgressSender};
 pub use store::{

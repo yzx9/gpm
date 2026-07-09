@@ -19,6 +19,7 @@ use crate::AppState;
 use crate::identity::{
     arm_clipboard_clear, disarm_clipboard_clear, maybe_soft_wipe, reset_lock_timer,
 };
+use crate::page::clamp_limit;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -60,15 +61,6 @@ pub(crate) struct EntryPage {
     total: usize,
     /// `true` when more pages remain past this slice.
     has_more: bool,
-}
-
-/// Upper bound on a client-requested page size, so a buggy/malicious caller
-/// can't ask for `usize::MAX`. The frontend requests 50 by default.
-const MAX_PAGE_SIZE: usize = 200;
-
-/// Clamp a client-requested page size to a sane, non-zero bound.
-fn clamp_limit(limit: usize) -> usize {
-    limit.clamp(1, MAX_PAGE_SIZE)
 }
 
 /// Build the IPC page envelope from a backend [`RankedPage`], deriving
@@ -243,16 +235,6 @@ mod tests {
     #[allow(clippy::unnecessary_wraps)]
     fn ok_page(entries: Vec<Entry>, total: usize) -> Result<RankedPage, Error> {
         Ok(RankedPage { entries, total })
-    }
-
-    #[test]
-    fn clamp_limit_bounds_request_size() {
-        assert_eq!(clamp_limit(0), 1);
-        assert_eq!(clamp_limit(1), 1);
-        assert_eq!(clamp_limit(50), 50);
-        assert_eq!(clamp_limit(MAX_PAGE_SIZE), MAX_PAGE_SIZE);
-        assert_eq!(clamp_limit(MAX_PAGE_SIZE + 1), MAX_PAGE_SIZE);
-        assert_eq!(clamp_limit(usize::MAX), MAX_PAGE_SIZE);
     }
 
     #[test]

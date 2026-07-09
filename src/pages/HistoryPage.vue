@@ -29,7 +29,7 @@ import {
   TriangleAlert,
   X,
 } from "@lucide/vue";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -37,29 +37,58 @@ const { t, locale } = useI18n();
 const router = useRouter();
 const { toast } = useToast();
 
+const PAGE_SIZE = 50;
 const commits = ref<CommitSigInfo[]>([]);
+const hasMore = ref(false);
 const loading = ref(false);
 const error = ref("");
+let reqId = 0; // monotonic; bumped per fetch so stale page responses are dropped
 
 const selected = ref<CommitSigInfo | null>(null);
 const actionLoading = ref(false);
+
+// ── Infinite-scroll sentinel ────────────────────────────────────────────
+const sentinel = ref<HTMLElement | null>(null);
+let io: IntersectionObserver | null = null;
 
 const now = ref(Date.now());
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
 const relativeNow = computed(() => now.value);
 
-async function loadHistory() {
+// Fetch one page from the backend. `replace` swaps page 0 in; otherwise the
+// page is appended (load-more). A monotonic request-id guard drops any page
+// response that lands after a newer fetch (a trust/ignore reset or a refresh).
+// On a replace failure we clear + surface the error; a load-more failure just
+// toasts and keeps what's already loaded.
+async function fetchPage(offset: number, replace: boolean) {
+  const myId = ++reqId;
   loading.value = true;
-  error.value = "";
   try {
-    commits.value = await listCommitSignatures(50);
+    const page = await listCommitSignatures(offset, PAGE_SIZE);
+    if (myId !== reqId) return; // superseded by a newer reset/refresh
+    commits.value = replace ? page.commits : commits.value.concat(page.commits);
+    hasMore.value = page.has_more;
+    error.value = "";
   } catch (e) {
+    if (myId !== reqId) return;
     const appError = e as AppError;
-    error.value = appError?.message || t("history.loadFailed");
+    if (replace) {
+      commits.value = [];
+      hasMore.value = false;
+      error.value = appError?.message || t("history.loadFailed");
+    } else {
+      // load-more: keep the already-loaded pages, just surface the error.
+      toast.danger(appError?.message || t("history.loadFailed"));
+    }
   } finally {
-    loading.value = false;
+    if (myId === reqId) loading.value = false;
   }
+}
+
+function loadMore() {
+  if (!hasMore.value || loading.value) return;
+  void fetchPage(commits.value.length, false);
 }
 
 function openDetail(commit: CommitSigInfo) {
@@ -81,7 +110,9 @@ async function onTrust(commit: CommitSigInfo) {
   try {
     await trustCommitSigner(commit.hash, label.trim() || suggested);
     toast.success(t("history.trustedToast", { label: label || suggested }));
-    await loadHistory();
+    // Trust re-derives status for every commit by this signer (possibly outside
+    // the loaded pages), so reset to page 0 to refresh the whole view.
+    await fetchPage(0, true);
     selected.value = null;
   } catch (e) {
     const appError = e as AppError;
@@ -94,9 +125,13 @@ async function onTrust(commit: CommitSigInfo) {
 async function onIgnore(commit: CommitSigInfo) {
   actionLoading.value = true;
   try {
-    await ignoreCommitIssue(commit.hash);
+    // ignore_commit_issue returns the updated signature info — refresh this row
+    // in place (preserving scroll position + other rows) instead of reloading.
+    const fresh = await ignoreCommitIssue(commit.hash);
+    commits.value = commits.value.map((c) =>
+      c.hash === fresh.hash ? fresh : c,
+    );
     toast.success(t("history.ignoredToast"));
-    await loadHistory();
     selected.value = null;
   } catch (e) {
     const appError = e as AppError;
@@ -123,10 +158,23 @@ function openSettings() {
 }
 
 onMounted(() => {
-  loadHistory();
+  void fetchPage(0, true);
   tickTimer = setInterval(() => {
     now.value = Date.now();
   }, 60_000);
+  // IntersectionObserver is a progressive enhancement — some WebViews lack it,
+  // so the explicit "Load more" button below remains the always-available path.
+  if (typeof IntersectionObserver !== "undefined") {
+    io = new IntersectionObserver(
+      (changes) => {
+        if (changes.some((c) => c.isIntersecting)) loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    nextTick(() => {
+      if (sentinel.value && io) io.observe(sentinel.value);
+    });
+  }
 });
 
 onBeforeUnmount(() => {
@@ -134,6 +182,9 @@ onBeforeUnmount(() => {
     clearInterval(tickTimer);
     tickTimer = null;
   }
+  io?.disconnect();
+  io = null;
+  reqId++; // drop any in-flight page response that lands after unmount
 });
 </script>
 
@@ -147,7 +198,7 @@ onBeforeUnmount(() => {
         <BaseButton
           size="sm"
           :disabled="loading"
-          @click="loadHistory"
+          @click="fetchPage(0, true)"
           :aria-label="t('history.recheckAria')"
           :title="t('history.recheckAria')"
         >
@@ -223,6 +274,18 @@ onBeforeUnmount(() => {
         >
       </li>
     </ul>
+
+    <div v-if="hasMore" class="flex justify-center py-3">
+      <BaseButton
+        size="sm"
+        :disabled="loading"
+        :aria-label="t('history.loadMoreAria')"
+        @click="loadMore"
+      >
+        {{ loading ? t("history.loadMoreLoading") : t("history.loadMore") }}
+      </BaseButton>
+    </div>
+    <div ref="sentinel" class="h-1" aria-hidden="true"></div>
 
     <!-- Detail sheet -->
     <BaseModalShell

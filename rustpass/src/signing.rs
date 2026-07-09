@@ -255,6 +255,29 @@ pub struct CommitSigInfo {
     pub ignored: bool,
 }
 
+/// One page of commit signatures for the `/history` list: a slice of up to
+/// `limit` commits starting at `offset`, plus `has_more` — set when the
+/// first-parent walk yielded a `(offset+limit+1)`-th commit. There is **no
+/// `total`**: deriving `has_more` in the walk bounds it to `offset+limit+1`
+/// instead of counting the whole chain, and avoids verifying signatures on
+/// skipped or over-read commits.
+///
+/// ## Pagination invariant
+///
+/// Offset pagination assumes the first-parent chain is stable across page
+/// turns within one `/history` mount. That holds today because `/history`
+/// performs no writes and the view remounts on navigation (re-fetching page
+/// 0 in `onMounted`). Any future background pull, `<keep-alive>`, or
+/// pull-to-refresh on `/history` must reset to page 0, or pages will silently
+/// overlap/drop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitSigPage {
+    /// The page's commits (up to `limit`, starting at `offset`).
+    pub commits: Vec<CommitSigInfo>,
+    /// `true` when more commits remain past this page.
+    pub has_more: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Trust set (SSH fingerprints + parsed GPG keys)
 // ---------------------------------------------------------------------------
@@ -550,18 +573,24 @@ pub fn verify_range(
     Ok(out)
 }
 
-/// List the `limit` most recent commits reachable from HEAD (newest first),
-/// each annotated with its verification status. Used by the `/history` screen.
+/// List one page of the most recent commits reachable from HEAD (newest
+/// first), each annotated with its verification status. Used by the
+/// `/history` screen. See [`CommitSigPage`] for the pagination shape and the
+/// cross-page stability invariant.
+///
+/// The walk advances only as far as `offset + limit + 1`: skipped commits and
+/// the over-read `(limit+1)`-th are never signature-verified.
 ///
 /// # Errors
 ///
 /// Returns an error if HEAD cannot be resolved or the walk fails.
 pub fn list_commit_signatures(
     repo: &Repository,
+    offset: usize,
     limit: usize,
     trust: &TrustSet,
     ignored: &[IgnoredIssue],
-) -> Result<Vec<CommitSigInfo>, Error> {
+) -> Result<CommitSigPage, Error> {
     let head = repo.head()?.peel_to_commit()?.id();
 
     let mut walk = repo.revwalk()?;
@@ -569,15 +598,23 @@ pub fn list_commit_signatures(
     walk.simplify_first_parent()?;
     walk.set_sorting(git2::Sort::TOPOLOGICAL)?;
 
-    let mut out = Vec::new();
+    let mut commits = Vec::new();
+    let mut has_more = false;
+    let mut seen = 0usize;
     for oid in walk {
-        if out.len() >= limit {
+        let oid = oid?;
+        if seen < offset {
+            seen += 1;
+            continue;
+        }
+        if commits.len() >= limit {
+            // A `(offset+limit+1)`-th commit exists → another page remains.
+            has_more = true;
             break;
         }
-        let oid = oid?;
-        out.push(commit_sig_info(repo, oid, trust, ignored)?);
+        commits.push(commit_sig_info(repo, oid, trust, ignored)?);
     }
-    Ok(out)
+    Ok(CommitSigPage { commits, has_more })
 }
 
 /// Convenience: status of the current HEAD commit.
@@ -725,20 +762,22 @@ pub fn verify_range_at(
     verify_range(&repo, from, to, trust, ignored)
 }
 
-/// Discover the repo at `repo_path` and return the `limit` most recent commits
-/// with per-commit verification status.
+/// Discover the repo at `repo_path` and return one page of the most recent
+/// commits (starting at `offset`, up to `limit` long) with per-commit
+/// verification status.
 ///
 /// # Errors
 ///
 /// Returns an error if the repo cannot be discovered or HEAD cannot be read.
 pub fn list_commit_signatures_at(
     repo_path: &Path,
+    offset: usize,
     limit: usize,
     trust: &TrustSet,
     ignored: &[IgnoredIssue],
-) -> Result<Vec<CommitSigInfo>, Error> {
+) -> Result<CommitSigPage, Error> {
     let repo = Repository::discover(repo_path)?;
-    list_commit_signatures(&repo, limit, trust, ignored)
+    list_commit_signatures(&repo, offset, limit, trust, ignored)
 }
 
 /// Discover the repo at `repo_path` and return metadata + status for a single
@@ -1328,31 +1367,112 @@ mod tests {
 
     // ── list_commit_signatures + head_status ──────────────────────────────
 
+    /// Build `n` unsigned first-parent child commits on top of `head`, named
+    /// `c0..c{n-1}` (newest first in the walk). Returns the new HEAD oid.
+    fn chain_of(repo: &Repository, sig: &git2::Signature<'_>, head: Oid, n: usize) -> Oid {
+        let mut prev = head;
+        for i in 0..n {
+            prev = create_child_commit(repo, sig, prev, &format!("c{i}"));
+        }
+        prev
+    }
+
     #[test]
     fn list_commit_signatures_from_head() {
         let (_dir, repo, head) = repo_with_initial_commit();
         let sig = test_signature();
-        let child = create_child_commit(&repo, &sig, head, "second");
-        let _ = child;
+        let _ = chain_of(&repo, &sig, head, 1);
 
         let trusted = fps(&[]);
-        let list = list_commit_signatures(&repo, 50, &trusted, &[]).expect("list");
-        assert_eq!(list.len(), 2, "should list both commits");
-        assert_eq!(list.first().expect("first").subject, "second");
-        assert_eq!(list.get(1).expect("second").subject, "initial commit");
+        let page = list_commit_signatures(&repo, 0, 50, &trusted, &[]).expect("list");
+        assert_eq!(page.commits.len(), 2, "should list both commits");
+        assert!(!page.has_more, "full list should have no more");
+        assert_eq!(page.commits.first().expect("first").subject, "c0");
+        assert_eq!(
+            page.commits.get(1).expect("second").subject,
+            "initial commit"
+        );
     }
 
     #[test]
     fn list_commit_signatures_respects_limit() {
         let (_dir, repo, head) = repo_with_initial_commit();
         let sig = test_signature();
-        let mut prev = head;
-        for i in 0..5 {
-            prev = create_child_commit(&repo, &sig, prev, &format!("c{i}"));
-        }
+        let _ = chain_of(&repo, &sig, head, 5); // 5 children + initial = 6
+
         let trusted = fps(&[]);
-        let list = list_commit_signatures(&repo, 3, &trusted, &[]).expect("list");
-        assert_eq!(list.len(), 3, "limit should cap the list length");
+        let page = list_commit_signatures(&repo, 0, 3, &trusted, &[]).expect("list");
+        assert_eq!(page.commits.len(), 3, "limit should cap the page length");
+        assert!(page.has_more, "more commits remain past the page");
+    }
+
+    #[test]
+    fn list_commit_signatures_offset_slices_the_tail() {
+        let (_dir, repo, head) = repo_with_initial_commit();
+        let sig = test_signature();
+        let _ = chain_of(&repo, &sig, head, 5); // walk: c4 c3 c2 c1 c0 initial
+
+        let trusted = fps(&[]);
+        let page = list_commit_signatures(&repo, 4, 10, &trusted, &[]).expect("list");
+        assert_eq!(page.commits.len(), 2, "tail slice = 2 commits");
+        assert!(!page.has_more, "no more past the tail");
+        assert_eq!(page.commits.first().expect("first").subject, "c0");
+        assert_eq!(
+            page.commits.get(1).expect("second").subject,
+            "initial commit"
+        );
+    }
+
+    #[test]
+    fn list_commit_signatures_offset_beyond_end_is_empty_no_more() {
+        let (_dir, repo, head) = repo_with_initial_commit();
+        let sig = test_signature();
+        let _ = chain_of(&repo, &sig, head, 5);
+
+        let trusted = fps(&[]);
+        let page = list_commit_signatures(&repo, 100, 10, &trusted, &[]).expect("list");
+        assert!(page.commits.is_empty(), "offset past end yields empty page");
+        assert!(!page.has_more, "no more past end");
+    }
+
+    #[test]
+    fn list_commit_signatures_has_more_false_at_exact_end() {
+        let (_dir, repo, head) = repo_with_initial_commit();
+        let sig = test_signature();
+        let _ = chain_of(&repo, &sig, head, 5); // 6 total
+
+        let trusted = fps(&[]);
+        let page = list_commit_signatures(&repo, 0, 6, &trusted, &[]).expect("list");
+        assert_eq!(page.commits.len(), 6, "exact fill");
+        assert!(!page.has_more, "no (limit+1)-th commit -> no more");
+    }
+
+    #[test]
+    fn list_commit_signatures_preserves_order_across_pages() {
+        let (_dir, repo, head) = repo_with_initial_commit();
+        let sig = test_signature();
+        let _ = chain_of(&repo, &sig, head, 5); // 6 total
+
+        let trusted = fps(&[]);
+        // Page through size-2 windows; the concatenation must equal the full
+        // walk order with no dupes/gaps. Assumes a stable first-parent chain
+        // (see `CommitSigPage`'s pagination-invariant note).
+        let mut collected: Vec<String> = Vec::new();
+        let mut offset = 0;
+        loop {
+            let page = list_commit_signatures(&repo, offset, 2, &trusted, &[]).expect("page");
+            collected.extend(page.commits.iter().map(|c| c.subject.clone()));
+            if !page.has_more {
+                break;
+            }
+            offset += page.commits.len();
+        }
+        let full = list_commit_signatures(&repo, 0, 50, &trusted, &[]).expect("full");
+        let full_order: Vec<String> = full.commits.iter().map(|c| c.subject.clone()).collect();
+        assert_eq!(
+            collected, full_order,
+            "paged concat must equal full walk order"
+        );
     }
 
     #[test]

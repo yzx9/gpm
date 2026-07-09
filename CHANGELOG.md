@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The Android biometric prompts (unlocking the app and unlocking your identity) and the clipboard-clear notification — including its name in your system notification settings — now follow your display language instead of always being English.
+- The History screen now loads in pages instead of stopping at the latest 50 commits — scroll to the bottom (or tap "Load more") to browse older commits and their signature status all the way back to the repo's first commit. An explicit "Load more" button is always available even when the browser can't observe scrolling.
 
 ## [v0.11.0] - 2026-07-08
 

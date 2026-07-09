@@ -102,14 +102,25 @@ export async function trustCommitSigner(
   await invoke("trust_commit_signer", { commit, label });
 }
 
-/** Dismiss the authenticity issue on a specific `commit` for this signer. */
-export async function ignoreCommitIssue(commit: string): Promise<void> {
-  await invoke("ignore_commit_issue", { commit });
+/** Dismiss the authenticity issue on a specific `commit`. Returns the commit's
+ * updated signature info so the caller can refresh the row in place. */
+export async function ignoreCommitIssue(
+  commit: string,
+): Promise<CommitSigInfo> {
+  return invoke<CommitSigInfo>("ignore_commit_issue", { commit });
 }
 
-/** List recent commits with their signature status (paged by `limit`). */
+/** One page of commits with their signature status: up to `limit` commits
+ * starting at `offset`, plus whether more pages remain. */
+export interface CommitPage {
+  commits: CommitSigInfo[];
+  /** `true` when more pages remain past this slice. */
+  has_more: boolean;
+}
+
 export async function listCommitSignatures(
+  offset: number,
   limit: number,
-): Promise<CommitSigInfo[]> {
-  return invoke<CommitSigInfo[]>("list_commit_signatures", { limit });
+): Promise<CommitPage> {
+  return invoke<CommitPage>("list_commit_signatures", { offset, limit });
 }

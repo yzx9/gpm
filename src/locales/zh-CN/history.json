@@ -23,5 +23,8 @@
   "ignoredToast": "已忽略此提交的问题",
   "ignoreFailed": "无法忽略",
   "hashCopied": "✓ 哈希已复制",
-  "loadFailed": "无法加载提交历史"
+  "loadFailed": "无法加载提交历史",
+  "loadMoreAria": "加载更多提交",
+  "loadMore": "加载更多",
+  "loadMoreLoading": "加载中……"
 }
