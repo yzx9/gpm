@@ -38,6 +38,7 @@ mod generator;
 mod git;
 mod identity;
 mod page;
+mod migrate;
 mod read;
 mod setup;
 mod write;
@@ -100,8 +101,9 @@ pub(crate) struct AppState {
     /// `cancel_git` command; cleared by the owning command once the operation
     /// settles. `None` outside a user-initiated clone/pull.
     pub(crate) active_cancel_token: Mutex<Option<rustpass::CancelToken>>,
-    /// App-shell (non-repo) preferences — primarily the screen-capture master
-    /// toggle. Persists at `app.json`; survives `reset_config` (device pref).
+    /// App-shell (non-repo) preferences — screen-capture toggle, locale, and the
+    /// behavior prefs (lock mode, clear timers, autosync, app-lock flag) moved
+    /// here from `RepoConfig`. Persists at `app.json`; survives `reset_config`.
     pub(crate) app_config: app_config::AppConfigStore,
 }
 
@@ -189,6 +191,10 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // toggle. Borrows `config_dir` before it is moved into `Store` below.
     let app_config = app_config::AppConfigStore::new(&config_dir);
     let store = Arc::new(Store::new(config_dir, master_key));
+    // Seed the Store's injected `autosync` cache from the authoritative app
+    // config (autosync_write reads it). One of the three re-push points — the
+    // others are the set_autosync command and the config-scope migration.
+    store.set_autosync(app_config.get().autosync);
     // One-time migration of any pre-existing plaintext files into the seal
     // envelope (no-op on desktop / already-wrapped). Each file is wrapped
     // atomically with a roundtrip check, so a failure leaves plaintext intact —
@@ -198,7 +204,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         eprintln!("[gpm] seal migration failed: {e}");
     }
 
-    AppState {
+    let app_state = AppState {
         store,
         app_config,
         lock_timer: Mutex::new(None),
@@ -217,7 +223,12 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         // (first app_unlock). Stays Pending on non-app-lock/desktop (no unlock).
         seal_migrate_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
-    }
+    };
+    // Copy the app-scoped behavior prefs out of a pre-split repo.json into
+    // app.json (no-op once migrated; soft-skips under app-lock — retried on
+    // app_unlock). Safe at startup when the master key is available (no app-lock).
+    tauri::async_runtime::block_on(migrate::migrate_config_scope(&app_state));
+    app_state
 }
 
 /// Application entry point.

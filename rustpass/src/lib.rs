@@ -89,7 +89,7 @@ pub use signing::{
 pub use storage::{CancelToken, GitProgress, ProgressSender};
 pub use store::{
     CommitIdentity, DivergenceChoice, RankedPage, Store, SyncDivergence, SyncOutcome, SyncResult,
-    WriteOutcome, WriteResult,
+    WriteOutcome, WriteResult, clamp_lock_mode, normalize_clear_secs,
 };
 
 /// Upper bound on a trusted GPG/OpenPGP armored public key's size (paste OR

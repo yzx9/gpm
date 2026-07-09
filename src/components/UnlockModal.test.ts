@@ -152,7 +152,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce(true) // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -181,7 +181,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce(true) // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -215,7 +215,7 @@ describe("UnlockModal", () => {
         code: "BIOMETRIC_LOCKOUT",
         message: "Too many attempts, try later",
       }) // auto-prompt (transient)
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -230,7 +230,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: "immediate" }) // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }) // get_app_config
       .mockRejectedValueOnce({ code: "WRONG_PASSPHRASE", message: "nope" }); // unlock
     const wrapper = mount(UnlockModal);
     await flushPromises();
@@ -247,7 +247,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -263,7 +263,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -278,7 +278,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -289,7 +289,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: { idle: 300 } }); // get_config
+      .mockResolvedValueOnce({ lock_mode: { idle: 300 } }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -302,7 +302,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: "never" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "never" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -311,15 +311,15 @@ describe("UnlockModal", () => {
     );
   });
 
-  it("falls back to the Immediate hint when get_config fails", async () => {
+  it("falls back to the Immediate hint when get_app_config fails", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockRejectedValueOnce(new Error("pre-setup")); // get_config rejects
+      .mockRejectedValueOnce(new Error("pre-setup")); // get_app_config rejects
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("get_config");
+    expect(invoke).toHaveBeenCalledWith("get_app_config");
     expect(wrapper.text()).toContain("Identity is cleared after every action.");
   });
 
@@ -327,7 +327,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 
@@ -348,7 +348,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(false) // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
-      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_config
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mount(UnlockModal);
     await flushPromises();
 

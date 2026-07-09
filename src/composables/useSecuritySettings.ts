@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { getConfig, type RepoConfig } from "@/api";
+import { getAppConfig, type AppConfig } from "@/api";
 import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
@@ -10,7 +10,7 @@ import { inject, ref, type InjectionKey, type Ref } from "vue";
  * just the password-view auto-clear seconds (the only one the frontend owns;
  * lock-mode and clipboard-clear are enforced backend-side). `SettingsPage` and
  * `useSecretReveal` both read from here so a settings change is visible
- * everywhere without each caller re-fetching `get_config`.
+ * everywhere without each caller re-fetching `get_app_config`.
  *
  * Provided app-wide via `SECURITY_SETTINGS_KEY` (see `main.ts`); one instance,
  * loaded once from the backend and refreshed whenever a setting is applied
@@ -23,8 +23,8 @@ export interface SecuritySettingsState {
   readonly viewClearSecs: Readonly<Ref<number>>;
   /** Load the cache from the backend once. Idempotent. */
   loadSecuritySettings: () => Promise<void>;
-  /** Apply a freshly-fetched (or just-set) repo config to the cache. */
-  applySecurityConfig: (rc: RepoConfig) => void;
+  /** Apply a freshly-fetched (or just-set) app config to the cache. */
+  applySecurityConfig: (cfg: AppConfig) => void;
 }
 
 /** Default password-view auto-clear seconds (used when the backend omits it). */
@@ -51,16 +51,16 @@ export function createSecuritySettings(): SecuritySettingsState {
     if (initialized) return;
     initialized = true;
     try {
-      applySecurityConfig(await getConfig());
+      applySecurityConfig(await getAppConfig());
     } catch {
       // Not configured yet, or the load failed — keep defaults.
     }
   }
 
-  /** Apply a freshly-fetched (or just-set) repo config to the cache. */
-  function applySecurityConfig(rc: RepoConfig) {
+  /** Apply a freshly-fetched (or just-set) app config to the cache. */
+  function applySecurityConfig(cfg: AppConfig) {
     // null/undefined ⇒ default; 0 ⇒ 0 (Never — the caller skips its timer).
-    viewClearSecs.value = rc.view_clear_secs ?? DEFAULT_VIEW_CLEAR_SECS;
+    viewClearSecs.value = cfg.view_clear_secs ?? DEFAULT_VIEW_CLEAR_SECS;
   }
 
   return { viewClearSecs, loadSecuritySettings, applySecurityConfig };

@@ -4,6 +4,7 @@
 
 <script setup lang="ts">
 import type {
+  AppConfig,
   AppError,
   AppLockError,
   AuthenticityConfig,
@@ -26,6 +27,7 @@ import {
   enableIdentityAutoUnlock,
   exportSshPrivateKey,
   getAppConfig,
+  getAppLockState,
   getAuthState,
   getAuthenticityConfig,
   getCommitIdentityDefault,
@@ -134,6 +136,7 @@ async function onLocaleChange(selection: string): Promise<void> {
 }
 
 const config = ref<RepoConfig | null>(null);
+const appConfig = ref<AppConfig | null>(null);
 const loading = ref(false);
 const error = ref("");
 const publicKey = ref("");
@@ -299,13 +302,13 @@ const CLIPBOARD_CLEAR_PRESETS = computed<
 ]);
 
 const rawLockMode = computed<LockMode>(
-  () => config.value?.lock_mode ?? "immediate",
+  () => appConfig.value?.lock_mode ?? "immediate",
 );
 const rawViewClear = computed<number | null>(
-  () => config.value?.view_clear_secs ?? null,
+  () => appConfig.value?.view_clear_secs ?? null,
 );
 const rawClipboardClear = computed<number | null>(
-  () => config.value?.clipboard_clear_secs ?? null,
+  () => appConfig.value?.clipboard_clear_secs ?? null,
 );
 
 // Two-arg equality for LockMode (handles the `{ idle }` object presets); passed
@@ -360,7 +363,8 @@ async function loadConfig() {
   error.value = "";
   try {
     config.value = await getConfig();
-    applySecurityConfig(config.value);
+    appConfig.value = await getAppConfig();
+    applySecurityConfig(appConfig.value);
     isSsh.value = config.value.ssh_key !== null;
     const auth = await getAuthState();
     isIdentityEncrypted.value = auth.encrypted;
@@ -368,7 +372,9 @@ async function loadConfig() {
     biometricAvailable.value = await isBiometricAvailable();
     biometricEnabled.value = await isBiometricUnlockEnabled();
     appLockAvailable.value = await isAppLockAvailable();
-    appLockEnabled.value = config.value.biometric_app_lock ?? false;
+    // The app-lock toggle reads Keystore truth (Path B), not the persisted
+    // config flag — the two can drift, and the runtime gate is what matters.
+    appLockEnabled.value = (await getAppLockState()).enabled;
     identityAutoUnlockEnabled.value =
       config.value.unlock_identity_with_app ?? false;
     commitName.value = config.value.commit_user_name ?? "";
@@ -427,12 +433,11 @@ async function onSecureScreenChange(enabled: boolean) {
 }
 
 async function onLockModeChange(mode: LockMode) {
-  if (!config.value) return;
+  if (!appConfig.value) return;
   lockLoading.value = true;
   error.value = "";
   try {
-    const updated = await setLockMode(mode);
-    config.value = updated;
+    appConfig.value = await setLockMode(mode);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("settings.lock.setModeFailed");
@@ -441,15 +446,14 @@ async function onLockModeChange(mode: LockMode) {
   }
 }
 
-const autosyncEnabled = computed(() => config.value?.autosync ?? true);
+const autosyncEnabled = computed(() => appConfig.value?.autosync ?? true);
 
 async function onAutosyncChange(enabled: boolean) {
-  if (!config.value) return;
+  if (!appConfig.value) return;
   lockLoading.value = true;
   error.value = "";
   try {
-    const updated = await setAutosync(enabled);
-    config.value = updated;
+    appConfig.value = await setAutosync(enabled);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("settings.autosync.setFailed");
@@ -459,12 +463,12 @@ async function onAutosyncChange(enabled: boolean) {
 }
 
 async function onViewClearChange(secs: number | null) {
-  if (!config.value) return;
+  if (!appConfig.value) return;
   lockLoading.value = true;
   error.value = "";
   try {
     const updated = await setViewClearSecs(secs);
-    config.value = updated;
+    appConfig.value = updated;
     applySecurityConfig(updated);
   } catch (e) {
     const appError = e as AppError;
@@ -475,12 +479,11 @@ async function onViewClearChange(secs: number | null) {
 }
 
 async function onClipboardClearChange(secs: number | null) {
-  if (!config.value) return;
+  if (!appConfig.value) return;
   lockLoading.value = true;
   error.value = "";
   try {
-    const updated = await setClipboardClearSecs(secs);
-    config.value = updated;
+    appConfig.value = await setClipboardClearSecs(secs);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("settings.clear.setClipboardFailed");

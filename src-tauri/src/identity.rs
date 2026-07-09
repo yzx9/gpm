@@ -232,20 +232,25 @@ pub(crate) async fn unlock_and_arm<R: Runtime>(
     Ok(())
 }
 
-/// Load the repo config into the [`AppState`] security cache (`lock_mode`,
+/// Snapshot the app config into the [`AppState`] security cache (`lock_mode`,
 /// `clipboard_clear_secs`), so the read/write hot paths branch on a cheap mutex
-/// read instead of decrypting `repo.json` per operation. Called on unlock and on
-/// the `set_*` config commands — never on the copy/show hot path. A load failure
-/// (e.g. mid-setup) leaves the defaults in place (fail-safe).
-pub(crate) async fn refresh_security_cache(state: &State<'_, AppState>) {
-    if let Ok(rc) = state.store.config().await {
-        if let Ok(mut mode) = state.lock_mode.lock() {
-            *mode = rc.lock_mode;
-        }
-        if let Ok(mut secs) = state.clipboard_clear_secs.lock() {
-            *secs = rc.clipboard_clear_secs_effective();
-        }
+/// read instead of re-reading config per operation. These prefs live in
+/// `app.json` (plaintext, always readable), so this never fails the way the old
+/// sealed-`repo.json` read could.
+pub(crate) fn apply_security_caches(state: &AppState) {
+    let cfg = state.app_config.get();
+    if let Ok(mut mode) = state.lock_mode.lock() {
+        *mode = cfg.lock_mode;
     }
+    if let Ok(mut secs) = state.clipboard_clear_secs.lock() {
+        *secs = cfg.clipboard_clear_secs_effective();
+    }
+}
+
+/// [`apply_security_caches`] wrapped for the Tauri `State` view. Called on
+/// unlock, on the `set_*` config commands, and after the config-scope migration.
+pub(crate) async fn refresh_security_cache(state: &State<'_, AppState>) {
+    apply_security_caches(state.inner());
 }
 
 /// Reset the auto-lock timer per the cached effective [`LockMode`]:

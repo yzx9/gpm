@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, str};
 
 use nucleo_matcher::{
@@ -89,6 +90,12 @@ pub struct Store {
     /// mid-resolution. Public mutation entry points acquire it; the orchestrator
     /// acquires it once and composes the lock-free `*_locked` inners.
     write_mu: Mutex<()>,
+    /// Cached app-scoped `autosync` flag — the only app-scoped pref `rustpass`
+    /// still consumes (`autosync_write` reads it). Owned by the app shell; seeded
+    /// on startup and re-pushed on every mutation via [`Store::set_autosync`],
+    /// mirroring [`Store::set_master_key`]. Defaults to `true` (a caller that
+    /// never seeds gets today's fresh-repo behavior, not a silent regression).
+    autosync: AtomicBool,
 }
 
 impl fmt::Debug for Store {
@@ -143,6 +150,7 @@ impl Store {
             config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
             write_mu: Mutex::new(()),
+            autosync: AtomicBool::new(true),
         }
     }
 
@@ -891,7 +899,7 @@ impl Store {
         // local-only primitives the closure calls) do NOT re-acquire this guard.
         let _guard = self.write_mu.lock().await;
 
-        let autosync = self.config.load_repo_config().await?.autosync;
+        let autosync = self.autosync.load(Ordering::Relaxed);
         if !autosync {
             return local_write().await.map(WriteOutcome::Written);
         }
@@ -1564,82 +1572,21 @@ impl Store {
         Ok(rc)
     }
 
-    /// Set the auto-lock mode. `Idle(n)` seconds are clamped to
-    /// `[LOCK_IDLE_SECS_MIN, LOCK_IDLE_SECS_MAX]`; `Immediate` and `Never` take
-    /// no duration. Returns the persisted [`RepoConfig`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the config cannot be loaded or persisted.
-    pub async fn set_lock_mode(&self, mode: LockMode) -> Result<RepoConfig, Error> {
-        let mode = match mode {
-            LockMode::Idle(secs) => {
-                LockMode::Idle(secs.clamp(LOCK_IDLE_SECS_MIN, LOCK_IDLE_SECS_MAX))
-            }
-            other => other,
-        };
-        let mut rc = self.config.load_repo_config().await?;
-        rc.lock_mode = mode;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
+    /// Push the app-scoped `autosync` flag into the [`Store`]'s cache — the
+    /// value [`autosync_write`](Store::autosync_write) reads. The app shell owns
+    /// the authoritative copy in `app.json`; this keeps the cached injection in
+    /// sync. Call on startup, on the `set_autosync` command, and after the
+    /// config-scope migration (the three mutation points).
+    pub fn set_autosync(&self, enabled: bool) {
+        self.autosync.store(enabled, Ordering::Relaxed);
     }
 
-    /// Set the password-view auto-clear override. `None` clears it (resolves to
-    /// the default); `Some(0)` means never auto-clear; any other value is clamped
-    /// to `[CLEAR_SECS_MIN, CLEAR_SECS_MAX]`. Returns the persisted [`RepoConfig`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the config cannot be loaded or persisted.
-    pub async fn set_view_clear_secs(&self, secs: Option<u64>) -> Result<RepoConfig, Error> {
-        let secs = normalize_clear_secs(secs);
-        let mut rc = self.config.load_repo_config().await?;
-        rc.view_clear_secs = secs;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
-    }
-
-    /// Set the clipboard auto-clear override. Same resolution rule as
-    /// [`set_view_clear_secs`](Store::set_view_clear_secs).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the config cannot be loaded or persisted.
-    pub async fn set_clipboard_clear_secs(&self, secs: Option<u64>) -> Result<RepoConfig, Error> {
-        let secs = normalize_clear_secs(secs);
-        let mut rc = self.config.load_repo_config().await?;
-        rc.clipboard_clear_secs = secs;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
-    }
-
-    /// Set the per-device autosync flag (whether each save wraps in a
-    /// pull → write → push via [`autosync_write`]). Default `true`; when `false`,
-    /// saves stay local until a manual Sync.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the config cannot be loaded or persisted.
-    pub async fn set_autosync(&self, enabled: bool) -> Result<RepoConfig, Error> {
-        let mut rc = self.config.load_repo_config().await?;
-        rc.autosync = enabled;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
-    }
-
-    /// Persist the app-launch biometric gate flag. This only stores the intent;
-    /// the actual master-key migration between the auth-free and biometric-gated
-    /// Keystore stores is orchestrated by the app layer (which owns the plugins),
-    /// so the flag and the key's location are kept consistent together there.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `repo.json` cannot be read or written.
-    pub async fn set_biometric_app_lock(&self, enabled: bool) -> Result<RepoConfig, Error> {
-        let mut rc = self.config.load_repo_config().await?;
-        rc.biometric_app_lock = enabled;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
+    /// The cached app-scoped `autosync` flag (the value [`autosync_write`] reads).
+    /// Read accessor for tests/diagnostics — production reads it via
+    /// [`autosync_write`](Store::autosync_write).
+    #[must_use]
+    pub fn autosync(&self) -> bool {
+        self.autosync.load(Ordering::Relaxed)
     }
 
     /// Persist the "unlock the identity together with the app" opt-in. A pure
@@ -2050,6 +1997,17 @@ impl Store {
     pub async fn config(&self) -> Result<RepoConfig, Error> {
         self.config.load_repo_config().await
     }
+
+    /// Read + unseal `repo.json` and deserialize into `T` (see
+    /// [`Config::load_repo_config_as`]). The config-scope migration uses this to
+    /// read the legacy field shape.
+    ///
+    /// # Errors
+    ///
+    /// See [`Config::load_repo_config_as`].
+    pub async fn load_repo_config_as<T: serde::de::DeserializeOwned>(&self) -> Result<T, Error> {
+        self.config.load_repo_config_as().await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2198,13 +2156,28 @@ fn invalid_name(message: &str) -> Error {
 
 /// Normalize a view/clipboard auto-clear override: `None` stays (default),
 /// `Some(0)` stays (Never), any other `Some(n)` is clamped to
-/// `[CLEAR_SECS_MIN, CLEAR_SECS_MAX]`. Infallible — out-of-range clamps rather
-/// than erroring, since the UI sends only preset values.
-fn normalize_clear_secs(secs: Option<u64>) -> Option<u64> {
+/// [`CLEAR_SECS_MIN`]..[`CLEAR_SECS_MAX`]. Infallible — out-of-range clamps
+/// rather than erroring, since the UI sends only preset values. `pub` so the
+/// app shell (which owns the app-scoped clear-timer setters post-scope-split)
+/// applies the same rule.
+#[must_use]
+pub fn normalize_clear_secs(secs: Option<u64>) -> Option<u64> {
     match secs {
         None => None,
         Some(0) => Some(0),
         Some(n) => Some(n.clamp(CLEAR_SECS_MIN, CLEAR_SECS_MAX)),
+    }
+}
+
+/// Clamp a [`LockMode::Idle`] timeout into
+/// [`LOCK_IDLE_SECS_MIN`]..[`LOCK_IDLE_SECS_MAX`]; `Immediate` and `Never` pass
+/// through. `pub` so the app shell's `lock_mode` setter applies the same rule
+/// the old in-`Store` setter did.
+#[must_use]
+pub fn clamp_lock_mode(mode: LockMode) -> LockMode {
+    match mode {
+        LockMode::Idle(secs) => LockMode::Idle(secs.clamp(LOCK_IDLE_SECS_MIN, LOCK_IDLE_SECS_MAX)),
+        other => other,
     }
 }
 
@@ -2895,60 +2868,51 @@ mod tests {
         assert_eq!(err.code, "WRONG_PASSPHRASE");
     }
 
-    // ── auto-lock / clear-secs setters ──────────────────────────────────
-
-    /// A store with a repo config on disk (the setters load + save repo.json).
-    async fn store_with_repo_config() -> (Store, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path().to_path_buf(), None);
-        config
-            .save_identity(b"AGE-SECRET-KEY-1TEST", None)
-            .await
-            .unwrap();
-        config
-            .save_repo_config("https://x/repo", None, None, None, "/p")
-            .await
-            .unwrap();
-        let store = Store::new(dir.path().to_path_buf(), None);
-        (store, dir)
-    }
-
-    #[tokio::test]
-    async fn set_lock_mode_roundtrip_and_clamps_idle() {
-        let (store, _d) = store_with_repo_config().await;
-
+    #[test]
+    fn clamp_lock_mode_clamps_idle_and_passes_others() {
         // Idle secs below the minimum clamp up.
-        let rc = store.set_lock_mode(LockMode::Idle(1)).await.unwrap();
-        assert_eq!(rc.lock_mode, LockMode::Idle(LOCK_IDLE_SECS_MIN));
+        assert_eq!(
+            clamp_lock_mode(LockMode::Idle(1)),
+            LockMode::Idle(LOCK_IDLE_SECS_MIN)
+        );
         // Idle secs above the maximum clamp down.
-        let rc = store.set_lock_mode(LockMode::Idle(99_999)).await.unwrap();
-        assert_eq!(rc.lock_mode, LockMode::Idle(LOCK_IDLE_SECS_MAX));
+        assert_eq!(
+            clamp_lock_mode(LockMode::Idle(99_999)),
+            LockMode::Idle(LOCK_IDLE_SECS_MAX)
+        );
         // Never + Immediate pass through unchanged.
-        let rc = store.set_lock_mode(LockMode::Never).await.unwrap();
-        assert_eq!(rc.lock_mode, LockMode::Never);
-        let rc = store.set_lock_mode(LockMode::Immediate).await.unwrap();
-        assert_eq!(rc.lock_mode, LockMode::Immediate);
-        // Persisted to disk.
-        assert_eq!(store.config().await.unwrap().lock_mode, LockMode::Immediate);
+        assert_eq!(clamp_lock_mode(LockMode::Never), LockMode::Never);
+        assert_eq!(clamp_lock_mode(LockMode::Immediate), LockMode::Immediate);
     }
 
-    #[tokio::test]
-    async fn set_clear_secs_clamp_keep_never_and_default() {
-        let (store, _d) = store_with_repo_config().await;
-
+    #[test]
+    fn normalize_clear_secs_clamps_keeps_never_and_none() {
         // A nonzero value below the minimum clamps up; Never (0) is preserved.
-        let rc = store.set_view_clear_secs(Some(1)).await.unwrap();
-        assert_eq!(rc.view_clear_secs, Some(CLEAR_SECS_MIN));
-        let rc = store.set_view_clear_secs(Some(0)).await.unwrap();
-        assert_eq!(rc.view_clear_secs, Some(0), "Some(0) (Never) must be kept");
-        // None clears the override (resolves to the default).
-        let rc = store.set_view_clear_secs(None).await.unwrap();
-        assert_eq!(rc.view_clear_secs, None);
+        assert_eq!(normalize_clear_secs(Some(1)), Some(CLEAR_SECS_MIN));
+        assert_eq!(
+            normalize_clear_secs(Some(0)),
+            Some(0),
+            "Some(0) (Never) must be kept"
+        );
+        // None stays None (resolves to the default at read time).
+        assert_eq!(normalize_clear_secs(None), None);
+        // Values above the maximum clamp down.
+        assert_eq!(normalize_clear_secs(Some(999_999)), Some(CLEAR_SECS_MAX));
+    }
 
-        // Clipboard secs behave identically.
-        let rc = store.set_clipboard_clear_secs(Some(999_999)).await.unwrap();
-        assert_eq!(rc.clipboard_clear_secs, Some(CLEAR_SECS_MAX));
-        let rc = store.set_clipboard_clear_secs(Some(0)).await.unwrap();
-        assert_eq!(rc.clipboard_clear_secs, Some(0));
+    #[test]
+    fn autosync_cache_default_true_and_set_round_trips() {
+        // Proves the injected `autosync` cache is what set_autosync writes and
+        // autosync_write reads — the plumbing the app shell pushes into. Default
+        // is true (a caller that never seeds gets today's fresh-repo behavior).
+        let store = Store::new(std::env::temp_dir(), None);
+        assert!(store.autosync(), "default is true");
+        store.set_autosync(false);
+        assert!(
+            !store.autosync(),
+            "set_autosync(false) must reach the cache autosync_write reads"
+        );
+        store.set_autosync(true);
+        assert!(store.autosync());
     }
 }

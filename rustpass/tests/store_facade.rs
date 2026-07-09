@@ -434,7 +434,7 @@ async fn store_facade_sync_then_list_updated() {
 /// covered in config.rs; this pins the facade wiring the device-coupled commands
 /// depend on.
 #[tokio::test]
-async fn store_app_lock_setters_and_passphrase_slot_persist() {
+async fn store_identity_auto_unlock_flag_and_passphrase_slot_persist() {
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
     let config_dir = tempfile::tempdir().expect("failed to create config dir");
@@ -451,10 +451,10 @@ async fn store_app_lock_setters_and_passphrase_slot_persist() {
         .await
         .expect("configure should succeed");
 
-    // The two flags default off, and the setters flip them through the facade.
-    assert!(!store.config().await.unwrap().biometric_app_lock);
-    store.set_biometric_app_lock(true).await.unwrap();
-    assert!(store.config().await.unwrap().biometric_app_lock);
+    // The auto-unlock flag defaults off; the setter flips it through the facade.
+    // (The biometric-app-lock flag now lives on AppConfig, not RepoConfig — it
+    // is covered by the app-config tests.)
+    assert!(!store.config().await.unwrap().unlock_identity_with_app);
     store.set_unlock_identity_with_app(true).await.unwrap();
     assert!(store.config().await.unwrap().unlock_identity_with_app);
 
@@ -467,10 +467,7 @@ async fn store_app_lock_setters_and_passphrase_slot_persist() {
     store.clear_app_identity_pass().await.unwrap();
     assert!(store.load_app_identity_pass().await.is_err());
 
-    // Toggling the flags back off persists too.
-    store.set_biometric_app_lock(false).await.unwrap();
+    // Toggling the flag back off persists too.
     store.set_unlock_identity_with_app(false).await.unwrap();
-    let rc = store.config().await.unwrap();
-    assert!(!rc.biometric_app_lock);
-    assert!(!rc.unlock_identity_with_app);
+    assert!(!store.config().await.unwrap().unlock_identity_with_app);
 }

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Your auto-lock timing, the password view and clipboard auto-clear timers, and the AutoSync choice are now device preferences — they stick around when you reset your repository or connect a different one, instead of being wiped along with the repository the way they used to be. The App Lock toggle in Settings also now reflects the lock's real on/off state rather than a stored flag that could drift out of sync.
 - On the App Lock screen, the "Unlock with biometric" button was shrunk to its label and left-aligned at the edge of the card. It now stretches the full width with centered text, matching the other unlock buttons.
 
 ## [v0.11.0] - 2026-07-08

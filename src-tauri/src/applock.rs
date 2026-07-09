@@ -152,7 +152,7 @@ pub(crate) async fn enable_biometric_app_lock(
     ks.store_biometric(&b64, prompt_text.as_ref()).await?;
     // Only now drop the auth-free copy and persist the flag.
     ks.delete().await?;
-    state.store.set_biometric_app_lock(true).await?;
+    state.app_config.set_biometric_app_lock(true).await?;
     state.app_lock_enabled.store(true, Ordering::SeqCst);
     Ok(())
 }
@@ -186,7 +186,7 @@ pub(crate) async fn disable_biometric_app_lock(
     if let Some(key) = decode_master_key(&b64) {
         state.store.set_master_key(Some(key));
     }
-    state.store.set_biometric_app_lock(false).await?;
+    state.app_config.set_biometric_app_lock(false).await?;
     // The identity-auto-unlock opt-in is meaningless without the gate (app_unlock
     // is never called when app_lock_enabled is false). Clear its flag + sealed
     // passphrase slot so re-enabling the gate later starts clean — otherwise the
@@ -260,6 +260,11 @@ pub(crate) async fn app_unlock(
     let key = decode_master_key(&b64)
         .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;
     state.store.set_master_key(Some(key));
+    // Copy the app-scoped behavior prefs out of a pre-split repo.json into
+    // app.json BEFORE anything reads them — the first unlock, and the cache
+    // refresh inside try_identity_auto_unlock, must see the migrated values, not
+    // the defaults. The master key is now in memory, so the sealed read succeeds.
+    crate::migrate::migrate_config_scope(state.inner()).await;
     // One-shot legacy-envelope migrate, BEFORE the unlock emit so the app isn't
     // interactive while repo.json is re-wrapped (no race with a settings write).
     // Under App Lock the key is absent at cold start, so convert it now.

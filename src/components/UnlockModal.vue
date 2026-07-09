@@ -8,7 +8,7 @@ import {
   asBiometricError,
   biometricUnlock,
   disableBiometricUnlock,
-  getConfig,
+  getAppConfig,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
   unlock,
@@ -54,7 +54,7 @@ const biometricUsable = computed(
 // ── Auto-lock policy hint ─────────────────────────────────────────────
 // The policy in effect (Immediate / N min idle / Never), shown so the user
 // knows how long the identity stays cached after unlocking. Defaults to
-// "immediate" (the backend default) until getConfig() resolves; a fetch
+// "immediate" (the backend default) until getAppConfig() resolves; a fetch
 // failure leaves that default in place.
 const lockMode = ref<LockMode>("immediate");
 const lockHint = computed(() => describeLockMode(lockMode.value));
@@ -175,7 +175,7 @@ onMounted(async () => {
   // Best-effort: read the auto-lock policy so the hint matches the user's
   // setting. A failure (or pre-setup) leaves the "immediate" default.
   try {
-    lockMode.value = (await getConfig()).lock_mode ?? "immediate";
+    lockMode.value = (await getAppConfig()).lock_mode ?? "immediate";
   } catch {
     // keep default
   }

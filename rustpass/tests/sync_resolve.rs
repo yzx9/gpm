@@ -493,7 +493,7 @@ async fn sync_local_ahead_is_noop_not_divergence() {
 async fn autosync_off_skips_network() {
     let (bare_dir, _cfg, store, _recipient) = store_with_base(vec![]).await;
     let store = Arc::new(store);
-    store.set_autosync(false).await.expect("autosync off");
+    store.set_autosync(false);
     let bare_before = bare_head_oid(bare_dir.path());
 
     let s = store.clone();
@@ -705,7 +705,7 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
 async fn sync_repo_publishes_local_commits() {
     let (bare_dir, _cfg, store, _recipient) = store_with_base(vec![]).await;
     let store = Arc::new(store);
-    store.set_autosync(false).await.expect("autosync off");
+    store.set_autosync(false);
     store
         .set("offline", b"local-then-sync")
         .await

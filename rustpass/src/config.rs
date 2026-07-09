@@ -28,20 +28,6 @@ pub const DEFAULT_VIEW_CLEAR_SECS: u64 = 45;
 /// Used when `clipboard_clear_secs` is `None`.
 pub const DEFAULT_CLIPBOARD_CLEAR_SECS: u64 = 45;
 
-/// Serde default for [`RepoConfig::autosync`] — `true`, so an existing
-/// `repo.json` written before the field existed deserializes with autosync ON
-/// (the pre-toggle behavior is preserved across the upgrade).
-fn default_autosync_true() -> bool {
-    true
-}
-
-/// `true` (the default) so `autosync` is omitted from `repo.json` while on —
-/// users who never toggle it see no change to the file's shape.
-#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
-fn is_autosync_default(autosync: &bool) -> bool {
-    *autosync
-}
-
 /// How the app auto-locks the identity cache.
 ///
 /// `Immediate` (the default) is the no-cache, per-operation mode: the identity
@@ -87,9 +73,18 @@ async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
 
 /// Configuration and identity persistence for a password store.
 ///
-/// Manages storage of age identity and repository configuration in an
-/// app-private directory. On Android, this is app-private storage; on
-/// desktop, it's the standard config directory.
+/// This is the **sealed-files tier** of gpm's three persistence tiers (RFC
+/// 0038): (1) Git — the age-encrypted repository of secrets; (2) sealed files —
+/// `repo.json` + `identity`, owned here; (3) plaintext files — `app.json`
+/// (owned by the app shell, `src-tauri`). The secrets themselves live in tier
+/// 1 (the on-disk clone this config points at); tiers 2 and 3 are local
+/// metadata that never leave the device.
+///
+/// Manages storage of the age identity and repository-scoped configuration in
+/// an app-private directory. On Android, this is app-private storage; on
+/// desktop, it's the standard config directory. `repo.json` and `identity` are
+/// sealed at rest with AEAD where the platform supports it; on desktop the
+/// master key is `None` so the [`Seal`] is a plaintext passthrough.
 #[derive(Debug)]
 pub struct Config {
     config_dir: PathBuf,
@@ -289,18 +284,9 @@ impl Config {
             // identity auto-tracks the shipped default across versions.
             commit_user_name: None,
             commit_user_email: None,
-            // Auto-lock defaults to Immediate (no-cache); the clear timers default
-            // to their `None`-implies-45s resolution. None are pinned here.
-            lock_mode: LockMode::default(),
-            view_clear_secs: None,
-            clipboard_clear_secs: None,
-            // The app-launch biometric gate and its identity-auto-unlock opt-in
-            // are off at setup; the user enables them from Settings.
-            biometric_app_lock: false,
+            // The identity-auto-unlock opt-in is off at setup; the user enables
+            // it from Settings.
             unlock_identity_with_app: false,
-            // Autosync defaults ON (gopass-style per-save pull→write→push); the
-            // user can turn it off per-device in Settings.
-            autosync: true,
             authenticity: AuthenticityConfig::default(),
         };
         // Delegate to the atomic variant so `repo.json` is never observed
@@ -323,13 +309,16 @@ impl Config {
         save_atomic(&self.repo_config_path(), &sealed).await
     }
 
-    /// Load repository configuration.
+    /// Read + unseal `repo.json` and deserialize into `T`. The default view is
+    /// [`RepoConfig`] (the slimmed repo-scoped shape); the config-scope migration
+    /// reads the legacy shape via a `LegacyRepoConfig` view to recover fields the
+    /// slimmed `RepoConfig` drops on deserialize (serde ignores unknown fields).
     ///
     /// # Errors
     ///
-    /// Returns an error if no config exists, the file cannot be read, or the
-    /// JSON is malformed.
-    pub async fn load_repo_config(&self) -> Result<RepoConfig, Error> {
+    /// Returns an error if no config exists, the file cannot be read, the AEAD
+    /// unseal fails (key unavailable / tag mismatch), or the JSON is malformed.
+    pub async fn load_repo_config_as<T: serde::de::DeserializeOwned>(&self) -> Result<T, Error> {
         let path = self.repo_config_path();
         if !path.exists() {
             return Err(Error::new(
@@ -339,8 +328,17 @@ impl Config {
         }
         let raw = fs::read(&path).await?;
         let json = self.seal.unseal("repo_config", &raw)?;
-        let config: RepoConfig = serde_json::from_slice(&json)?;
-        Ok(config)
+        Ok(serde_json::from_slice(&json)?)
+    }
+
+    /// Load the repo-scoped config. Thin wrapper over
+    /// [`load_repo_config_as`](Self::load_repo_config_as) for the common case.
+    ///
+    /// # Errors
+    ///
+    /// See [`load_repo_config_as`](Self::load_repo_config_as).
+    pub async fn load_repo_config(&self) -> Result<RepoConfig, Error> {
+        self.load_repo_config_as().await
     }
 
     /// Check if setup is complete (both identity and repo config exist).
@@ -366,6 +364,12 @@ impl Config {
         }
         if self.repo_config_path().exists() {
             fs::remove_file(self.repo_config_path()).await?;
+        }
+        // The sealed identity-passphrase slot is repo-scoped (paired with the
+        // identity above), so a repo reset clears it too — leaving the at-rest
+        // master key (app-scoped, Keystore) untouched.
+        if self.app_identity_pass_path().exists() {
+            fs::remove_file(self.app_identity_pass_path()).await?;
         }
         Ok(())
     }
@@ -477,45 +481,12 @@ pub struct RepoConfig {
     /// Optional git commit author email; `None` uses the app default.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub commit_user_email: Option<String>,
-    /// How the app auto-locks the identity cache. Skipped from serialization
-    /// when default ([`LockMode::Immediate`]) so an uncustomized config — and a
-    /// config written before this field existed — both resolve to the default.
-    #[serde(default, skip_serializing_if = "LockMode::is_default")]
-    pub lock_mode: LockMode,
-    /// Seconds a revealed password stays in the DOM before auto-clear.
-    /// `None` ⇒ [`DEFAULT_VIEW_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub view_clear_secs: Option<u64>,
-    /// Seconds the clipboard holds a copied password before auto-clear.
-    /// `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub clipboard_clear_secs: Option<u64>,
-    /// Whether the app-launch biometric gate is enabled. When `true` the seal
-    /// master key is sealed in the biometric-gated Keystore (injected after the
-    /// unlock prompt, wiped on background) instead of the auth-free store, so the
-    /// whole store is unreadable until the user authenticates on launch/resume.
-    /// Skipped when `false` (default) so a config that never toggled it — and one
-    /// written before the field existed — are byte-identical. The authoritative
-    /// runtime signal at startup is the Keystore probe (readable before
-    /// `repo.json`); this flag is the persisted intent for display/consistency.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub biometric_app_lock: bool,
     /// Whether a successful app-unlock should also unlock the identity session
     /// (no separate identity prompt on the next copy/show). Independent of the
-    /// auto-lock timing presets and only meaningful when [`biometric_app_lock`]
-    /// is `true`; defaults off. Read after the app-unlock injects the master key.
-    ///
-    /// [`biometric_app_lock`]: RepoConfig::biometric_app_lock
+    /// auto-lock timing presets and only meaningful when the app-launch biometric
+    /// gate is enabled; defaults off. Read after the app-unlock injects the master key.
     #[serde(default, skip_serializing_if = "is_false")]
     pub unlock_identity_with_app: bool,
-    /// Whether each save wraps in a pull→write→push (gopass-style per-command
-    /// sync). Default `true`; when `false`, saves stay local until a manual Sync.
-    /// Per-device (in `repo.json`); omitted from serialization while `true`.
-    #[serde(
-        default = "default_autosync_true",
-        skip_serializing_if = "is_autosync_default"
-    )]
-    pub autosync: bool,
     /// Repository authenticity config (verification mode + trusted signing
     /// keys + ignored issues). Skipped from serialization when default so
     /// users who never enable authenticity see no change to `repo.json`'s
@@ -542,26 +513,7 @@ impl RepoConfig {
             GitAuth::None
         }
     }
-
-    /// Effective password-view auto-clear seconds: `None` resolves to
-    /// [`DEFAULT_VIEW_CLEAR_SECS`], `Some(0)` means never (0 — the UI skips the
-    /// timer), otherwise the configured value. A single resolution point so the
-    /// backend and the UI agree.
-    #[must_use]
-    pub fn view_clear_secs_effective(&self) -> u64 {
-        self.view_clear_secs.unwrap_or(DEFAULT_VIEW_CLEAR_SECS)
-    }
-
-    /// Effective clipboard auto-clear seconds (same rule as
-    /// [`view_clear_secs_effective`](RepoConfig::view_clear_secs_effective)).
-    /// `Some(0)` (Never) tells the backend not to spawn a clear task at all.
-    #[must_use]
-    pub fn clipboard_clear_secs_effective(&self) -> u64 {
-        self.clipboard_clear_secs
-            .unwrap_or(DEFAULT_CLIPBOARD_CLEAR_SECS)
-    }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1165,92 +1117,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repo_config_lock_mode_roundtrip() {
-        let (config, _dir) = create_config();
-
-        for mode in [LockMode::Immediate, LockMode::Idle(300), LockMode::Never] {
-            std::fs::create_dir_all(&config.config_dir).unwrap();
-            let rc = RepoConfig {
-                url: "https://example.com/repo.git".to_string(),
-                pat: None,
-                ssh_key: None,
-                ssh_passphrase: None,
-                local_path: "/local/path".to_string(),
-                lock_mode: mode,
-                ..Default::default()
-            };
-            config.save_repo_config_full(&rc).await.unwrap();
-            let loaded = config.load_repo_config().await.unwrap();
-            assert_eq!(loaded.lock_mode, mode, "roundtrip for {mode:?}");
-        }
-    }
-
-    #[tokio::test]
-    async fn repo_config_lock_mode_immediate_omitted_when_default() {
-        let (config, _dir) = create_config();
-        std::fs::create_dir_all(&config.config_dir).unwrap();
-        let rc = RepoConfig {
-            url: "https://example.com/repo.git".to_string(),
-            local_path: "/local/path".to_string(),
-            lock_mode: LockMode::Immediate,
-            ..Default::default()
-        };
-        config.save_repo_config_full(&rc).await.unwrap();
-
-        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
-        assert!(
-            !json.contains("lock_mode"),
-            "Immediate (default) must not be serialized"
-        );
-    }
-
-    #[tokio::test]
-    async fn repo_config_lock_mode_defaults_to_immediate_for_old_config() {
-        let (config, _dir) = create_config();
-        // A config written before lock_mode existed.
-        std::fs::create_dir_all(&config.config_dir).unwrap();
-        let old_json = r#"{"url":"https://example.com/repo.git","pat":"t","local_path":"/p"}"#;
-        std::fs::write(config.repo_config_path(), old_json).unwrap();
-
-        let cfg = config.load_repo_config().await.unwrap();
-        assert_eq!(cfg.lock_mode, LockMode::Immediate);
-        assert_eq!(cfg.view_clear_secs, None);
-        assert_eq!(cfg.clipboard_clear_secs, None);
-    }
-
-    #[tokio::test]
-    async fn repo_config_clear_secs_roundtrip_and_effective() {
-        let (config, _dir) = create_config();
-        std::fs::create_dir_all(&config.config_dir).unwrap();
-        let rc = RepoConfig {
-            url: "https://example.com/repo.git".to_string(),
-            local_path: "/local/path".to_string(),
-            view_clear_secs: Some(0), // Never
-            clipboard_clear_secs: Some(180),
-            ..Default::default()
-        };
-        config.save_repo_config_full(&rc).await.unwrap();
-
-        let cfg = config.load_repo_config().await.unwrap();
-        assert_eq!(cfg.view_clear_secs, Some(0));
-        assert_eq!(cfg.clipboard_clear_secs, Some(180));
-        assert_eq!(cfg.view_clear_secs_effective(), 0);
-        assert_eq!(cfg.clipboard_clear_secs_effective(), 180);
-
-        // None ⇒ default resolution.
-        let cfg2 = RepoConfig {
-            url: "u".to_string(),
-            local_path: "/p".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(cfg2.view_clear_secs_effective(), DEFAULT_VIEW_CLEAR_SECS);
-        assert_eq!(
-            cfg2.clipboard_clear_secs_effective(),
-            DEFAULT_CLIPBOARD_CLEAR_SECS
-        );
-    }
-
-    #[tokio::test]
     async fn app_identity_pass_slot_roundtrip_under_master_key() {
         // The identity-auto-unlock slot seals the passphrase under the master
         // key (None here ⇒ passthrough, mirroring desktop; the seal/open path is
@@ -1295,40 +1161,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repo_config_app_lock_flags_roundtrip() {
+    async fn repo_config_unlock_identity_with_app_roundtrip() {
         let (config, _dir) = create_config();
         std::fs::create_dir_all(&config.config_dir).unwrap();
         let rc = RepoConfig {
             url: "https://example.com/repo.git".to_string(),
             local_path: "/local/path".to_string(),
-            biometric_app_lock: true,
             unlock_identity_with_app: true,
             ..Default::default()
         };
         config.save_repo_config_full(&rc).await.unwrap();
 
         let cfg = config.load_repo_config().await.unwrap();
-        assert!(cfg.biometric_app_lock);
         assert!(cfg.unlock_identity_with_app);
     }
 
     #[tokio::test]
-    async fn repo_config_app_lock_flags_omitted_when_false() {
+    async fn repo_config_unlock_identity_with_app_omitted_when_false() {
         let (config, _dir) = create_config();
         std::fs::create_dir_all(&config.config_dir).unwrap();
         let rc = RepoConfig {
             url: "https://example.com/repo.git".to_string(),
             local_path: "/local/path".to_string(),
-            // Both flags left at their default (false).
+            // The flag is left at its default (false).
             ..Default::default()
         };
         config.save_repo_config_full(&rc).await.unwrap();
 
         let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
-        assert!(
-            !json.contains("biometric_app_lock"),
-            "false flag must not be serialized"
-        );
         assert!(
             !json.contains("unlock_identity_with_app"),
             "false flag must not be serialized"
@@ -1336,15 +1196,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repo_config_app_lock_flags_default_false_for_old_config() {
+    async fn repo_config_unlock_identity_with_app_default_false_for_old_config() {
         let (config, _dir) = create_config();
-        // A config written before the app-lock flags existed.
+        // A config written before the flag existed.
         std::fs::create_dir_all(&config.config_dir).unwrap();
         let old_json = r#"{"url":"https://example.com/repo.git","pat":"t","local_path":"/p"}"#;
         std::fs::write(config.repo_config_path(), old_json).unwrap();
 
         let cfg = config.load_repo_config().await.unwrap();
-        assert!(!cfg.biometric_app_lock);
         assert!(!cfg.unlock_identity_with_app);
     }
 }

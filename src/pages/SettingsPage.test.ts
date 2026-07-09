@@ -81,6 +81,12 @@ describe("SettingsPage", () => {
   /** Default successful return values per command (order-independent). */
   const defaults: Record<string, unknown> = {
     get_config: httpsConfig,
+    // AppConfig (app-scoped, RFC 0038): the 5 moved behavior prefs are omitted
+    // so they take their serde defaults (immediate / default clears / autosync
+    // on / app-lock off) — the same posture as a fresh install.
+    get_app_config: { secure_screen: true },
+    // App-launch biometric gate reads Keystore truth (Path B), not the flag.
+    get_app_lock_state: { enabled: false, locked: false },
     get_auth_state: {
       configured: true,
       encrypted: false,

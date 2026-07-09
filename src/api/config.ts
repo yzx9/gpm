@@ -3,15 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
-import type { CommitIdentity, LockMode, RepoConfig } from "./common";
+import type { CommitIdentity, RepoConfig } from "./common";
 
 /**
- * Repo-config IPC — mirrors `src-tauri/src/config.rs`. Each setter returns the
- * freshly-persisted {@link RepoConfig} so callers refresh their cached copy from
- * the single authoritative response (no re-fetch).
+ * Repo-config IPC — mirrors `src-tauri/src/config.rs`. Repo-scoped only (URL,
+ * auth, commit identity, authenticity) after the RFC 0038 scope split; the
+ * app-scoped behavior prefs live on
+ * {@link import("./system").AppConfig} (`api/system.ts`). Each setter returns
+ * the freshly-persisted {@link RepoConfig} so callers refresh their cached copy
+ * from the single authoritative response (no re-fetch).
  */
 
-/** Read the full repository config (URL, auth, lock mode, clear timers, …). */
+/** Read the repository config (URL, auth, commit identity, authenticity). */
 export async function getConfig(): Promise<RepoConfig> {
   return invoke<RepoConfig>("get_config");
 }
@@ -30,31 +33,6 @@ export async function setCommitIdentity(
   email: string | null,
 ): Promise<RepoConfig> {
   return invoke<RepoConfig>("set_commit_identity", { name, email });
-}
-
-/** Set the app auto-lock mode; returns the updated config. */
-export async function setLockMode(mode: LockMode): Promise<RepoConfig> {
-  return invoke<RepoConfig>("set_lock_mode", { mode });
-}
-
-/** Toggle per-device autosync (on ⇒ every save pull-write-pushes; off ⇒ saves
- *  stay local until a manual Sync). Returns the updated config. */
-export async function setAutosync(enabled: boolean): Promise<RepoConfig> {
-  return invoke<RepoConfig>("set_autosync", { enabled });
-}
-
-/** Set the password-view auto-clear seconds (`null` ⇒ default, `0` ⇒ never). */
-export async function setViewClearSecs(
-  secs: number | null,
-): Promise<RepoConfig> {
-  return invoke<RepoConfig>("set_view_clear_secs", { secs });
-}
-
-/** Set the clipboard auto-clear seconds (`null` ⇒ default, `0` ⇒ never). */
-export async function setClipboardClearSecs(
-  secs: number | null,
-): Promise<RepoConfig> {
-  return invoke<RepoConfig>("set_clipboard_clear_secs", { secs });
 }
 
 /** Emergency reset: wipe the local store + config and return to setup. */

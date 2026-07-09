@@ -2,24 +2,47 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! App-shell configuration that must persist before any repo is set up.
+//! App-shell configuration that must persist before any repo is set up, and
+//! survive a repository re-setup. See RFC 0038 for the full model.
 //!
-//! Today this holds the screen-capture master toggle ([`AppConfig::secure_screen`])
-//! and the display-language preference ([`AppConfig::locale`]). Both live at
-//! `app.json` in the config directory — distinct from `repo.json`, which is
-//! repo-scoped and (on Android) sealed at rest. `app.json` is a plaintext UI
-//! preference (no secret); encrypting it would be theater and would couple this
-//! app-shell module to the `rustpass` store layer.
+//! # The three persistence tiers
+//!
+//! gpm persists state across three tiers; this module owns the third:
+//!
+//! 1. **Git** — the cloned gopass repository of age-encrypted secrets, version-
+//!    controlled and synced via `git pull`/`push`. The only tier that leaves the
+//!    device. (The on-disk clone lives under the path `repo.json` points at.)
+//! 2. **Sealed files** — `repo.json` (repo-scoped config) and `identity`, sealed
+//!    at rest with AEAD on Android, plaintext on desktop. Owned by `rustpass`.
+//!    See [`rustpass::config::Config`].
+//! 3. **Plaintext files** — **`app.json` (this module)**, always plaintext.
+//!
+//! `app.json` is **plaintext on disk**, and this is forced, not a shortcut:
+//! `locale` must be readable before unlock (first-paint injection + the app-lock
+//! biometric screen), and sealing `app.json` would make it unreadable at setup
+//! when app-lock is on. None of these prefs are confidential, and the local
+//! write attacker is out of scope per the threat model, so plaintext is
+//! consistent. (The `WebView`'s `localStorage` is explicitly not a tier — it may
+//! be cleared by the system, so it is never authoritative for settings.)
+//!
+//! # What lives here
+//!
+//! The screen-capture master toggle ([`AppConfig::secure_screen`]), the
+//! display-language preference ([`AppConfig::locale`]), and the behavior prefs
+//! that moved here from `RepoConfig` in the RFC 0038 scope split: `lock_mode`,
+//! the view/clipboard clear timers, `autosync`, and `biometric_app_lock`. All
+//! are application-scoped (survive a repository re-setup) and non-confidential.
 //!
 //! `app.json` intentionally survives `reset_config` (which wipes the repo dir,
-//! `identity`, and `repo.json`): these are device-level preferences, not repo
-//! data, so re-setting up the repo should not reset the user's screen-capture or
-//! language choice.
+//! `identity`, `repo.json`, and the `app_id_pass` slot): these are device-level
+//! preferences, not repo data, so re-setting up the repo does not reset the
+//! user's language, timers, autosync, or app-lock choice.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rustpass::{Error, ErrorCode};
+use rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS;
+use rustpass::{Error, ErrorCode, LockMode, clamp_lock_mode, normalize_clear_secs};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -37,7 +60,15 @@ const SUPPORTED_LOCALES: [&str; 2] = ["en", "zh-CN"];
 const DEFAULT_LOCALE: &str = "en";
 
 /// App-level (non-repo) preferences. Plaintext on disk — no secrets, only UI
-/// toggles.
+/// behavior prefs. Plaintext (not sealed) is forced: `locale` must be readable
+/// before unlock for the first-paint injection + app-lock biometric screen, and
+/// sealing `app.json` would make it unreadable at setup when app-lock is on. The
+/// other prefs ride along (none are confidential; the local write attacker is
+/// out of scope per the threat model).
+///
+/// The behavior prefs (`lock_mode`, clear timers, `autosync`,
+/// `biometric_app_lock`) moved here from `RepoConfig` (the RFC 0038 scope split)
+/// so they survive a repository re-setup instead of being wiped with repo data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AppConfig {
     /// Master toggle for per-page screen-capture protection. Default ON
@@ -52,6 +83,37 @@ pub(crate) struct AppConfig {
     /// on round-trip, so adding the field is non-breaking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) locale: Option<String>,
+    /// How the app auto-locks the identity cache. Skipped from serialization
+    /// when default (`Immediate`), so an uncustomized config is byte-identical
+    /// to one written before this field moved here.
+    #[serde(default, skip_serializing_if = "LockMode::is_default")]
+    pub(crate) lock_mode: LockMode,
+    /// Seconds a revealed password stays in the DOM before auto-clear.
+    /// `None` ⇒ [`DEFAULT_VIEW_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) view_clear_secs: Option<u64>,
+    /// Seconds the clipboard holds a copied password before auto-clear.
+    /// `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) clipboard_clear_secs: Option<u64>,
+    /// Whether each save wraps in a pull→write→push (gopass-style per-command
+    /// sync). Default `true`; omitted from serialization while `true`.
+    #[serde(
+        default = "default_autosync_true",
+        skip_serializing_if = "is_autosync_default"
+    )]
+    pub(crate) autosync: bool,
+    /// Persisted intent for the app-launch biometric gate. **Write-only** — the
+    /// Settings toggle and the runtime gate read the Keystore probe via
+    /// `get_app_lock_state`, not this flag; it exists only as a persisted record
+    /// mirroring the old `RepoConfig` field. Skipped when `false`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) biometric_app_lock: bool,
+    /// Persisted-schema version for one-shot migrations. `1` is the pre-split
+    /// shape; `migrate_config_scope` bumps it to `2` after copying the behavior
+    /// prefs out of `repo.json`.
+    #[serde(default = "default_schema_version")]
+    pub(crate) schema_version: u32,
 }
 
 impl Default for AppConfig {
@@ -59,6 +121,12 @@ impl Default for AppConfig {
         Self {
             secure_screen: default_secure_screen(),
             locale: None,
+            lock_mode: LockMode::default(),
+            view_clear_secs: None,
+            clipboard_clear_secs: None,
+            autosync: default_autosync_true(),
+            biometric_app_lock: false,
+            schema_version: default_schema_version(),
         }
     }
 }
@@ -67,6 +135,47 @@ impl Default for AppConfig {
 fn default_secure_screen() -> bool {
     true
 }
+
+/// Serde default for [`AppConfig::autosync`] — `true` (gopass-style per-save
+/// pull→write→push on by default).
+fn default_autosync_true() -> bool {
+    true
+}
+
+/// `true` (the default) so `autosync` is omitted from `app.json` while on — a
+/// user who never toggles it sees no change to the file's shape.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
+fn is_autosync_default(autosync: &bool) -> bool {
+    *autosync
+}
+
+/// `false` (the default) so `biometric_app_lock` is omitted from `app.json`
+/// when off.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// Serde default for [`AppConfig::schema_version`] — `1` (the version before
+/// the config-scope migration existed). The migration bumps it to `2`.
+fn default_schema_version() -> u32 {
+    1
+}
+
+impl AppConfig {
+    /// Effective clipboard auto-clear seconds: `None` resolves to
+    /// [`DEFAULT_CLIPBOARD_CLEAR_SECS`], otherwise the configured value.
+    #[must_use]
+    pub(crate) fn clipboard_clear_secs_effective(&self) -> u64 {
+        self.clipboard_clear_secs
+            .unwrap_or(DEFAULT_CLIPBOARD_CLEAR_SECS)
+    }
+}
+
+/// `app.json` schema version once [`migrate_config_scope`] has copied the
+/// behavior prefs out of `repo.json`. The migration gates on
+/// `schema_version < APP_CONFIG_SCHEMA_VERSION`.
+pub(crate) const APP_CONFIG_SCHEMA_VERSION: u32 = 2;
 
 /// True if `code` is one of [`SUPPORTED_LOCALES`].
 fn is_supported_locale(code: &str) -> bool {
@@ -176,13 +285,56 @@ impl AppConfigStore {
     /// The `Mutex` is held only for the final cache swap — never across the
     /// `tokio::fs` `.await` points (the write/rename complete before the guard
     /// is taken), so there is no await-held-lock deadlock risk.
-    async fn save(&self, cfg: &AppConfig) -> Result<(), Error> {
+    pub(crate) async fn save(&self, cfg: &AppConfig) -> Result<(), Error> {
         let json = serde_json::to_string_pretty(cfg)?;
         let tmp = self.path.with_extension("tmp");
         tokio::fs::write(&tmp, json).await?;
         tokio::fs::rename(&tmp, &self.path).await?;
         *self.cache.lock().expect("app config lock poisoned") = cfg.clone();
         Ok(())
+    }
+
+    /// Get → mutate → save → return the updated config. Shared shape for the
+    /// app-scoped setters (atomic write + cache swap under the mutex, never
+    /// holding the mutex across an `.await`).
+    async fn update<F: FnOnce(&mut AppConfig)>(&self, f: F) -> Result<AppConfig, Error> {
+        let mut cfg = self.get();
+        f(&mut cfg);
+        self.save(&cfg).await?;
+        Ok(cfg)
+    }
+
+    /// Set the auto-lock mode. `Idle(n)` is clamped to the allowed range first.
+    pub(crate) async fn set_lock_mode(&self, mode: LockMode) -> Result<AppConfig, Error> {
+        self.update(|cfg| cfg.lock_mode = clamp_lock_mode(mode))
+            .await
+    }
+
+    /// Set the password-view auto-clear override (`None` ⇒ default, `Some(0)` ⇒
+    /// never, else clamped to the allowed range).
+    pub(crate) async fn set_view_clear_secs(&self, secs: Option<u64>) -> Result<AppConfig, Error> {
+        self.update(|cfg| cfg.view_clear_secs = normalize_clear_secs(secs))
+            .await
+    }
+
+    /// Set the clipboard auto-clear override (same rule as view-clear).
+    pub(crate) async fn set_clipboard_clear_secs(
+        &self,
+        secs: Option<u64>,
+    ) -> Result<AppConfig, Error> {
+        self.update(|cfg| cfg.clipboard_clear_secs = normalize_clear_secs(secs))
+            .await
+    }
+
+    /// Set the per-save autosync flag.
+    pub(crate) async fn set_autosync(&self, enabled: bool) -> Result<AppConfig, Error> {
+        self.update(|cfg| cfg.autosync = enabled).await
+    }
+
+    /// Set the persisted app-launch biometric-gate intent flag (write-only
+    /// mirror of the Keystore-probed runtime state).
+    pub(crate) async fn set_biometric_app_lock(&self, enabled: bool) -> Result<AppConfig, Error> {
+        self.update(|cfg| cfg.biometric_app_lock = enabled).await
     }
 }
 
@@ -278,6 +430,7 @@ mod tests {
             .save(&AppConfig {
                 secure_screen: false,
                 locale: None,
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -292,6 +445,7 @@ mod tests {
             .save(&AppConfig {
                 secure_screen: true,
                 locale: None,
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -311,6 +465,7 @@ mod tests {
             .save(&AppConfig {
                 secure_screen: true,
                 locale: Some("zh-CN".to_string()),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -328,6 +483,7 @@ mod tests {
             .save(&AppConfig {
                 secure_screen: true,
                 locale: None,
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -389,6 +545,7 @@ mod tests {
             .save(&AppConfig {
                 secure_screen: true,
                 locale: Some("zh-CN".to_string()),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -406,6 +563,7 @@ mod tests {
             .save(&AppConfig {
                 secure_screen: true,
                 locale: Some("fr".to_string()),
+                ..Default::default()
             })
             .await
             .unwrap();

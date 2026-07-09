@@ -33,26 +33,12 @@ export interface RepoConfig {
   commit_user_name?: string | null;
   /** Git commit author email; null/absent uses the app default. */
   commit_user_email?: string | null;
-  /** App auto-lock mode. Absent ⇒ Immediate (the default). Mirrors the Rust
-   * `LockMode` (serde externally-tagged, lowercase). */
-  lock_mode?: LockMode;
-  /** Password-view auto-clear seconds. Absent/null ⇒ default (45); 0 ⇒ never. */
-  view_clear_secs?: number | null;
-  /** Clipboard auto-clear seconds. Absent/null ⇒ default (45); 0 ⇒ never. */
-  clipboard_clear_secs?: number | null;
-  /** Whether the app-launch biometric gate is enabled (absent ⇒ false). When
-   * enabled, the seal master key is sealed behind a biometric-gated key and
-   * the whole store is unreadable until the app is unlocked. */
-  biometric_app_lock?: boolean;
   /** Whether a successful app-unlock should also unlock the identity session
    * (absent ⇒ false). Independent of the auto-lock timing presets; only
    * meaningful when `biometric_app_lock` is enabled. */
   unlock_identity_with_app?: boolean;
   /** Repository authenticity config. Absent when Off/empty. */
   authenticity?: AuthenticityConfig;
-  /** Per-device autosync: when on (absent ⇒ true), every save pull-write-pushes
-   *  automatically; when off, saves stay local until a manual Sync publishes. */
-  autosync?: boolean;
 }
 
 /** How the app auto-locks the identity cache (mirrors Rust `LockMode`). */
