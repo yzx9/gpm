@@ -66,6 +66,10 @@ function select(v: T) {
   background: var(--color-surface);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  /* .mode-pill is a <label>, so the global button user-select rule misses it;
+     suppress long-press text selection on the pill labels here too. */
+  -webkit-user-select: none;
+  user-select: none;
   min-height: 48px;
   display: flex;
   align-items: center;

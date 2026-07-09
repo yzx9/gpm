@@ -144,6 +144,11 @@
   button,
   [role="button"] {
     -webkit-tap-highlight-color: transparent;
+    /* Buttons aren't selectable text: suppress Android WebView's long-press
+       selection handles on button labels. Copy targets are non-button
+       elements (password/value/pre/code), so this doesn't touch them. */
+    -webkit-user-select: none;
+    user-select: none;
   }
   /* Keyboard focus ring — matches BaseSegmentedControl's active-pill ring. */
   button:focus-visible,
