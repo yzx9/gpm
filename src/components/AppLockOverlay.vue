@@ -93,7 +93,7 @@ onMounted(() => {
       {{ notice }}
     </BaseAlert>
 
-    <BaseButton variant="primary" :loading="loading" @click="tryUnlock">
+    <BaseButton variant="primary" block :loading="loading" @click="tryUnlock">
       <BaseIcon v-if="!loading" :icon="ScanFace" />
       <span>{{
         loading

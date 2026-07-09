@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The pull-to-refresh sync indicator is rebuilt: syncing now leads with a spinning refresh icon and a full-width progress bar instead of a lone stop button, the stop control is smaller and calmer, and the pull-down spinner sits with breathing room above the search box.
 
+### Fixed
+
+- On the App Lock screen, the "Unlock with biometric" button was shrunk to its label and left-aligned at the edge of the card. It now stretches the full width with centered text, matching the other unlock buttons.
+
 ## [v0.11.0] - 2026-07-08
 
 ### Added
