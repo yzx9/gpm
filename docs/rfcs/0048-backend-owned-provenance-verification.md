@@ -18,8 +18,8 @@ may carry.
 
 ## Why
 
-Authenticity is coupled to git in two places at once: it is *implemented* only
-for git (commit signatures), and it is *invoked* from the store as if git is
+Authenticity is coupled to git in two places at once: it is _implemented_ only
+for git (commit signatures), and it is _invoked_ from the store as if git is
 the only possibility. The first pluggable-storage backends (RFC 0046's
 local-only and cloud-folder backends) have no revision control and therefore no
 commit signatures, so for them authenticity is not applicable — which forces
@@ -42,7 +42,7 @@ signature verification is a function of its git revision-control backend; the
 no-RCS `fs` backend has no equivalent and makes no claim to it. gpm inherits
 this: provenance is meaningful only where there is a signed history. This RFC
 does not invent a new provenance model; it relocates the existing one so its
-*location* matches gopass's conceptual split — it is the backend's concern, not
+_location_ matches gopass's conceptual split — it is the backend's concern, not
 the store's.
 
 **Why a backend seam, not a store policy.** A store-level authenticity policy
@@ -61,7 +61,7 @@ whatever the user's external sync tool provides; the cloud-folder store's is
 the cloud provider's conflict model. Neither is a cryptographic attestation of
 authorship. Declaring "no provenance model" is the honest answer for them, not a
 gap to paper over. The seam's value is not that these backends gain a feature;
-it is that a *future* backend with a real trust signal has a place to put it,
+it is that a _future_ backend with a real trust signal has a place to put it,
 and that the store stops assuming the only such signal is a commit signature.
 
 **The near-term gating is the prerequisite, not the alternative.** Until this
@@ -74,7 +74,7 @@ store has to remember.
 
 **Threat-model impact — none for contents; honesty about metadata.** Secret
 contents stay encrypted exactly as today; this moves only the provenance
-*check*, not the encryption. What changes is that a user on a no-provenance
+_check_, not the encryption. What changes is that a user on a no-provenance
 backend is told, explicitly, that authorship is not attested — the same honest
 position a gopass `fs` user is already in — rather than silently inheriting a
 signature check that does not exist for their backend.
