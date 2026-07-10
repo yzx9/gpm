@@ -54,7 +54,8 @@ const entryName = entryPath.replace(/\.age$/, "");
 // Sensitive state lives in the shared secure-reveal composable: configurable
 // auto-clear, wipe on unmount, wipe on browser back. `copyPassword` calls
 // `clear()` itself.
-const { password, notes, revealed, reveal, clear } = useSecretReveal();
+const { password, notes, revealed, clearsInSecs, reveal, clear } =
+  useSecretReveal();
 const { viewClearSecs } = useSecuritySettings();
 const loading = ref(false);
 const error = ref("");
@@ -455,7 +456,7 @@ function handleKeydown(e: KeyboardEvent) {
         <p class="text-center text-xs text-muted mt-3">
           {{
             viewClearSecs > 0
-              ? t("entry.autoClearsIn", { secs: viewClearSecs })
+              ? t("entry.autoClearsIn", { secs: clearsInSecs })
               : t("entry.staysVisible")
           }}
         </p>

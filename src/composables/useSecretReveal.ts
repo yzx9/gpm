@@ -27,16 +27,29 @@ export function useSecretReveal() {
   const password = ref<string | null>(null);
   const notes = ref<string | null>(null);
   const revealed = ref(false);
+  /** Seconds remaining until the auto-clear fires. Drives the live "auto-clears
+   *  in Ns" countdown; `0` while nothing is revealed or when Never is set. */
+  const clearsInSecs = ref(0);
   let autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+  let countdownTimer: ReturnType<typeof setInterval> | null = null;
+  /** Epoch-ms deadline the wipe is scheduled for. The countdown recomputes the
+   *  remaining seconds from this on each tick instead of counting ticks down, so
+   *  a throttled/skipped interval can't make the label drift. */
+  let wipeDeadline = 0;
 
   /** Wipe any revealed content and cancel the auto-clear timer. */
   function clear() {
     password.value = null;
     notes.value = null;
     revealed.value = false;
+    clearsInSecs.value = 0;
     if (autoHideTimer) {
       clearTimeout(autoHideTimer);
       autoHideTimer = null;
+    }
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
     }
   }
 
@@ -48,9 +61,30 @@ export function useSecretReveal() {
       clearTimeout(autoHideTimer);
       autoHideTimer = null;
     }
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
     const secs = viewClearSecs.value;
     if (secs > 0) {
+      // Capture the wipe's absolute deadline once, then recompute the remaining
+      // seconds from it on each tick. setInterval has no per-second guarantee on
+      // a WebView (background/lock throttling, busy main thread), so counting
+      // ticks would let the label drift ahead of wall-clock; recomputing against
+      // the deadline keeps it truthful however often the tick actually fires.
+      wipeDeadline = Date.now() + secs * 1000;
+      clearsInSecs.value = secs;
       autoHideTimer = setTimeout(clear, secs * 1000);
+      // Clamped at 1 so the label never flashes "0s" — the wipe hides the whole
+      // block the moment it fires (even if the wipe itself is throttled late).
+      countdownTimer = setInterval(() => {
+        clearsInSecs.value = Math.max(
+          1,
+          Math.ceil((wipeDeadline - Date.now()) / 1000),
+        );
+      }, 1000);
+    } else {
+      clearsInSecs.value = 0;
     }
   }
 
@@ -77,5 +111,5 @@ export function useSecretReveal() {
     }
   });
 
-  return { password, notes, revealed, reveal, clear };
+  return { password, notes, revealed, clearsInSecs, reveal, clear };
 }

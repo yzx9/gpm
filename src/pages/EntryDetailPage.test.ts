@@ -79,6 +79,67 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("some notes");
     });
 
+    it("ticks the auto-clear countdown down each second", async () => {
+      vi.mocked(invoke).mockResolvedValue({ password: "s3cret", notes: "" });
+      const wrapper = mountPage();
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises();
+
+      // Freshly revealed: shows the full default 45s window.
+      expect(wrapper.text()).toContain("Auto-clears in 45s");
+
+      // One second later: the live countdown has ticked.
+      vi.advanceTimersByTime(1_000);
+      await flushPromises();
+      expect(wrapper.text()).toContain("Auto-clears in 44s");
+    });
+
+    it("clamps the countdown at 1s and never shows 0s before the wipe", async () => {
+      vi.mocked(invoke).mockResolvedValue({ password: "s3cret", notes: "" });
+      const wrapper = mountPage();
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises();
+
+      // Tick to the last whole second before the 45s wipe deadline: the clamp
+      // holds at 1s, never flashing 0s.
+      vi.advanceTimersByTime(44_000);
+      await flushPromises();
+      expect(wrapper.text()).toContain("Auto-clears in 1s");
+      expect(wrapper.text()).not.toContain("Auto-clears in 0s");
+
+      // The final second: the wipe fires and the whole block (label included) hides.
+      vi.advanceTimersByTime(1_000);
+      await flushPromises();
+      expect(wrapper.text()).not.toContain("s3cret");
+      expect(wrapper.text()).not.toContain("Auto-clears in");
+    });
+
+    it("resets the countdown when the view-clear setting changes mid-reveal", async () => {
+      vi.mocked(invoke).mockResolvedValue({ password: "s3cret", notes: "" });
+      const { wrapper, securitySettings } = mountWithApp(EntryDetailPage);
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises();
+      expect(wrapper.text()).toContain("Auto-clears in 45s");
+
+      // A few seconds tick down from the original 45s window.
+      vi.advanceTimersByTime(5_000);
+      await flushPromises();
+      expect(wrapper.text()).toContain("Auto-clears in 40s");
+
+      // Lowering the setting to 10s re-arms from a fresh deadline.
+      securitySettings.applySecurityConfig({
+        secure_screen: true,
+        view_clear_secs: 10,
+      });
+      await flushPromises();
+      expect(wrapper.text()).toContain("Auto-clears in 10s");
+
+      // The new (shorter) deadline governs: 10s later the password wipes.
+      vi.advanceTimersByTime(10_000);
+      await flushPromises();
+      expect(wrapper.text()).not.toContain("s3cret");
+    });
+
     it("toggles off when clicked while already revealed (no re-auth, no re-decrypt)", async () => {
       // Regression: clicking the "Showing..." button used to re-run auth +
       // show_password instead of hiding. It must now clear in place.
