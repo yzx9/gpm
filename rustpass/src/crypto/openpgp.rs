@@ -728,6 +728,54 @@ mod tests {
         assert_eq!(decrypted, DATA);
     }
 
+    /// Gate-zero for the MIN unlock design. Proves the exact chain a future
+    /// `GpgBackend::unlock_identity` + `decrypt` depends on:
+    ///   at-rest S2K-locked armor
+    ///     -> `remove_password` (primary + every subkey)
+    ///     -> `armor_secret_key`   (the operational bytes cached in
+    ///                              `Store::cached_identity`)
+    ///     -> `parse_armored_secret_key` (re-parse on the decrypt path)
+    ///     -> `decrypt_message_with_keys(.., Password::empty())`
+    /// Every other spike test decrypts *with* the passphrase; this one proves
+    /// the unlocked-then-emptied path that the bytes-through-cached_identity
+    /// model relies on. Round-trip bar only — S2K salts make byte-equality
+    /// meaningless (see the `scrypt-at-rest-not-byte-identical` learning).
+    #[test]
+    fn remove_password_unlock_chain_round_trips() {
+        const DATA: &[u8] = b"unlocked-armor chain";
+        let passphrase = SPIKE_PASSPHRASE;
+        let pw: Password = passphrase.into();
+        let (sk, pk) = generate_keypair(SPIKE_UID, Some(passphrase)).expect("keygen");
+        let encrypted = encrypt_to_recipients(DATA, &[&pk]).expect("encrypt");
+
+        // at-rest form: S2K-locked armor (what gets AEAD-sealed on disk).
+        let at_rest = armor_secret_key(&sk).expect("armor at-rest");
+        let mut locked = parse_armored_secret_key(at_rest.as_bytes()).expect("parse at-rest");
+
+        // unlock_identity: strip the S2K layer from the primary + every subkey.
+        locked
+            .primary_key
+            .remove_password(&pw)
+            .expect("remove_password primary");
+        for sub in &mut locked.secret_subkeys {
+            sub.key
+                .remove_password(&pw)
+                .expect("remove_password subkey");
+        }
+
+        // The operational bytes cached in `Store::cached_identity`: the unlocked
+        // key re-armored (no passphrase layer left).
+        let unlocked_armor = armor_secret_key(&locked).expect("re-armor unlocked");
+        let operational = parse_armored_secret_key(unlocked_armor.as_bytes())
+            .expect("re-parse unlocked armor");
+
+        // decrypt: the operational (unlocked) key + Password::empty().
+        let decrypted =
+            decrypt_message_with_keys(&encrypted, &[&operational], &[&Password::empty()])
+                .expect("unlocked armor decrypts with empty passphrase");
+        assert_eq!(decrypted, DATA);
+    }
+
     #[test]
     fn decrypt_message_with_keys_two_recipients() {
         const DATA: &[u8] = b"two-recipient keyring decrypt";
