@@ -20,7 +20,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
 
 ### Frontend — `src/`
 
-SPA web app with Vue3 + TypeScript. All Tauri IPC types live in `src/types.ts`.
+SPA web app with Vue3 + TypeScript.
 
 ### Backend — `rustpass/`
 
@@ -36,11 +36,11 @@ Async Tauri commands, shared app state (`AppState`), and the entry point (`run()
 
 ### Tauri Plugins — `tauri-plugin-*/`
 
-Local Tauri plugin crates (not published). Each follows the standard Tauri mobile-plugin layout: Rust in `src/`, and its Android Kotlin in its own `android/` Gradle library module (own namespace + build) under a `xyz.yzx9.gpm.{plugin}` package. Tauri auto-discovers each `android/` dir and wires it into the app's gradle build on `tauri android *` runs.
+Local Tauri plugin crates. Each follows the standard Tauri mobile-plugin layout: Rust in `src/`, and its Android Kotlin in its own `android/` Gradle library module (own namespace + build) under a `xyz.yzx9.gpm.{plugin}` package. Tauri auto-discovers each `android/` dir and wires it into the app's gradle build on `tauri android *` runs.
 
 - `tauri-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
 - `tauri-plugin-biometric-keystore` — stores the identity passphrase in the Android Keystore (AES/GCM, hardware-backed) and retrieves it through a biometric-gated `BiometricPrompt`
-- `tauri-plugin-secure-keystore` — seals the at-rest master key with an auth-free, hardware-backed Android Keystore AES/GCM key (the biometric-keystore sibling, minus the prompt; survives fingerprint changes) and returns it to Rust so `repo.json`/`identity` can be AEAD-encrypted at rest
+- `tauri-plugin-secure-keystore` — seals the at-rest master key with an auth-free, hardware-backed Android Keystore AES/GCM key (the biometric-keystore sibling, minus the prompt; survives fingerprint changes) and returns it to Rust so resources can be AEAD-encrypted at rest
 - `tauri-plugin-file-picker` — opens the Android Storage Access Framework picker and reads the picked file's bytes into Rust (backend-only; desktop falls back to `tauri-plugin-dialog`)
 
 ## Security Model
@@ -86,18 +86,15 @@ Write an RFC when:
 - A decision is non-obvious, reversible only with effort, or touches the architecture or threat model.
 - A thought came up during implementation but does not belong in the current PR.
 - A phase just landed and you want to record the next, larger improvement.
+
+When writing one:
+
+- **Read `0000-rfc-template.md` first, before writing anything.** It is the spec: the header metadata, the section structure, the file-naming / numbering rules, and the altitude rule all live there.
+
+RFC references and lifecycle:
+
 - Do not reference temporary RFCs, review labels, or planning artifacts in code, docs, comments, or commit messages; instead, write self-contained explanations of the what and why.
-
-### How to write one
-
-- One file per RFC: `NNNN-kebab-title.md`.
-- `NNNN` is 4-digit zero-padded; **next number = current max + 1**. The "current max" is the highest `NNNN` on **any branch** (local or remote), not just the local checkout — scan every branch tip's `docs/rfcs/` (e.g. `git ls-tree -r --name-only <ref> -- docs/rfcs/` over each `git branch -a` ref), since an in-flight branch may already hold a higher number than your local `main`.
-- Follow the template in `0000-rfc-template.md`.
 - If an RFC is completed or superseded, it may be removed.
-
-### Altitude — the one rule
-
-If you are writing file paths, line numbers, struct fields, function signatures, or code, you have dropped below RFC altitude — move it into the implementation. An RFC should still read cleanly after the code it describes has been rewritten twice. The RFC records _why_; the implementation records _how_.
 
 ## Compact Instructions
 

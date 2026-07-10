@@ -14,6 +14,16 @@
 >
 > When the RFC's feature ships, delete the file — the rationale then lives in the code docs / threat model, and the numbering gaps this leaves are expected.
 
+> ## Naming & numbering
+>
+> One file per RFC: `NNNN-kebab-title.md`. `NNNN` is 4-digit zero-padded; **next number = current max + 1**. The "current max" is the highest `NNNN` on **any branch** (local or remote), not just the local checkout — scan every branch tip's `docs/rfcs/` (e.g. `git ls-tree -r --name-only <ref> -- docs/rfcs/` over each `git branch -a` ref), since an in-flight branch may already hold a higher number than your local `main`.
+
+> ## Altitude — the one rule
+>
+> If you are writing file paths, line numbers, struct fields, function signatures, or code, you have dropped below RFC altitude — move it into the implementation. An RFC should still read cleanly after the code it describes has been rewritten twice. The RFC records _why_; the implementation records _how_.
+>
+> The Metadata, Naming & numbering, and Altitude notes above are author guidance — delete all three when filling the RFC in.
+
 ## What
 
 One paragraph: the problem and the proposed shape of the solution.
