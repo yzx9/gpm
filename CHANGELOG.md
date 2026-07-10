@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- When sliding between screens — for example, tapping a create-secret step like "Website" — the Back button on the outgoing screen used to leap up into the camera notch for a moment before settling back, most noticeably on phones with a large display cutout. The outgoing screen now keeps its top spacing throughout the slide.
+
 ## [v0.12.0] - 2026-07-10
 
 ### Added

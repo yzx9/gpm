@@ -199,9 +199,16 @@
 .slide-forward-leave-active,
 .slide-back-leave-active {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  /* Match .app-shell's safe-area padding: an absolutely-positioned child is
+     offset from the padding box (the inner border edge), so it ignores the
+     shell's padding-top/left/right. With `0` the departing page would jump up
+     by --safe-area-inset-top the instant the transition starts — its Back
+     button leaps into the cutout, then "falls" back when the in-flow arriving
+     page settles. Offsetting by the same insets keeps the departing page on the
+     content box it occupied in flow, so only the horizontal translateX fires. */
+  top: var(--safe-area-inset-top, 0px);
+  left: var(--safe-area-inset-left, 0px);
+  right: var(--safe-area-inset-right, 0px);
   /* The departing page must not intercept taps during the slide — a fast
      second tap could otherwise hit a stale control (e.g. Delete) on the page
      that's sliding away. */
