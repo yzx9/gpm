@@ -28,12 +28,16 @@ use crate::identity::{IdentityType, classify_identity};
 use crate::recipient::{Recipient, parse_recipients};
 use crate::storage::{RecipientsIndexPresence, RepoFileView, validate_recipients_index_liveness};
 
-/// The age encryption backend (the sole `CryptoBackend` implementation today).
+/// The age encryption backend (a `CryptoBackend` implementation).
 pub mod age;
 
+/// The GPG/OpenPGP crypto backend (a `CryptoBackend` implementation).
+pub mod gpg;
+
 /// Low-level OpenPGP (rpgp) wrapper — the shared seam owning the `pgp` dep.
-/// Holds GPG commit-signature verification (RFC 0009, live) and the crypto
-/// primitives (RFC 0036, `#[allow(dead_code)]` until `GpgBackend` lands).
+/// Holds GPG commit-signature verification (live) and the crypto primitives the
+/// GPG backend routes through (`generate_keypair` stays `#[allow(dead_code)]`
+/// until the setup flow consumes it).
 pub mod openpgp;
 
 #[allow(unused_imports)]
@@ -41,6 +45,9 @@ pub mod openpgp;
 // (src-tauri's `generate_age_identity`, integration tests, the seal
 // `Config` layer). `Store` itself routes through `AgeBackend`, not these.
 pub use age::*;
+
+/// The GPG backend constructor surface (seam-tested, not yet wired into `Store`).
+pub use gpg::GpgBackend;
 
 // ── Per-backend profile ───────────────────────────────────────────────────
 
@@ -51,11 +58,9 @@ pub use age::*;
 /// at `Store::new`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
-    /// The age (X25519 / SSH) crypto backend — the sole implementation today.
+    /// The age (X25519 / SSH) crypto backend.
     Age,
-    /// The GPG/OpenPGP crypto backend (RFC 0036; lands once the trait reshape
-    /// is in). `#[allow(dead_code)]` until `GpgBackend` exists.
-    #[allow(dead_code)]
+    /// The GPG/OpenPGP crypto backend.
     Gpg,
 }
 

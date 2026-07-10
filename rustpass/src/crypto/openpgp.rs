@@ -406,6 +406,62 @@ pub(crate) fn encrypt_to_recipients(
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("serialize message: {e}")))
 }
 
+/// Encrypt `plaintext` to each recipient's encryption-capable subkey, returning
+/// binary `OpenPGP` (the on-disk gopass `<name>.gpg` format). Unlike
+/// [`encrypt_to_recipients`] (which takes the first subkey blindly), this selects
+/// the subkey whose binding signature grants encryption — gpg's own rule, which
+/// gopass delegates to (`gpg --encrypt` picks the encryption subkey by key flags).
+/// Correct for imported keys whose first subkey is signing-only.
+///
+/// SEIPD v1 / AES256 / no compression, one PKESK per recipient — same wire shape
+/// as [`encrypt_to_recipients`] and gopass's `--compress-algo=none` output.
+///
+/// # Errors
+///
+/// `InvalidIdentity` if `recipients` is empty, or a recipient has subkeys but
+/// none encryption-capable (a "bad recipient" — surfaced so the caller doesn't
+/// silently drop it, matching gopass's `badRecipients`); `StoreError` if rpgp
+/// fails to encrypt or serialize.
+pub(crate) fn encrypt_to_selected_subkeys(
+    plaintext: &[u8],
+    recipients: &[&SignedPublicKey],
+) -> Result<Vec<u8>, Error> {
+    if recipients.is_empty() {
+        return Err(Error::new(
+            ErrorCode::InvalidIdentity,
+            "encrypt_to_selected_subkeys requires at least one recipient public key",
+        ));
+    }
+    let mut rng = thread_rng();
+    let mut builder = MessageBuilder::from_bytes("", plaintext.to_vec())
+        .seipd_v1(&mut rng, SymmetricKeyAlgorithm::AES256);
+    for r in recipients {
+        // gpg's selection: the first subkey whose binding grants encryption
+        // storage/comms. gopass/gpg keys always carry key-flags subpackets, so a
+        // recipient with subkeys but no encryption-capable one is a bad recipient.
+        let enc_subkey = r
+            .public_subkeys
+            .iter()
+            .find(|sub| {
+                sub.signatures
+                    .iter()
+                    .any(|s| s.key_flags().encrypt_storage() || s.key_flags().encrypt_comms())
+            })
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InvalidIdentity,
+                    "recipient GPG key has no encryption-capable subkey (bad recipient)",
+                )
+            })?;
+        builder
+            .encrypt_to_key(&mut rng, enc_subkey)
+            .map_err(|e| Error::new(ErrorCode::StoreError, format!("encrypt to subkey: {e}")))?;
+    }
+    builder
+        .to_vec(&mut rng)
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("serialize message: {e}")))
+}
+
 /// Decrypt a single-recipient `OpenPGP` message with one secret key + passphrase,
 /// returning the literal plaintext bytes. `passphrase` is `Password::empty()` for
 /// an unprotected key. The single-key special case of
@@ -415,7 +471,6 @@ pub(crate) fn encrypt_to_recipients(
 ///
 /// `DecryptFailed` if the ciphertext is unparseable, the key/passphrase do not
 /// match, or the data is corrupt.
-#[allow(dead_code)]
 pub(crate) fn decrypt_message(
     ciphertext: &[u8],
     passphrase: &Password,
@@ -457,19 +512,85 @@ pub(crate) fn decrypt_message_with_keys(
         .map_err(|e| Error::new(ErrorCode::DecryptFailed, format!("extract literal: {e}")))
 }
 
+/// Strip the S2K passphrase layer from a secret key (primary + every subkey) in
+/// place — the inverse of the `set_password` step in [`generate_keypair`]. A
+/// `Plain` (unprotected) key is a no-op. This is the load-bearing op for the
+/// GPG backend's `unlock_identity`/`validate_identity_passphrase`: rpgp's
+/// `remove_password` consumes `Password` here so callers need not name the type.
+///
+/// # Errors
+///
+/// `WrongPassphrase` if `password` does not satisfy the S2K checksum on an
+/// encrypted key (the only failure mode for an otherwise-parseable key).
+pub(crate) fn strip_passphrase(sk: &mut SignedSecretKey, password: &str) -> Result<(), Error> {
+    let pw: Password = password.into();
+    sk.primary_key.remove_password(&pw).map_err(|e| {
+        Error::new(
+            ErrorCode::WrongPassphrase,
+            format!("unlock primary key: {e}"),
+        )
+    })?;
+    for sub in &mut sk.secret_subkeys {
+        sub.key
+            .remove_password(&pw)
+            .map_err(|e| Error::new(ErrorCode::WrongPassphrase, format!("unlock subkey: {e}")))?;
+    }
+    Ok(())
+}
+
+/// Decrypt a single-recipient message with an already-unlocked (`Plain`) secret
+/// key — `Password::empty()` because [`strip_passphrase`] already removed the S2K
+/// layer. This is the GPG backend's `decrypt` path over the operational
+/// (unlocked-armor) identity bytes.
+///
+/// # Errors
+///
+/// `DecryptFailed` if the ciphertext is unparseable, the key does not match, or
+/// the data is corrupt.
+pub(crate) fn decrypt_with_unlocked_key(
+    ciphertext: &[u8],
+    sk: &SignedSecretKey,
+) -> Result<Vec<u8>, Error> {
+    decrypt_message(ciphertext, &Password::empty(), sk)
+}
+
+/// True iff the secret key (primary or any subkey) is S2K-encrypted at rest —
+/// i.e. unlocking needs a passphrase. Used by the GPG backend's
+/// `identity_requires_passphrase`.
+#[must_use]
+pub(crate) fn secret_key_is_encrypted(sk: &SignedSecretKey) -> bool {
+    sk.primary_key.secret_params().is_encrypted()
+        || sk
+            .secret_subkeys
+            .iter()
+            .any(|sub| sub.key.secret_params().is_encrypted())
+}
+
 /// Armor a secret key for at-rest storage (the gopass identity format).
 /// Round-trips with [`parse_armored_secret_key`].
 ///
 /// # Errors
 ///
 /// `StoreError` if rpgp fails to serialize.
-#[allow(dead_code, clippy::default_trait_access)]
+#[allow(clippy::default_trait_access)]
 pub(crate) fn armor_secret_key(sk: &SignedSecretKey) -> Result<String, Error> {
     // `ArmorOptions` isn't re-exported by pgp 0.19 (`mod message` is private), so
     // `Default::default()` is the only external way to construct it — matches
     // pgp's own internal `to_armored_string(Default::default())` usage.
     sk.to_armored_string(Default::default())
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("armor secret key: {e}")))
+}
+
+/// Armor a public key — the gopass `.public-keys/<id>` blob format. Round-trips
+/// with [`parse_armored_public_key`].
+///
+/// # Errors
+///
+/// `StoreError` if rpgp fails to serialize.
+#[allow(dead_code, clippy::default_trait_access)]
+pub(crate) fn armor_public_key(pk: &SignedPublicKey) -> Result<String, Error> {
+    pk.to_armored_string(Default::default())
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("armor public key: {e}")))
 }
 
 /// Parse an armored secret key produced by [`armor_secret_key`] or by
@@ -482,7 +603,6 @@ pub(crate) fn armor_secret_key(sk: &SignedSecretKey) -> Result<String, Error> {
 /// # Errors
 ///
 /// `InvalidIdentity` if the armor is unparseable.
-#[allow(dead_code)]
 pub(crate) fn parse_armored_secret_key(armored: &[u8]) -> Result<SignedSecretKey, Error> {
     let (sk, _headers) = SignedSecretKey::from_armor_single(armored).map_err(|e| {
         Error::new(
@@ -766,8 +886,8 @@ mod tests {
         // The operational bytes cached in `Store::cached_identity`: the unlocked
         // key re-armored (no passphrase layer left).
         let unlocked_armor = armor_secret_key(&locked).expect("re-armor unlocked");
-        let operational = parse_armored_secret_key(unlocked_armor.as_bytes())
-            .expect("re-parse unlocked armor");
+        let operational =
+            parse_armored_secret_key(unlocked_armor.as_bytes()).expect("re-parse unlocked armor");
 
         // decrypt: the operational (unlocked) key + Password::empty().
         let decrypted =
