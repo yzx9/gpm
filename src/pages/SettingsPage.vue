@@ -15,7 +15,6 @@ import type {
   VerifyMode,
 } from "@/api";
 import {
-  addTrustedSigningKey,
   resetConfig as apiResetConfig,
   asAppLockError,
   changePassphrase,
@@ -25,7 +24,6 @@ import {
   enableBiometricAppLock,
   enableBiometricUnlock,
   enableIdentityAutoUnlock,
-  exportSshPrivateKey,
   getAppConfig,
   getAppLockState,
   getAuthState,
@@ -33,7 +31,6 @@ import {
   getCommitIdentityDefault,
   getConfig,
   getGpgKeyParseWarnings,
-  getSshPublicKey,
   importTrustedGpgKeyFile,
   isAppLockAvailable,
   isBiometricAvailable,
@@ -58,7 +55,6 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
@@ -77,16 +73,13 @@ import { navBack } from "@/utils/nav";
 import {
   ArrowLeft,
   CircleCheck,
-  Copy,
   FileUp,
   History,
   KeyRound,
   Lock,
-  LockOpen,
   Plus,
   Settings,
   Trash2,
-  TriangleAlert,
 } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -138,10 +131,6 @@ const config = ref<RepoConfig | null>(null);
 const appConfig = ref<AppConfig | null>(null);
 const loading = ref(false);
 const error = ref("");
-const publicKey = ref("");
-const showPublic = ref(false);
-const privateKey = ref("");
-const showPrivate = ref(false);
 
 const isSsh = ref(false);
 
@@ -231,9 +220,6 @@ const appLockLoading = ref(false);
 // ── Repository authenticity state ────────────────────────────────────────
 const authConfig = ref<AuthenticityConfig | null>(null);
 const authLoading = ref(false);
-const showAddKey = ref(false);
-const newPublicKey = ref("");
-const newKeyLabel = ref("");
 /** Per-key parse warnings for the persisted trusted GPG keys — non-empty when
  * a previously-trusted key later fails to re-parse (surfaces the silent
  * Verified→UnverifiedSignature downgrade so the user can re-add or remove). */
@@ -342,19 +328,10 @@ const isSshIdentity = computed(
     identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
 );
 
-/** Wipe the exported SSH key panels (public + private). */
-function wipeKeys() {
-  publicKey.value = "";
-  privateKey.value = "";
-  showPublic.value = false;
-  showPrivate.value = false;
-}
-
-/** Wipe every in-DOM secret: exported keys, the typed passphrase-modal inputs,
- *  and its confirm echo. Idempotent — fires on a hard lock, browser back, and
- *  unmount. */
+/** Wipe every in-DOM secret: the typed passphrase-modal inputs and their
+ *  confirm echo. Idempotent — fires on a hard lock, browser back, and unmount.
+ *  (Exported SSH keys now live on the dedicated SshKeyPage, which wipes itself.) */
 function wipeSecrets() {
-  wipeKeys();
   ppCurrent.value = "";
   ppNew.value = "";
   ppAck.value = false;
@@ -425,11 +402,6 @@ async function onSecureScreenChange(enabled: boolean) {
     toast.danger(t("settings.secureScreen.saveFailed"));
     return;
   }
-  // Disarming protection while a secret is still on screen would expose it, so
-  // wipe any revealed key material first (mirrors the wipe on lock/back/unmount).
-  if (!enabled) {
-    wipeKeys();
-  }
   toast.success(
     enabled
       ? t("settings.secureScreen.blockedToast")
@@ -494,40 +466,6 @@ async function onClipboardClearChange(secs: number | null) {
     error.value = appError?.message || t("settings.clear.setClipboardFailed");
   } finally {
     lockLoading.value = false;
-  }
-}
-
-async function showPublicKey() {
-  error.value = "";
-  try {
-    const result = await getSshPublicKey();
-    publicKey.value = result.public_key;
-    showPublic.value = true;
-  } catch (e) {
-    const appError = e as AppError;
-    error.value = appError?.message || t("settings.ssh.publicFailed");
-  }
-}
-
-async function exportPrivateKey() {
-  if (!confirm(t("settings.ssh.exportConfirm"))) return;
-  error.value = "";
-  try {
-    const result = await exportSshPrivateKey();
-    privateKey.value = result.private_key;
-    showPrivate.value = true;
-  } catch (e) {
-    const appError = e as AppError;
-    error.value = appError?.message || t("settings.ssh.exportFailed");
-  }
-}
-
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success(t("settings.toast.copied"));
-  } catch {
-    toast.danger(t("common.toast.copyFailed"));
   }
 }
 
@@ -720,34 +658,6 @@ async function onModeChange(mode: VerifyMode) {
   }
 }
 
-async function onAddKey(): Promise<boolean> {
-  error.value = "";
-  const key = newPublicKey.value.trim();
-  if (!key) {
-    error.value = t("settings.auth.pasteKeyPrompt");
-    return false;
-  }
-  authLoading.value = true;
-  try {
-    // The backend detects GPG vs SSH from the armor prefix — no client-side
-    // branching. `added.kind` tells us which list refreshed, but loadAuthConfig
-    // re-reads both regardless.
-    await addTrustedSigningKey(key, newKeyLabel.value.trim() || "signer");
-    newPublicKey.value = "";
-    newKeyLabel.value = "";
-    showAddKey.value = false;
-    toast.success(t("settings.auth.addedToast"));
-    await loadAuthConfig();
-    return true;
-  } catch (e) {
-    const appError = e as AppError;
-    error.value = appError?.message || t("settings.auth.addFailed");
-    return false;
-  } finally {
-    authLoading.value = false;
-  }
-}
-
 async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
   if (!confirm(t("settings.auth.removeConfirm"))) return;
   authLoading.value = true;
@@ -859,23 +769,15 @@ const commitDirty = computed(() => {
   const email = config.value?.commit_user_email ?? "";
   return commitName.value.trim() !== name || commitEmail.value.trim() !== email;
 });
-const addKeyDirty = computed(
-  () =>
-    showAddKey.value &&
-    (newPublicKey.value.trim() !== "" || newKeyLabel.value.trim() !== ""),
-);
-const hasUnsavedChanges = computed(
-  () => commitDirty.value || addKeyDirty.value,
-);
+const hasUnsavedChanges = computed(() => commitDirty.value);
 
-// Commit every dirty form. Returns false on any failure so the leave guard
-// can keep the user on the page to see the error; each handler already sets
-// `error` and leaves the form dirty on failure.
+// Commit the dirty commit-identity form. Returns false on failure so the leave
+// guard can keep the user on the page to see the error (the handler sets `error`
+// and leaves the form dirty on failure). The add-key form now lives on its own
+// route, so it no longer contributes to this page's dirty state.
 async function commitAllPending(): Promise<boolean> {
-  let ok = true;
-  if (commitDirty.value) ok = (await onSaveCommitIdentity()) && ok;
-  if (addKeyDirty.value) ok = (await onAddKey()) && ok;
-  return ok;
+  if (!commitDirty.value) return true;
+  return onSaveCommitIdentity();
 }
 
 type UnsavedChoice = "discard" | "save" | "cancel";
@@ -1042,62 +944,13 @@ onMounted(() => {
         </BaseButton>
       </BaseCard>
 
-      <!-- SSH key management -->
+      <!-- SSH key management — the key view/export lives on its own route so
+           Android back returns here instead of the entry list. -->
       <BaseCard as="section" v-if="isSsh">
         <h2 class="text-sm font-medium mb-3">{{ t("settings.ssh.title") }}</h2>
-
-        <!-- Show public key -->
-        <div class="flex flex-col gap-2">
-          <BaseButton variant="action" @click="showPublicKey">
-            <BaseIcon :icon="KeyRound" /> {{ t("settings.ssh.showPublic") }}
-          </BaseButton>
-
-          <div v-if="showPublic" class="mt-2 flex flex-col gap-2">
-            <div class="flex justify-between items-center">
-              <span class="text-xs text-muted">{{
-                t("settings.ssh.publicKeyLabel")
-              }}</span>
-              <button class="btn-copy" @click="copyText(publicKey)">
-                <BaseIcon :icon="Copy" /> {{ t("settings.ssh.copy") }}
-              </button>
-            </div>
-            <pre class="key-display">{{ publicKey }}</pre>
-          </div>
-        </div>
-
-        <!-- Export private key -->
-        <div class="flex flex-col gap-2 mt-3">
-          <BaseButton variant="action-danger" @click="exportPrivateKey">
-            <BaseIcon :icon="LockOpen" /> {{ t("settings.ssh.exportPrivate") }}
-          </BaseButton>
-
-          <div v-if="showPrivate" class="mt-2 flex flex-col gap-2">
-            <BaseAlert variant="danger">
-              <BaseIcon
-                :icon="TriangleAlert"
-                :size="14"
-                class="inline-block align-middle"
-              />
-              {{ t("settings.ssh.privateVisible") }}
-            </BaseAlert>
-            <div class="flex justify-end">
-              <button class="btn-copy" @click="copyText(privateKey)">
-                <BaseIcon :icon="Copy" /> {{ t("settings.ssh.copy") }}
-              </button>
-            </div>
-            <pre class="key-display private-key-display">{{ privateKey }}</pre>
-            <BaseButton
-              variant="action"
-              class="mt-1"
-              @click="
-                showPrivate = false;
-                privateKey = '';
-              "
-            >
-              {{ t("settings.ssh.hidePrivate") }}
-            </BaseButton>
-          </div>
-        </div>
+        <BaseButton variant="action" @click="router.push({ name: 'sshKey' })">
+          <BaseIcon :icon="KeyRound" /> {{ t("settings.ssh.manage") }}
+        </BaseButton>
       </BaseCard>
 
       <!-- Passphrase management (x25519 identities only — SSH keys rely on
@@ -1362,19 +1215,9 @@ onMounted(() => {
       </BaseCard>
 
       <!-- Repository authenticity -->
-      <BaseCard
-        as="section"
-        v-if="authConfig"
-        :border="addKeyDirty ? 'accent' : 'edge'"
-      >
+      <BaseCard as="section" v-if="authConfig">
         <h2 class="text-sm font-medium mb-3">
           {{ t("settings.auth.title") }}
-          <span
-            v-if="addKeyDirty"
-            class="ml-1 text-xs font-normal"
-            style="color: var(--color-accent)"
-            >{{ t("settings.auth.unsaved") }}</span
-          >
         </h2>
         <p class="text-xs text-muted mb-3">
           {{ t("settings.auth.description") }}
@@ -1449,55 +1292,16 @@ onMounted(() => {
           >
             <BaseIcon :icon="KeyRound" /> {{ t("settings.auth.trustHead") }}
           </BaseButton>
-          <BaseButton
-            v-if="!showAddKey"
-            variant="action"
-            @click="showAddKey = true"
-          >
+          <BaseButton variant="action" @click="router.push({ name: 'addKey' })">
             <BaseIcon :icon="Plus" /> {{ t("settings.auth.addKey") }}
           </BaseButton>
           <BaseButton
-            v-if="!showAddKey"
             variant="action"
             :disabled="authLoading"
             @click="onImportGpgKey"
           >
             <BaseIcon :icon="FileUp" /> {{ t("settings.auth.importGpg") }}
           </BaseButton>
-          <div v-if="showAddKey" class="flex flex-col gap-2">
-            <BaseTextarea
-              v-model="newPublicKey"
-              rows="3"
-              :placeholder="t('settings.auth.keyPlaceholder')"
-              class="font-mono text-xs"
-            />
-            <BaseInput
-              v-model="newKeyLabel"
-              type="text"
-              :placeholder="t('settings.auth.labelPlaceholder')"
-            />
-            <div class="flex gap-2">
-              <BaseButton
-                variant="action"
-                class="flex-1"
-                :disabled="authLoading"
-                @click="onAddKey"
-              >
-                {{ t("settings.auth.saveKey") }}
-              </BaseButton>
-              <BaseButton
-                variant="action"
-                class="flex-1"
-                @click="
-                  showAddKey = false;
-                  newPublicKey = '';
-                  newKeyLabel = '';
-                "
-              >
-                {{ t("common.button.cancel") }}
-              </BaseButton>
-            </div>
-          </div>
           <BaseButton variant="action" @click="openHistory">
             <BaseIcon :icon="History" /> {{ t("settings.auth.viewHistory") }}
           </BaseButton>
@@ -1647,24 +1451,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.key-display {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-input);
-  font-size: var(--text-xs);
-  font-family: monospace;
-  word-break: break-all;
-  white-space: pre-wrap;
-  max-height: 150px;
-  overflow-y: auto;
-  margin: 0;
-}
-
-.private-key-display {
-  max-height: 250px;
-}
-
 .key-row {
   display: flex;
   align-items: center;

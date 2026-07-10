@@ -116,6 +116,12 @@ const auditIssues = ref<CommitSigInfo[] | null>(null);
 const blockIssues = ref<CommitSigInfo[] | null>(null);
 
 // ── Sync divergence (keep-mine / adopt-remote modal) ─────────────────────
+// This divergence handling is sync-context and stays inline (it does not share
+// useDivergence()): a sync detects divergence on pull — there is no local
+// commit and no deferred identity wipe, so cancel is a no-op; resolve re-runs
+// syncRepo on PULL_FF_FAILED; and enforce may refuse again after resolve. The
+// save-context pages (create/edit/delete) share useDivergence() instead. If
+// these sync-vs-save differences ever collapse, fold this into useDivergence.
 /** Diverged sync → drives the shared resolve modal. */
 const divergence = ref<SyncDivergence | null>(null);
 const resolving = ref(false);

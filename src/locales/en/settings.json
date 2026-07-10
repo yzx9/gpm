@@ -34,15 +34,7 @@
   },
   "ssh": {
     "title": "SSH Key",
-    "showPublic": "Show Public Key",
-    "publicKeyLabel": "Public key",
-    "copy": "Copy",
-    "exportPrivate": "Export Private Key",
-    "exportConfirm": "This will display your private SSH key. Make sure no one is watching. Continue?",
-    "privateVisible": "Private key is now visible. Copy it to a safe place and close this screen.",
-    "hidePrivate": "Hide Private Key",
-    "publicFailed": "Failed to get public key",
-    "exportFailed": "Failed to export private key"
+    "manage": "Manage SSH Key"
   },
   "passphrase": {
     "title": "Passphrase",
@@ -174,13 +166,8 @@
     "trustHead": "Trust this repo's signer (HEAD)",
     "addKey": "Add a signing public key",
     "importGpg": "Import GPG key file (.asc)",
-    "keyPlaceholder": "ssh-ed25519 AAAA… [comment]  — or paste a GPG public key block",
-    "labelPlaceholder": "Label (e.g. Alice — laptop)",
-    "saveKey": "Save key",
     "viewHistory": "View commit history & signatures",
-    "addedToast": "✓ Trusted signing key added",
     "removedToast": "Trusted key removed",
-    "addFailed": "Failed to add key",
     "removeFailed": "Failed to remove key",
     "pasteKeyPrompt": "Paste a signing public key (SSH one-liner or GPG armor)",
     "importGpgPrompt": "Label for the imported GPG key? (Leave blank to use the filename.)",

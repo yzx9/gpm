@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import enAddKey from "@/locales/en/addKey.json";
 import enCommon from "@/locales/en/common.json";
 import enCreate from "@/locales/en/create.json";
 import enEntries from "@/locales/en/entries.json";
@@ -10,6 +11,7 @@ import enGenerate from "@/locales/en/generate.json";
 import enHistory from "@/locales/en/history.json";
 import enSettings from "@/locales/en/settings.json";
 import enSetup from "@/locales/en/setup.json";
+import enSshKey from "@/locales/en/sshKey.json";
 import { createI18n } from "vue-i18n";
 
 /**
@@ -48,6 +50,8 @@ export function createTestI18n() {
         history: enHistory,
         settings: enSettings,
         setup: enSetup,
+        sshKey: enSshKey,
+        addKey: enAddKey,
       },
     },
   });

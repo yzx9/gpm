@@ -1,0 +1,8 @@
+{
+  "title": "添加受信密钥",
+  "keyPlaceholder": "ssh-ed25519 AAAA… [备注]  —— 或粘贴 GPG 公钥块",
+  "labelPlaceholder": "标签（例如 Alice —— 笔记本）",
+  "saveKey": "保存密钥",
+  "addedToast": "✓ 已添加受信签名密钥",
+  "addFailed": "添加密钥失败"
+}

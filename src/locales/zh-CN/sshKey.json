@@ -1,0 +1,11 @@
+{
+  "title": "SSH 密钥",
+  "publicKeyLabel": "公钥",
+  "copy": "复制",
+  "exportPrivate": "导出私钥",
+  "exportConfirm": "这将显示你的 SSH 私钥。请确保没有旁人窥视。是否继续？",
+  "privateVisible": "私钥现已可见。请将其复制到安全位置并关闭此页面。",
+  "hidePrivate": "隐藏私钥",
+  "publicFailed": "获取公钥失败",
+  "exportFailed": "导出私钥失败"
+}

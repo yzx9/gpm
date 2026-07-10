@@ -1,0 +1,8 @@
+{
+  "title": "Add Trusted Key",
+  "keyPlaceholder": "ssh-ed25519 AAAA… [comment]  — or paste a GPG public key block",
+  "labelPlaceholder": "Label (e.g. Alice — laptop)",
+  "saveKey": "Save key",
+  "addedToast": "✓ Trusted signing key added",
+  "addFailed": "Failed to add key"
+}

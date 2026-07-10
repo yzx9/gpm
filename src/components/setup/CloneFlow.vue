@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import { isRepoReady } from "@/api";
-import { useWipeOnLeave } from "@/composables";
+import { useOverlayBackHandler, useWipeOnLeave } from "@/composables";
 import { computed, onMounted, ref } from "vue";
 import IdentitySetupForm from "./IdentitySetupForm.vue";
 import RepoCloneForm from "./RepoCloneForm.vue";
@@ -38,6 +38,18 @@ useWipeOnLeave(
     sshPassphrase.value = "";
   },
   { lock: false },
+);
+
+// Android back on step 2 collapses to step 1 (preserving the hoisted sshKey for
+// IdentitySetupForm's "Use my SSH key for decryption" reuse) instead of popping
+// the Setup route mid-flow. On step 1 there is no listener, so back keeps its
+// default (leave setup). The listener suppresses the default webview goBack, so
+// the popstate wipe above does NOT fire on this collapse — credentials survive.
+useOverlayBackHandler(
+  computed(() => step.value === 2),
+  () => {
+    step.value = 1;
+  },
 );
 
 // Auto-advance to step 2 if repo is already cloned (identity missing).

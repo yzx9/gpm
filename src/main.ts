@@ -68,6 +68,18 @@ const routes = [
     meta: { secure: true },
   },
   {
+    path: "/create/preset/:presetId",
+    name: "createPreset",
+    component: () => import("./pages/CreatePresetPage.vue"),
+    meta: { secure: true },
+  },
+  {
+    path: "/create/custom",
+    name: "createCustom",
+    component: () => import("./pages/CreateCustomPage.vue"),
+    meta: { secure: true },
+  },
+  {
     path: "/generate",
     name: "generate",
     component: () => import("./pages/GeneratePasswordPage.vue"),
@@ -81,9 +93,28 @@ const routes = [
     meta: { secure: true },
   },
   {
+    path: "/edit/:pathMatch(.*)",
+    name: "entryEdit",
+    component: () => import("./pages/EntryEditPage.vue"),
+    props: true,
+    meta: { secure: true },
+  },
+  {
     path: "/settings",
     name: "settings",
     component: () => import("./pages/SettingsPage.vue"),
+    meta: { secure: true },
+  },
+  {
+    path: "/settings/ssh-key",
+    name: "sshKey",
+    component: () => import("./pages/SshKeyPage.vue"),
+    meta: { secure: true },
+  },
+  {
+    path: "/settings/add-key",
+    name: "addKey",
+    component: () => import("./pages/AddKeyPage.vue"),
     meta: { secure: true },
   },
   {

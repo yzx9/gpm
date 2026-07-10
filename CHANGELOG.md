@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The pull-to-refresh sync indicator is rebuilt: syncing now leads with a spinning refresh icon and a full-width progress bar instead of a lone stop button, the stop control is smaller and calmer, and the pull-down spinner sits with breathing room above the search box.
 - While a revealed password is on screen, its "auto-clears in Ns" hint now counts down live each second instead of sitting on a static number, so you can see exactly how long is left before it wipes.
+- The SSH key view, the add-trusted-key form, the edit-entry screen, and the create-secret steps are now their own screens — pressing Back returns you to the previous screen instead of jumping all the way out to the secret list. During setup, Back on the identity step now returns to the clone step instead of leaving setup.
 
 ### Fixed
 

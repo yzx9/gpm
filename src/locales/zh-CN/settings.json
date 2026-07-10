@@ -34,15 +34,7 @@
   },
   "ssh": {
     "title": "SSH 密钥",
-    "showPublic": "显示公钥",
-    "publicKeyLabel": "公钥",
-    "copy": "复制",
-    "exportPrivate": "导出私钥",
-    "exportConfirm": "这将显示你的 SSH 私钥。请确保没有旁人窥视。是否继续？",
-    "privateVisible": "私钥现已可见。请将其复制到安全位置并关闭此页面。",
-    "hidePrivate": "隐藏私钥",
-    "publicFailed": "获取公钥失败",
-    "exportFailed": "导出私钥失败"
+    "manage": "管理 SSH 密钥"
   },
   "passphrase": {
     "title": "口令",
@@ -174,13 +166,8 @@
     "trustHead": "信任本仓库签名者（HEAD）",
     "addKey": "添加签名公钥",
     "importGpg": "导入 GPG 密钥文件（.asc）",
-    "keyPlaceholder": "ssh-ed25519 AAAA… [备注]  —— 或粘贴 GPG 公钥块",
-    "labelPlaceholder": "标签（例如 Alice —— 笔记本）",
-    "saveKey": "保存密钥",
     "viewHistory": "查看提交历史与签名",
-    "addedToast": "✓ 已添加受信签名密钥",
     "removedToast": "受信密钥已移除",
-    "addFailed": "添加密钥失败",
     "removeFailed": "移除密钥失败",
     "pasteKeyPrompt": "粘贴签名公钥（SSH 单行或 GPG armor）",
     "importGpgPrompt": "导入的 GPG 密钥的标签？（留空则使用文件名。）",

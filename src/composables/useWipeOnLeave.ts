@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { useLockState } from "./useLockState";
 import { onBeforeUnmount, onMounted } from "vue";
+import { useLockState } from "./useLockState";
 
 /**
  * Wipe sensitive state on the three "leaving" events, so a secret held in a Vue
