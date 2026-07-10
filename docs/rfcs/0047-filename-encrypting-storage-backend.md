@@ -6,7 +6,7 @@
 
 ## What
 
-Add an optional storage backend that encrypts secret *names* and *structure* on
+Add an optional storage backend that encrypts secret _names_ and _structure_ on
 top of an underlying storage backend. Secret blobs are stored under hashed names
 with the directory tree flattened to a single level, and a name-to-location map
 is persisted as an encrypted lookup table at the store root; listing is served

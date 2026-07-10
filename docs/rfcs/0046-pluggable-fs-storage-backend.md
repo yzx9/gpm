@@ -53,7 +53,7 @@ the seam to host it.
 **Dependency inversion is the only clean seam.** SAF (`ContentResolver`,
 `DocumentsContract`) is a Java/Kotlin API; the backend crate is pure Rust with no
 JVM. So the filesystem trait must be defined in the backend crate and
-*implemented* in the app layer (a Rust shim in a Tauri plugin bridging to Kotlin,
+_implemented_ in the app layer (a Rust shim in a Tauri plugin bridging to Kotlin,
 the same shape as the existing file-picker plugin). The alternative — a callback
 backend where the store calls up into the app layer per file operation —
 duplicates the store's orchestration in the app layer and is far uglier. The
