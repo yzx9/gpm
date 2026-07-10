@@ -32,6 +32,9 @@ pub enum IdentityType {
     /// Post-quantum MLKEM768-X25519 key (`AGE-SECRET-KEY-PQ-1...`), recognized
     /// but unsupported.
     PostQuantum,
+    /// Armored OpenPGP/GPG secret key (`-----BEGIN PGP PRIVATE KEY BLOCK-----`),
+    /// S2K-passphrase-protected. The GPG crypto backend identity (RFC 0036).
+    PgpSecretKey,
     /// Unknown / unrecognized identity format.
     Unknown,
 }
@@ -55,6 +58,8 @@ pub fn classify_identity(bytes: &[u8]) -> IdentityType {
         IdentityType::X25519
     } else if trimmed.starts_with("-----BEGIN AGE ENCRYPTED FILE-----") {
         IdentityType::AgeEncrypted
+    } else if trimmed.starts_with("-----BEGIN PGP PRIVATE KEY BLOCK-----") {
+        IdentityType::PgpSecretKey
     } else if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----") {
         // Distinguish ed25519 from RSA within OpenSSH format
         if trimmed.contains("ssh-ed25519") || trimmed.contains("nistp256") {
@@ -96,11 +101,11 @@ pub fn normalize_identity_text(text: &str) -> &str {
 /// Validate that `identity_bytes` contains a recognized private key format.
 ///
 /// Delegates to [`classify_identity`] for the actual prefix detection, keeping
-/// it as the single source of truth. Accepts native x25519, OpenSSH, RSA, and
-/// PKCS#8 private keys. Rejects age-encrypted blobs (not a private key),
-/// unrecognized formats, post-quantum keys (recognized but unsupported), and age
-/// plugin identities (recognized — recipients are supported — but decrypting with
-/// one is not yet implemented).
+/// it as the single source of truth. Accepts native x25519, OpenSSH, RSA, PKCS#8
+/// private keys, and armored OpenPGP/GPG secret keys. Rejects age-encrypted blobs
+/// (not a private key), unrecognized formats, post-quantum keys (recognized but
+/// unsupported), and age plugin identities (recognized — recipients are supported
+/// — but decrypting with one is not yet implemented).
 ///
 /// # Errors
 ///

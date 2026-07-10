@@ -38,6 +38,10 @@ pub enum KeyType {
     Plugin,
     /// Post-quantum MLKEM768-X25519 key (age1pq1...), recognized but unsupported.
     PostQuantum,
+    /// GPG/OpenPGP key — `public_key` holds the gopass recipient id (`0x` + long
+    /// key id, or a full fingerprint), resolved against `.public-keys/<id>`.
+    #[allow(dead_code)] // produced by GpgBackend (RFC 0036), not yet wired.
+    Gpg,
 }
 
 impl KeyType {

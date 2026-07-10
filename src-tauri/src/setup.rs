@@ -95,6 +95,7 @@ impl From<Recipient> for RecipientInfo {
                 KeyType::SshRsa => "ssh_rsa".to_string(),
                 KeyType::Plugin => "plugin".to_string(),
                 KeyType::PostQuantum => "post_quantum".to_string(),
+                KeyType::Gpg => "gpg".to_string(),
             },
         }
     }
@@ -383,6 +384,15 @@ pub(crate) async fn pick_identity_file(
                 "File is not a recognized age or SSH identity",
             ));
         }
+        IdentityType::PgpSecretKey => {
+            // Recognized GPG/OpenPGP secret key, but the GPG crypto backend's
+            // setup/import flow isn't wired yet (RFC 0036 — backend lands in a
+            // later phase). Reject clearly rather than silently mishandling.
+            return Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                "GPG/OpenPGP identities aren't supported in setup yet (RFC 0036)",
+            ));
+        }
     };
 
     let result = PickedIdentityResult {
@@ -618,6 +628,7 @@ fn identity_type_string(itype: IdentityType) -> String {
         IdentityType::AgeEncrypted => "age_encrypted",
         IdentityType::Plugin => "plugin",
         IdentityType::PostQuantum => "post_quantum",
+        IdentityType::PgpSecretKey => "pgp_secret_key",
         IdentityType::Unknown => "unknown",
     }
     .to_string()
@@ -632,6 +643,7 @@ fn key_type_string(key_type: KeyType) -> &'static str {
         KeyType::SshRsa => "ssh_rsa",
         KeyType::Plugin => "plugin",
         KeyType::PostQuantum => "post_quantum",
+        KeyType::Gpg => "gpg",
     }
 }
 

@@ -226,7 +226,7 @@ impl Store {
         }
 
         if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
-            return self.crypto.is_ssh_identity_encrypted(&bytes);
+            return self.crypto.identity_requires_passphrase(&bytes);
         }
 
         false
@@ -325,7 +325,7 @@ impl Store {
             }
             IdentityType::SshEd25519 | IdentityType::SshRsa => {
                 self.crypto
-                    .validate_ssh_key_passphrase(&bytes, passphrase)
+                    .validate_identity_passphrase(&bytes, passphrase)
                     .await?;
             }
             _ => {}
@@ -559,7 +559,7 @@ impl Store {
         };
         let derived_recipient = self
             .crypto
-            .identity_to_recipient(identity, recipient_passphrase)?;
+            .identity_recipient(identity, recipient_passphrase)?;
 
         // Read the recipients to match the identity against. A tampered/corrupt
         // index on a configured repo (symlink, non-UTF-8, I/O error) must FAIL
@@ -656,7 +656,7 @@ impl Store {
         // Validate identity can derive a recipient (verifies key is usable)
         let _ = self
             .crypto
-            .identity_to_recipient(identity, identity_passphrase)?;
+            .identity_recipient(identity, identity_passphrase)?;
 
         let auth = match (ssh_key, pat) {
             (Some(key), _) => GitAuth::Ssh {

@@ -73,6 +73,11 @@ impl SecretExt {
     /// source. Tests reference this const instead of a raw string.
     pub const AGE: Self = Self(".age");
 
+    /// The GPG secret extension (`.gpg`). The canonical GPG value — the future
+    /// `GpgBackend::profile` reuses this so the on-disk extension has one source.
+    #[allow(dead_code)] // consumed by GpgBackend (RFC 0036), not yet wired.
+    pub const GPG: Self = Self(".gpg");
+
     /// The dotted extension, e.g. `.age` / `.gpg`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -106,6 +111,19 @@ pub struct CryptoProfile {
 /// (production code + in-crate tests cannot drift).
 pub(crate) const RECIPIENTS_FILE: &str = ".age-recipients";
 
+/// The GPG backend's recipients-index filename — gopass's canonical `.gpg-id`,
+/// one recipient id per line (`0x` + last 16 hex long key id, or a full
+/// fingerprint), `#` comments allowed.
+#[allow(dead_code)] // consumed by GpgBackend (RFC 0036), not yet wired.
+pub(crate) const GPG_RECIPIENTS_FILE: &str = ".gpg-id";
+
+/// The GPG backend's armored-recipient pubkey directory (gopass `.public-keys/`,
+/// one file per recipient named by its `.gpg-id` token — token == filename is
+/// the gopass invariant). Age has no analog (its recipient strings are
+/// self-describing).
+#[allow(dead_code)] // consumed by GpgBackend (RFC 0036), not yet wired.
+pub(crate) const GPG_PUBLIC_KEYS_DIR: &str = ".public-keys";
+
 /// Swappable crypto backend (gopass `internal/backend/crypto.go` analogue).
 ///
 /// Owns everything age-specific: encrypt/decrypt, recipient derivation, and
@@ -116,8 +134,8 @@ pub(crate) const RECIPIENTS_FILE: &str = ".age-recipients";
 /// Blocking work (age encrypt/decrypt, scrypt, the SSH KDF) is the impl's
 /// responsibility: each method wraps its CPU-bound step in `spawn_blocking`
 /// internally, so callers await a plain `Result` with no double-`?` on the
-/// `JoinError`. Pure-CPU helpers ([`CryptoBackend::identity_to_recipient`] and
-/// [`CryptoBackend::is_ssh_identity_encrypted`]) stay synchronous.
+/// `JoinError`. Pure-CPU helpers ([`CryptoBackend::identity_recipient`] and
+/// [`CryptoBackend::identity_requires_passphrase`]) stay synchronous.
 #[async_trait]
 pub trait CryptoBackend: Send + Sync {
     /// Per-backend storage-facing naming (extension, recipients filename,
@@ -185,23 +203,25 @@ pub trait CryptoBackend: Send + Sync {
     /// See [`decrypt_bytes`] — `InvalidIdentity`, `DecryptFailed`.
     async fn decrypt(&self, ciphertext: &[u8], identity: &[u8]) -> Result<Vec<u8>, Error>;
 
-    /// Validate `passphrase` against an SSH identity without producing output.
+    /// Validate `passphrase` against an identity without producing output.
     /// Used by the biometric-enable flow to reject a wrong passphrase before
-    /// sealing it. Unencrypted keys succeed with any passphrase. The SSH KDF is
-    /// blocking work, so this runs on a blocking thread.
+    /// sealing it. Identities with no passphrase layer succeed with any value.
+    /// The KDF (SSH bcrypt, GPG S2K) is blocking work, so this runs on a
+    /// blocking thread.
     ///
     /// # Errors
     ///
-    /// `WrongPassphrase` if the key is encrypted and `passphrase` is wrong,
-    /// `InvalidIdentity` if the key can't be parsed.
-    async fn validate_ssh_key_passphrase(
+    /// `WrongPassphrase` if the identity is passphrase-protected and
+    /// `passphrase` is wrong, `InvalidIdentity` if it can't be parsed.
+    async fn validate_identity_passphrase(
         &self,
         identity_bytes: &[u8],
         passphrase: &str,
     ) -> Result<(), Error>;
 
-    /// Derive the public recipient string from an identity (native x25519 or
-    /// SSH). Pure CPU op — synchronous.
+    /// Derive the canonical recipient string from an identity — the age
+    /// bech32/SSH public-key string for the age backend, the gopass recipient id
+    /// (`0x` + long key id) for a GPG backend. Pure CPU op — synchronous.
     ///
     /// # Errors
     ///
@@ -209,16 +229,13 @@ pub trait CryptoBackend: Send + Sync {
     /// `IdentityEncrypted` for an encrypted SSH key with no passphrase,
     /// `PostQuantumNotSupported` / `PluginIdentityNotSupported` for the
     /// recognized-but-unsupported variants.
-    fn identity_to_recipient(
-        &self,
-        identity: &str,
-        passphrase: Option<&str>,
-    ) -> Result<String, Error>;
+    fn identity_recipient(&self, identity: &str, passphrase: Option<&str>)
+    -> Result<String, Error>;
 
-    /// True iff `identity_bytes` is an SSH key whose private body is
-    /// passphrase-encrypted. Pure CPU op — synchronous. See
-    /// [`age::is_ssh_identity_encrypted`].
-    fn is_ssh_identity_encrypted(&self, identity_bytes: &[u8]) -> bool;
+    /// True iff `identity_bytes` needs a passphrase to unlock — an encrypted SSH
+    /// key today; an S2K-protected GPG key once `GpgBackend` lands. Pure CPU op
+    /// — synchronous. See [`age::is_ssh_identity_encrypted`] for the age impl.
+    fn identity_requires_passphrase(&self, identity_bytes: &[u8]) -> bool;
 }
 
 /// The age crypto backend — the sole [`CryptoBackend`] implementation.
@@ -323,7 +340,7 @@ impl CryptoBackend for AgeBackend {
             .collect();
         let identity_str = str::from_utf8(identity)
             .map_err(|_| Error::new(ErrorCode::InvalidIdentity, "Identity is not valid UTF-8"))?;
-        let our_recipient = self.identity_to_recipient(identity_str, None)?;
+        let our_recipient = self.identity_recipient(identity_str, None)?;
         if !recipients.iter().any(|r| r == &our_recipient) {
             recipients.push(our_recipient);
         }
@@ -342,7 +359,7 @@ impl CryptoBackend for AgeBackend {
         spawn_blocking(move || decrypt_bytes(&ciphertext, &identity, None)).await?
     }
 
-    async fn validate_ssh_key_passphrase(
+    async fn validate_identity_passphrase(
         &self,
         identity_bytes: &[u8],
         passphrase: &str,
@@ -352,7 +369,7 @@ impl CryptoBackend for AgeBackend {
         spawn_blocking(move || validate_ssh_key_passphrase(&identity_bytes, &passphrase)).await?
     }
 
-    fn identity_to_recipient(
+    fn identity_recipient(
         &self,
         identity: &str,
         passphrase: Option<&str>,
@@ -360,7 +377,7 @@ impl CryptoBackend for AgeBackend {
         crate::recipient::identity_to_recipient(identity, passphrase)
     }
 
-    fn is_ssh_identity_encrypted(&self, identity_bytes: &[u8]) -> bool {
+    fn identity_requires_passphrase(&self, identity_bytes: &[u8]) -> bool {
         is_ssh_identity_encrypted(identity_bytes)
     }
 }
