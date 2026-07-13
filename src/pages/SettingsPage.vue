@@ -415,6 +415,9 @@ async function onLockModeChange(mode: LockMode) {
   error.value = "";
   try {
     appConfig.value = await setLockMode(mode);
+    // Keep the reactive lockMode ref in sync so the activity bumper's filter
+    // picks up the new mode immediately (mirrors onViewClearChange below).
+    applySecurityConfig(appConfig.value);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("settings.lock.setModeFailed");

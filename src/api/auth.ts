@@ -32,6 +32,21 @@ export async function unlock(passphrase: string): Promise<void> {
   await invoke("unlock", { passphrase });
 }
 
+/**
+ * Best-effort: restart the identity idle-lock timer (a no-op under `Immediate`
+ * / `Never` — the backend disarms). The activity bumper throttles + filters
+ * calls. Errors are swallowed — the backend timer is the source of truth, and a
+ * missed bump just means the user may re-authenticate (the same race `copy`/
+ * `show` already accept).
+ */
+export async function bumpIdleTimer(): Promise<void> {
+  try {
+    await invoke("bump_idle_timer");
+  } catch {
+    // Best-effort: a failed bump is equivalent to no bump.
+  }
+}
+
 /** Payload of the `identity-lock-state` event: the backend's identity-cache
  *  lock snapshot. `locked` = the decrypted identity is NOT cached (the next
  *  identity-needing op will require auth); `soft` = a soft wipe (Immediate

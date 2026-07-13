@@ -273,6 +273,7 @@ pub fn run() {
             // identity: session, passphrase, ssh key
             identity::unlock,
             identity::lock,
+            identity::bump_idle_timer,
             identity::set_passphrase,
             identity::change_passphrase,
             identity::generate_ssh_key,

@@ -2,15 +2,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { getAppConfig, type AppConfig } from "@/api";
+import { getAppConfig, type AppConfig, type LockMode } from "@/api";
 import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
- * Single cache for the security-related config the UI needs reactively — today
- * just the password-view auto-clear seconds (the only one the frontend owns;
- * lock-mode and clipboard-clear are enforced backend-side). `SettingsPage` and
- * `useSecretReveal` both read from here so a settings change is visible
- * everywhere without each caller re-fetching `get_app_config`.
+ * Single cache for the security-related config the UI needs reactively. Today
+ * that is the password-view auto-clear seconds (the only setting the frontend
+ * *enforces*) plus the auto-lock `lockMode` — cached reactively so the activity
+ * bumper (`useLockActivity`) can filter bumps without a per-event config fetch.
+ * The backend still owns the auto-lock timer and the authoritative mode;
+ * clipboard-clear is enforced backend-side too. `SettingsPage` and
+ * `useSecretReveal` read from here so a settings change is visible everywhere
+ * without each caller re-fetching `get_app_config`.
  *
  * Provided app-wide via `SECURITY_SETTINGS_KEY` (see `main.ts`); one instance,
  * loaded once from the backend and refreshed whenever a setting is applied
@@ -21,6 +24,8 @@ import { inject, ref, type InjectionKey, type Ref } from "vue";
 export interface SecuritySettingsState {
   /** Password-view auto-clear seconds (`0` ⇒ Never). */
   readonly viewClearSecs: Readonly<Ref<number>>;
+  /** Cached auto-lock mode (Immediate default) — read by the activity bumper. */
+  readonly lockMode: Readonly<Ref<LockMode>>;
   /** Load the cache from the backend once. Idempotent. */
   loadSecuritySettings: () => Promise<void>;
   /** Apply a freshly-fetched (or just-set) app config to the cache. */
@@ -40,6 +45,8 @@ export const SECURITY_SETTINGS_KEY: InjectionKey<SecuritySettingsState> =
  */
 export function createSecuritySettings(): SecuritySettingsState {
   const viewClearSecs = ref(DEFAULT_VIEW_CLEAR_SECS);
+  // Cached auto-lock mode so the activity bumper can filter bumps reactively.
+  const lockMode = ref<LockMode>("immediate");
   let initialized = false;
 
   /**
@@ -61,9 +68,11 @@ export function createSecuritySettings(): SecuritySettingsState {
   function applySecurityConfig(cfg: AppConfig) {
     // null/undefined ⇒ default; 0 ⇒ 0 (Never — the caller skips its timer).
     viewClearSecs.value = cfg.view_clear_secs ?? DEFAULT_VIEW_CLEAR_SECS;
+    // lock_mode absent ⇒ Immediate (matches LockMode's serde default).
+    lockMode.value = cfg.lock_mode ?? "immediate";
   }
 
-  return { viewClearSecs, loadSecuritySettings, applySecurityConfig };
+  return { viewClearSecs, lockMode, loadSecuritySettings, applySecurityConfig };
 }
 
 /**

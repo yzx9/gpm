@@ -7,6 +7,7 @@ export * from "./useAppLockState";
 export * from "./useClipboardNotify";
 export * from "./useCommitSignature";
 export * from "./useDivergence";
+export * from "./useLockActivity";
 export * from "./useLockState";
 export * from "./useNavDirection";
 export * from "./useOverlayBackHandler";

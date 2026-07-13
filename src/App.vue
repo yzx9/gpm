@@ -8,6 +8,7 @@ import AppLockOverlay from "./components/AppLockOverlay.vue";
 import ToastHost from "./components/ToastHost.vue";
 import UnlockModal from "./components/UnlockModal.vue";
 import {
+  createLockActivity,
   useAppLockState,
   useLockState,
   useNavDirection,
@@ -16,9 +17,13 @@ import {
 } from "./composables";
 import { applySafeAreaInsets } from "./utils/safe-area";
 
-const { overlayUp, ready, init, dismissOverlay } = useLockState();
+const { overlayUp, ready, init, dismissOverlay, identityCached } =
+  useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
-const { loadSecuritySettings } = useSecuritySettings();
+const { loadSecuritySettings, lockMode } = useSecuritySettings();
+// Activity bumper: any in-app tap/scroll/key extends the identity idle-lock
+// timer (no-op under Immediate/Never; throttled; backend timer authoritative).
+const lockActivity = createLockActivity(lockMode, identityCached);
 const { initSecureScreen, setSecureOverlay } = useSecureScreen();
 // Drives the <router-view> slide transition: "slide-forward" on a push,
 // "slide-back" on a pop, "" (instant) on secure↔non-secure boundaries and
@@ -40,6 +45,8 @@ onMounted(() => {
   initAppLock();
   // Prime the view-clear cache so the first reveal uses the configured timer.
   loadSecuritySettings();
+  // Start extending the identity idle-lock timer on in-app activity (Idle mode).
+  lockActivity.init();
   // Load the screen-capture master toggle + platform availability, then
   // reconcile FLAG_SECURE for the current route. The boot default in
   // MainActivity.onCreate keeps every screen secure until this runs.

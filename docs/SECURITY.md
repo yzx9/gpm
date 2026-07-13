@@ -11,6 +11,13 @@ physical access to an unlocked device, or a malicious app that somehow injects
 script into the WebView. It does **not** defend against a fully compromised OS
 or a determined attacker with root access.
 
+### Auto-lock
+
+gpm auto-locks the in-memory identity — it is wiped on inactivity rather than
+left sitting in memory, so secrets are not exposed to anyone who later picks up
+an unlocked device. This is a core security property. (The lock modes, timeouts,
+and what counts as activity are implementation details; see the code.)
+
 ### Local private files
 
 gpm's private files — the age/SSH `identity` and `repo.json` (which carries the

@@ -115,6 +115,30 @@ pub(crate) async fn lock(state: State<'_, AppState>, app: AppHandle) -> Result<(
     Ok(())
 }
 
+/// Best-effort idle-timer bump fired by frontend user activity (tap / scroll /
+/// key). Thin IPC wrapper over [`reset_lock_timer`]: the frontend throttles
+/// (~1 per few seconds while active) and filters on its cached `LockMode` +
+/// `identityCached`, so this only runs under `Idle` while cached and active.
+/// Does NOT call [`refresh_security_cache`] — no config changed (matches the
+/// per-op resets in `read`/`write`, which also call `reset_lock_timer` without
+/// re-refreshing). The backend timer stays authoritative; see [`reset_lock_timer`]
+/// for `Immediate`/`Never`/`Idle` branching.
+///
+/// The server side does NOT re-check `LockMode`/`identityCached` — the filter is
+/// frontend-only, so this is a private IPC whose only caller is the activity
+/// bumper (never reused). A bump landing just after a hard-lock re-arms a timer
+/// against an already-locked store: benign dead work (`store.lock()` is
+/// idempotent; the re-emitted hard-lock event is a no-op for the frontend).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn bump_idle_timer(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), Error> {
+    reset_lock_timer(&state, &app);
+    Ok(())
+}
+
 /// Core lock logic, shared by the [`lock`] command and the auto-lock timer's
 /// fire path. Runtime-generic so tests can drive it with the mock runtime.
 ///

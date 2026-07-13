@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AppConfig } from "@/api";
+import type { AppConfig, LockMode } from "@/api";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -12,9 +12,9 @@ import {
 
 vi.mock("@tauri-apps/api/core");
 
-/** Minimal AppConfig varying only the view-clear seconds. */
-function cfg(view_clear_secs: number | null): AppConfig {
-  return { secure_screen: true, view_clear_secs };
+/** Minimal AppConfig varying view-clear seconds and (optionally) lock mode. */
+function cfg(view_clear_secs: number | null, lock_mode?: LockMode): AppConfig {
+  return { secure_screen: true, view_clear_secs, lock_mode };
 }
 
 describe("useSecuritySettings", () => {
@@ -59,5 +59,24 @@ describe("useSecuritySettings", () => {
     expect(s.viewClearSecs.value).toBe(0);
     s.applySecurityConfig(cfg(180));
     expect(s.viewClearSecs.value).toBe(180);
+  });
+
+  it("defaults to the Immediate lock mode", () => {
+    expect(s.lockMode.value).toBe("immediate");
+  });
+
+  it("loadSecuritySettings applies the backend lock_mode", async () => {
+    vi.mocked(invoke).mockResolvedValue(cfg(null, { idle: 300 }));
+    await s.loadSecuritySettings();
+    expect(s.lockMode.value).toEqual({ idle: 300 });
+  });
+
+  it("applySecurityConfig maps a missing lock_mode to Immediate", () => {
+    s.applySecurityConfig(cfg(null));
+    expect(s.lockMode.value).toBe("immediate");
+    s.applySecurityConfig(cfg(null, "never"));
+    expect(s.lockMode.value).toBe("never");
+    s.applySecurityConfig(cfg(null, { idle: 60 }));
+    expect(s.lockMode.value).toEqual({ idle: 60 });
   });
 });
