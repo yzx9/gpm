@@ -24,7 +24,7 @@ SPA web app with Vue3 + TypeScript.
 
 ### Backend — `rustpass/`
 
-The crate implements encryption, decryption, Git operations, and repository file management, with its core functionality encapsulated in a `Store` facade. It is an async-first crate built on `tokio`, using `tokio::fs` for all file I/O, while Git and scrypt operations are wrapped in `spawn_blocking`. At this stage, it supports only age encryption and read-only operations, and does not include write capabilities or any UI/CLI interaction logic.
+The crate implements encryption, decryption, Git operations, and repository file management, with its core functionality encapsulated in a `Store` facade. It is an async-first crate built on `tokio`, using `tokio::fs` for all file I/O, while Git and scrypt operations are wrapped in `spawn_blocking`. It is a library crate only — no UI or CLI; the Tauri app (`src-tauri/`) exposes its `Store` as commands.
 
 `rustpass` was designed to be compatible with and conceptually aligned with `gopass`, drawing heavily from its architecture and design principles, while intentionally narrowing its scope in the current implementation phase.
 
