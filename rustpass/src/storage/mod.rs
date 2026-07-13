@@ -39,6 +39,13 @@ pub mod git;
 /// Re-entrant access to [`git::GitStorage`].
 pub use git::GitStorage;
 
+/// Storage-backend registration (RFC 0049): built-in dispatch + the reserved
+/// `ext:` extension namespace, populated via [`StoreBuilder`] at startup.
+pub mod registry;
+pub(crate) use registry::StorageRegistry;
+/// Construction-time host for the backend registry.
+pub use registry::StoreBuilder;
+
 // ── Auth / progress / keep-mine types (relocated from `git.rs`) ─────────────
 //
 // These are the storage layer's transport + resolution types. They live here

@@ -37,6 +37,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
         app_lock_enabled: AtomicBool::new(false),
         app_locked: AtomicBool::new(false),
         seal_migrate_state: AtomicU8::new(0),
+        backend_resolve_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
     }
 }

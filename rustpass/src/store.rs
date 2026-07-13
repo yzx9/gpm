@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::{fmt, str};
 
 use nucleo_matcher::{
@@ -30,8 +30,8 @@ use crate::signing::{
 };
 use crate::storage::git::passfile_rel;
 use crate::storage::{
-    CancelToken, CommitKind, GitAuth, GitStorage, KeepLocalOutcome, KeepLocalPlan, ProgressSender,
-    RepoFiles, StorageBackend, StorageCtx,
+    CancelToken, CommitKind, GitAuth, KeepLocalOutcome, KeepLocalPlan, ProgressSender, RepoFiles,
+    StorageBackend, StorageCtx, StorageRegistry,
 };
 use crate::template;
 
@@ -77,10 +77,25 @@ pub struct Store {
     /// age library directly. `Box<dyn>` so a second backend can
     /// arrive without rewriting the facade.
     crypto: Box<dyn CryptoBackend>,
-    /// The storage backend (git today). The only path to working-tree file ops
-    /// AND RCS ops (clone/pull/push/keep-mine) — list/get/set/delete entries, the
-    /// recipients file, templates.
-    storage: Box<dyn StorageBackend>,
+    /// The storage backend (git today; `ext:` extensions via the registry).
+    /// Lazily resolved post-unlock — the backend type + root live in sealed
+    /// `repo.json`, unreadable until app unlock — so `None` until
+    /// [`resolve_storage`](Self::resolve_storage) or a setup path calls
+    /// [`resolve_and_set`](Self::resolve_and_set). `std::sync::Mutex` (not
+    /// `tokio::sync`) because the guard is dropped before any `.await`:
+    /// [`storage`](Self::storage)() clones the `Arc` out and releases.
+    storage: std::sync::Mutex<Option<Arc<dyn StorageBackend>>>,
+    /// The most recent hard resolve failure (a tampered config, an unregistered
+    /// `ext:` backend, …). Stashed by [`resolve_storage`](Self::resolve_storage)
+    /// so [`storage`](Self::storage)() surfaces the specific reason instead of a
+    /// generic `BackendNotAvailable`. Cleared on a successful
+    /// [`set_storage_backend`](Self::set_storage_backend) /
+    /// [`clear_storage_backend`](Self::clear_storage_backend).
+    resolve_err: std::sync::Mutex<Option<Error>>,
+    /// The backend registry (built-ins + `ext:` extensions). Injected by
+    /// [`StoreBuilder::build`](crate::storage::StoreBuilder::build) and consulted
+    /// at resolve time. Immutable after construction.
+    registry: Arc<StorageRegistry>,
     config: Config,
     /// Cached decrypted identity (populated after unlock).
     cached_identity: RwLock<Option<Zeroizing<Vec<u8>>>>,
@@ -141,16 +156,164 @@ impl RcsCtx {
 }
 
 impl Store {
-    /// Create a new `Store` backed by the given config directory.
+    /// Create a new `Store` backed by the given config directory, with only the
+    /// built-in (git) storage backend. Equivalent to
+    /// [`StoreBuilder::new().build(config_dir, master_key)`](crate::storage::StoreBuilder::build)
+    /// — use [`StoreBuilder`](crate::storage::StoreBuilder) directly to register
+    /// `ext:` extension backends.
+    ///
+    /// **Behavior note:** the storage backend is NOT constructed here (it lives
+    /// in sealed `repo.json`, unreadable until app unlock). It is resolved
+    /// lazily post-unlock via [`resolve_storage`](Self::resolve_storage), or by a
+    /// setup path via [`resolve_and_set`](Self::resolve_and_set). Before that,
+    /// [`storage`](Self::storage)() returns [`ErrorCode::BackendNotAvailable`].
     #[must_use]
     pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
+        crate::storage::StoreBuilder::new().build(config_dir, master_key)
+    }
+
+    /// Construct a `Store` with an injected backend registry. The crate-private
+    /// construction path used by
+    /// [`StoreBuilder::build`](crate::storage::StoreBuilder::build); not public
+    /// because extensions register through the builder, not here.
+    #[must_use]
+    pub(crate) fn with_registry(
+        config_dir: PathBuf,
+        master_key: Option<[u8; 32]>,
+        registry: Arc<StorageRegistry>,
+    ) -> Self {
         Self {
             crypto: Box::new(AgeBackend),
-            storage: Box::new(GitStorage),
+            storage: std::sync::Mutex::new(None),
+            resolve_err: std::sync::Mutex::new(None),
+            registry,
             config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
             write_mu: Mutex::new(()),
             autosync: AtomicBool::new(true),
+        }
+    }
+
+    /// Borrow the resolved storage backend, cloning its `Arc` out so the
+    /// `std::sync::Mutex` guard is dropped before any caller `.await`.
+    ///
+    /// Returns [`ErrorCode::BackendNotAvailable`] when the backend hasn't been
+    /// resolved yet (pre-unlock, or after a resolve failure — `resolve_storage`
+    /// stashes the specific error so the app can surface it).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::BackendNotAvailable`] when `storage` is `None`;
+    /// [`ErrorCode::StoreError`] on a poisoned lock (a panic mid-set).
+    fn storage(&self) -> Result<Arc<dyn StorageBackend>, Error> {
+        let backend = self
+            .storage
+            .lock()
+            .map_err(|_| Error::new(ErrorCode::StoreError, "storage backend lock poisoned"))?
+            .clone();
+        match backend {
+            Some(b) => Ok(b),
+            None => {
+                // No backend — surface the stashed resolve error if any (the
+                // specific reason: unregistered ext:, tampered config, …),
+                // else a generic "not resolved".
+                Err(self
+                    .resolve_err
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.clone())
+                    .unwrap_or_else(|| {
+                        Error::new(
+                            ErrorCode::BackendNotAvailable,
+                            "storage backend not resolved (awaiting app unlock)",
+                        )
+                    }))
+            }
+        }
+    }
+
+    /// Swap in a resolved backend. Used by [`resolve_and_set`](Self::resolve_and_set),
+    /// which the setup paths call to pin the git built-in.
+    pub(crate) fn set_storage_backend(&self, backend: Arc<dyn StorageBackend>) {
+        if let Ok(mut slot) = self.storage.lock() {
+            *slot = Some(backend);
+        }
+        // A fresh, working backend supersedes any prior resolve error.
+        self.clear_resolve_err();
+    }
+
+    /// Drop the resolved backend (set `storage` to `None`). Called first in
+    /// [`Store::reset`] so post-reset ops get a clear `BackendNotAvailable`
+    /// instead of operating against a torn-down repo. Marginal: `reset` does not
+    /// hold `write_mu`, so an in-flight op that already cloned the `Arc` may
+    /// still touch the old backend.
+    pub(crate) fn clear_storage_backend(&self) {
+        if let Ok(mut slot) = self.storage.lock() {
+            *slot = None;
+        }
+        self.clear_resolve_err();
+    }
+
+    /// Resolve a backend of `backend` type rooted at `root` and swap it in.
+    /// The single construction path for both the post-unlock resolve (which
+    /// reads the type from `repo.json`) and the setup paths (which know the
+    /// type they're configuring).
+    fn resolve_and_set(&self, backend: Option<&str>, root: &str) -> Result<(), Error> {
+        let resolved = self.registry.resolve(backend, root)?;
+        self.set_storage_backend(Arc::from(resolved));
+        Ok(())
+    }
+
+    /// Resolve the storage backend from the persisted `repo.json` config.
+    /// Intended to be called post-unlock (once the master key is injected and
+    /// `repo.json` is readable) — soft-skips when the config isn't readable yet
+    /// (`NoRepo` pre-setup; `SealKeyUnavailable` under app-lock), mirroring
+    /// [`Config::migrate_seal`].
+    ///
+    /// # Errors
+    ///
+    /// Soft-skips (`Ok`) on `NoRepo`/`SealKeyUnavailable`; otherwise propagates
+    /// `load_repo_config`/`resolve` errors, stashing them internally (via
+    /// `stash_resolve_err`) so [`storage`](Self::storage)() can surface the
+    /// specific reason.
+    pub async fn resolve_storage(&self) -> Result<(), Error> {
+        let rc = match self.config.load_repo_config().await {
+            Ok(rc) => rc,
+            Err(e) if e.code == "NO_REPO" || e.code == "SEAL_KEY_UNAVAILABLE" => {
+                // Not resolvable yet: pre-setup (no repo.json) or app-lock
+                // (key withheld). Retry later — not an error. A soft-skip
+                // carries no specific failure, so drop any error stashed by a
+                // prior hard resolve (it's stale for this state).
+                self.clear_resolve_err();
+                return Ok(());
+            }
+            Err(e) => {
+                self.stash_resolve_err(e.clone());
+                return Err(e);
+            }
+        };
+        match self.resolve_and_set(rc.backend.as_deref(), &rc.local_path) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.stash_resolve_err(e.clone());
+                Err(e)
+            }
+        }
+    }
+
+    /// Stash a hard resolve failure so [`storage`](Self::storage)() surfaces the
+    /// specific reason instead of a generic `BackendNotAvailable`.
+    fn stash_resolve_err(&self, err: Error) {
+        if let Ok(mut slot) = self.resolve_err.lock() {
+            *slot = Some(err);
+        }
+    }
+
+    /// Clear the stashed resolve error (a working backend supersedes it, or
+    /// `reset` tears everything down).
+    fn clear_resolve_err(&self) {
+        if let Ok(mut slot) = self.resolve_err.lock() {
+            *slot = None;
         }
     }
 
@@ -175,7 +338,8 @@ impl Store {
     /// hard error — see [`crate::storage::validate_recipients_index_liveness`]
     /// for why "empty" is unsafe for a tampered/escaping index.
     async fn read_recipients_raw(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error> {
-        let view = RepoFiles::new(&*self.storage, repo_path);
+        let storage = self.storage()?;
+        let view = RepoFiles::new(&*storage, repo_path);
         self.crypto.list_recipients(&view).await
     }
 
@@ -398,7 +562,8 @@ impl Store {
             fs::remove_dir_all(&repo_dir).await?;
         }
 
-        self.storage
+        self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
+        self.storage()?
             .clone_repo(&auth, repo_url, &repo_dir, cancel, progress)
             .await?;
 
@@ -474,21 +639,22 @@ impl Store {
         self.config.clear_all().await?;
 
         let bootstrap = async {
-            self.storage.init_repo(&repo_dir).await?;
+            self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
+            self.storage()?.init_repo(&repo_dir).await?;
 
             let recipients_bytes = serialize_recipients(&[recipient.to_string()]);
-            self.storage
+            self.storage()?
                 .write_file_atomic(&repo_dir, self.recipients_file(), &recipients_bytes)
                 .await?;
 
             let message = format!("Initialized Store for {recipient}");
             let rel_paths = vec![self.recipients_file().to_string()];
-            self.storage
+            self.storage()?
                 .commit_initial(&repo_dir, &rel_paths, &message)
                 .await?;
 
             if has_url {
-                self.storage.remote_add(&repo_dir, "origin", url).await?;
+                self.storage()?.remote_add(&repo_dir, "origin", url).await?;
             }
 
             let local_path = repo_dir.to_string_lossy().to_string();
@@ -677,7 +843,8 @@ impl Store {
 
         self.config.save_identity(identity_bytes, None).await?;
 
-        self.storage
+        self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
+        self.storage()?
             .clone_repo(&auth, repo_url, &repo_dir, cancel, progress)
             .await?;
 
@@ -698,7 +865,7 @@ impl Store {
     pub async fn list(&self) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        self.storage.list(repo_path, self.secret_ext()).await
+        self.storage()?.list(repo_path, self.secret_ext()).await
     }
 
     /// Fuzzy-search the configured repository's entries by `query`, ranked by
@@ -716,7 +883,7 @@ impl Store {
     pub async fn search(&self, query: &str) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage.list(&repo_path, self.secret_ext()).await?;
+        let entries = self.storage()?.list(&repo_path, self.secret_ext()).await?;
         let q = query.to_string();
         Ok(spawn_blocking(move || rank_entries(entries, &q)).await?)
     }
@@ -740,7 +907,7 @@ impl Store {
     ) -> Result<RankedPage, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage.list(&repo_path, self.secret_ext()).await?;
+        let entries = self.storage()?.list(&repo_path, self.secret_ext()).await?;
         let q = query.to_string();
         Ok(spawn_blocking(move || slice_page(rank_entries(entries, &q), offset, limit)).await?)
     }
@@ -771,7 +938,7 @@ impl Store {
         let repo_path = Path::new(&repo_config.local_path);
 
         let encrypted = self
-            .storage
+            .storage()?
             .get(repo_path, &passfile_rel(name, self.secret_ext()))
             .await?;
         let identity_bytes = self.get_identity_bytes().await?;
@@ -842,7 +1009,7 @@ impl Store {
 
         // Existence + within-repo guard + remove the worktree file. The index
         // removal is staged in the commit below.
-        self.storage.delete(&rcs.repo_path, &passfile).await?;
+        self.storage()?.delete(&rcs.repo_path, &passfile).await?;
 
         let head = self
             .commit_local(
@@ -994,7 +1161,7 @@ impl Store {
             DivergenceChoice::AdoptRemote => {
                 let rcs = self.rcs_ctx().await?;
                 let expected = expected_remote_oid.to_string();
-                self.storage.adopt_remote(&rcs.ctx(), &expected).await
+                self.storage()?.adopt_remote(&rcs.ctx(), &expected).await
             }
             DivergenceChoice::KeepMine => self.resolve_keep_mine(expected_remote_oid).await,
         }
@@ -1015,7 +1182,11 @@ impl Store {
 
         // 1. Plan: fetch once, stale-guard, authenticity-verify, compute the
         //    replay set + conflict detection. Does NOT move HEAD.
-        let plan = match self.storage.keep_local_plan(&rcs.ctx(), &expected).await? {
+        let plan = match self
+            .storage()?
+            .keep_local_plan(&rcs.ctx(), &expected)
+            .await?
+        {
             KeepLocalOutcome::Blocked(result) => return Ok(result),
             KeepLocalOutcome::Plan(p) => p,
         };
@@ -1051,7 +1222,7 @@ impl Store {
         //    (objects still in the DB), so no second fetch can race past the
         //    reviewed tip and bypass the authenticity check under Enforce.
         let fetched = fetched_oid.clone();
-        self.storage
+        self.storage()?
             .keep_local_advance(&rcs.repo_path, &fetched)
             .await?;
 
@@ -1059,7 +1230,8 @@ impl Store {
         //    (ensureOurKeyID) via the backend. It re-reads the recipients index
         //    and re-derives our recipient per entry — cheap for age, and the
         //    replay set is small. The view binds to the advanced working tree.
-        let view = RepoFiles::new(&*self.storage, &rcs.repo_path);
+        let storage = self.storage()?;
+        let view = RepoFiles::new(&*storage, &rcs.repo_path);
         let mut ciphertexts: Vec<(String, Vec<u8>)> = Vec::with_capacity(decrypted.len());
         for (rel, plaintext) in decrypted {
             let ct = self.crypto.encrypt(&plaintext, &identity, &view).await?;
@@ -1069,7 +1241,7 @@ impl Store {
         // 5. Write the re-encrypted entries, apply local deletes, commit, push.
         let deletes = deletes.clone();
         let head = self
-            .storage
+            .storage()?
             .keep_local_finalize(&rcs.ctx(), &ciphertexts, &deletes)
             .await?;
 
@@ -1090,7 +1262,7 @@ impl Store {
     /// Returns an error if the store is not configured or the fetch fails.
     pub async fn sync_divergence_preview(&self) -> Result<SyncDivergence, Error> {
         let rcs = self.rcs_ctx().await?;
-        self.storage.preview_divergence(&rcs.ctx()).await
+        self.storage()?.preview_divergence(&rcs.ctx()).await
     }
 
     /// Look up the content template (`.pass-template`) that applies to `name`,
@@ -1104,7 +1276,7 @@ impl Store {
     /// Returns an error if the store is not configured.
     pub async fn lookup_template(&self, name: &str) -> Result<Option<String>, Error> {
         let repo_path = self.repo_path().await?;
-        self.storage.lookup_template(&repo_path, name).await
+        self.storage()?.lookup_template(&repo_path, name).await
     }
 
     /// Create a secret, applying a matching `.pass-template` if one exists
@@ -1202,7 +1374,7 @@ impl Store {
         passfile: String,
         message: String,
     ) -> Result<String, Error> {
-        self.storage
+        self.storage()?
             .commit(&rcs.ctx(), kind, &[passfile], &message)
             .await
     }
@@ -1222,13 +1394,14 @@ impl Store {
         // reading the index through a view — the backend owns recipient
         // resolution + the encrypt step now.
         let identity_bytes = self.get_identity_bytes().await?;
-        let view = RepoFiles::new(&*self.storage, repo_path);
+        let storage = self.storage()?;
+        let view = RepoFiles::new(&*storage, repo_path);
         let ciphertext = self
             .crypto
             .encrypt(plaintext, &identity_bytes, &view)
             .await?;
 
-        self.storage.set(repo_path, &passfile, &ciphertext).await?;
+        storage.set(repo_path, &passfile, &ciphertext).await?;
         Ok(passfile)
     }
 
@@ -1393,7 +1566,7 @@ impl Store {
         progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let rcs = self.rcs_ctx().await?;
-        self.storage.pull(&rcs.ctx(), cancel, progress).await
+        self.storage()?.pull(&rcs.ctx(), cancel, progress).await
     }
 
     /// Push the current branch to `origin`.
@@ -1415,7 +1588,7 @@ impl Store {
     /// Lock-free inner of [`push`] (see [`sync_with_locked`]).
     async fn push_locked(&self) -> Result<(), Error> {
         let rcs = self.rcs_ctx().await?;
-        self.storage.push(&rcs.ctx()).await
+        self.storage()?.push(&rcs.ctx()).await
     }
 
     /// Manual sync (pull → push) — the publish path when autosync is off, and the
@@ -1909,7 +2082,7 @@ impl Store {
     /// The full hash of the current HEAD commit, for provenance fields.
     async fn current_head_hash(&self) -> Result<String, Error> {
         let repo_path = self.repo_path().await?;
-        self.storage.current_head(&repo_path).await
+        self.storage()?.current_head(&repo_path).await
     }
 
     /// Verify every commit in the half-open range `(from, to]` (newest first)
@@ -1979,6 +2152,12 @@ impl Store {
     /// Returns an error if the files cannot be removed.
     pub async fn reset(&self) -> Result<(), Error> {
         self.lock();
+        // Drop the resolved backend first so post-reset ops get a clear
+        // `BackendNotAvailable` instead of touching a torn-down repo. Marginal:
+        // `reset` doesn't hold `write_mu`, so an in-flight op that already cloned
+        // the `Arc` may still hit the old backend (pre-existing destructive-reset
+        // behavior).
+        self.clear_storage_backend();
 
         if let Ok(repo_config) = self.config.load_repo_config().await {
             let repo_path = Path::new(&repo_config.local_path);
@@ -2256,6 +2435,9 @@ mod tests {
         // target) → not a regular file → hard error.
         let repo_dir = tempfile::tempdir().unwrap();
         let store = Store::new(repo_dir.path().to_path_buf(), None);
+        store
+            .resolve_and_set(Some("git"), &repo_dir.path().to_string_lossy())
+            .unwrap();
         symlink(
             "/nonexistent/gpm-dangling",
             repo_dir.path().join(".age-recipients"),
@@ -2278,6 +2460,9 @@ mod tests {
         fs::write(&external_file, b"age1stolen\n").unwrap();
         symlink(&external_file, repo_dir2.path().join(".age-recipients")).unwrap();
         let store2 = Store::new(repo_dir2.path().to_path_buf(), None);
+        store2
+            .resolve_and_set(Some("git"), &repo_dir2.path().to_string_lossy())
+            .unwrap();
         let err = store2
             .read_recipients_raw(repo_dir2.path())
             .await
@@ -2292,12 +2477,18 @@ mod tests {
         let repo_dir3 = tempfile::tempdir().unwrap();
         fs::write(repo_dir3.path().join(".age-recipients"), b"age1abc\n").unwrap();
         let store3 = Store::new(repo_dir3.path().to_path_buf(), None);
+        store3
+            .resolve_and_set(Some("git"), &repo_dir3.path().to_string_lossy())
+            .unwrap();
         let got = store3.read_recipients_raw(repo_dir3.path()).await.unwrap();
         assert_eq!(got.len(), 1, "regular index still parses");
 
         // Missing index → empty (uninitialized store), unchanged.
         let repo_dir4 = tempfile::tempdir().unwrap();
         let store4 = Store::new(repo_dir4.path().to_path_buf(), None);
+        store4
+            .resolve_and_set(Some("git"), &repo_dir4.path().to_string_lossy())
+            .unwrap();
         assert!(
             store4
                 .read_recipients_raw(repo_dir4.path())
@@ -2314,6 +2505,9 @@ mod tests {
         let missing_checkout = PathBuf::from("/tmp/gpm_no_such_checkout_12345_age_recipients");
         assert!(!missing_checkout.exists());
         let store5 = Store::new(missing_checkout.clone(), None);
+        store5
+            .resolve_and_set(Some("git"), &missing_checkout.to_string_lossy())
+            .unwrap();
         assert_eq!(
             store5
                 .read_recipients_raw(&missing_checkout)
@@ -2570,6 +2764,56 @@ mod tests {
         assert!(!store.is_unlocked());
         store.lock();
         assert!(!store.is_unlocked());
+    }
+
+    /// An unresolved Store (no `resolve_and_set` / configure) surfaces
+    /// `BackendNotAvailable` from `storage()` — not a panic, not a wrong backend.
+    #[tokio::test]
+    async fn unresolved_storage_returns_backend_not_available() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        // read_recipients_raw calls storage() directly (repo_path passed
+        // explicitly — no repo_config load that would mask the error).
+        let err = store.read_recipients_raw(dir.path()).await.unwrap_err();
+        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
+    }
+
+    /// A hard resolve failure (unregistered `ext:`) stashes the specific error
+    /// so `storage()` surfaces the offending name, not a generic message.
+    #[tokio::test]
+    async fn resolve_storage_stashes_unregistered_backend_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        // Seed a repo.json pointing at an unregistered ext: backend.
+        let rc = RepoConfig {
+            url: String::new(),
+            local_path: "/tmp".to_string(),
+            backend: Some("ext:unregistered".to_string()),
+            ..Default::default()
+        };
+        store.config.save_repo_config_full(&rc).await.unwrap();
+        // Resolve fails (unregistered) and stashes the error.
+        let err = store.resolve_storage().await.unwrap_err();
+        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
+        // storage() surfaces the stashed error, including the offending name.
+        let stashed = store.storage().err().unwrap();
+        assert_eq!(stashed.code, "BACKEND_NOT_AVAILABLE");
+        assert!(
+            stashed.message.contains("ext:unregistered"),
+            "stashed error should name the unregistered backend: {stashed}"
+        );
+    }
+
+    /// `resolve_storage` soft-skips (Ok) when there's no `repo.json` yet
+    /// (pre-setup) — not an error. `storage()` stays unresolved.
+    #[tokio::test]
+    async fn resolve_storage_soft_skips_when_no_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        // No repo.json — soft-skip, not an error.
+        store.resolve_storage().await.unwrap();
+        let err = store.storage().err().unwrap();
+        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
     }
 
     #[tokio::test]

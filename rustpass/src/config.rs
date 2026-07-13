@@ -288,6 +288,9 @@ impl Config {
             // it from Settings.
             unlock_identity_with_app: false,
             authenticity: AuthenticityConfig::default(),
+            // Setup always configures the git built-in; an `ext:` backend is
+            // chosen only by its own (0046) setup path via `save_repo_config_full`.
+            backend: None,
         };
         // Delegate to the atomic variant so `repo.json` is never observed
         // half-written (temp file + rename), matching `save_identity`. Matters
@@ -493,6 +496,12 @@ pub struct RepoConfig {
     /// shape.
     #[serde(default, skip_serializing_if = "AuthenticityConfig::is_default")]
     pub authenticity: AuthenticityConfig,
+    /// Which storage backend this store uses. `None` (the default) means the
+    /// built-in git backend; `"ext:<name>"` selects an extension backend the
+    /// app registered at startup. Lives in sealed `repo.json`, so it is
+    /// unreadable until app unlock — resolved post-unlock, not at `Store::new`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend: Option<String>,
 }
 
 impl RepoConfig {
@@ -988,6 +997,53 @@ mod tests {
         let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
         assert!(!json.contains("commit_user_name"));
         assert!(!json.contains("commit_user_email"));
+    }
+
+    #[tokio::test]
+    async fn repo_config_backend_round_trip() {
+        let (config, _dir) = create_config();
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let rc = RepoConfig {
+            url: "https://x/repo".to_string(),
+            local_path: "/p".to_string(),
+            backend: Some("ext:cloud-folder".to_string()),
+            ..Default::default()
+        };
+        config.save_repo_config_full(&rc).await.unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
+        assert_eq!(cfg.backend.as_deref(), Some("ext:cloud-folder"));
+    }
+
+    #[tokio::test]
+    async fn repo_config_backend_omitted_when_none() {
+        let (config, _dir) = create_config();
+        config
+            .save_repo_config("https://x/repo", None, None, None, "/p")
+            .await
+            .unwrap();
+        // No master key ⇒ passthrough, so the JSON is readable plaintext.
+        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        assert!(
+            !json.contains("backend"),
+            "backend must not be serialized when None (git default)"
+        );
+        let cfg = config.load_repo_config().await.unwrap();
+        assert_eq!(cfg.backend, None);
+    }
+
+    #[tokio::test]
+    async fn repo_config_backend_defaults_none_for_old_config() {
+        // A config written before the `backend` field existed deserializes as
+        // None (git) — backward compat.
+        let (config, _dir) = create_config();
+        std::fs::create_dir_all(&config.config_dir).unwrap();
+        let old_json = r#"{"url":"https://x/repo","local_path":"/p"}"#;
+        std::fs::write(config.repo_config_path(), old_json).unwrap();
+        let cfg = config.load_repo_config().await.unwrap();
+        assert_eq!(
+            cfg.backend, None,
+            "old config without backend deserializes as None (git)"
+        );
     }
 
     #[tokio::test]

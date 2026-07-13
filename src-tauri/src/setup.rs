@@ -686,6 +686,7 @@ mod tests {
             app_lock_enabled: std::sync::atomic::AtomicBool::new(false),
             app_locked: std::sync::atomic::AtomicBool::new(false),
             seal_migrate_state: std::sync::atomic::AtomicU8::new(0),
+            backend_resolve_state: std::sync::atomic::AtomicU8::new(0),
             active_cancel_token: Mutex::new(None),
         };
         (state, dir)

@@ -233,6 +233,34 @@ pub(crate) async fn run_seal_migrate_once(state: &AppState) {
     }
 }
 
+/// One-shot storage-backend resolve, CAS-guarded against concurrent callers.
+///
+/// Called by `app_unlock` after the master key is injected (and after
+/// [`run_seal_migrate_once`]): the backend type + root live in sealed
+/// `repo.json`, unreadable until unlock. On a hard failure (unregistered `ext:`,
+/// tampered config) the specific error is stashed in `Store` so `storage()`
+/// surfaces it; the CAS resets to `Pending` so the next unlock retries (mirrors
+/// `run_seal_migrate_once`). `pub(crate)` so in-crate tests can drive it.
+pub(crate) async fn run_backend_resolve_once(state: &AppState) {
+    const BR_PENDING: u8 = 0;
+    const BR_INFLIGHT: u8 = 1;
+    const BR_DONE: u8 = 2;
+    if state
+        .backend_resolve_state
+        .compare_exchange(BR_PENDING, BR_INFLIGHT, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        match state.store.resolve_storage().await {
+            Ok(()) => state
+                .backend_resolve_state
+                .store(BR_DONE, Ordering::Release),
+            Err(_) => state
+                .backend_resolve_state
+                .store(BR_PENDING, Ordering::Release),
+        }
+    }
+}
+
 /// Unlock the app: retrieve the master key via a biometric prompt and inject it
 /// into the `Store`. The identity cache is left wiped (re-established lazily by
 /// per-operation auth, or by the identity-auto-unlock opt-in); a soft
@@ -270,6 +298,11 @@ pub(crate) async fn app_unlock(
     // Under App Lock the key is absent at cold start, so convert it now.
     // TODO: v1.0.x — remove with the legacy-magic compat path.
     run_seal_migrate_once(&state).await;
+    // One-shot storage-backend resolve: the backend type lives in sealed
+    // repo.json, now readable. Runs before the unlock emit so content ops see a
+    // resolved backend (not BackendNotAvailable). Mirrors the seal-migrate
+    // one-shot; on a hard failure the error is stashed in Store for storage().
+    run_backend_resolve_once(&state).await;
     state.app_locked.store(false, Ordering::SeqCst);
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
     emit_app_lock_state(&app, enabled, false);

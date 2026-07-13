@@ -97,6 +97,12 @@ pub(crate) struct AppState {
     /// unlock claims this and runs `migrate_seal` to convert `GPMATR1`
     /// envelopes to `GPMSEL1`. TODO: v1.0.x — remove with the legacy-magic path.
     pub(crate) seal_migrate_state: AtomicU8,
+    /// One-shot state for the post-unlock storage-backend resolve
+    /// (`0` = Pending, `1` = `InFlight`, `2` = Done). The backend type lives in
+    /// sealed `repo.json` (unreadable until app unlock), so the resolve runs
+    /// post-unlock — mirroring `seal_migrate_state`. On a hard failure the
+    /// specific error is stashed in `Store` (not here) so `storage()` surfaces it.
+    pub(crate) backend_resolve_state: AtomicU8,
     /// Cancel token for the in-flight clone/pull (if any). Set by the
     /// `cancel_git` command; cleared by the owning command once the operation
     /// settles. `None` outside a user-initiated clone/pull.
@@ -203,6 +209,12 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     if let Err(e) = tauri::async_runtime::block_on(store.migrate_seal()) {
         eprintln!("[gpm] seal migration failed: {e}");
     }
+    // Resolve the storage backend from sealed repo.json (no-op pre-setup or
+    // under app-lock — the post-unlock one-shot finishes it). Best-effort, like
+    // migrate_seal: a hard failure is stashed in Store for storage() to surface.
+    if let Err(e) = tauri::async_runtime::block_on(store.resolve_storage()) {
+        eprintln!("[gpm] storage backend resolve failed: {e}");
+    }
 
     let app_state = AppState {
         store,
@@ -222,6 +234,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         // Legacy-envelope migrate pending; only consumed on the App-Lock path
         // (first app_unlock). Stays Pending on non-app-lock/desktop (no unlock).
         seal_migrate_state: AtomicU8::new(0),
+        backend_resolve_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
     };
     // Copy the app-scoped behavior prefs out of a pre-split repo.json into

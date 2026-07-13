@@ -65,6 +65,11 @@ pub enum ErrorCode {
     /// An seal envelope exists but the master key is unavailable (Keystore
     /// wiped / app data cleared). Re-setup is required.
     SealKeyUnavailable,
+    /// A configured storage backend is not available in this build (e.g. an
+    /// `ext:` extension backend that wasn't registered, or a cloud-folder
+    /// backend opened on a desktop build with no SAF plugin). The store is
+    /// unusable until reconfigured to a backend this build offers.
+    BackendNotAvailable,
 }
 
 /// Safe error type that never contains secret content.
@@ -106,6 +111,7 @@ impl Error {
                 ErrorCode::SealKeyUnavailable => "SEAL_KEY_UNAVAILABLE",
                 ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
                 ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
+                ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
             }
             .to_string(),
             message: message.into(),
@@ -202,6 +208,7 @@ mod tests {
             ErrorCode::SealKeyUnavailable => "SEAL_KEY_UNAVAILABLE",
             ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
             ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
+            ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
         }
     }
 
@@ -233,6 +240,7 @@ mod tests {
             ErrorCode::SealKeyUnavailable,
             ErrorCode::PluginUnavailable,
             ErrorCode::PluginIdentityNotSupported,
+            ErrorCode::BackendNotAvailable,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -272,6 +280,7 @@ mod tests {
             ErrorCode::SealKeyUnavailable,
             ErrorCode::PluginUnavailable,
             ErrorCode::PluginIdentityNotSupported,
+            ErrorCode::BackendNotAvailable,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");
