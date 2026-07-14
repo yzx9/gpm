@@ -120,33 +120,48 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            # Rust
-            rustToolchain
-            rust-analyzer
-            cargo-audit
-            cargo-release
-            cargo-outdated
-            sccache # shared compile cache across worktrees (RUSTC_WRAPPER below)
+          packages =
+            with pkgs;
+            [
+              # Rust
+              rustToolchain
+              rust-analyzer
+              cargo-audit
+              cargo-release
+              cargo-outdated
+              sccache # shared compile cache across worktrees (RUSTC_WRAPPER below)
 
-            # Frontend
-            nodejs
-            pnpm
+              # Frontend
+              nodejs
+              pnpm
 
-            # Android
-            jdk17
-            androidComp.androidsdk
+              # Android
+              jdk17
+              androidComp.androidsdk
 
-            # Utils
-            just
-            jq
-            nixfmt
-            prettier
+              # Utils
+              just
+              jq
+              nixfmt
+              prettier
 
-            # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
-            # `age` CLI (independent of rustpass's own decrypt path).
-            age
-          ];
+              # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
+              # `age` CLI (independent of rustpass's own decrypt path).
+              age
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkg-config
+              dbus
+              glib
+              # Tauri v2 desktop (host) build — webkit2gtk-4.1 + GTK3 stack
+              gtk3
+              cairo
+              pango
+              gdk-pixbuf
+              atk
+              webkitgtk_4_1
+              libsoup_3
+            ];
 
           ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
           ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
