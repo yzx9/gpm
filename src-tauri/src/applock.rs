@@ -233,7 +233,9 @@ pub(crate) async fn run_seal_migrate_once(state: &AppState) {
     }
 }
 
-/// One-shot storage-backend resolve, CAS-guarded against concurrent callers.
+/// One-shot backend resolve (storage + crypto), CAS-guarded against concurrent
+/// callers. The shared CAS flag is `Done` only when BOTH resolve; on a hard
+/// failure the next unlock retries both (see the body comment).
 ///
 /// Called by `app_unlock` after the master key is injected (and after
 /// [`run_seal_migrate_once`]): the backend type + root live in sealed
@@ -250,14 +252,20 @@ pub(crate) async fn run_backend_resolve_once(state: &AppState) {
         .compare_exchange(BR_PENDING, BR_INFLIGHT, Ordering::AcqRel, Ordering::Acquire)
         .is_ok()
     {
-        match state.store.resolve_storage().await {
-            Ok(()) => state
-                .backend_resolve_state
-                .store(BR_DONE, Ordering::Release),
-            Err(_) => state
-                .backend_resolve_state
-                .store(BR_PENDING, Ordering::Release),
-        }
+        // Shared one-shot flag: Done only when BOTH storage and crypto resolve.
+        // They read the same sealed repo.json at the same unlock instant, so a
+        // failure in either is a failure of the shared config read — retry both
+        // on the next unlock.
+        let storage_ok = state.store.resolve_storage().await.is_ok();
+        let crypto_ok = state.store.resolve_crypto().await.is_ok();
+        state.backend_resolve_state.store(
+            if storage_ok && crypto_ok {
+                BR_DONE
+            } else {
+                BR_PENDING
+            },
+            Ordering::Release,
+        );
     }
 }
 

@@ -1,88 +1,84 @@
-# Crypto backend registration
+# Crypto backend selection (typed built-in dispatch)
 
 **Priority:** P3
-**Status:** Blocked
-**Phase:** Future
+**Status:** Implemented
+**Phase:** Current
 
 ## What
 
-A registration mechanism for crypto backends, parallel to the storage one —
-deferred until a second crypto backend actually appears and forces the question.
-Today there is one crypto backend (age), and it lives inside rustpass, so there
-is no consumer for a registration seam. This RFC records the decision to wait:
-when a second crypto backend arrives (the GPG/OpenPGP backend), revisit whether
-crypto needs the registration mechanism the storage side has, or whether
-internal dispatch suffices.
+Crypto backend selection for a store: a typed match on a persisted
+`RepoConfig.crypto` field — `None`/`"age"` → `AgeBackend`, `"gpg"` →
+`GpgBackend` — resolved lazily post-unlock, mirroring storage's resolve
+lifecycle but **without a registry**. The field lives in sealed `repo.json`,
+unreadable until app unlock; `Store::resolve_crypto` runs at startup and is
+folded into the storage one-shot at app-unlock. An unknown kind surfaces as
+`BackendNotAvailable`.
 
 ## Why
 
-A registration seam earns its keep only when a backend's implementation lives
-outside the crate that uses it, or when there are enough backends that a central
-dispatch is worth abstracting. Neither is true for crypto today. The age backend
-is a pure-Rust implementation inside rustpass, and the planned GPG backend is
-also pure-Rust and will live inside rustpass — chosen precisely because it
-cross-compiles to Android without an external binary. There is no crypto backend
-whose implementation rustpass cannot host, so there is no external
-implementation to register, and no consumer forcing the abstraction.
-
-Building the mechanism now would be designing a registration seam from a single
-implementation — the same trap that shaped this codebase's earlier abstractions
-the wrong way when attempted from one example. The honest move is to block until
-a real consumer (the GPG backend) arrives and tells us whether crypto wants a
-registry at all, or whether a typed internal selection is enough.
+The second crypto backend (GPG/OpenPGP, RFC 0036) landed, forcing the decision
+this RFC had deferred. Both backends are rustpass-internal pure-Rust unit
+structs that rustpass constructs itself, so selection is an internal typed
+match — not a registry lookup. There is no external crypto backend whose
+implementation rustpass cannot host, so there is nothing to register. Typed
+internal selection handles GPG cleanly, vindicating the original "wait for the
+second backend, then see if typed selection suffices" thesis.
 
 ## Context
 
-**Crypto's backends are internal; storage's are not.** The storage side has a
-backend (the cloud-folder backend) whose implementation must live in the app
-layer because it bridges to Kotlin; that external implementation is what forces
-the storage registry. Crypto has no such backend: every crypto backend is, or is
-planned to be, a pure-Rust implementation inside rustpass. Without an external
-implementation, rustpass can construct any crypto backend itself, and selection
-is an internal decision — a typed backend-kind field resolved after unlock — not
-a registry lookup.
+**Mirror of storage's resolve lifecycle, not its mechanism.** Crypto keeps the
+valuable part of the storage pattern — the persisted backend-kind field, the
+lazy post-unlock resolve, the `crypto()` accessor that surfaces a specific
+error when unresolved — but drops the registry. Storage needs a registry
+(`ext:` namespace + factory map) because its cloud-folder backend's
+implementation lives outside rustpass (it bridges to Kotlin). Crypto has no
+such backend, so imposing storage's registry would be an indirection with no
+backend behind it.
 
-**The shared part is late binding, not the mechanism.** Both crypto and storage
-keep "which backend" in the sealed repository configuration, unreadable until
-unlock, and both resolve it after unlock. What differs is the dispatch: storage
-looks up a registry because its backends can be external; crypto matches
-internally because its backends cannot. Imposing the storage registry on crypto
-would add an indirection with no backend behind it.
+**The `crypto()` accessor is fallible.** It returns `BackendNotAvailable` when
+the slot is `None` (pre-unlock, after a failed resolve, or after `reset`),
+refusing operations the store cannot correctly perform rather than silently
+serving a wrong default. Its reachable error paths are narrow — all crypto ops
+are gated behind `load_repo_config`, which fails pre-unlock, and an unknown
+crypto kind needs manual config corruption — but the explicit refusal is the
+same contract `storage()` offers.
 
-**The consumer that unblocks this.** The GPG/OpenPGP backend is the event that
-makes this decision real: a second crypto backend with a different identity and
-recipient model, needing construction-time selection. When it lands, the
-question becomes concrete — does crypto want a registration seam (for symmetry,
-or for a hypothetical external crypto backend), or is a typed internal selection
-sufficient? Until then the question has no answer that is not speculation.
+**The `ext:` extension seam is deferred.** No `register_crypto` / `ext:` crypto
+namespace is built, because there is no external crypto backend to populate
+it. The deferral is a bet: it stays cheap only while the next crypto backend is
+internal pure-Rust (a third typed match arm). If a future backend is
+JNI-bridged, a subprocess, or stateful, typed dispatch breaks and the registry
+gets built then. "Deferred" means "not re-written iff the next backend is
+internal pure-Rust," not "never."
 
 ## Alternatives considered
 
-1. **Impose the storage registration mechanism on crypto now.** Rejected: there
-   is no consumer, so it is an abstraction over one implementation, and it
-   imports machinery (a registry, an extension namespace) that crypto has no
-   external backend to populate. Over-engineering.
+1. **Impose the storage registry on crypto (register_crypto + `ext:` namespace).**
+   Rejected: no external crypto backend exists, so the `ext:` path would be
+   dead-in-production code with zero consumers. Add the seam only when a
+   consumer (e.g. JNI/PGP) appears — it is additive and non-breaking.
 
-2. **Decide the crypto mechanism now anyway, ahead of the second backend.**
-   Rejected: a backend-selection shape guessed from a single implementation is
-   the documented failure mode of this codebase's earlier abstractions. Shape it
-   when the second backend arrives, not before.
+2. **Infallible default-and-swap accessor (always hold `AgeBackend`, swap at
+   unlock).** Rejected: it would silently serve the wrong backend on a corrupt
+   config (`crypto = "quux"`) instead of a clear error. The fallible accessor's
+   cost (a few internal `?` additions, no public-API change) is worth the
+   explicit error states.
 
-3. **Never add a crypto registration mechanism.** Not rejected — it remains a
-   live possibility. If the GPG backend lands and internal typed selection
-   handles it cleanly, this RFC may be deprecated rather than implemented. The
-   decision is genuinely open until the consumer exists.
+3. **A separate CAS one-shot for crypto resolve.** Rejected: crypto and storage
+   read the same sealed `repo.json` at the same unlock instant, so a separate
+   guard buys nothing. Crypto resolve is folded into storage's existing
+   one-shot; the shared flag means "both resolved."
 
 ## Effort
 
-Unknown until the consumer arrives; blocked. When the GPG backend lands, the
-work is either small (a typed internal selection, if that suffices) or medium
-(a real registration seam, if a reason for one appears). This RFC records the
-deferral, not a plan to build.
+Done. The typed match, lazy resolve, `crypto()` accessor, reset teardown, and
+the startup/post-unlock wiring landed across config, store, and the Tauri app
+layer, with an end-to-end integration test proving a `crypto = "gpg"` store
+decrypts through `Store::get`.
 
 ## Depends on / Supersedes
 
-Blocked on a consumer: the GPG/OpenPGP backend
-(`0036-gpg-crypto-backend.md`). Reassess when it lands. Parallel to
-`0049-storage-backend-registration.md`, which has a consumer (the cloud-folder
-backend) and so is not blocked.
+Resolves the deferral this RFC originally recorded: the second backend
+(RFC 0036) arrived and typed internal selection sufficed, so no registry was
+built. Parallel to `0049-storage-backend-registration.md`, which keeps its
+registry because the cloud-folder storage backend is external.

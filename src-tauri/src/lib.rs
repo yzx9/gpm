@@ -215,6 +215,13 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     if let Err(e) = tauri::async_runtime::block_on(store.resolve_storage()) {
         eprintln!("[gpm] storage backend resolve failed: {e}");
     }
+    // Resolve the crypto backend from the same sealed repo.json (no-op
+    // pre-setup or under app-lock — the post-unlock one-shot finishes it).
+    // Best-effort, like resolve_storage: a hard failure is stashed in Store
+    // for crypto() to surface.
+    if let Err(e) = tauri::async_runtime::block_on(store.resolve_crypto()) {
+        eprintln!("[gpm] crypto backend resolve failed: {e}");
+    }
 
     let app_state = AppState {
         store,

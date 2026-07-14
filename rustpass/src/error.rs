@@ -65,10 +65,11 @@ pub enum ErrorCode {
     /// An seal envelope exists but the master key is unavailable (Keystore
     /// wiped / app data cleared). Re-setup is required.
     SealKeyUnavailable,
-    /// A configured storage backend is not available in this build (e.g. an
-    /// `ext:` extension backend that wasn't registered, or a cloud-folder
-    /// backend opened on a desktop build with no SAF plugin). The store is
-    /// unusable until reconfigured to a backend this build offers.
+    /// A configured backend (storage or crypto) is not available in this build
+    /// — e.g. an `ext:` storage extension that wasn't registered, a cloud-folder
+    /// storage backend opened on a desktop build with no SAF plugin, or an
+    /// unknown crypto kind in `repo.json`. The store is unusable until
+    /// reconfigured to a backend this build offers.
     BackendNotAvailable,
 }
 
