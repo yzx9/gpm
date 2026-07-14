@@ -8,6 +8,10 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -15,6 +19,7 @@
       nixpkgs,
       systems,
       fenix,
+      git-hooks,
       ...
     }:
 
@@ -70,6 +75,48 @@
           "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/llvm/prebuilt/"
           + (if pkgs.stdenv.isDarwin then "darwin-x86_64" else "linux-x86_64")
           + "/bin";
+
+        # Generated / volatile paths the write-hooks must not touch. prettier also
+        # honors .prettierignore; this covers the whitespace hooks and mirrors it.
+        formatExcludes = [
+          "^src-tauri/gen/android/"
+          "^pnpm-lock\\.yaml$"
+          "^Cargo\\.lock$"
+          "^rustpass/data/cacert\\.pem$"
+          "^dist/"
+          "^\\.agents/skills/"
+        ];
+
+        # git pre-commit hooks, auto-installed into the devShell (direnv sets
+        # core.hooksPath via pre-commit-checks.shellHook). Unlike the old
+        # smart_format.sh PostToolUse hook, this fires for *every* write path
+        # (shell / heredoc / git), closing the formatter-bypass gap.
+        pre-commit-checks = git-hooks.lib.${system}.run {
+          src = ./.;
+          hooks = {
+            nixfmt.enable = true;
+
+            prettier = {
+              enable = true;
+              excludes = formatExcludes;
+            };
+
+            # Per-file rustfmt (edition 2024) — formats only staged .rs files.
+            # `cargo fmt` would reformat the whole workspace and drag unrelated
+            # files into the commit, so we call rustfmt directly on staged files.
+            rustfmt = {
+              enable = true;
+              name = "rustfmt";
+              description = "Format staged Rust files (edition 2024)";
+              entry = "rustfmt --edition 2024";
+              files = "\\.rs$";
+              language = "system";
+              # git-hooks.nix defaults pass_filenames to false for custom hooks;
+              # rustfmt must receive the staged filenames to format per-file.
+              pass_filenames = true;
+            };
+          };
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -124,14 +171,16 @@
           # regardless of which fallback it checks.
           # macOS-only: rust-lang/rust#131407 — macOS ar creates BSD-format archives
           # that rustc cannot handle when cross-compiling to Linux/Android targets.
-          shellHook = ''
-            export PATH="${ndkBin}:$PATH"
-          ''
-          + lib.optionalString pkgs.stdenv.isDarwin ''
-            export AR="${ndkBin}/llvm-ar"
-            export TARGET_AR="${ndkBin}/llvm-ar"
-            export RANLIB="${ndkBin}/llvm-ranlib"
-          '';
+          shellHook =
+            pre-commit-checks.shellHook
+            + ''
+              export PATH="${ndkBin}:$PATH"
+            ''
+            + lib.optionalString pkgs.stdenv.isDarwin ''
+              export AR="${ndkBin}/llvm-ar"
+              export TARGET_AR="${ndkBin}/llvm-ar"
+              export RANLIB="${ndkBin}/llvm-ranlib"
+            '';
         };
       }
     );

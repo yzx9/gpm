@@ -44,10 +44,17 @@ lint: gen-icons
   cargo clippy --all-targets --all-features -- -D warnings
   pnpm exec vue-tsc --noEmit
 
-# Format Rust + Vue code
+# Format Rust + Vue + Nix code
 fmt:
   cargo fmt
   prettier --write .
+  nixfmt $(git ls-files '*.nix')
+
+# Check formatting without writing (parity with the nix pre-commit hooks)
+fmt-check:
+  cargo fmt --check
+  prettier --check .
+  nixfmt --check $(git ls-files '*.nix')
 
 # Refresh the embedded Mozilla CA bundle (rustpass/data/cacert.pem) that backs
 # HTTPS git certificate verification on Android. Run once per release so the
