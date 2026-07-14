@@ -218,9 +218,10 @@ slot. The sequence runs over whichever transport is open (USB CCID or NFC IsoDep
    `11` (ECC), P2 = slot (`82`–`95`, the retired slots). The data is a `7C`
    constructed TLV wrapping an empty response placeholder (`82 00`) and tag `85`
    carrying the sender's 65-byte uncompressed ephemeral point (`04 ‖ X ‖ Y`). Tag
-   `85` (not `81`) selects ECDH rather than signing. The response `7C … 82 … <32-byte
-   shared secret>` is the ECDH X-coordinate, which HKDF/HPKE then turns into the file
-   key. Everything fits short APDUs; no extended-length support required.
+   `85` (not `81`) selects ECDH rather than signing. The response
+   `7C … 82 … <32-byte shared secret>` is the ECDH X-coordinate, which HKDF/HPKE
+   then turns into the file key. Everything fits short APDUs; no extended-length
+   support required.
 
 The **management key** (slot `9B`) is only for generating/replacing keys and writing
 the slot certificate — it is never touched on the decrypt path. The **PUK** only
