@@ -19,7 +19,7 @@ use tokio::task::spawn_blocking;
 use zeroize::Zeroizing;
 
 use crate::config::{Config, LockMode, RepoConfig};
-use crate::crypto::{AgeBackend, CryptoBackend, SecretExt};
+use crate::crypto::{AgeBackend, CryptoBackend, GpgBackend, SecretExt};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity, validate_identity_format};
@@ -72,11 +72,21 @@ pub use crate::storage::git::{list_entries, resolve_entry_path};
 /// [`list`](Store::list), [`get`](Store::get), and [`sync`](Store::sync) (pull).
 /// Supports optional passphrase-encrypted identity with in-memory caching.
 pub struct Store {
-    /// The crypto backend (age today). The only path to encrypt/decrypt,
-    /// recipient derivation, and identity management — `Store` never touches the
-    /// age library directly. `Box<dyn>` so a second backend can
-    /// arrive without rewriting the facade.
-    crypto: Box<dyn CryptoBackend>,
+    /// The crypto backend (age by default; GPG once `repo.json` selects it). The
+    /// only path to encrypt/decrypt, recipient derivation, and identity
+    /// management — `Store` never touches the age/GPG libraries directly.
+    /// Lazily resolved post-unlock — the backend kind lives in sealed
+    /// `repo.json`, unreadable until app unlock — so `None` until
+    /// [`resolve_crypto`](Self::resolve_crypto) runs. `std::sync::Mutex` (not
+    /// `tokio::sync`) because the guard is dropped before any `.await`:
+    /// [`crypto`](Self::crypto)() clones the `Arc` out and releases.
+    ///
+    /// `Arc<dyn>` (not `Box`) so a cloned handle survives across the async
+    /// encrypt/decrypt `.await`s without holding the mutex guard. Safe to share:
+    /// every backend is a stateless unit struct (`AgeBackend`, `GpgBackend`) —
+    /// `GpgBackend`'s keyring is read through `RepoFileView` per call, never held
+    /// on the struct. A stateful backend would need re-review before sharing.
+    crypto: std::sync::Mutex<Option<Arc<dyn CryptoBackend>>>,
     /// The storage backend (git today; `ext:` extensions via the registry).
     /// Lazily resolved post-unlock — the backend type + root live in sealed
     /// `repo.json`, unreadable until app unlock — so `None` until
@@ -92,6 +102,13 @@ pub struct Store {
     /// [`set_storage_backend`](Self::set_storage_backend) /
     /// [`clear_storage_backend`](Self::clear_storage_backend).
     resolve_err: std::sync::Mutex<Option<Error>>,
+    /// The most recent hard crypto-resolve failure (an unknown crypto kind in
+    /// `repo.json`). Stashed by [`resolve_crypto`](Self::resolve_crypto) so
+    /// [`crypto`](Self::crypto)() surfaces the specific reason instead of a
+    /// generic `BackendNotAvailable`. Cleared on a successful
+    /// [`resolve_crypto`](Self::resolve_crypto) /
+    /// [`clear_crypto_backend`](Self::clear_crypto_backend).
+    crypto_resolve_err: std::sync::Mutex<Option<Error>>,
     /// The backend registry (built-ins + `ext:` extensions). Injected by
     /// [`StoreBuilder::build`](crate::storage::StoreBuilder::build) and consulted
     /// at resolve time. Immutable after construction.
@@ -183,9 +200,10 @@ impl Store {
         registry: Arc<StorageRegistry>,
     ) -> Self {
         Self {
-            crypto: Box::new(AgeBackend),
+            crypto: std::sync::Mutex::new(None),
             storage: std::sync::Mutex::new(None),
             resolve_err: std::sync::Mutex::new(None),
+            crypto_resolve_err: std::sync::Mutex::new(None),
             registry,
             config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
@@ -239,7 +257,7 @@ impl Store {
             *slot = Some(backend);
         }
         // A fresh, working backend supersedes any prior resolve error.
-        self.clear_resolve_err();
+        Self::clear_err(&self.resolve_err);
     }
 
     /// Drop the resolved backend (set `storage` to `None`). Called first in
@@ -251,7 +269,7 @@ impl Store {
         if let Ok(mut slot) = self.storage.lock() {
             *slot = None;
         }
-        self.clear_resolve_err();
+        Self::clear_err(&self.resolve_err);
     }
 
     /// Resolve a backend of `backend` type rooted at `root` and swap it in.
@@ -284,37 +302,149 @@ impl Store {
                 // (key withheld). Retry later — not an error. A soft-skip
                 // carries no specific failure, so drop any error stashed by a
                 // prior hard resolve (it's stale for this state).
-                self.clear_resolve_err();
+                Self::clear_err(&self.resolve_err);
                 return Ok(());
             }
             Err(e) => {
-                self.stash_resolve_err(e.clone());
+                Self::stash_err(&self.resolve_err, e.clone());
                 return Err(e);
             }
         };
         match self.resolve_and_set(rc.backend.as_deref(), &rc.local_path) {
             Ok(()) => Ok(()),
             Err(e) => {
-                self.stash_resolve_err(e.clone());
+                Self::stash_err(&self.resolve_err, e.clone());
                 Err(e)
             }
         }
     }
 
-    /// Stash a hard resolve failure so [`storage`](Self::storage)() surfaces the
-    /// specific reason instead of a generic `BackendNotAvailable`.
-    fn stash_resolve_err(&self, err: Error) {
-        if let Ok(mut slot) = self.resolve_err.lock() {
-            *slot = Some(err);
+    /// Stash a hard resolve failure so the matching accessor surfaces the
+    /// specific reason instead of a generic `BackendNotAvailable`. Shared by the
+    /// storage and crypto resolve paths — pass the slot (`resolve_err` /
+    /// `crypto_resolve_err`).
+    fn stash_err(slot: &std::sync::Mutex<Option<Error>>, err: Error) {
+        if let Ok(mut s) = slot.lock() {
+            *s = Some(err);
         }
     }
 
-    /// Clear the stashed resolve error (a working backend supersedes it, or
-    /// `reset` tears everything down).
-    fn clear_resolve_err(&self) {
-        if let Ok(mut slot) = self.resolve_err.lock() {
+    /// Clear the stashed resolve error for `slot` (a working backend supersedes
+    /// it, or `reset` tears everything down).
+    fn clear_err(slot: &std::sync::Mutex<Option<Error>>) {
+        if let Ok(mut s) = slot.lock() {
+            *s = None;
+        }
+    }
+
+    /// Borrow the resolved crypto backend, cloning its `Arc` out so the
+    /// `std::sync::Mutex` guard is dropped before any caller `.await`.
+    ///
+    /// Returns [`ErrorCode::BackendNotAvailable`] when the backend hasn't been
+    /// resolved yet (pre-unlock, or after a resolve failure — `resolve_crypto`
+    /// stashes the specific error so the app can surface it).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::BackendNotAvailable`] when `crypto` is `None`;
+    /// [`ErrorCode::StoreError`] on a poisoned lock (a panic mid-set).
+    fn crypto(&self) -> Result<Arc<dyn CryptoBackend>, Error> {
+        let backend = self
+            .crypto
+            .lock()
+            .map_err(|_| Error::new(ErrorCode::StoreError, "crypto backend lock poisoned"))?
+            .clone();
+        match backend {
+            Some(b) => Ok(b),
+            None => Err(self
+                .crypto_resolve_err
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .unwrap_or_else(|| {
+                    Error::new(
+                        ErrorCode::BackendNotAvailable,
+                        "crypto backend not resolved (awaiting app unlock)",
+                    )
+                })),
+        }
+    }
+
+    /// Drop the resolved crypto backend (set the slot to `None`). Called in
+    /// [`Store::reset`] so post-reset ops get a clear `BackendNotAvailable`
+    /// instead of operating against a torn-down repo. Marginal: `reset` does not
+    /// hold `write_mu`, so an in-flight op that already cloned the `Arc` may still
+    /// touch the old backend — the same pre-existing race as
+    /// `clear_storage_backend`.
+    pub(crate) fn clear_crypto_backend(&self) {
+        if let Ok(mut slot) = self.crypto.lock() {
             *slot = None;
         }
+        Self::clear_err(&self.crypto_resolve_err);
+    }
+
+    /// Resolve the crypto backend from the persisted `repo.json` config — a typed
+    /// match on [`RepoConfig::crypto`] (`None`/`"age"` → `AgeBackend`, `"gpg"` →
+    /// `GpgBackend`). Intended post-unlock (sealed `repo.json` is readable once
+    /// the master key is injected); soft-skips when the config isn't readable yet
+    /// (`NoRepo` pre-setup; `SealKeyUnavailable` under app-lock), mirroring
+    /// [`resolve_storage`](Self::resolve_storage). There is no `ext:` crypto
+    /// namespace: both backends are rustpass-internal pure-Rust, so selection is a
+    /// typed match, not a registry lookup.
+    ///
+    /// # Errors
+    ///
+    /// Soft-skips (`Ok`) on `NoRepo`/`SealKeyUnavailable`; otherwise propagates
+    /// `load_repo_config`/resolve errors, stashing them internally so
+    /// [`crypto`](Self::crypto)() can surface the specific reason.
+    pub async fn resolve_crypto(&self) -> Result<(), Error> {
+        let rc = match self.config.load_repo_config().await {
+            Ok(rc) => rc,
+            Err(e) if e.code == "NO_REPO" || e.code == "SEAL_KEY_UNAVAILABLE" => {
+                // Not resolvable yet: pre-setup or app-lock. Retry later — not
+                // an error. Drop any error stashed by a prior hard resolve.
+                Self::clear_err(&self.crypto_resolve_err);
+                return Ok(());
+            }
+            Err(e) => {
+                Self::stash_err(&self.crypto_resolve_err, e.clone());
+                return Err(e);
+            }
+        };
+        match self.resolve_and_set_crypto(rc.crypto.as_deref()) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                Self::stash_err(&self.crypto_resolve_err, e.clone());
+                Err(e)
+            }
+        }
+    }
+
+    /// Construct the typed crypto backend for `kind` and swap it in.
+    /// `None`/`"age"` → the age built-in; `"gpg"` → the GPG built-in; anything
+    /// else → [`ErrorCode::BackendNotAvailable`] (an unknown crypto kind in
+    /// `repo.json`).
+    fn resolve_and_set_crypto(&self, kind: Option<&str>) -> Result<(), Error> {
+        let backend: Arc<dyn CryptoBackend> = match kind {
+            None | Some("age") => Arc::new(AgeBackend),
+            Some("gpg") => Arc::new(GpgBackend),
+            Some(other) => {
+                // Clear any prior backend so crypto() surfaces THIS error
+                // instead of a stale backend from a previous resolve.
+                if let Ok(mut slot) = self.crypto.lock() {
+                    *slot = None;
+                }
+                return Err(Error::new(
+                    ErrorCode::BackendNotAvailable,
+                    format!("unknown crypto backend {other:?} (expected \"age\" or \"gpg\")"),
+                ));
+            }
+        };
+        if let Ok(mut slot) = self.crypto.lock() {
+            *slot = Some(backend);
+        }
+        Self::clear_err(&self.crypto_resolve_err);
+        Ok(())
     }
 
     /// The crypto backend's typed secret-file extension (`.age` today; `.gpg`
@@ -322,13 +452,13 @@ impl Store {
     /// can't be typo'd at a storage call site. `Store` threads this into `list`
     /// and builds passfile paths with it; `get`/`set`/`delete` take the built
     /// passfile, so they never name an extension.
-    fn secret_ext(&self) -> SecretExt {
-        self.crypto.profile().secret_extension
+    fn secret_ext(&self) -> Result<SecretExt, Error> {
+        Ok(self.crypto()?.profile().secret_extension)
     }
 
     /// The crypto backend's recipients-index filename (`.age-recipients` today).
-    fn recipients_file(&self) -> &'static str {
-        self.crypto.profile().recipients_filename
+    fn recipients_file(&self) -> Result<&'static str, Error> {
+        Ok(self.crypto()?.profile().recipients_filename)
     }
 
     /// Read + parse the recipients index at `repo_path`, delegating the liveness
@@ -339,8 +469,9 @@ impl Store {
     /// for why "empty" is unsafe for a tampered/escaping index.
     async fn read_recipients_raw(&self, repo_path: &Path) -> Result<Vec<Recipient>, Error> {
         let storage = self.storage()?;
+        let crypto = self.crypto()?;
         let view = RepoFiles::new(&*storage, repo_path);
-        self.crypto.list_recipients(&view).await
+        crypto.list_recipients(&view).await
     }
 
     /// Replace the seal master key at runtime. The app-launch biometric lock
@@ -377,8 +508,10 @@ impl Store {
 
     /// Check if the stored identity requires a passphrase.
     ///
-    /// Returns true for age-encrypted identities and encrypted SSH keys.
-    /// Returns false for plaintext x25519 keys and unencrypted SSH keys.
+    /// Returns true for age-encrypted identities, passphrase-protected SSH keys,
+    /// and S2K-protected GPG keys. Returns false for plaintext x25519 keys and
+    /// unprotected SSH/GPG keys. Fails closed (returns true) if the crypto
+    /// backend isn't resolved, so the app prompts rather than skips.
     pub async fn is_identity_encrypted(&self) -> bool {
         let Ok(bytes) = self.config.load_identity().await else {
             return false;
@@ -389,8 +522,19 @@ impl Store {
             return true;
         }
 
-        if matches!(itype, IdentityType::SshEd25519 | IdentityType::SshRsa) {
-            return self.crypto.identity_requires_passphrase(&bytes);
+        if matches!(
+            itype,
+            IdentityType::SshEd25519 | IdentityType::SshRsa | IdentityType::PgpSecretKey
+        ) {
+            // Whether an SSH or GPG key needs a passphrase is a question for the
+            // resolved crypto backend. Fail CLOSED on a missing backend: assume
+            // encrypted so the app prompts for a passphrase rather than skipping
+            // it. (Production resolves crypto at startup in init_state; this
+            // guards the window after an unlock whose resolve_crypto failed.)
+            return match self.crypto() {
+                Ok(c) => c.identity_requires_passphrase(&bytes),
+                Err(_) => true,
+            };
         }
 
         false
@@ -444,10 +588,13 @@ impl Store {
         // plaintext-never-cached invariant.
         if matches!(
             itype,
-            IdentityType::AgeEncrypted | IdentityType::SshEd25519 | IdentityType::SshRsa
+            IdentityType::AgeEncrypted
+                | IdentityType::SshEd25519
+                | IdentityType::SshRsa
+                | IdentityType::PgpSecretKey
         ) {
             let zeroizing = self
-                .crypto
+                .crypto()?
                 .unlock_identity(&encrypted_bytes, passphrase)
                 .await?;
             let mut cache = self
@@ -483,12 +630,13 @@ impl Store {
         // has no light validator, so `unlock_identity` scrypt-decrypts to the
         // operational key, returned as `Zeroizing` and dropped (wiped on drop).
         // Plaintext / unencrypted: nothing to validate.
+        let crypto = self.crypto()?;
         match itype {
             IdentityType::AgeEncrypted => {
-                self.crypto.unlock_identity(&bytes, passphrase).await?;
+                crypto.unlock_identity(&bytes, passphrase).await?;
             }
             IdentityType::SshEd25519 | IdentityType::SshRsa => {
-                self.crypto
+                crypto
                     .validate_identity_passphrase(&bytes, passphrase)
                     .await?;
             }
@@ -563,6 +711,7 @@ impl Store {
         }
 
         self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
+        self.resolve_and_set_crypto(None)?;
         self.storage()?
             .clone_repo(&auth, repo_url, &repo_dir, cancel, progress)
             .await?;
@@ -640,15 +789,16 @@ impl Store {
 
         let bootstrap = async {
             self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
+            self.resolve_and_set_crypto(None)?;
             self.storage()?.init_repo(&repo_dir).await?;
 
             let recipients_bytes = serialize_recipients(&[recipient.to_string()]);
             self.storage()?
-                .write_file_atomic(&repo_dir, self.recipients_file(), &recipients_bytes)
+                .write_file_atomic(&repo_dir, self.recipients_file()?, &recipients_bytes)
                 .await?;
 
             let message = format!("Initialized Store for {recipient}");
-            let rel_paths = vec![self.recipients_file().to_string()];
+            let rel_paths = vec![self.recipients_file()?.to_string()];
             self.storage()?
                 .commit_initial(&repo_dir, &rel_paths, &message)
                 .await?;
@@ -724,7 +874,7 @@ impl Store {
             _ => None,
         };
         let derived_recipient = self
-            .crypto
+            .crypto()?
             .identity_recipient(identity, recipient_passphrase)?;
 
         // Read the recipients to match the identity against. A tampered/corrupt
@@ -819,9 +969,14 @@ impl Store {
         let identity_bytes = identity.as_bytes();
         validate_identity_format(identity_bytes)?;
 
+        // A fresh/cloned store uses the age built-in; pin it before the identity
+        // validation below touches the crypto backend. (A GPG store has its own
+        // setup path; the post-unlock resolve corrects this default.)
+        self.resolve_and_set_crypto(None)?;
+
         // Validate identity can derive a recipient (verifies key is usable)
         let _ = self
-            .crypto
+            .crypto()?
             .identity_recipient(identity, identity_passphrase)?;
 
         let auth = match (ssh_key, pat) {
@@ -865,7 +1020,7 @@ impl Store {
     pub async fn list(&self) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path);
-        self.storage()?.list(repo_path, self.secret_ext()).await
+        self.storage()?.list(repo_path, self.secret_ext()?).await
     }
 
     /// Fuzzy-search the configured repository's entries by `query`, ranked by
@@ -883,7 +1038,7 @@ impl Store {
     pub async fn search(&self, query: &str) -> Result<Vec<Entry>, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage()?.list(&repo_path, self.secret_ext()).await?;
+        let entries = self.storage()?.list(&repo_path, self.secret_ext()?).await?;
         let q = query.to_string();
         Ok(spawn_blocking(move || rank_entries(entries, &q)).await?)
     }
@@ -907,7 +1062,7 @@ impl Store {
     ) -> Result<RankedPage, Error> {
         let repo_config = self.config.load_repo_config().await?;
         let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage()?.list(&repo_path, self.secret_ext()).await?;
+        let entries = self.storage()?.list(&repo_path, self.secret_ext()?).await?;
         let q = query.to_string();
         Ok(spawn_blocking(move || slice_page(rank_entries(entries, &q), offset, limit)).await?)
     }
@@ -939,10 +1094,11 @@ impl Store {
 
         let encrypted = self
             .storage()?
-            .get(repo_path, &passfile_rel(name, self.secret_ext()))
+            .get(repo_path, &passfile_rel(name, self.secret_ext()?))
             .await?;
         let identity_bytes = self.get_identity_bytes().await?;
-        let decrypted = self.crypto.decrypt(&encrypted, &identity_bytes).await?;
+        let crypto = self.crypto()?;
+        let decrypted = crypto.decrypt(&encrypted, &identity_bytes).await?;
         Secret::parse(&decrypted)
     }
 
@@ -1004,7 +1160,7 @@ impl Store {
     /// from the underlying remove/commit.
     pub async fn delete(&self, name: &str) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
-        let passfile = passfile_rel(name, self.secret_ext());
+        let passfile = passfile_rel(name, self.secret_ext()?);
         let rcs = self.rcs_ctx().await?;
 
         // Existence + within-repo guard + remove the worktree file. The index
@@ -1117,7 +1273,7 @@ impl Store {
         // Existence gate: a local typo guard so edit can't create a stray entry.
         // resolve_entry_path also guards path traversal (used identically by `get`
         // and `delete`). NOT a remote-state check.
-        resolve_entry_path(&repo_path, &passfile_rel(name, self.secret_ext()))?;
+        resolve_entry_path(&repo_path, &passfile_rel(name, self.secret_ext()?))?;
         // Raw write primitive (no template), local-only via `set`.
         self.set(name, plaintext).await
     }
@@ -1203,9 +1359,10 @@ impl Store {
         //    *unlocked* identity, so this works for passphrase-protected SSH keys
         //    (the PEM is already decrypted); the re-encrypt step (4) reuses it.
         let identity = self.get_identity_bytes().await?;
+        let crypto = self.crypto()?;
         let mut decrypted: Vec<(String, Zeroizing<Vec<u8>>)> = Vec::with_capacity(replays.len());
         for r in replays {
-            let plaintext = self.crypto.decrypt(&r.blob, &identity).await.map_err(|_| {
+            let plaintext = crypto.decrypt(&r.blob, &identity).await.map_err(|_| {
                 Error::new(
                     ErrorCode::PushRejected,
                     format!(
@@ -1234,7 +1391,7 @@ impl Store {
         let view = RepoFiles::new(&*storage, &rcs.repo_path);
         let mut ciphertexts: Vec<(String, Vec<u8>)> = Vec::with_capacity(decrypted.len());
         for (rel, plaintext) in decrypted {
-            let ct = self.crypto.encrypt(&plaintext, &identity, &view).await?;
+            let ct = crypto.encrypt(&plaintext, &identity, &view).await?;
             ciphertexts.push((rel, ct));
         }
 
@@ -1388,7 +1545,7 @@ impl Store {
         plaintext: &[u8],
         repo_path: &Path,
     ) -> Result<String, Error> {
-        let passfile = passfile_rel(name, self.secret_ext());
+        let passfile = passfile_rel(name, self.secret_ext()?);
 
         // Encrypt to the store's recipients plus our own key (ensureOurKeyID),
         // reading the index through a view — the backend owns recipient
@@ -1397,7 +1554,7 @@ impl Store {
         let storage = self.storage()?;
         let view = RepoFiles::new(&*storage, repo_path);
         let ciphertext = self
-            .crypto
+            .crypto()?
             .encrypt(plaintext, &identity_bytes, &view)
             .await?;
 
@@ -1420,7 +1577,10 @@ impl Store {
         // Load from disk
         let raw_bytes = self.config.load_identity().await?;
 
-        if classify_identity(&raw_bytes) == IdentityType::AgeEncrypted {
+        if matches!(
+            classify_identity(&raw_bytes),
+            IdentityType::AgeEncrypted | IdentityType::PgpSecretKey
+        ) {
             return Err(Error::new(
                 ErrorCode::IdentityEncrypted,
                 "Identity is encrypted — unlock with passphrase first",
@@ -1509,7 +1669,7 @@ impl Store {
         // `Zeroizing`, so it's wiped after the re-encrypt instead of lingering
         // in the heap.
         let plaintext = self
-            .crypto
+            .crypto()?
             .unlock_identity(&encrypted_bytes, old_passphrase)
             .await?;
         self.config
@@ -2152,12 +2312,13 @@ impl Store {
     /// Returns an error if the files cannot be removed.
     pub async fn reset(&self) -> Result<(), Error> {
         self.lock();
-        // Drop the resolved backend first so post-reset ops get a clear
+        // Drop the resolved backends first so post-reset ops get a clear
         // `BackendNotAvailable` instead of touching a torn-down repo. Marginal:
         // `reset` doesn't hold `write_mu`, so an in-flight op that already cloned
-        // the `Arc` may still hit the old backend (pre-existing destructive-reset
-        // behavior).
+        // an `Arc` may still hit the old backend (pre-existing destructive-reset
+        // behavior; applies to storage and crypto alike).
         self.clear_storage_backend();
+        self.clear_crypto_backend();
 
         if let Ok(repo_config) = self.config.load_repo_config().await {
             let repo_path = Path::new(&repo_config.local_path);
@@ -2438,6 +2599,7 @@ mod tests {
         store
             .resolve_and_set(Some("git"), &repo_dir.path().to_string_lossy())
             .unwrap();
+        store.resolve_and_set_crypto(None).unwrap();
         symlink(
             "/nonexistent/gpm-dangling",
             repo_dir.path().join(".age-recipients"),
@@ -2463,6 +2625,7 @@ mod tests {
         store2
             .resolve_and_set(Some("git"), &repo_dir2.path().to_string_lossy())
             .unwrap();
+        store2.resolve_and_set_crypto(None).unwrap();
         let err = store2
             .read_recipients_raw(repo_dir2.path())
             .await
@@ -2480,6 +2643,7 @@ mod tests {
         store3
             .resolve_and_set(Some("git"), &repo_dir3.path().to_string_lossy())
             .unwrap();
+        store3.resolve_and_set_crypto(None).unwrap();
         let got = store3.read_recipients_raw(repo_dir3.path()).await.unwrap();
         assert_eq!(got.len(), 1, "regular index still parses");
 
@@ -2489,6 +2653,7 @@ mod tests {
         store4
             .resolve_and_set(Some("git"), &repo_dir4.path().to_string_lossy())
             .unwrap();
+        store4.resolve_and_set_crypto(None).unwrap();
         assert!(
             store4
                 .read_recipients_raw(repo_dir4.path())
@@ -2508,6 +2673,7 @@ mod tests {
         store5
             .resolve_and_set(Some("git"), &missing_checkout.to_string_lossy())
             .unwrap();
+        store5.resolve_and_set_crypto(None).unwrap();
         assert_eq!(
             store5
                 .read_recipients_raw(&missing_checkout)
@@ -2817,6 +2983,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn crypto_returns_backend_not_available_before_resolve() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        // Unresolved (no resolve_crypto / setup path yet) → a clear error, not a
+        // panic or a silently-wrong default backend.
+        let err = store.crypto().err().unwrap();
+        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
+    }
+
+    #[test]
+    fn resolve_and_set_crypto_picks_age_for_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
+        let crypto = store.crypto().unwrap();
+        assert_eq!(
+            crypto.profile().backend_kind,
+            crate::crypto::BackendKind::Age
+        );
+        assert_eq!(crypto.profile().secret_extension.as_str(), ".age");
+    }
+
+    #[test]
+    fn resolve_and_set_crypto_picks_gpg_for_gpg() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(Some("gpg")).unwrap();
+        let crypto = store.crypto().unwrap();
+        assert_eq!(
+            crypto.profile().backend_kind,
+            crate::crypto::BackendKind::Gpg
+        );
+        assert_eq!(crypto.profile().secret_extension.as_str(), ".gpg");
+    }
+
+    #[test]
+    fn resolve_and_set_crypto_rejects_unknown_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        let err = store.resolve_and_set_crypto(Some("quux")).unwrap_err();
+        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
+        // A failed resolve leaves no backend — crypto() still errors.
+        assert!(store.crypto().is_err());
+    }
+
+    #[tokio::test]
+    async fn resolve_crypto_soft_skips_when_no_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        // No repo.json — soft-skip, not an error (mirrors resolve_storage).
+        store.resolve_crypto().await.unwrap();
+        let err = store.crypto().err().unwrap();
+        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn reset_clears_crypto_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(Some("gpg")).unwrap();
+        assert!(store.crypto().is_ok(), "gpg backend resolved");
+        store.reset().await.unwrap();
+        let err = store.crypto().err().unwrap();
+        assert_eq!(
+            err.code, "BACKEND_NOT_AVAILABLE",
+            "reset tears down the crypto slot"
+        );
+    }
+
+    #[test]
+    fn resolve_and_set_crypto_picks_age_for_explicit_age_string() {
+        // The Some("age") arm is a documented input (mirrors None); cover it so a
+        // refactor that dropped it (matching only None) would fail.
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(Some("age")).unwrap();
+        let crypto = store.crypto().unwrap();
+        assert_eq!(
+            crypto.profile().backend_kind,
+            crate::crypto::BackendKind::Age
+        );
+        assert_eq!(crypto.profile().secret_extension.as_str(), ".age");
+    }
+
+    #[tokio::test]
+    async fn resolve_crypto_surfaces_unknown_kind_via_crypto() {
+        // Driving the full resolve_crypto path with an unknown kind must (a)
+        // hard-fail and (b) leave crypto() surfacing the stashed unknown-kind
+        // error — not a stale backend from a prior resolve.
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap(); // seed a backend first
+        assert!(store.crypto().is_ok());
+
+        Config::new(dir.path().to_path_buf(), None)
+            .save_repo_config_full(&RepoConfig {
+                local_path: dir.path().join("repo").to_string_lossy().to_string(),
+                crypto: Some("quux".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        store.resolve_crypto().await.unwrap_err();
+        let err = store.crypto().err().unwrap();
+        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
+        assert!(
+            err.message.contains("unknown crypto backend"),
+            "crypto() must surface the stashed unknown-kind error, not a stale backend: {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn unlock_is_noop_for_plaintext_identity() {
         // The raw-passphrase cache is gone, so unlock() on a plaintext identity
         // is a true no-op — nothing is cached and is_unlocked() stays false. (In
@@ -2854,6 +3133,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         assert!(
             !store.is_unlocked(),
             "store must start locked for an encrypted SSH identity"
@@ -2891,6 +3171,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         let err = store.unlock("wrong-passphrase").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
         assert!(
@@ -2913,6 +3194,7 @@ mod tests {
         let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(rsa_key, None).await.unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         assert!(
             !store.is_identity_encrypted().await,
             "legacy RSA PEM must not be treated as encrypted"
@@ -2953,6 +3235,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         assert!(store.is_identity_encrypted().await);
     }
 
@@ -2967,6 +3250,7 @@ mod tests {
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         assert!(!store.is_identity_encrypted().await);
     }
 
@@ -2975,6 +3259,7 @@ mod tests {
         let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
 
         // Even when a passphrase is supplied, SSH keys are stored as-is — gpm
         // never re-encrypts them (they rely on their own native protection),
@@ -3071,6 +3356,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         store
             .validate_passphrase("test-passphrase")
             .await
@@ -3087,6 +3373,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         let err = store
             .validate_passphrase("wrong-passphrase")
             .await
@@ -3108,6 +3395,7 @@ mod tests {
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(None).unwrap();
         let err = store.validate_passphrase("nope").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
     }
