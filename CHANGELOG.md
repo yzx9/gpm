@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.12.1] - 2026-07-14
+
 ### Fixed
 
 - On cold start with App Lock on, the small signature-status light next to the app name stayed stuck showing "verification off" (or an unchecked state) even after you unlocked — it now refreshes to the real status the moment you unlock, matching the secret list that already reloads on unlock.
@@ -275,7 +277,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.12.1...HEAD
+[v0.12.1]: https://github.com/yzx9/gpm/compare/v0.12.0...v0.12.1
 [v0.12.0]: https://github.com/yzx9/gpm/compare/v0.11.0...v0.12.0
 [v0.11.0]: https://github.com/yzx9/gpm/compare/v0.10.0...v0.11.0
 [v0.10.0]: https://github.com/yzx9/gpm/compare/v0.9.0...v0.10.0
