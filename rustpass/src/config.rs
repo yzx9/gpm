@@ -291,6 +291,9 @@ impl Config {
             // Setup always configures the git built-in; an `ext:` backend is
             // chosen only by its own (0046) setup path via `save_repo_config_full`.
             backend: None,
+            // Setup always configures the age built-in; a `"gpg"` crypto backend
+            // is chosen only by its own (0036) setup path via `save_repo_config_full`.
+            crypto: None,
         };
         // Delegate to the atomic variant so `repo.json` is never observed
         // half-written (temp file + rename), matching `save_identity`. Matters
@@ -502,6 +505,15 @@ pub struct RepoConfig {
     /// unreadable until app unlock — resolved post-unlock, not at `Store::new`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub backend: Option<String>,
+    /// Which crypto backend this store uses. `None` (the default) means the
+    /// built-in age backend; `"gpg"` selects the GPG/OpenPGP built-in. Lives in
+    /// sealed `repo.json`, so it is unreadable until app unlock — resolved
+    /// post-unlock, not at `Store::new`. (No `ext:` crypto namespace yet: both
+    /// backends are rustpass-internal pure-Rust, so selection is a typed match,
+    /// not a registry lookup. Add an extension seam only when an external crypto
+    /// backend appears.)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub crypto: Option<String>,
 }
 
 impl RepoConfig {
@@ -666,6 +678,33 @@ mod tests {
 
         let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.pat, None);
+    }
+
+    /// A default `RepoConfig` (crypto = None) must NOT serialize a `crypto` key,
+    /// so existing age stores stay byte-identical after the field is added; and
+    /// an explicit `"gpg"` round-trips. Guards the backward-compat claim of the
+    /// crypto-backend field (RFC 0050).
+    #[test]
+    fn repo_config_crypto_field_backward_compatible() {
+        let default_json = serde_json::to_string(&RepoConfig::default()).unwrap();
+        assert!(
+            !default_json.contains("\"crypto\""),
+            "default RepoConfig must omit `crypto` so existing stores are byte-identical: {default_json}"
+        );
+        let back: RepoConfig = serde_json::from_str(&default_json).unwrap();
+        assert_eq!(back.crypto, None);
+
+        let gpg = RepoConfig {
+            crypto: Some("gpg".to_string()),
+            ..Default::default()
+        };
+        let gpg_json = serde_json::to_string(&gpg).unwrap();
+        assert!(
+            gpg_json.contains("\"crypto\":\"gpg\""),
+            "explicit gpg must serialize: {gpg_json}"
+        );
+        let back: RepoConfig = serde_json::from_str(&gpg_json).unwrap();
+        assert_eq!(back.crypto.as_deref(), Some("gpg"));
     }
 
     #[test]
