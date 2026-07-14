@@ -216,6 +216,60 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).not.toContain("Store is locked");
     });
 
+    it("refreshes the header authenticity badge on unlock after a cold-start lock", async () => {
+      // At cold start `repo.json` is sealed, so get_authenticity_state
+      // soft-falls-back to { mode: Off, head_status: Unknown } and the header
+      // badge reads "off" even when the real mode is Audit/Enforce. After the
+      // biometric unlock the master key is back, so the badge must be refetched
+      // alongside the list — otherwise it stays stuck on the stale "off" state.
+      let listCall = 0;
+      let authCall = 0;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "list_entries") {
+          listCall += 1;
+          return listCall === 1
+            ? Promise.reject({
+                code: "SEAL_KEY_UNAVAILABLE",
+                message: "Store is locked",
+              })
+            : Promise.resolve(page(sampleEntries));
+        }
+        if (cmd === "get_authenticity_state") {
+          authCall += 1;
+          return authCall === 1
+            ? // Sealed at cold start → backend coerces to Off / Unknown.
+              Promise.resolve({ mode: "off", head_status: { kind: "unknown" } })
+            : // Post-unlock → the real mode + a verified HEAD.
+              Promise.resolve({
+                mode: "audit",
+                head_status: { kind: "verified" },
+              });
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+
+      const { wrapper, appLock } = mountWithApp(EntryListPage);
+      const appLocked = appLock.appLocked as unknown as { value: boolean };
+      appLocked.value = true;
+      await flushPromises();
+
+      // While locked: the badge is stuck on the sealed "off" reading.
+      expect(authCall).toBe(1);
+      expect(wrapper.find("button.sig-light").classes()).toContain("badge-off");
+
+      // Biometric unlock: the badge is refetched and reflects the real state.
+      appLocked.value = false;
+      await flushPromises();
+
+      expect(authCall).toBe(2);
+      expect(wrapper.find("button.sig-light").classes()).toContain("badge-ok");
+    });
+
     it("reloads on unlock even if the cold-start fetch is still in flight (biometric race)", async () => {
       // The biometric AppLockOverlay auto-prompts on mount and can resolve
       // BEFORE the sealed-state list fetch's SEAL_KEY_UNAVAILABLE rejection

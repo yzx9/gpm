@@ -241,10 +241,17 @@ function retry() {
 // stale in-flight result. A resume re-lock over a list that has already loaded —
 // entries OR a genuinely-empty store — is left intact: nothing changed while
 // backgrounded, so no refetch (and no empty → spinner → empty flicker).
+//
+// The header authenticity badge is refreshed here too: at cold start `repo.json`
+// is sealed, so `get_authenticity_state` soft-falls-back to `{ mode: Off,
+// head_status: Unknown }` and the badge reads "off" regardless of the real mode.
+// Without this refetch the badge would stay stuck on that sealed reading after
+// unlock — the same stale-error symptom the list reload already handles.
 watch(appLocked, (locked, prev) => {
   if (prev && !locked && (!hasFetchedOnce.value || error.value)) {
     error.value = "";
     void fetchPage(search.value.trim(), 0, true);
+    void loadAuthState();
   }
 });
 

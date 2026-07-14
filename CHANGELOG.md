@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On cold start with App Lock on, the small signature-status light next to the app name stayed stuck showing "verification off" (or an unchecked state) even after you unlocked — it now refreshes to the real status the moment you unlock, matching the secret list that already reloads on unlock.
 - When sliding between screens — for example, tapping a create-secret step like "Website" — the Back button on the outgoing screen used to leap up into the camera notch for a moment before settling back, most noticeably on phones with a large display cutout. The outgoing screen now keeps its top spacing throughout the slide.
 - With an auto-lock timeout set (e.g. "after 1 minute"), browsing the secret list, searching, or otherwise using the app no longer triggers a surprise unlock screen mid-browse. Any tap, scroll, or key press now keeps the auto-lock timer refreshed — previously only viewing or copying a secret did, so simply reading the list for a minute would lock you out.
 
