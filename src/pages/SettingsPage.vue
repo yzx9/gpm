@@ -51,6 +51,7 @@ import {
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
@@ -69,9 +70,7 @@ import {
   appLockUnlockPrompt,
   identityEnrollPrompt,
 } from "@/i18n/native";
-import { navBack } from "@/utils/nav";
 import {
-  ArrowLeft,
   CircleCheck,
   FileUp,
   History,
@@ -758,11 +757,6 @@ async function doReset() {
   }
 }
 
-function goBack() {
-  // Pop to the page that opened Settings (normally entries).
-  navBack(router, { name: "entries" });
-}
-
 // ── Deferred-save dirty tracking + leave guard (Commit Identity, Add Key) ──
 // These two text forms stage edits in refs and only commit on their own Save
 // button. Leaving the page with uncommitted edits prompts Discard / Save /
@@ -836,14 +830,11 @@ onMounted(() => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex justify-between items-center mb-6" role="banner">
-      <h1 class="text-xl flex items-center gap-1">
-        <BaseIcon :icon="Settings" :size="24" /> {{ t("settings.title") }}
-      </h1>
-      <BaseButton size="sm" :aria-label="t('common.back')" @click="goBack">
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </BaseButton>
-    </header>
+    <BaseHeader
+      :back-fallback="{ name: 'entries' }"
+      :title="t('settings.title')"
+      :title-icon="Settings"
+    />
 
     <BaseCard as="section" class="mb-4">
       <h2 class="text-sm font-medium mb-2">

@@ -13,7 +13,7 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
-import BaseIcon from "@/components/base/BaseIcon.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import {
@@ -25,7 +25,6 @@ import {
 } from "@/composables";
 import { currentLocale, loadBundle } from "@/i18n";
 import { navBack } from "@/utils/nav";
-import { ArrowLeft } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -140,24 +139,15 @@ useWipeOnLeave(wipeCustom);
 onBeforeUnmount(() => {
   if (previewTimer) clearTimeout(previewTimer);
 });
-
-function goBack() {
-  navBack(router, { name: "create" });
-}
 </script>
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex items-center gap-3 mb-6" role="banner">
-      <button
-        @click="goBack"
-        class="back-btn inline-flex items-center gap-1"
-        :aria-label="t('common.back')"
-      >
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </button>
-      <h1 class="text-lg flex-1">{{ t("create.customLabel") }}</h1>
-    </header>
+    <BaseHeader :back-fallback="{ name: 'create' }">
+      <template #title>
+        <h1 class="text-lg flex-1">{{ t("create.customLabel") }}</h1>
+      </template>
+    </BaseHeader>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
       error
@@ -211,17 +201,6 @@ function goBack() {
 </template>
 
 <style scoped>
-.back-btn {
-  background: transparent;
-  border: none;
-  font-size: var(--text-base);
-  cursor: pointer;
-  color: var(--color-accent);
-  padding: 0.25rem 0.5rem;
-  min-width: 48px;
-  min-height: 48px;
-}
-
 .preview {
   padding: 0.5rem 0.75rem;
   background: var(--color-accent-ring);

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Every screen's Back button now sits in the same place — a back arrow at the top-left — instead of appearing top-left on some screens, top-right on the Settings / SSH key / add-key screens, and not at all on History. The History screen also gained its own Back button instead of relying only on the system back gesture.
+
 ## [v0.12.1] - 2026-07-14
 
 ### Fixed

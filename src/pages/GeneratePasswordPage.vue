@@ -11,6 +11,7 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import {
@@ -19,14 +20,11 @@ import {
   useWipeOnLeave,
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
-import { navBack } from "@/utils/nav";
-import { ArrowLeft, Copy, Dices } from "@lucide/vue";
+import { Copy, Dices } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 
 const { t } = useI18n();
-const router = useRouter();
 const { toast } = useToast();
 
 // ── Generator options ─────────────────────────────────────────────────────
@@ -60,10 +58,6 @@ const lenPayload = computed(() => {
     ? length.value
     : null;
 });
-
-function goBack() {
-  navBack(router, { name: "entries" });
-}
 
 /** Generate a batch of passwords via the backend (CSPRNG). */
 async function onGenerate() {
@@ -118,16 +112,11 @@ useWipeOnLeave(() => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex items-center gap-3 mb-6" role="banner">
-      <button
-        @click="goBack"
-        class="back-btn inline-flex items-center gap-1"
-        :aria-label="t('common.back')"
-      >
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </button>
-      <h1 class="text-lg flex-1">{{ t("generate.title") }}</h1>
-    </header>
+    <BaseHeader :back-fallback="{ name: 'entries' }">
+      <template #title>
+        <h1 class="text-lg flex-1">{{ t("generate.title") }}</h1>
+      </template>
+    </BaseHeader>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
       error

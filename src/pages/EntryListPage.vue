@@ -26,6 +26,7 @@ import {
 import AuthenticityBlockModal from "@/components/AuthenticityBlockModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
@@ -538,22 +539,24 @@ defineExpose({ syncRepo });
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex justify-between items-center mb-4" role="banner">
-      <div class="flex items-center gap-1">
-        <h1 class="text-xl flex items-center gap-1">
-          <BaseIcon :icon="LockKeyhole" :size="24" /> gpm
-        </h1>
-        <button
-          @click="openHistory"
-          class="sig-light"
-          :class="badge.cls"
-          :aria-label="badge.title"
-          :title="badge.title"
-        >
-          <BaseIcon :icon="badge.icon" :size="16" />
-        </button>
-      </div>
-      <div class="flex gap-2 items-center">
+    <BaseHeader spacing="sm">
+      <template #nav>
+        <div class="flex items-center gap-1">
+          <h1 class="text-xl flex items-center gap-1">
+            <BaseIcon :icon="LockKeyhole" :size="24" /> gpm
+          </h1>
+          <button
+            @click="openHistory"
+            class="sig-light"
+            :class="badge.cls"
+            :aria-label="badge.title"
+            :title="badge.title"
+          >
+            <BaseIcon :icon="badge.icon" :size="16" />
+          </button>
+        </div>
+      </template>
+      <template #actions>
         <BaseButton
           size="sm"
           :aria-label="t('entries.createSecret')"
@@ -570,8 +573,8 @@ defineExpose({ syncRepo });
         >
           <BaseIcon :icon="Settings" />
         </BaseButton>
-      </div>
-    </header>
+      </template>
+    </BaseHeader>
 
     <div
       v-if="!pulling"

@@ -6,23 +6,15 @@
 import { exportSshPrivateKey, getSshPublicKey, type AppError } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { useLockState, useToast } from "@/composables";
-import { navBack } from "@/utils/nav";
-import {
-  ArrowLeft,
-  Copy,
-  KeyRound,
-  LockOpen,
-  TriangleAlert,
-} from "@lucide/vue";
+import { Copy, KeyRound, LockOpen, TriangleAlert } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 
 const { t } = useI18n();
-const router = useRouter();
 const { onLock } = useLockState();
 const { toast } = useToast();
 
@@ -80,22 +72,15 @@ onLock(() => {
   privateKey.value = "";
   showPrivate.value = false;
 });
-
-function goBack() {
-  navBack(router, { name: "settings" });
-}
 </script>
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex justify-between items-center mb-6" role="banner">
-      <h1 class="text-xl flex items-center gap-1">
-        <BaseIcon :icon="KeyRound" :size="24" /> {{ t("sshKey.title") }}
-      </h1>
-      <BaseButton size="sm" :aria-label="t('common.back')" @click="goBack">
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </BaseButton>
-    </header>
+    <BaseHeader
+      :back-fallback="{ name: 'settings' }"
+      :title="t('sshKey.title')"
+      :title-icon="KeyRound"
+    />
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">{{
       error

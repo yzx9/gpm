@@ -370,6 +370,24 @@ describe("EntryDetailPage", () => {
 
       expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
+
+    it("header Back button navigates back and wipes the revealed password", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "",
+      });
+      const wrapper = mountPage();
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises();
+      expect(wrapper.text()).toContain("s3cret");
+
+      // Header Back (BaseHeader): @back="clear" wipes, then navBack runs.
+      await wrapper.find('button[aria-label="Back"]').trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("s3cret");
+      expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
+    });
   });
 
   describe("deleteSecret", () => {

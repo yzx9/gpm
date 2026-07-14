@@ -13,7 +13,7 @@ import {
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
-import BaseIcon from "@/components/base/BaseIcon.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
@@ -26,10 +26,9 @@ import {
 } from "@/composables";
 import { currentLocale, loadBundle } from "@/i18n";
 import { navBack } from "@/utils/nav";
-import { ArrowLeft } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 
 // The edit form reuses the `entry.*` bundle (loaded for the read view); load it
 // explicitly so a cold deep-link to /edit/… resolves keys without a prior /entry visit.
@@ -46,6 +45,14 @@ const entryPath = decodeURIComponent(
   Array.isArray(pathMatch) ? pathMatch[0] : pathMatch,
 );
 const entryName = entryPath.replace(/\.age$/, "");
+
+// Shared by the header Back button, the form Cancel (goBack), and Save-success
+// so all three return to the same read view and can't drift apart. The
+// divergence callbacks above go to the entries list instead, so they stay inline.
+const BACK_FALLBACK: RouteLocationRaw = {
+  name: "entry",
+  params: { pathMatch },
+};
 
 const editPassword = ref("");
 const editNotes = ref("");
@@ -145,7 +152,7 @@ async function onSave() {
     if (outcome.kind === "written") {
       toast.success(t("entry.saved", { commit: outcome.commit }));
       // Back to the read view (the opener) — it remounts and shows fresh content.
-      navBack(router, { name: "entry", params: { pathMatch } });
+      navBack(router, BACK_FALLBACK);
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The edit's push lost a race — surface the divergence. The local edit was
       // committed; adopt discards it, keep pushes it. Stay on the edit form.
@@ -165,26 +172,21 @@ async function onSave() {
 }
 
 function goBack() {
-  navBack(router, { name: "entry", params: { pathMatch } });
+  navBack(router, BACK_FALLBACK);
 }
 </script>
 
 <template>
   <main class="max-w-120 mx-auto p-4" role="main">
-    <header class="flex items-center gap-3 mb-6" role="banner">
-      <button
-        @click="goBack"
-        class="bg-transparent border-none text-base cursor-pointer text-accent active:text-accent-deep p-1 min-w-12 min-h-12 inline-flex items-center gap-1"
-        :aria-label="t('common.back')"
-      >
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </button>
-      <h1
-        class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
-      >
-        {{ entryName }}
-      </h1>
-    </header>
+    <BaseHeader :back-fallback="BACK_FALLBACK">
+      <template #title>
+        <h1
+          class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
+        >
+          {{ entryName }}
+        </h1>
+      </template>
+    </BaseHeader>
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">
       {{ error }}

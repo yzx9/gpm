@@ -14,6 +14,7 @@ import {
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import {
@@ -27,10 +28,10 @@ import {
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
-import { ArrowLeft, Copy, Eye } from "@lucide/vue";
+import { Copy, Eye } from "@lucide/vue";
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -166,11 +167,15 @@ function editEntry() {
   router.push({ name: "entryEdit", params: { pathMatch } });
 }
 
+// Shared by the header Back button and the Escape-key goBack() so the two
+// can't drift to different destinations.
+const BACK_FALLBACK: RouteLocationRaw = { name: "entries" };
+
 function goBack() {
   clear();
   // Pop to the page that opened this entry (normally entries). At a deep-link
   // root there's nothing to pop, so fall back to entries as the new root.
-  navBack(router, { name: "entries" });
+  navBack(router, BACK_FALLBACK);
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -182,20 +187,15 @@ function handleKeydown(e: KeyboardEvent) {
 
 <template>
   <main class="max-w-120 mx-auto p-4" role="main" @keydown="handleKeydown">
-    <header class="flex items-center gap-3 mb-6" role="banner">
-      <button
-        @click="goBack"
-        class="bg-transparent border-none text-base cursor-pointer text-accent active:text-accent-deep p-1 min-w-12 min-h-12 inline-flex items-center gap-1"
-        :aria-label="t('common.back')"
-      >
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </button>
-      <h1
-        class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
-      >
-        {{ entryName }}
-      </h1>
-    </header>
+    <BaseHeader :back-fallback="BACK_FALLBACK" @back="clear">
+      <template #title>
+        <h1
+          class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
+        >
+          {{ entryName }}
+        </h1>
+      </template>
+    </BaseHeader>
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">
       {{ error }}

@@ -259,23 +259,6 @@
   }
 }
 
-/* Transparent accent-text back arrow used by the create/generate page headers.
-   Shared utility (not a Base* component). No background so it reads as a link,
-   not a chip; press feedback is a deeper accent. */
-.back-btn {
-  background: transparent;
-  border: none;
-  font-size: var(--text-base);
-  cursor: pointer;
-  color: var(--color-accent);
-  padding: 0.25rem 0.5rem;
-  min-width: 48px;
-  min-height: 48px;
-}
-.back-btn:active:not(:disabled) {
-  color: var(--color-accent-deep);
-}
-
 .public-key-display {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-edge);

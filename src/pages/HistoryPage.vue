@@ -11,6 +11,7 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
@@ -190,11 +191,13 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex justify-between items-center mb-4" role="banner">
-      <h1 class="text-xl flex items-center gap-1">
-        <BaseIcon :icon="History" :size="24" /> {{ t("history.title") }}
-      </h1>
-      <div class="flex gap-2">
+    <BaseHeader
+      :back-fallback="{ name: 'entries' }"
+      spacing="sm"
+      :title="t('history.title')"
+      :title-icon="History"
+    >
+      <template #actions>
         <BaseButton
           size="sm"
           :disabled="loading"
@@ -211,8 +214,8 @@ onBeforeUnmount(() => {
         >
           <BaseIcon :icon="Settings" />
         </BaseButton>
-      </div>
-    </header>
+      </template>
+    </BaseHeader>
 
     <p class="text-xs text-muted mb-4">{{ t("history.preamble") }}</p>
 

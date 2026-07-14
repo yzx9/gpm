@@ -52,6 +52,12 @@ describe("HistoryPage", () => {
   const findLoadMore = (w: { find: (s: string) => DOMWrapper<Element> }) =>
     w.find('button[aria-label="Load more commits"]');
 
+  it("renders a Back button (net-new affordance)", async () => {
+    const wrapper = mountWithApp(HistoryPage).wrapper;
+    await flushPromises();
+    expect(wrapper.find('button[aria-label="Back"]').exists()).toBe(true);
+  });
+
   it("clicking a commit row opens the detail modal", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) =>
       cmd === "list_commit_signatures"

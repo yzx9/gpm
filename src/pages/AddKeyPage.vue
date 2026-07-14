@@ -5,19 +5,23 @@
 <script setup lang="ts">
 import { addTrustedSigningKey, type AppError } from "@/api";
 import BaseButton from "@/components/base/BaseButton.vue";
-import BaseIcon from "@/components/base/BaseIcon.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import { useToast } from "@/composables";
 import { navBack } from "@/utils/nav";
-import { ArrowLeft, Plus } from "@lucide/vue";
+import { Plus } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { useRouter, type RouteLocationRaw } from "vue-router";
 
 const { t } = useI18n();
 const router = useRouter();
 const { toast } = useToast();
+
+// Shared by the header Back button, the form Cancel (goBack), and Save-success
+// so all three return to settings and can't drift apart.
+const BACK_FALLBACK: RouteLocationRaw = { name: "settings" };
 
 const newPublicKey = ref("");
 const newKeyLabel = ref("");
@@ -38,7 +42,7 @@ async function onSave() {
       newKeyLabel.value.trim(),
     );
     toast.success(t("addKey.addedToast"));
-    navBack(router, { name: "settings" });
+    navBack(router, BACK_FALLBACK);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("addKey.addFailed");
@@ -48,20 +52,17 @@ async function onSave() {
 }
 
 function goBack() {
-  navBack(router, { name: "settings" });
+  navBack(router, BACK_FALLBACK);
 }
 </script>
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex justify-between items-center mb-6" role="banner">
-      <h1 class="text-xl flex items-center gap-1">
-        <BaseIcon :icon="Plus" :size="24" /> {{ t("addKey.title") }}
-      </h1>
-      <BaseButton size="sm" :aria-label="t('common.back')" @click="goBack">
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </BaseButton>
-    </header>
+    <BaseHeader
+      :back-fallback="BACK_FALLBACK"
+      :title="t('addKey.title')"
+      :title-icon="Plus"
+    />
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">{{
       error

@@ -5,10 +5,10 @@
 <script setup lang="ts">
 import { listCreatePresets, type AppError, type CreatePreset } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import { navBack } from "@/utils/nav";
-import { ArrowLeft, Dices } from "@lucide/vue";
+import { Dices } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -41,24 +41,15 @@ function openGenerate() {
 }
 
 onMounted(loadPresets);
-
-function goBack() {
-  navBack(router, { name: "entries" });
-}
 </script>
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex items-center gap-3 mb-6" role="banner">
-      <button
-        @click="goBack"
-        class="back-btn inline-flex items-center gap-1"
-        :aria-label="t('common.back')"
-      >
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </button>
-      <h1 class="text-lg flex-1">{{ t("create.title") }}</h1>
-    </header>
+    <BaseHeader :back-fallback="{ name: 'entries' }">
+      <template #title>
+        <h1 class="text-lg flex-1">{{ t("create.title") }}</h1>
+      </template>
+    </BaseHeader>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
       error
@@ -114,17 +105,6 @@ function goBack() {
 </template>
 
 <style scoped>
-.back-btn {
-  background: transparent;
-  border: none;
-  font-size: var(--text-base);
-  cursor: pointer;
-  color: var(--color-accent);
-  padding: 0.25rem 0.5rem;
-  min-width: 48px;
-  min-height: 48px;
-}
-
 .type-card {
   display: block;
   width: 100%;

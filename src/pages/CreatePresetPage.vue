@@ -16,6 +16,7 @@ import {
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
@@ -28,7 +29,7 @@ import {
 } from "@/composables";
 import { currentLocale, loadBundle } from "@/i18n";
 import { navBack } from "@/utils/nav";
-import { ArrowLeft, Dices, Eye, EyeOff } from "@lucide/vue";
+import { Dices, Eye, EyeOff } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
@@ -170,24 +171,15 @@ function wipeFields() {
   fields.value = {};
 }
 useWipeOnLeave(wipeFields);
-
-function goBack() {
-  navBack(router, { name: "create" });
-}
 </script>
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <header class="flex items-center gap-3 mb-6" role="banner">
-      <button
-        @click="goBack"
-        class="back-btn inline-flex items-center gap-1"
-        :aria-label="t('common.back')"
-      >
-        <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
-      </button>
-      <h1 class="text-lg flex-1">{{ t("create.title") }}</h1>
-    </header>
+    <BaseHeader :back-fallback="{ name: 'create' }">
+      <template #title>
+        <h1 class="text-lg flex-1">{{ t("create.title") }}</h1>
+      </template>
+    </BaseHeader>
 
     <BaseAlert v-if="error" variant="danger" class="mb-3">{{
       error
@@ -277,17 +269,6 @@ function goBack() {
 </template>
 
 <style scoped>
-.back-btn {
-  background: transparent;
-  border: none;
-  font-size: var(--text-base);
-  cursor: pointer;
-  color: var(--color-accent);
-  padding: 0.25rem 0.5rem;
-  min-width: 48px;
-  min-height: 48px;
-}
-
 .field-row {
   display: flex;
   gap: 0.5rem;
