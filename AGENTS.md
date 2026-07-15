@@ -76,6 +76,7 @@ The local Android plugins' Robolectric/JVM unit tests run via `just test-plugin`
 - Tauri v2 IPC naming: Rust uses `snake_case`, frontend/Kotlin use `camelCase` — Tauri auto-converts at the boundary. Match the existing plugin code.
 - The Android debug build sets `applicationIdSuffix = ".debug"` (installs as `xyz.yzx9.gpm.debug`) so it coexists with the release — install a debug build for diagnostics without uninstalling.
 - Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
+- Always run `pnpm install` in a fresh worktree before formatting and committing.
 
 ## Design RFCs
 
