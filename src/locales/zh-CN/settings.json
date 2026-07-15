@@ -1,5 +1,14 @@
 {
   "title": "设置",
+  "hub": {
+    "general": "通用",
+    "locking": "锁定与自动清除",
+    "identity": "身份与解锁",
+    "repository": "仓库",
+    "identityEncrypted": "已加密",
+    "identityPlaintext": "无口令",
+    "identitySsh": "SSH 密钥"
+  },
   "language": {
     "title": "显示语言",
     "legend": "语言",

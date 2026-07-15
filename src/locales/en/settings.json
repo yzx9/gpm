@@ -1,5 +1,14 @@
 {
   "title": "Settings",
+  "hub": {
+    "general": "General",
+    "locking": "Locking & auto-clear",
+    "identity": "Identity & unlock",
+    "repository": "Repository",
+    "identityEncrypted": "Encrypted",
+    "identityPlaintext": "No passphrase",
+    "identitySsh": "SSH key"
+  },
   "language": {
     "title": "Display Language",
     "legend": "Language",

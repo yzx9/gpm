@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Every screen's Back button now sits in the same place — a back arrow at the top-left — instead of appearing top-left on some screens, top-right on the Settings / SSH key / add-key screens, and not at all on History. The History screen also gained its own Back button instead of relying only on the system back gesture.
+- Settings is now a hub of four categories — General, Locking & auto-clear, Identity & unlock, and Repository — instead of one long scrolling page. Each row shows a quick summary of its current state (your language, lock mode, identity status, repo host), and tapping one drills into just those settings. Grouping the repository-specific settings on their own page also clears the way for managing multiple repositories later.
 
 ## [v0.12.1] - 2026-07-14
 

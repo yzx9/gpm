@@ -103,7 +103,35 @@ const routes = [
     path: "/settings",
     name: "settings",
     component: () => import("./pages/SettingsPage.vue"),
-    meta: { secure: true },
+    // `bundle` is redundant for the hub (name === "settings" already loads the
+    // bundle) but is set on the hub + its sub-pages for uniformity. The sibling
+    // `sshKey`/`addKey` routes intentionally keep their own namespaces (those
+    // pages read `sshKey.*`/`addKey.*`, not `settings.*`).
+    meta: { secure: true, bundle: "settings" },
+  },
+  {
+    path: "/settings/general",
+    name: "settingsGeneral",
+    component: () => import("./pages/SettingsGeneralPage.vue"),
+    meta: { secure: true, bundle: "settings" },
+  },
+  {
+    path: "/settings/locking",
+    name: "settingsLocking",
+    component: () => import("./pages/SettingsLockingPage.vue"),
+    meta: { secure: true, bundle: "settings" },
+  },
+  {
+    path: "/settings/identity",
+    name: "settingsIdentity",
+    component: () => import("./pages/SettingsIdentityPage.vue"),
+    meta: { secure: true, bundle: "settings" },
+  },
+  {
+    path: "/settings/repository",
+    name: "settingsRepository",
+    component: () => import("./pages/SettingsRepositoryPage.vue"),
+    meta: { secure: true, bundle: "settings" },
   },
   {
     path: "/settings/ssh-key",

@@ -64,9 +64,14 @@ export function installRouteGuards(
     // the (lazy) component chunk. Fire-and-forget — securing above is what gates
     // a secret page's paint, not this bundle load, and a late bundle just
     // re-renders with `fallbackLocale` covering the gap. Never throws (loadBundle
-    // swallows a missing bundle), so it can't block or abort the navigation.
-    if (typeof to.name === "string") {
-      void loadBundle(currentLocale(), to.name);
+    // swallows a missing bundle), so it can't block or abort the navigation. The
+    // namespace defaults to the route name; a route may override it via
+    // `meta.bundle` when its strings live under a different namespace (e.g. the
+    // settings sub-pages share the `settings` bundle).
+    const ns =
+      (typeof to.meta?.bundle === "string" && to.meta.bundle) || to.name;
+    if (typeof ns === "string") {
+      void loadBundle(currentLocale(), ns);
     }
     return true;
   });

@@ -4,6 +4,7 @@
 
 import { createSecureScreen } from "@/composables/useSecureScreen";
 import { createToast } from "@/composables/useToast";
+import { currentLocale, i18n } from "@/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,5 +116,75 @@ describe("installRouteGuards", () => {
     expect(order.indexOf("set_secure:true")).toBeLessThan(
       order.indexOf("mounted"),
     );
+  });
+
+  it("loads a route's meta.bundle namespace instead of its name", async () => {
+    // The settings sub-pages are named `settingsGeneral` etc. but share the
+    // `settings` message bundle. A naive `loadBundle(locale, to.name)` would
+    // look for a non-existent `settingsGeneral.json` and leave the page
+    // untranslated on a direct deep-link. `meta.bundle` overrides the name.
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_auth_state")
+        return Promise.resolve({ configured: true });
+      return Promise.resolve();
+    });
+
+    const secureState = createSecureScreen({ available: true });
+    const toastState = createToast();
+    const locale = currentLocale();
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", name: "home", component: { render: () => h("div") } },
+        {
+          path: "/sub",
+          name: "settingsGeneral",
+          meta: { bundle: "settings" },
+          component: { render: () => h("div") },
+        },
+      ],
+    });
+    installRouteGuards(router, secureState, toastState);
+
+    const app = createApp({ render: () => h(RouterView) });
+    app.use(router);
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    app.mount(el);
+    cleanup = () => app.unmount();
+    await flushPromises();
+
+    // Start clean so the assertion proves THIS navigation loaded the bundle:
+    // i18n.global is a singleton shared across test files, so a prior test may
+    // have already merged `settings`.
+    const fresh = i18n.global.getLocaleMessage(locale) as Record<
+      string,
+      unknown
+    >;
+    delete fresh.settings;
+
+    await router.push("/sub");
+    // loadBundle is fire-and-forget; its dynamic import settles on the
+    // microtask queue, which under a fuller module graph can take more than one
+    // flushPromises tick. Flush until the namespace lands (bounded).
+    for (let i = 0; i < 20; i++) {
+      await flushPromises();
+      if (
+        (i18n.global.getLocaleMessage(locale) as Record<string, unknown>)
+          .settings
+      )
+        break;
+    }
+
+    // The `settings` namespace merged into the locale's messages — proving the
+    // guard loaded `meta.bundle` ("settings"), not the route name (for which no
+    // bundle ships). `settingsGeneral` is unique to this test file, so presence
+    // here is attributable solely to the override.
+    const msgs = i18n.global.getLocaleMessage(locale) as Record<
+      string,
+      unknown
+    >;
+    expect(msgs.settings).toBeDefined();
   });
 });

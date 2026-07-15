@@ -11,7 +11,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import SettingsPage from "./SettingsPage.vue";
+import SettingsLockingPage from "./SettingsLockingPage.vue";
 
 const { mockPush, mockReplace } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -33,10 +33,13 @@ vi.mock("vue-router", () => ({
   }),
 }));
 
-describe("SettingsPage (hub)", () => {
+describe("SettingsLockingPage", () => {
   const overrides: Overrides = {};
   const defaults = { ...baseDefaults };
 
+  function when(cmd: string, value: unknown) {
+    overrides[cmd] = { value };
+  }
   function installMock() {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd in overrides) {
@@ -59,48 +62,42 @@ describe("SettingsPage (hub)", () => {
   });
 
   function mountPage() {
-    return mountWithApp(SettingsPage).wrapper;
+    return mountWithApp(SettingsLockingPage).wrapper;
   }
 
-  it("renders the four category rows", async () => {
+  it("renders the auto-lock card with its three controls", async () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll(".hub-row")).toHaveLength(4);
-    // The hub loads the summary sources.
-    expect(invoke).toHaveBeenCalledWith("get_app_config");
-    expect(invoke).toHaveBeenCalledWith("get_config");
-    expect(invoke).toHaveBeenCalledWith("get_auth_state");
+    expect(wrapper.text()).toContain("Auto-Lock & Auto-Clear");
+    expect(wrapper.findAll('input[name="lock-mode"]')).toHaveLength(6);
+    expect(wrapper.findAll('input[name="view-clear"]')).toHaveLength(4);
+    expect(wrapper.findAll('input[name="clipboard-clear"]')).toHaveLength(3);
   });
 
-  it("navigates into a category on row click", async () => {
+  it("switching the auto-lock mode invokes set_lock_mode", async () => {
+    when("set_lock_mode", { secure_screen: true, lock_mode: { idle: 60 } });
     const wrapper = mountPage();
     await flushPromises();
 
-    await wrapper.findAll(".hub-row")[0]!.trigger("click");
-    expect(mockPush).toHaveBeenCalledWith({ name: "settingsGeneral" });
+    // radios[1] is the "1 min" preset ({ idle: 60 }).
+    await wrapper.findAll('input[name="lock-mode"]')[1]!.trigger("change");
+    await flushPromises();
 
-    await wrapper.findAll(".hub-row")[3]!.trigger("click");
-    expect(mockPush).toHaveBeenCalledWith({ name: "settingsRepository" });
+    expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
+      mode: { idle: 60 },
+    });
   });
 
-  it("navigates back to entries when Back is clicked", async () => {
+  it("switching the view auto-clear invokes set_view_clear_secs", async () => {
+    when("set_view_clear_secs", { secure_screen: true, view_clear_secs: 10 });
     const wrapper = mountPage();
     await flushPromises();
 
-    await wrapper.find('button[aria-label="Back"]').trigger("click");
-
-    // navBack falls back to replace when there is no history to pop.
-    expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
-  });
-
-  it("shows a repo-host summary on the Repository row", async () => {
-    const wrapper = mountPage();
+    // radios[0] is the "10s" preset (value 10).
+    await wrapper.findAll('input[name="view-clear"]')[0]!.trigger("change");
     await flushPromises();
 
-    // httpsConfig.url = https://github.com/user/repo.git → github.com/user/repo
-    expect(wrapper.findAll(".hub-row")[3]!.text()).toContain(
-      "github.com/user/repo",
-    );
+    expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", { secs: 10 });
   });
 });
