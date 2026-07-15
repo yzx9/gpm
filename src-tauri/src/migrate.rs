@@ -81,7 +81,7 @@ pub(crate) async fn migrate_config_scope(state: &AppState) {
             cfg.biometric_app_lock = legacy.biometric_app_lock;
             cfg.schema_version = APP_CONFIG_SCHEMA_VERSION;
             if let Err(e) = state.app_config.save(&cfg).await {
-                eprintln!("[gpm] config-scope migration save failed: {e}");
+                log::warn!("config-scope migration save failed: {e}");
                 return; // stay below target; retried on the next run
             }
             // Re-seed every cache that reads these values.
@@ -95,7 +95,7 @@ pub(crate) async fn migrate_config_scope(state: &AppState) {
         Err(e) => {
             // No repo.json (fresh install / post-reset) or a parse error — bump
             // schema_version so we don't retry forever; nothing to copy.
-            eprintln!("[gpm] config-scope migration: nothing to copy ({e}); marking done");
+            log::warn!("config-scope migration: nothing to copy ({e}); marking done");
             let mut cfg = state.app_config.get();
             cfg.schema_version = APP_CONFIG_SCHEMA_VERSION;
             let _ = state.app_config.save(&cfg).await;

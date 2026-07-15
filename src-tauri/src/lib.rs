@@ -181,6 +181,7 @@ async fn startup_master_key<R: tauri::Runtime>(
 ///
 /// Panics if the config directory cannot be determined.
 fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
+    log::info!("gpm {} starting", env!("CARGO_PKG_VERSION"));
     let config_dir = app
         .path()
         .app_config_dir()
@@ -207,13 +208,13 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // logged, non-fatal. With app-lock on the master key is absent here, so
     // this is a no-op over the existing envelopes.
     if let Err(e) = tauri::async_runtime::block_on(store.migrate_seal()) {
-        eprintln!("[gpm] seal migration failed: {e}");
+        log::warn!("seal migration failed: {e}");
     }
     // Resolve the storage backend from sealed repo.json (no-op pre-setup or
     // under app-lock — the post-unlock one-shot finishes it). Best-effort, like
     // migrate_seal: a hard failure is stashed in Store for storage() to surface.
     if let Err(e) = tauri::async_runtime::block_on(store.resolve_storage()) {
-        eprintln!("[gpm] storage backend resolve failed: {e}");
+        log::warn!("storage backend resolve failed: {e}");
     }
     // Resolve the crypto backend from the same sealed repo.json (no-op
     // pre-setup or under app-lock — the post-unlock one-shot finishes it).
@@ -260,6 +261,25 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
 #[allow(clippy::too_many_lines)] // length is the command-registration list, not logic
 pub fn run() {
     tauri::Builder::default()
+        // Logger is registered first so every subsequent plugin/setup line can
+        // emit to the rotated file + Android logcat. `Stdout` auto-routes to
+        // logcat on Android (there is no separate Logcat target in v2); `LogDir`
+        // writes a rotated file under app_log_dir(). Fixed Info level for now;
+        // runtime level control arrives with the in-app viewer (Phase 2).
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: None,
+                    }),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(1_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseUtc)
+                .build(),
+        )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_safe_area::init())
         .plugin(tauri_plugin_biometric_keystore::init())

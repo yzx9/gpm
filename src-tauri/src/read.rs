@@ -139,6 +139,7 @@ pub(crate) async fn copy_password(
     notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
 ) -> Result<CopyResult, Error> {
     let entry_name = entry_path.trim_end_matches(".age").to_string();
+    log::info!("copy: {entry_name}");
 
     // Decrypt first so a FAILED read still counts as a secret access: under
     // Immediate we reset the timer + wipe on both paths (an errored op must not

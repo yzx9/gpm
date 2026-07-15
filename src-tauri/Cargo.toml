@@ -22,6 +22,7 @@ tauri-plugin-secure-keystore = { path = "../tauri-plugin-secure-keystore" }
 tauri-plugin-file-picker = { path = "../tauri-plugin-file-picker" }
 tauri-plugin-screen-secure = { path = "../tauri-plugin-screen-secure" }
 tauri-plugin-clipboard-notify = { path = "../tauri-plugin-clipboard-notify" }
+tauri-plugin-log = "2"
 rustpass = { path = "../rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,6 +30,7 @@ zeroize = { workspace = true }
 tokio = { workspace = true, features = ["rt", "fs"] }
 base64 = { workspace = true }
 sys-locale = "0.3"
+log = "0.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }
