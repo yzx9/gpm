@@ -1,0 +1,60 @@
+{
+  "title": "About",
+  "tabs": {
+    "overview": "Overview",
+    "acknowledgements": "Acknowledgements",
+    "licenses": "Licenses"
+  },
+  "overview": {
+    "tagline": "An Android-first, age-only gopass password client.",
+    "version": "Version",
+    "repoLink": "Source code",
+    "designGoalsTitle": "Design goals",
+    "builtWithTitle": "Built with",
+    "goals": {
+      "ageOnly": "age-only encryption — no GPG secret encryption, just modern age",
+      "androidFirst": "Android-first UX, with a matching desktop app from one codebase",
+      "gitSync": "sync over git to your own repository — no cloud, no third-party servers",
+      "gopassCompatible": "gopass-compatible secret, template, and preset formats",
+      "securityFirst": "secrets never reach the WebView; the master key is wiped after every operation"
+    }
+  },
+  "ack": {
+    "intro": "gpm stands on the shoulders of these open-source projects.",
+    "gopass": {
+      "desc": "The password manager gpm is conceptually aligned with. gpm mirrors gopass's secret, template, and create-wizard formats, narrowing its scope to an age-only, mobile-first client."
+    },
+    "age": {
+      "desc": "The modern age encryption that powers gpm's core. Every secret is age-encrypted; this Rust library (rage) does the heavy lifting."
+    },
+    "tauri": {
+      "desc": "The framework that ships one Rust + web codebase to Android and the desktop, with a security model that keeps secrets in Rust and out of the WebView."
+    },
+    "vue": {
+      "desc": "The progressive frontend framework behind gpm's reactive, accessible UI."
+    },
+    "git2": {
+      "desc": "Git operations — clone, pull, push, commit — over HTTPS and SSH, the backbone of gpm's repository sync."
+    },
+    "rpgp": {
+      "desc": "Pure-Rust OpenPGP used to verify GPG-signed commits, with no OpenSSL or C dependencies."
+    },
+    "nucleo": {
+      "desc": "The fuzzy matcher behind gpm's fast entry search."
+    }
+  },
+  "licenses": {
+    "summary": "{count} open-source dependencies",
+    "summaryEco": "{rust} Rust crates · {npm} npm packages",
+    "searchPlaceholder": "Search dependencies…",
+    "searchAria": "Search dependencies",
+    "noResults": "No dependencies match “{query}”",
+    "empty": "No license data available.",
+    "loading": "Loading licenses…",
+    "loadFailed": "Couldn't load the license inventory.",
+    "degradedNotice": "This inventory is incomplete — some license text is missing. Rebuilding with the full toolchain regenerates it.",
+    "packageCount": "{count} package | {count} packages",
+    "expandAria": "Show license text for {name}",
+    "noLicenseText": "License text unavailable for this package."
+  }
+}

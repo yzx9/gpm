@@ -8,6 +8,8 @@ import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 // @ts-expect-error node:url is a nodejs module (this project ships no @types/node)
 import { fileURLToPath, URL } from "node:url";
+// @ts-expect-error local .mjs plugin (ships no type declarations)
+import { licensesPlugin } from "./scripts/vite-plugin-licenses.mjs";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -20,6 +22,10 @@ export default defineConfig(async () => ({
   plugins: [
     vue(),
     tailwindcss(),
+    // Regenerate the open-source license inventory (public/licenses.json) at
+    // dev/build start. Staleness-aware; failures are swallowed (the Licenses
+    // tab renders a degraded-state notice when the file is missing/empty).
+    licensesPlugin(),
     // Precompile every locale JSON bundle at build time so the runtime message
     // compiler doesn't ship to the WebView. (`legacy: false` is set on
     // `createI18n` itself, not here.)

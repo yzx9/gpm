@@ -10,6 +10,7 @@
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-clear",
     "safe-area:default",
-    "screen-secure:default"
+    "screen-secure:default",
+    "opener:allow-open-url"
   ]
 }

@@ -1,0 +1,60 @@
+{
+  "title": "关于",
+  "tabs": {
+    "overview": "概览",
+    "acknowledgements": "致谢",
+    "licenses": "开源许可"
+  },
+  "overview": {
+    "tagline": "一个 Android 优先、仅使用 age 加密的 gopass 密码客户端。",
+    "version": "版本",
+    "repoLink": "源代码",
+    "designGoalsTitle": "设计目标",
+    "builtWithTitle": "构建于",
+    "goals": {
+      "ageOnly": "仅使用 age 加密——不使用 GPG 秘密加密，只用现代的 age",
+      "androidFirst": "Android 优先的体验，并从同一套代码得到对应的桌面应用",
+      "gitSync": "通过 git 与你自己的仓库同步——没有云、没有第三方服务器",
+      "gopassCompatible": "与 gopass 兼容的密码项、模板与预设格式",
+      "securityFirst": "秘密永不进入 WebView；主密钥在每次操作后被立即擦除"
+    }
+  },
+  "ack": {
+    "intro": "gpm 站在这些开源项目的肩膀上。",
+    "gopass": {
+      "desc": "gpm 在设计理念上与之对齐的密码管理器。gpm 沿用 gopass 的密码项、模板与创建向导格式，把范围收窄为一个仅使用 age、移动优先的客户端。"
+    },
+    "age": {
+      "desc": "驱动 gpm 核心的现代 age 加密。每一个秘密都用 age 加密;这个 Rust 库(rage)承担了主要的加密工作。"
+    },
+    "tauri": {
+      "desc": "让同一套 Rust + Web 代码同时发布到 Android 与桌面的框架,其安全模型把秘密留在 Rust 侧、不进入 WebView。"
+    },
+    "vue": {
+      "desc": "驱动 gpm 响应式、无障碍界面的渐进式前端框架。"
+    },
+    "git2": {
+      "desc": "Git 操作——克隆、拉取、推送、提交,支持 HTTPS 与 SSH,是 gpm 仓库同步的骨架。"
+    },
+    "rpgp": {
+      "desc": "用于校验 GPG 签名提交的纯 Rust OpenPGP 实现,不依赖 OpenSSL 或任何 C 库。"
+    },
+    "nucleo": {
+      "desc": "gpm 快速条目搜索背后的模糊匹配器。"
+    }
+  },
+  "licenses": {
+    "summary": "共 {count} 个开源依赖",
+    "summaryEco": "{rust} 个 Rust crate · {npm} 个 npm 包",
+    "searchPlaceholder": "搜索依赖…",
+    "searchAria": "搜索依赖",
+    "noResults": "没有匹配“{query}”的依赖",
+    "empty": "暂无许可信息。",
+    "loading": "正在加载许可信息…",
+    "loadFailed": "无法加载许可信息。",
+    "degradedNotice": "该清单不完整——部分许可文本缺失。用完整工具链重新构建即可重新生成。",
+    "packageCount": "{count} 个包",
+    "expandAria": "显示 {name} 的许可文本",
+    "noLicenseText": "该包暂无许可文本。"
+  }
+}

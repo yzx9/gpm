@@ -5,6 +5,7 @@
     "locking": "Locking & auto-clear",
     "identity": "Identity & unlock",
     "repository": "Repository",
+    "about": "About",
     "identityEncrypted": "Encrypted",
     "identityPlaintext": "No passphrase",
     "identitySsh": "SSH key"

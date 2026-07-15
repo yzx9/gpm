@@ -62,11 +62,11 @@ describe("SettingsPage (hub)", () => {
     return mountWithApp(SettingsPage).wrapper;
   }
 
-  it("renders the four category rows", async () => {
+  it("renders the five hub rows", async () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll(".hub-row")).toHaveLength(4);
+    expect(wrapper.findAll(".hub-row")).toHaveLength(5);
     // The hub loads the summary sources.
     expect(invoke).toHaveBeenCalledWith("get_app_config");
     expect(invoke).toHaveBeenCalledWith("get_config");
@@ -82,6 +82,10 @@ describe("SettingsPage (hub)", () => {
 
     await wrapper.findAll(".hub-row")[3]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsRepository" });
+
+    // The 5th row is About (overview/licenses; no secret content).
+    await wrapper.findAll(".hub-row")[4]!.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({ name: "about" });
   });
 
   it("navigates back to entries when Back is clicked", async () => {

@@ -150,6 +150,15 @@ const routes = [
     name: "history",
     component: () => import("./pages/HistoryPage.vue"),
   },
+  // About: overview, acknowledgements, and the auto-scanned license tree. Carries
+  // no secret content, so it is NOT marked secure (capturable, like the entry
+  // list / history). Reached via Settings (see SettingsPage) once that page
+  // surfaces the entry; the route exists independently so it's testable now.
+  {
+    path: "/about",
+    name: "about",
+    component: () => import("./pages/AboutPage.vue"),
+  },
 ];
 
 const router = createRouter({

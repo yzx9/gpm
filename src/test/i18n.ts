@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import enAbout from "@/locales/en/about.json";
 import enAddKey from "@/locales/en/addKey.json";
 import enCommon from "@/locales/en/common.json";
 import enCreate from "@/locales/en/create.json";
@@ -43,6 +44,7 @@ export function createTestI18n() {
     messages: {
       en: {
         common: enCommon,
+        about: enAbout,
         entries: enEntries,
         entry: enEntry,
         create: enCreate,

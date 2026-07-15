@@ -12,6 +12,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import {
   ChevronRight,
   Database,
+  Info,
   KeyRound,
   Lock,
   Settings,
@@ -20,6 +21,8 @@ import {
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
+
+import pkg from "../../package.json";
 
 const router = useRouter();
 const { t } = useI18n();
@@ -37,6 +40,10 @@ const identityType = ref("");
 // default-value rows (loadSummaries runs in onMounted, after first render).
 const loading = ref(true);
 const error = ref("");
+
+// The About row's "current value" is the installed version — a glanceable
+// answer to "what version am I on?" without drilling into About.
+const version = pkg.version;
 
 function lockModeLabel(mode: LockMode | undefined): string {
   if (!mode) return t("settings.lock.immediate");
@@ -188,6 +195,25 @@ onMounted(() => {
           <BaseIcon :icon="Database" :size="20" class="text-muted" />
           <span class="hub-title">{{ t("settings.hub.repository") }}</span>
           <span class="hub-value">{{ repositoryValue }}</span>
+          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
+        </div>
+
+        <!-- About: overview, acknowledgements, and the open-source license
+             tree. Carries no secret content (not a settings category), so it
+             sits below the four category pages. Its summary value is the
+             installed version. -->
+        <div
+          class="hub-row"
+          tabindex="0"
+          role="button"
+          :aria-label="`${t('settings.hub.about')} — ${version}`"
+          @click="router.push({ name: 'about' })"
+          @keydown.enter="router.push({ name: 'about' })"
+          @keydown.space.prevent="router.push({ name: 'about' })"
+        >
+          <BaseIcon :icon="Info" :size="20" class="text-muted" />
+          <span class="hub-title">{{ t("settings.hub.about") }}</span>
+          <span class="hub-value">{{ version }}</span>
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>
       </BaseCard>

@@ -287,6 +287,7 @@ pub fn run() {
         .plugin(tauri_plugin_file_picker::init())
         .plugin(tauri_plugin_screen_secure::init())
         .plugin(tauri_plugin_clipboard_notify::init())
+        .plugin(tauri_plugin_opener::init())
         // Best-effort display language baked in pre-paint; `resolved_locale` IPC reconciles a pinned preference after mount (see `app_config`).
         .append_invoke_initialization_script(app_config::locale_init_script())
         .setup(|app| {
