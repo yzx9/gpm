@@ -20,6 +20,7 @@
 //! types also live here (relocated from `git.rs`) so the RCS trait methods can
 //! name them without a `storage → git` dependency.
 
+use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -54,7 +55,7 @@ pub use registry::StoreBuilder;
 // until its RCS bodies fold into `storage/git` and the `git` module disappears.
 
 /// Credentials for Git remote authentication.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum GitAuth {
     /// No authentication (public repo).
     None,
@@ -69,6 +70,24 @@ pub enum GitAuth {
         /// Optional passphrase for encrypted key.
         passphrase: Option<String>,
     },
+}
+
+/// Redacts credential payloads — `Pat(_)` and the SSH `private_key`/`passphrase`
+/// would otherwise print verbatim. `username` (typically "git") is not secret.
+/// Mirrors `rustpass::Secret`.
+impl fmt::Debug for GitAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GitAuth::None => f.debug_tuple("None").finish(),
+            GitAuth::Pat(_) => f.debug_tuple("Pat").field(&"[REDACTED]").finish(),
+            GitAuth::Ssh { username, .. } => f
+                .debug_struct("Ssh")
+                .field("username", username)
+                .field("private_key", &"[REDACTED]")
+                .field("passphrase", &"[REDACTED]")
+                .finish(),
+        }
+    }
 }
 
 /// Shared cancellation token. Set to `true` to abort an in-progress git
@@ -706,6 +725,30 @@ pub enum DivergenceChoice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_redacts_git_auth_credentials() {
+        let pat = GitAuth::Pat("ghp_SECRET".to_string());
+        let out = format!("{pat:?}");
+        assert!(out.contains("[REDACTED]"), "Pat should redact: {out}");
+        assert!(!out.contains("ghp_SECRET"), "PAT leaked into Debug: {out}");
+
+        let ssh = GitAuth::Ssh {
+            username: "git".to_string(),
+            private_key: "-----BEGIN OPENSSH PRIVATE KEY-----".to_string(),
+            passphrase: Some("ssh-pass".to_string()),
+        };
+        let out = format!("{ssh:?}");
+        assert!(out.contains("[REDACTED]"), "Ssh should redact: {out}");
+        assert!(
+            !out.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "ssh key leaked into Debug: {out}"
+        );
+        assert!(!out.contains("ssh-pass"), "passphrase leaked: {out}");
+        assert!(out.contains("git"), "username is not secret: {out}");
+
+        assert_eq!(format!("{:?}", GitAuth::None), "None");
+    }
 
     /// A regular recipients index is `Present` — safe to read through storage.
     #[tokio::test]

@@ -7,18 +7,30 @@
 //! Uses the `ssh-key` crate to generate ed25519 keypairs compatible with
 //! standard OpenSSH tools and git2's SSH authentication.
 
+use std::fmt;
+
 use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
 use zeroize::Zeroizing;
 
 use crate::error::{Error, ErrorCode};
 
 /// A generated SSH keypair.
-#[derive(Debug)]
 pub struct SshKeyPair {
     /// OpenSSH PEM-encoded private key (wiped on drop).
     pub private_key: Zeroizing<String>,
     /// OpenSSH public key string (`ssh-ed25519 AAAA...`).
     pub public_key: String,
+}
+
+/// Redacts `private_key` — mirrors `rustpass::Secret` so `Debug` never leaks
+/// the PEM body (the derived `Debug` would print `Zeroizing<String>` verbatim).
+impl fmt::Debug for SshKeyPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SshKeyPair")
+            .field("private_key", &"[REDACTED]")
+            .field("public_key", &self.public_key)
+            .finish()
+    }
 }
 
 /// Generate a new ed25519 SSH keypair.
@@ -247,6 +259,25 @@ mod tests {
     fn export_private_key_rejects_garbage() {
         let result = export_private_key("garbage");
         assert!(result.is_err(), "should reject invalid key");
+    }
+
+    #[test]
+    fn debug_redacts_private_key() {
+        let pair = generate_keypair(None).expect("generation should succeed");
+        let debug_output = format!("{pair:?}");
+        assert!(
+            debug_output.contains("[REDACTED]"),
+            "Debug should redact the private key, got: {debug_output}"
+        );
+        assert!(
+            !debug_output.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "Debug must not contain the PEM body, got: {debug_output}"
+        );
+        // The public key is safe to surface (it is public).
+        assert!(
+            debug_output.contains(&pair.public_key),
+            "Debug should still show the public key, got: {debug_output}"
+        );
     }
 
     // ── to_unencrypted_pem ──────────────────────────────────────────────

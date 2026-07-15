@@ -114,6 +114,15 @@ pub(crate) struct AppConfig {
     /// prefs out of `repo.json`.
     #[serde(default = "default_schema_version")]
     pub(crate) schema_version: u32,
+    /// Persisted diagnostics log level (`None` ⇒ default `Info`). One of
+    /// `"error"`, `"warn"`, `"info"`, `"debug"`. Applied at startup via
+    /// `log::set_max_level` (see `logging`/`lib::init_state`) and on the
+    /// `set_log_level` command. Plaintext here (not sealed) so it is readable
+    /// before unlock and survives `reset_config` — same rationale as `locale`.
+    /// Omitted from `app.json` while `None` (the default) so existing files stay
+    /// byte-identical on round-trip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) log_level: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -127,6 +136,7 @@ impl Default for AppConfig {
             autosync: default_autosync_true(),
             biometric_app_lock: false,
             schema_version: default_schema_version(),
+            log_level: None,
         }
     }
 }
@@ -191,6 +201,24 @@ fn validate_locale(locale: Option<&str>) -> Result<(), Error> {
         return Err(Error::new(
             ErrorCode::ConfigError,
             format!("Unsupported locale code '{code}'"),
+        ));
+    }
+    Ok(())
+}
+
+/// Log levels the diagnostics viewer exposes (lowercase, matching `log::Level`).
+/// `trace`/`off` are intentionally excluded — too noisy / disables logging.
+const LOG_LEVELS: [&str; 4] = ["error", "warn", "info", "debug"];
+
+/// Reject an unsupported log level. `None` (use the default `Info`) is always
+/// valid; `Some(level)` must be one of [`LOG_LEVELS`]. Mirrors `validate_locale`.
+fn validate_log_level(level: Option<&str>) -> Result<(), Error> {
+    if let Some(lvl) = level
+        && !LOG_LEVELS.contains(&lvl)
+    {
+        return Err(Error::new(
+            ErrorCode::ConfigError,
+            format!("Unsupported log level '{lvl}'"),
         ));
     }
     Ok(())
@@ -279,6 +307,22 @@ impl AppConfigStore {
         }
     }
 
+    /// Effective log level as a `log::LevelFilter`: the persisted value if set and
+    /// supported, else `Info`. An unsupported on-disk value (hand-edited or from a
+    /// newer build) degrades to `Info` rather than poisoning logging — mirroring
+    /// `resolved_locale`'s resilience.
+    #[must_use]
+    pub(crate) fn effective_log_level(&self) -> log::LevelFilter {
+        match self.get().log_level.as_deref() {
+            Some("error") => log::LevelFilter::Error,
+            Some("warn") => log::LevelFilter::Warn,
+            Some("debug") => log::LevelFilter::Debug,
+            // "info" and None/unsupported both resolve to Info — folding "info"
+            // into the wildcard avoids clippy::match_same_arms.
+            _ => log::LevelFilter::Info,
+        }
+    }
+
     /// Persist `cfg` atomically (temp + rename, mirroring
     /// `rustpass::config::save_atomic`) and update the cache.
     ///
@@ -335,6 +379,14 @@ impl AppConfigStore {
     /// mirror of the Keystore-probed runtime state).
     pub(crate) async fn set_biometric_app_lock(&self, enabled: bool) -> Result<AppConfig, Error> {
         self.update(|cfg| cfg.biometric_app_lock = enabled).await
+    }
+
+    /// Set the persisted log level (`None` ⇒ default Info). `Some` must be one of
+    /// [`LOG_LEVELS`]; a bad value returns `ConfigError`. The caller applies the
+    /// runtime effect (`log::set_max_level`) so this stays a pure persistence step.
+    pub(crate) async fn set_log_level(&self, level: Option<String>) -> Result<AppConfig, Error> {
+        validate_log_level(level.as_deref())?;
+        self.update(|cfg| cfg.log_level = level).await
     }
 }
 
@@ -394,6 +446,31 @@ pub(crate) async fn set_locale_pref(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn resolved_locale(state: State<'_, AppState>) -> String {
     state.app_config.resolved_locale()
+}
+
+/// The effective diagnostics log level (persisted value or `"info"` default).
+/// Read by the viewer's level selector.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn get_log_level(state: State<'_, AppState>) -> String {
+    match state.app_config.get().log_level.as_deref() {
+        Some(lvl) if LOG_LEVELS.contains(&lvl) => lvl.to_string(),
+        _ => "info".to_string(),
+    }
+}
+
+/// Persist the log level and apply it at runtime immediately via
+/// `log::set_max_level` (no restart — the `log` macros short-circuit at
+/// `max_level`). `null` clears the override (back to the Info default).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_log_level(
+    state: State<'_, AppState>,
+    level: Option<String>,
+) -> Result<(), Error> {
+    state.app_config.set_log_level(level).await?;
+    log::set_max_level(state.app_config.effective_log_level());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -522,6 +599,95 @@ mod tests {
         assert_eq!(err.code, "CONFIG_ERROR");
         assert!(err.message.contains("zh-TW"));
         assert!(validate_locale(Some("fr")).is_err());
+    }
+
+    #[test]
+    fn validate_log_level_accepts_supported_and_none() {
+        assert!(validate_log_level(None).is_ok());
+        for lvl in LOG_LEVELS {
+            assert!(validate_log_level(Some(lvl)).is_ok(), "accept {lvl}");
+        }
+    }
+
+    #[test]
+    fn validate_log_level_rejects_unknown() {
+        for bad in ["trace", "off", "DEBUG", "", "verbose"] {
+            let err = validate_log_level(Some(bad)).unwrap_err();
+            assert_eq!(err.code, "CONFIG_ERROR", "reject {bad:?}");
+            assert!(
+                err.message.contains(bad),
+                "message names {bad:?}: {}",
+                err.message
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn log_level_roundtrips_through_save() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                log_level: Some("debug".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let reloaded = store_at(dir.path()).get();
+        assert_eq!(reloaded.log_level.as_deref(), Some("debug"));
+    }
+
+    #[tokio::test]
+    async fn log_level_omitted_on_disk_when_none() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                log_level: None,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        assert!(
+            !on_disk.contains("log_level"),
+            "log_level key must be absent when None; got: {on_disk}"
+        );
+    }
+
+    #[tokio::test]
+    async fn effective_log_level_degrades_unsupported_to_info() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        // A raw "trace" (rejected by set_log_level, but a hand-edited file or
+        // newer build could carry it) must degrade to Info, not panic or poison.
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                log_level: Some("trace".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(store.effective_log_level(), log::LevelFilter::Info);
+        // A supported value resolves directly.
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                log_level: Some("debug".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(store.effective_log_level(), log::LevelFilter::Debug);
+        // None → Info: a brand-new dir (no app.json) loads the default, which
+        // has no log_level and degrades to Info. Reusing `dir` would re-read
+        // the "debug" persisted above and wrongly resolve to Debug.
+        let fresh_dir = tempdir().expect("tempdir");
+        let fresh = store_at(fresh_dir.path());
+        assert_eq!(fresh.effective_log_level(), log::LevelFilter::Info);
     }
 
     #[test]

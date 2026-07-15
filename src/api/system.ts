@@ -54,6 +54,9 @@ export interface AppConfig {
    *  Settings toggle + runtime gate read `getAppLockState` (Keystore truth),
    *  not this flag; it exists only as a persisted record. */
   biometric_app_lock?: boolean;
+  /** Persisted diagnostics log level (`"error"|"warn"|"info"|"debug"`). Absent ⇒
+   *  the default `info`. Applied at startup + on the `set_log_level` command. */
+  log_level?: string;
 }
 
 /**

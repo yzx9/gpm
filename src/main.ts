@@ -7,6 +7,7 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import App from "./App.vue";
 import "./style.css";
 
+import { installFrontendLogger } from "./api";
 import {
   APP_LOCK_KEY,
   createAppLockStore,
@@ -159,6 +160,15 @@ const routes = [
     name: "about",
     component: () => import("./pages/AboutPage.vue"),
   },
+  // Diagnostics log viewer (RFC 0052). Standalone namespace like About — the log
+  // is a self-contained viewer, not a settings category — but `secure: true`
+  // because the log surfaces entry names (screen-protected metadata).
+  {
+    path: "/settings/log",
+    name: "log",
+    component: () => import("./pages/LogViewerPage.vue"),
+    meta: { secure: true },
+  },
 ];
 
 const router = createRouter({
@@ -181,6 +191,10 @@ void (async () => {
   const app = createApp(App);
   app.use(router);
   app.use(i18n);
+  // Frontend logging bridge (RFC 0052): route uncaught frontend errors into the
+  // backend log so a bug report has a persisted frontend trace. Fire-and-forget
+  // with a recursion guard — it must never break rendering.
+  installFrontendLogger(app);
   // Direction tracker for the <router-view> slide transition. Registered after
   // the secure-screen guards so its afterEach runs alongside them. The
   // secure-boundary gate inside it keeps FLAG_SECURE safe (see useNavDirection).

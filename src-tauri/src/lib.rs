@@ -37,6 +37,7 @@ mod config;
 mod generator;
 mod git;
 mod identity;
+mod logging;
 mod migrate;
 mod page;
 mod read;
@@ -197,6 +198,11 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // App-shell (non-repo) preferences — primarily the screen-capture master
     // toggle. Borrows `config_dir` before it is moved into `Store` below.
     let app_config = app_config::AppConfigStore::new(&config_dir);
+    // Apply the persisted log level NOW (right after app.json loads and the log
+    // plugin has initialized). The plugin is configured at Trace (see `run()`),
+    // so this `set_max_level` is the runtime gate — immediate, symmetric, and
+    // survives restart. `None` ⇒ Info (the default).
+    log::set_max_level(app_config.effective_log_level());
     let store = Arc::new(Store::new(config_dir, master_key));
     // Seed the Store's injected `autosync` cache from the authoritative app
     // config (autosync_write reads it). One of the three re-push points — the
@@ -221,7 +227,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // Best-effort, like resolve_storage: a hard failure is stashed in Store
     // for crypto() to surface.
     if let Err(e) = tauri::async_runtime::block_on(store.resolve_crypto()) {
-        eprintln!("[gpm] crypto backend resolve failed: {e}");
+        log::warn!("crypto backend resolve failed: {e}");
     }
 
     let app_state = AppState {
@@ -264,8 +270,11 @@ pub fn run() {
         // Logger is registered first so every subsequent plugin/setup line can
         // emit to the rotated file + Android logcat. `Stdout` auto-routes to
         // logcat on Android (there is no separate Logcat target in v2); `LogDir`
-        // writes a rotated file under app_log_dir(). Fixed Info level for now;
-        // runtime level control arrives with the in-app viewer (Phase 2).
+        // writes a rotated file under app_log_dir(). Configured at Trace so the
+        // runtime level gate (`log::set_max_level`, applied in `init_state` from
+        // the persisted app.json value) can be raised or lowered at runtime: the
+        // `log` macros short-circuit at `max_level`, so Debug/Trace cost nothing
+        // while gated down to Info (the default).
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -274,7 +283,7 @@ pub fn run() {
                         file_name: None,
                     }),
                 ])
-                .level(log::LevelFilter::Info)
+                .level(log::LevelFilter::Trace)
                 .max_file_size(1_000_000)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseUtc)
@@ -360,6 +369,12 @@ pub fn run() {
             app_config::set_locale_pref,
             app_config::resolved_locale,
             app_config::screen_secure_available,
+            // logging: in-app diagnostics viewer + runtime level control
+            logging::read_log,
+            logging::clear_log,
+            logging::write_log,
+            app_config::get_log_level,
+            app_config::set_log_level,
             // biometric
             biometric::is_biometric_available,
             biometric::is_biometric_unlock_enabled,

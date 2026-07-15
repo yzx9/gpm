@@ -15,6 +15,7 @@ import {
   Info,
   KeyRound,
   Lock,
+  ScrollText,
   Settings,
   SlidersHorizontal,
 } from "@lucide/vue";
@@ -44,6 +45,10 @@ const error = ref("");
 // The About row's "current value" is the installed version — a glanceable
 // answer to "what version am I on?" without drilling into About.
 const version = pkg.version;
+
+// The Logs row's summary value — the current diagnostics level, so the user can
+// see at a glance whether verbose (debug) logging is on.
+const logLevel = computed(() => appConfig.value?.log_level ?? "info");
 
 function lockModeLabel(mode: LockMode | undefined): string {
   if (!mode) return t("settings.lock.immediate");
@@ -214,6 +219,24 @@ onMounted(() => {
           <BaseIcon :icon="Info" :size="20" class="text-muted" />
           <span class="hub-title">{{ t("settings.hub.about") }}</span>
           <span class="hub-value">{{ version }}</span>
+          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
+        </div>
+
+        <!-- Diagnostics log viewer (RFC 0052). Sits below the categories like
+             About; its summary value is the current log level. Independent of
+             repo/identity state, so always shown. -->
+        <div
+          class="hub-row"
+          tabindex="0"
+          role="button"
+          :aria-label="`${t('settings.hub.logs')} — ${logLevel}`"
+          @click="router.push({ name: 'log' })"
+          @keydown.enter="router.push({ name: 'log' })"
+          @keydown.space.prevent="router.push({ name: 'log' })"
+        >
+          <BaseIcon :icon="ScrollText" :size="20" class="text-muted" />
+          <span class="hub-title">{{ t("settings.hub.logs") }}</span>
+          <span class="hub-value">{{ logLevel }}</span>
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>
       </BaseCard>

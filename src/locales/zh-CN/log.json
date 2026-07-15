@@ -1,0 +1,18 @@
+{
+  "title": "日志",
+  "levelLabel": "级别",
+  "levels": {
+    "error": "仅错误",
+    "warn": "警告",
+    "info": "信息",
+    "debug": "调试"
+  },
+  "refresh": "刷新",
+  "clear": "清空日志",
+  "clearConfirm": "确认清空日志？此操作不可撤销。",
+  "empty": "暂无日志。",
+  "loadFailed": "无法加载日志。",
+  "clearFailed": "无法清空日志。",
+  "cleared": "日志已清空。",
+  "levelFailed": "无法设置日志级别。"
+}

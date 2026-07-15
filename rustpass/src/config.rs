@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde_json;
@@ -467,7 +468,7 @@ fn is_false(b: &bool) -> bool {
 }
 
 /// Repository configuration persisted to disk.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RepoConfig {
     /// Remote repository URL.
     pub url: String,
@@ -516,6 +517,49 @@ pub struct RepoConfig {
     pub crypto: Option<String>,
 }
 
+/// Redacts credential fields and sanitizes `url` — a pasted remote may embed
+/// credentials (`https://user:pat@host/...`), and the derived `Debug` would
+/// print `pat`/`ssh_key`/`ssh_passphrase` plus that credentialed URL verbatim.
+/// Mirrors `rustpass::Secret`. Serde (`Serialize`/`Deserialize`) is unaffected —
+/// only `Debug` changes.
+impl fmt::Debug for RepoConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RepoConfig")
+            .field("url", &redact_url(&self.url))
+            .field("pat", &self.pat.as_ref().map(|_| "[REDACTED]"))
+            .field("ssh_key", &self.ssh_key.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "ssh_passphrase",
+                &self.ssh_passphrase.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("local_path", &self.local_path)
+            .field("commit_user_name", &self.commit_user_name)
+            .field("commit_user_email", &self.commit_user_email)
+            .field("unlock_identity_with_app", &self.unlock_identity_with_app)
+            .field("authenticity", &self.authenticity)
+            .field("backend", &self.backend)
+            .field("crypto", &self.crypto)
+            .finish()
+    }
+}
+
+/// Strip any `user:pass@` userinfo from a URL so a credentialed remote cannot
+/// leak through `Debug`. Keeps scheme + host + port + path/query for diagnostics.
+/// A non-URL string (no `://`) is returned unchanged.
+fn redact_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    // The authority ends at the first path/query/fragment delimiter.
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(auth_end);
+    // `user:pass@host[:port]` → keep only the host[:port] after the last `@`.
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    format!("{scheme}://{host}{tail}")
+}
+
 impl RepoConfig {
     /// Build a [`GitAuth`](crate::storage::GitAuth) from stored credentials.
     ///
@@ -538,6 +582,70 @@ impl RepoConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_redacts_credentials_and_url() {
+        let cfg = RepoConfig {
+            url: "https://alice:hunter2@git.example.com/org/repo.git".to_string(),
+            pat: Some("ghp_TOKEN".to_string()),
+            ssh_key: Some("-----BEGIN OPENSSH PRIVATE KEY-----".to_string()),
+            ssh_passphrase: Some("ssh-pass".to_string()),
+            local_path: "/tmp/repo".to_string(),
+            ..Default::default()
+        };
+        let out = format!("{cfg:?}");
+        // Credential fields are redacted.
+        assert!(
+            out.contains("[REDACTED]"),
+            "pat/ssh fields should redact: {out}"
+        );
+        assert!(!out.contains("ghp_TOKEN"), "PAT leaked into Debug: {out}");
+        assert!(
+            !out.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "ssh key leaked into Debug: {out}"
+        );
+        assert!(!out.contains("ssh-pass"), "ssh passphrase leaked: {out}");
+        // The credentialed URL's userinfo is stripped; host/path kept.
+        assert!(!out.contains("alice"), "url userinfo leaked: {out}");
+        assert!(!out.contains("hunter2"), "url password leaked: {out}");
+        assert!(
+            out.contains("git.example.com/org/repo.git"),
+            "url host/path should remain for diagnostics: {out}"
+        );
+        // Serialize still carries the plaintext credentials across IPC (mirrors
+        // identity.rs's serialize-transparent assertions — only Debug changed).
+        let json = serde_json::to_string(&cfg).expect("serializes");
+        assert!(
+            json.contains("ghp_TOKEN"),
+            "Serialize must carry PAT: {json}"
+        );
+        assert!(
+            json.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "Serialize must carry ssh key: {json}"
+        );
+        assert!(
+            json.contains("alice:hunter2"),
+            "Serialize must carry the credentialed URL verbatim: {json}"
+        );
+    }
+
+    #[test]
+    fn redact_url_strips_userinfo_only() {
+        // Credentialed → host/path kept, userinfo gone.
+        assert_eq!(
+            redact_url("https://u:p@host/repo.git"),
+            "https://host/repo.git"
+        );
+        // Port preserved.
+        assert_eq!(
+            redact_url("ssh://git:pass@host:22/path"),
+            "ssh://host:22/path"
+        );
+        // No userinfo → unchanged.
+        assert_eq!(redact_url("https://host/repo.git"), "https://host/repo.git");
+        // No scheme → unchanged.
+        assert_eq!(redact_url("just-a-path"), "just-a-path");
+    }
 
     fn create_config() -> (Config, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();

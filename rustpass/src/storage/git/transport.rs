@@ -378,7 +378,13 @@ mod tests {
     fn git_auth_pat_debug_masks_token() {
         let auth = GitAuth::Pat("secret-token".to_string());
         let debug = format!("{auth:?}");
-        assert_eq!(debug, "Pat(\"secret-token\")");
+        // The redacting `Debug` (storage/mod.rs) masks the token — the test's
+        // name has always promised this; the assertion now matches the impl.
+        assert_eq!(debug, "Pat(\"[REDACTED]\")");
+        assert!(
+            !debug.contains("secret-token"),
+            "PAT leaked into Debug: {debug}"
+        );
     }
 
     #[test]

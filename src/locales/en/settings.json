@@ -6,6 +6,7 @@
     "identity": "Identity & unlock",
     "repository": "Repository",
     "about": "About",
+    "logs": "Logs",
     "identityEncrypted": "Encrypted",
     "identityPlaintext": "No passphrase",
     "identitySsh": "SSH key"

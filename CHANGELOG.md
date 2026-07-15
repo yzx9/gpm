@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A new "About" screen, reached from Settings, brings together gpm's overview, acknowledgements, and the full open-source license list in one place. See the projects gpm is built on — gopass, age, Tauri, Vue, and more — and search or expand any of the hundreds of bundled dependencies to read its license text.
+- A new **Logs** screen, reached from Settings, shows gpm's diagnostics log so you can review what the app has been doing — handy when troubleshooting or filing a bug report. Pick how detailed the log is (Errors / Warnings / Info / Debug) right from the screen: the change takes effect immediately and is remembered across restarts. You can also clear the log. Logs record entry names and operation outcomes only, never secret content.
 
 ### Changed
 

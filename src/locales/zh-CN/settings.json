@@ -6,6 +6,7 @@
     "identity": "身份与解锁",
     "repository": "仓库",
     "about": "关于",
+    "logs": "日志",
     "identityEncrypted": "已加密",
     "identityPlaintext": "无口令",
     "identitySsh": "SSH 密钥"

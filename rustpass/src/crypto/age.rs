@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
 use std::str::{self, FromStr};
@@ -19,12 +20,22 @@ use crate::error::{Error, ErrorCode};
 ///
 /// `identity` is wrapped in [`Zeroizing`] so the secret is wiped when the value
 /// is dropped. The recipient is a public key, safe to store in plaintext.
-#[derive(Debug)]
 pub struct AgeIdentity {
     /// The native x25519 secret identity (`AGE-SECRET-KEY-...`).
     pub identity: Zeroizing<String>,
     /// The matching public recipient (`age1...`).
     pub recipient: String,
+}
+
+/// Redacts `identity` — mirrors `rustpass::Secret` so `Debug` never leaks the
+/// x25519 secret scalar (the derived `Debug` would print `Zeroizing<String>`).
+impl fmt::Debug for AgeIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AgeIdentity")
+            .field("identity", &"[REDACTED]")
+            .field("recipient", &self.recipient)
+            .finish()
+    }
 }
 
 /// Generate a new native x25519 age identity and derive its public recipient.
@@ -625,6 +636,25 @@ mod tests {
         let decrypted =
             decrypt_bytes(&ciphertext, generated.identity.as_bytes(), None).expect("self decrypt");
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn debug_redacts_identity() {
+        let generated = generate_age_identity();
+        let debug_output = format!("{generated:?}");
+        assert!(
+            debug_output.contains("[REDACTED]"),
+            "Debug should redact the identity, got: {debug_output}"
+        );
+        assert!(
+            !debug_output.contains("AGE-SECRET-KEY-"),
+            "Debug must not contain the secret identity, got: {debug_output}"
+        );
+        // The recipient is public — safe to surface.
+        assert!(
+            debug_output.contains(&generated.recipient),
+            "Debug should still show the recipient, got: {debug_output}"
+        );
     }
 
     #[tokio::test]

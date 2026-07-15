@@ -23,6 +23,7 @@
 //!   its own view-clear timer. `maybe_soft_wipe` is the gated wrapper the
 //!   read/write commands call after each op.
 
+use std::fmt;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -41,10 +42,22 @@ use crate::AppState;
 // ---------------------------------------------------------------------------
 
 /// Returned by `generate_ssh_key` — contains both keys for setup form.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub(crate) struct SshKeyPairResult {
     public_key: String,
     private_key: String,
+}
+
+/// Redacts `private_key` — mirrors `crate::read::SensitiveContent` so `Debug`
+/// never leaks the PEM. `Serialize` is unaffected (the private key still crosses
+/// IPC for the setup form).
+impl fmt::Debug for SshKeyPairResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SshKeyPairResult")
+            .field("public_key", &self.public_key)
+            .field("private_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// Returned by `get_ssh_public_key` — public key only, safe to display.
@@ -54,9 +67,67 @@ pub(crate) struct SshPublicKeyResult {
 }
 
 /// Returned by `export_ssh_private_key` — secret, strict Vue lifecycle required.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub(crate) struct SshPrivateKeyResult {
     private_key: String,
+}
+
+/// Redacts `private_key` — mirrors `crate::read::SensitiveContent` so `Debug`
+/// never leaks it. `Serialize` is unaffected (the key still crosses IPC).
+impl fmt::Debug for SshPrivateKeyResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SshPrivateKeyResult")
+            .field("private_key", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    //! Redaction regressions for the secret-bearing IPC result types — assert
+    //! `Debug` redacts the private key while `Serialize` still carries it (so IPC
+    //! keeps working). Mirrors `debug_redacts_password` in `rustpass::Secret` and
+    //! the serialize-transparent pattern in `read.rs`.
+    use super::*;
+
+    #[test]
+    fn ssh_key_pair_result_debug_redacts_but_serializes() {
+        let result = SshKeyPairResult {
+            public_key: "ssh-ed25519 AAAApublic".to_string(),
+            private_key: "-----BEGIN OPENSSH PRIVATE KEY-----".to_string(),
+        };
+        let dbg = format!("{result:?}");
+        assert!(dbg.contains("[REDACTED]"), "Debug redacts: {dbg}");
+        assert!(
+            !dbg.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "private key leaked into Debug: {dbg}"
+        );
+        assert!(dbg.contains("AAAApublic"), "public key is safe: {dbg}");
+        // Serialize still carries the private key across IPC.
+        let json = serde_json::to_string(&result).expect("serializes");
+        assert!(
+            json.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "Serialize must still carry the key for IPC: {json}"
+        );
+    }
+
+    #[test]
+    fn ssh_private_key_result_debug_redacts_but_serializes() {
+        let result = SshPrivateKeyResult {
+            private_key: "-----BEGIN OPENSSH PRIVATE KEY-----".to_string(),
+        };
+        let dbg = format!("{result:?}");
+        assert!(dbg.contains("[REDACTED]"), "Debug redacts: {dbg}");
+        assert!(
+            !dbg.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "private key leaked into Debug: {dbg}"
+        );
+        let json = serde_json::to_string(&result).expect("serializes");
+        assert!(
+            json.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "Serialize must still carry the key: {json}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

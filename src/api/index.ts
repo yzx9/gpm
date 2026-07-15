@@ -23,6 +23,7 @@ export * from "./clipboard";
 export * from "./common";
 export * from "./config";
 export * from "./identity";
+export * from "./log";
 export * from "./repo";
 export * from "./secrets";
 export * from "./setup";
