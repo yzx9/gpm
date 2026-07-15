@@ -25,6 +25,8 @@ pgp = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt", "sync"] }
 aes-gcm = { workspace = true, features = ["zeroize"] }
 getrandom = { workspace = true }
+# TOTP (RFC 6238) generation for entries storing a 2FA seed (gopass `pkg/otp`).
+totp-rs = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

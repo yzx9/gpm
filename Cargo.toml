@@ -67,3 +67,8 @@ getrandom = "0.2"
 base64 = "0.22"
 # Bech32 for tests that construct valid age plugin recipient/identity encodings.
 bech32 = { version = "0.9", default-features = false }
+# TOTP (RFC 6238) generation for entries that store a 2FA seed (gopass `pkg/otp`
+# analogue). `otpauth` parses otpauth:// URIs; `zeroize` wipes the seed on drop.
+# `qr` is deliberately off — unused, and it would pull `qrcode` + `image` and
+# bloat the Android build.
+totp-rs = { version = "5", default-features = false, features = ["otpauth", "zeroize"] }

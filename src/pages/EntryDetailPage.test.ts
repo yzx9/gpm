@@ -314,6 +314,71 @@ describe("EntryDetailPage", () => {
     });
   });
 
+  describe("copyTotp", () => {
+    it("invokes copy_totp and shows success toast when the entry has a seed", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        copied: true,
+        entry_name: "prod",
+        cleared_after_secs: 45,
+      });
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
+      await wrapper
+        .find('button[aria-label="Copy 2FA code to clipboard"]')
+        .trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith(
+        "copy_totp",
+        expect.objectContaining({ entryPath: "servers/prod.age" }),
+      );
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("✓ 2FA code copied for prod"),
+        ),
+      ).toBe(true);
+    });
+
+    it("shows the no-2FA info toast when the entry has no seed", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        copied: false,
+        entry_name: "prod",
+        cleared_after_secs: 0,
+      });
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
+      await wrapper
+        .find('button[aria-label="Copy 2FA code to clipboard"]')
+        .trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith(
+        "copy_totp",
+        expect.objectContaining({ entryPath: "servers/prod.age" }),
+      );
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("This entry has no 2FA code"),
+        ),
+      ).toBe(true);
+    });
+
+    it("swallows AUTH_CANCELLED silently on copyTotp", async () => {
+      // unlocked:false → identity NOT cached → copy_totp's runWithAuth parks.
+      const { wrapper, lock } = mountWithApp(EntryDetailPage, {
+        unlocked: false,
+      });
+      await wrapper
+        .find('button[aria-label="Copy 2FA code to clipboard"]')
+        .trigger("click");
+      await flushPromises(); // parked awaiting auth
+
+      lock.cancelAuth(); // user dismissed the overlay (back)
+      await flushPromises();
+
+      // No error UI — the catch swallowed AUTH_CANCELLED; copy_totp never ran.
+      expect(wrapper.find("[role='alert']").exists()).toBe(false);
+    });
+  });
+
   describe("security lifecycle", () => {
     it("clears sensitive data on unmount", async () => {
       vi.mocked(invoke).mockResolvedValue({

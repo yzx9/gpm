@@ -74,6 +74,8 @@ pub mod storage;
 pub mod store;
 /// gopass-compatible content templates and create presets.
 pub mod template;
+/// TOTP (RFC 6238) generation for entries storing a 2FA seed (gopass `pkg/otp`).
+pub mod totp;
 
 // Re-export core types at crate root (gopass-aligned)
 pub use config::{Config, LockMode, RepoConfig};
@@ -91,6 +93,7 @@ pub use store::{
     CommitIdentity, DivergenceChoice, RankedPage, Store, SyncDivergence, SyncOutcome, SyncResult,
     WriteOutcome, WriteResult, clamp_lock_mode, normalize_clear_secs,
 };
+pub use totp::{Otp, extract, generate_at};
 
 /// Upper bound on a trusted GPG/OpenPGP armored public key's size (paste OR
 /// file import). Armored pubkeys are small; this rejects a mis-pasted/mis-picked

@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import {
   copyPassword as copyPasswordCmd,
+  copyTotp as copyTotpCmd,
   deleteSecret as deleteSecretCmd,
   showPassword as showPasswordCmd,
   type AppError,
@@ -28,7 +29,7 @@ import {
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
-import { Copy, Eye } from "@lucide/vue";
+import { Clock, Copy, Eye } from "@lucide/vue";
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
@@ -122,6 +123,32 @@ async function copyPassword() {
         secs: result.cleared_after_secs,
       }),
     );
+  } catch (e) {
+    if (isAuthCancelled(e)) return;
+    const appError = e as AppError;
+    error.value = appError?.message || t("common.toast.copyFailed");
+  }
+}
+
+async function copyTotp() {
+  error.value = "";
+  decryptError.value = false;
+  try {
+    await ensureClipboardNotifyPermission();
+    const result = await runWithAuth(() =>
+      copyTotpCmd(entryPath, clipboardNotifyText()),
+    );
+    if (result.copied) {
+      toast.success(
+        t("entry.totpCopied", {
+          name: result.entry_name,
+          secs: result.cleared_after_secs,
+        }),
+      );
+    } else {
+      // No TOTP seed in this entry — gentle info, not an error.
+      toast.info(t("entry.noTotp"));
+    }
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
@@ -227,6 +254,17 @@ function handleKeydown(e: KeyboardEvent) {
         {{ revealed ? t("entry.showingLabel") : t("entry.showLabel") }}
       </BaseButton>
     </div>
+
+    <BaseButton
+      variant="outline"
+      block
+      class="mb-3"
+      :disabled="loading || deleting"
+      :aria-label="t('entry.copyTotpAria')"
+      @click="copyTotp"
+    >
+      <BaseIcon :icon="Clock" /> {{ t("entry.copyTotpLabel") }}
+    </BaseButton>
 
     <BaseButton
       variant="outline"

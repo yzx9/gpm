@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- gpm can now copy the current two-factor (TOTP) code for an entry that stores one. Add a `totp:` line or an `otpauth://` link to an entry's notes — the same format gopass uses — then use the new **Copy 2FA Code** button on that entry's detail page. Like copying a password, the code goes straight to your clipboard and clears automatically; the 2FA seed itself never leaves the app's encrypted core. See the security model for when it's better to keep a 2FA code in a separate app instead.
 - A new "About" screen, reached from Settings, brings together gpm's overview, acknowledgements, and the full open-source license list in one place. See the projects gpm is built on — gopass, age, Tauri, Vue, and more — and search or expand any of the hundreds of bundled dependencies to read its license text.
 
 ### Changed
