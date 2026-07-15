@@ -7,18 +7,13 @@
 
 use std::fmt;
 
-use rustpass::error::ErrorCode;
 use rustpass::{Entry, Error, RankedPage};
 use serde::Serialize;
 use tauri::{AppHandle, Runtime, State};
-use tauri_plugin_clipboard_manager::ClipboardExt;
-use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
-use crate::identity::{
-    arm_clipboard_clear, disarm_clipboard_clear, maybe_soft_wipe, reset_lock_timer,
-};
+use crate::identity::{maybe_soft_wipe, reset_lock_timer};
 use crate::page::clamp_limit;
 
 // ---------------------------------------------------------------------------
@@ -29,6 +24,17 @@ use crate::page::clamp_limit;
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CopyResult {
     success: bool,
+    entry_name: String,
+    cleared_after_secs: u32,
+}
+
+/// Returned by `copy_totp`. Like [`CopyResult`] but distinguishes "copied a
+/// code" from "the entry has no TOTP seed" (`copied == false`, no clipboard
+/// write). No secret data — neither the seed nor the code crosses IPC.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TotpCopyResult {
+    /// `false` when the entry holds no TOTP seed (no clipboard write happened).
+    copied: bool,
     entry_name: String,
     cleared_after_secs: u32,
 }
@@ -149,34 +155,16 @@ pub(crate) async fn copy_password(
     maybe_soft_wipe(&state, &app).await;
     let secret = secret?;
 
-    app.clipboard()
-        .write_text(secret.password().to_string())
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Clipboard error: {e}")))?;
-
-    // Clipboard auto-clear: configured seconds, or never when the user set it to
-    // 0. Read from the AppState cache (not repo.json) — copy is the hot path.
-    let clear_secs = state
-        .clipboard_clear_secs
-        .lock()
-        .map_or_else(|_| rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS, |s| *s);
-    let (spawn_clear, cleared_after_secs) = clipboard_clear_plan(clear_secs);
-    if spawn_clear {
-        // Arm the cancellable auto-clear — replaces any in-flight clear task
-        // (the copy-overlap fix: copy-A's earlier timer must not survive to
-        // clear copy-B's secret short of its full timeout) — then post the
-        // sticky notification so the user can tap to clear early. The post is
-        // best-effort: a denial or plugin error never fails the copy (the
-        // notification method swallows its own errors).
-        arm_clipboard_clear(&state, &app, clear_secs);
-        app.clipboard_notify()
-            .post_notification(clear_secs, notify_text.as_ref())
-            .await;
-    } else {
-        // Never: abort any in-flight clear left over from a prior shorter
-        // setting so it can't fire and clear a clipboard the user asked to
-        // leave alone.
-        disarm_clipboard_clear(&state);
-    }
+    // Clipboard write + cancellable auto-clear + sticky notification, shared
+    // with `copy_totp` via the helper. The password never reaches the WebView —
+    // only the resolved auto-clear seconds return here.
+    let cleared_after_secs = crate::clipboard::write_and_schedule_clear(
+        &state,
+        &app,
+        secret.password().to_string(),
+        notify_text.as_ref(),
+    )
+    .await?;
 
     Ok(CopyResult {
         success: true,
@@ -217,6 +205,52 @@ pub(crate) async fn show_password(
     show_password_core(&state, &app, &entry_path).await
 }
 
+/// Decrypt the entry, compute its TOTP code in Rust, and copy it to the
+/// clipboard. Neither the seed nor the code reaches the `WebView` — only this
+/// result. `copied == false` means the entry has no TOTP seed (no clipboard
+/// write). Mirrors [`copy_password`]'s lock-timer reset + Immediate wipe on
+/// both paths, so a failed read still counts as a secret access.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn copy_totp(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    entry_path: String,
+    notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
+) -> Result<TotpCopyResult, Error> {
+    let entry_name = entry_path.trim_end_matches(".age").to_string();
+    log::info!("copy-totp: {entry_name}");
+
+    // Decrypt first so a FAILED read still counts as a secret access (Immediate).
+    let secret = state.store.get(&entry_path).await;
+    reset_lock_timer(&state, &app);
+    maybe_soft_wipe(&state, &app).await;
+    let secret = secret?;
+
+    let Some(otp) = rustpass::totp::extract(secret.body())? else {
+        // No TOTP seed: don't touch the clipboard. A prior copy's auto-clear
+        // timer is left intact; `cleared_after_secs` is unused on this branch.
+        return Ok(TotpCopyResult {
+            copied: false,
+            entry_name,
+            cleared_after_secs: 0,
+        });
+    };
+    let code = rustpass::totp::generate_at(&otp, std::time::SystemTime::now())?;
+    let cleared_after_secs = crate::clipboard::write_and_schedule_clear(
+        &state,
+        &app,
+        (*code).clone(),
+        notify_text.as_ref(),
+    )
+    .await?;
+    Ok(TotpCopyResult {
+        copied: true,
+        entry_name,
+        cleared_after_secs,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     //! Pagination envelope logic — the Tauri-layer bits `rustpass` can't test:
@@ -225,6 +259,7 @@ mod tests {
     //! fns, no Store needed.
 
     use super::*;
+    use rustpass::error::ErrorCode;
 
     fn entry(name: &str) -> Entry {
         Entry {

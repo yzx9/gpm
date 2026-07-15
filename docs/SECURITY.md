@@ -132,6 +132,27 @@ Mitigations:
   and manual dismiss
 - Password is never logged or persisted to storage
 
+### `copy_totp` — 2FA code path (no IPC exposure of the seed or code)
+
+When an entry stores a TOTP seed (a `totp:` line or an `otpauth://` link in its
+notes — the format gopass uses), gpm extracts the seed, computes the current
+one-time code in Rust, and writes the code directly to the clipboard. **On this
+path neither the seed nor the code crosses the IPC boundary** — only a small
+result (`TotpCopyResult { copied, entry_name, cleared_after_secs }`) returns to
+the UI. This is **strictly safer than using _Show_ for the same goal**: the copy
+path never exposes the password, notes, or seed to the WebView, and it rides the
+same clipboard auto-clear and sticky notification as `copy_password`.
+
+**What this does _not_ fix:** tapping _Show_ on a seed-bearing entry still sends
+the full notes — including the seed line — to the WebView, exactly as before. We
+deliberately do **not** redact `totp:`/`otpauth:` lines out of the revealed
+notes: the editor loads a secret through the same reveal path, so redaction would
+overwrite the seed with a placeholder on save and destroy it (and would diverge
+from gopass's `show`). Treat the seed as sensitive on the reveal path too —
+prefer _Copy 2FA_. A malformed or unsupported seed (HOTP, Steam Guard, an unknown
+algorithm, or a zero period) surfaces as a clear error rather than a silently
+wrong code.
+
 ## Security Measures
 
 | Measure                  | Detail                                                                                                                                                                                                  |
@@ -271,6 +292,36 @@ The password display element uses `select-all` CSS to allow users to manually
 select and copy the password. On mobile, this may interact with the system
 clipboard in unexpected ways. The primary copy mechanism should be the
 "Copy Password" button, which avoids this entirely.
+
+### TOTP seed storage is not true two-factor authentication
+
+gpm can store a TOTP seed in an entry and copy the current code — convenient and
+gopass-compatible — but this is **two-step verification, not a true second
+factor.** TOTP's protection rests on the seed being a separate thing you _have_.
+When the password and the seed live in the same gpm vault on the same device, a
+single compromise of that device or vault exposes both at once, collapsing two
+factors into one.
+
+What it **still defends against**: an attacker who only has your password — for
+example from another site's breach used in credential stuffing — still cannot
+generate the code, because the seed stays on your device. So storing the seed in
+gpm retains real value against the most common account-takeover vector.
+
+What it **does not defend against**: anyone who gains access to your unlocked
+gpm gets both the password and the ability to produce codes.
+
+**Recommendation.** For high-value accounts — and especially for the email or
+account that protects your gpm vault and its git remote — keep the TOTP seed on a
+**separate device or a hardware security key**, not in gpm. For routine accounts,
+storing the code in gpm is a reasonable convenience tradeoff. **Never** store the
+TOTP seed for the account that protects access to your vault (your git host or
+recovery email) inside that same vault — losing that one device must not lock you
+out of everything.
+
+gpm also enforces a stricter seed floor than gopass: a TOTP secret must be at
+least 128 bits (16 bytes), or gpm refuses to parse it. gopass accepts shorter
+seeds, so a seed gopass honors may need lengthening before gpm will generate its
+code.
 
 ## Approaches Not Adopted
 

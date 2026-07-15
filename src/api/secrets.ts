@@ -37,6 +37,14 @@ export interface CopyResult {
   cleared_after_secs: number;
 }
 
+/** Result of `copy_totp`: `copied` is `false` when the entry has no TOTP seed
+ *  (no clipboard write happened). Neither the seed nor the code crosses IPC. */
+export interface TotpCopyResult {
+  copied: boolean;
+  entry_name: string;
+  cleared_after_secs: number;
+}
+
 /** Decrypted secret content (password first line, notes the rest). */
 export interface SensitiveContent {
   password: string;
@@ -114,6 +122,16 @@ export async function copyPassword(
   notify?: ClipboardNotifyText,
 ): Promise<CopyResult> {
   return invoke<CopyResult>("copy_password", { entryPath, notifyText: notify });
+}
+
+/** Decrypt + compute the entry's TOTP code in Rust + copy it; the clipboard
+ *  auto-clears after a timer. `copied` is `false` when the entry has no TOTP
+ *  seed. Neither the seed nor the code reaches the WebView. */
+export async function copyTotp(
+  entryPath: string,
+  notify?: ClipboardNotifyText,
+): Promise<TotpCopyResult> {
+  return invoke<TotpCopyResult>("copy_totp", { entryPath, notifyText: notify });
 }
 
 /** Decrypt + return the entry's content for in-app reveal. */

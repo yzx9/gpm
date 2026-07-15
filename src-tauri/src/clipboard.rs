@@ -23,8 +23,8 @@ use crate::read::clipboard_clear_plan;
 
 /// Write `text` to the system clipboard, then arm the cancellable auto-clear
 /// for the configured `clipboard_clear_secs` and post the sticky notification.
-/// Returns the clipboard-write result; the armed clear + notification are
-/// best-effort.
+/// Returns the resolved auto-clear seconds (0 when the user set *Never*); the
+/// armed clear + notification are best-effort.
 ///
 /// # Errors
 ///
@@ -34,7 +34,7 @@ pub(crate) async fn write_and_schedule_clear<R: Runtime>(
     app: &AppHandle<R>,
     text: String,
     notify_text: Option<&tauri_plugin_clipboard_notify::NotifyText>,
-) -> Result<(), Error> {
+) -> Result<u32, Error> {
     app.clipboard()
         .write_text(text)
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("Clipboard error: {e}")))?;
@@ -43,7 +43,7 @@ pub(crate) async fn write_and_schedule_clear<R: Runtime>(
         .clipboard_clear_secs
         .lock()
         .map_or_else(|_| rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS, |s| *s);
-    let (spawn_clear, _cleared_after_secs) = clipboard_clear_plan(clear_secs);
+    let (spawn_clear, cleared_after_secs) = clipboard_clear_plan(clear_secs);
     if spawn_clear {
         arm_clipboard_clear(state, app, clear_secs);
         app.clipboard_notify()
@@ -53,7 +53,7 @@ pub(crate) async fn write_and_schedule_clear<R: Runtime>(
         // Never: abort any in-flight clear from a prior shorter setting.
         disarm_clipboard_clear(state);
     }
-    Ok(())
+    Ok(cleared_after_secs)
 }
 
 /// Copy an already-decrypted/generated password to the clipboard and arm the
@@ -75,7 +75,9 @@ pub(crate) async fn copy_generated_password(
     text: Zeroizing<String>,
     notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
 ) -> Result<(), Error> {
-    write_and_schedule_clear(&state, &app, (*text).clone(), notify_text.as_ref()).await
+    write_and_schedule_clear(&state, &app, (*text).clone(), notify_text.as_ref())
+        .await
+        .map(|_| ())
 }
 
 /// Whether the app may post notifications (Android 13+ runtime permission).
