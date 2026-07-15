@@ -66,5 +66,7 @@ describe("AboutPage", () => {
     await flushPromises();
     // gopass is the first/primary acknowledgement.
     expect(wrapper.text()).toContain("gopass");
+    // a11y: external ack links announce they open a new window (WCAG G201).
+    expect(wrapper.text()).toContain("opens in a new window");
   });
 });

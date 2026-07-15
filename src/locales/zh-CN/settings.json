@@ -5,6 +5,8 @@
     "locking": "锁定与自动清除",
     "identity": "身份与解锁",
     "repository": "仓库",
+    "security": "安全",
+    "securityHint": "gpm 如何保护你",
     "about": "关于",
     "logs": "日志",
     "identityEncrypted": "已加密",

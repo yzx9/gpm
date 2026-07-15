@@ -1,0 +1,33 @@
+{
+  "title": "Security",
+  "intro": "A plain-language look at how gpm keeps your secrets safe — and what it does and does not protect against.",
+  "fullModelLink": "Read the full security model",
+  "local": {
+    "title": "Secrets stay on your device",
+    "body": "gpm keeps a local age-encrypted copy of your repository and syncs over git to a repository you own. No cloud, no third-party servers."
+  },
+  "copyShow": {
+    "title": "Copy vs. show",
+    "body": "“Copy password” writes straight from secure memory to the clipboard and never enters the app's interface. “Show” puts the password on screen only to be read, then clears it on a timer, when you navigate away, or when you dismiss it."
+  },
+  "autoLock": {
+    "title": "The key is wiped after every use",
+    "body": "By default the unlock key is decrypted for a single operation and erased right after, so it is not left sitting in memory. You can change the timing in Locking & auto-clear."
+  },
+  "atRest": {
+    "title": "Encrypted at rest on Android",
+    "body": "On Android your identity and repository configuration are sealed with a hardware-backed key from the Keystore. The desktop app keeps these as plain files — a documented difference, since desktop has no equivalent keystore."
+  },
+  "appLock": {
+    "title": "Optional App Lock",
+    "body": "Turn on App Lock to require your fingerprint or face before anyone can read the store. The key is wiped whenever the app returns to the foreground, so a locked app cannot read it even from memory. Set it up in App Lock settings."
+  },
+  "authenticity": {
+    "title": "Optional signature verification",
+    "body": "gpm can verify SSH- or GPG-signed commits on every sync to detect a tampered remote. Turn it on under Repository."
+  },
+  "scope": {
+    "title": "What this protects against",
+    "body": "gpm defends against someone briefly using your unlocked device, or a malicious app injecting script. It is not a defense against a compromised or rooted operating system."
+  }
+}

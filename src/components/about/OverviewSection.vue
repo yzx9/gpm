@@ -50,6 +50,7 @@ const builtWith = ["Rust", "Tauri", "Vue 3", "age", "libgit2"] as const;
         @click.prevent="openExternal(repoUrl)"
       >
         <ExternalLink :size="14" /> {{ t("about.overview.repoLink") }}
+        <span class="sr-only">{{ t("common.opensInNewWindow") }}</span>
       </a>
     </BaseCard>
 

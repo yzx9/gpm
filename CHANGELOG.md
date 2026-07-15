@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A new "About" screen, reached from Settings, brings together gpm's overview, acknowledgements, and the full open-source license list in one place. See the projects gpm is built on — gopass, age, Tauri, Vue, and more — and search or expand any of the hundreds of bundled dependencies to read its license text.
 - A new **Logs** screen, reached from Settings, shows gpm's diagnostics log so you can review what the app has been doing — handy when troubleshooting or filing a bug report. Pick how detailed the log is (Errors / Warnings / Info / Debug) right from the screen: the change takes effect immediately and is remembered across restarts. You can also clear the log. Logs record entry names and operation outcomes only, never secret content.
 
+- A new "Security" screen, reached from Settings, explains in plain language — in both English and Chinese — how gpm keeps your secrets safe: secrets stay on your device in an age-encrypted copy synced over git to your own repository, copying a password never brings it into the app's interface, the unlock key is wiped after every use, files are encrypted at rest on Android, and there's an optional fingerprint/face App Lock and optional commit-signature verification. It also states plainly what gpm does and does not protect against, with a link to the full security model.
+
 ### Changed
 
 - Every screen's Back button now sits in the same place — a back arrow at the top-left — instead of appearing top-left on some screens, top-right on the Settings / SSH key / add-key screens, and not at all on History. The History screen also gained its own Back button instead of relying only on the system back gesture.

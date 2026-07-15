@@ -11,6 +11,7 @@ import enEntry from "@/locales/en/entry.json";
 import enGenerate from "@/locales/en/generate.json";
 import enHistory from "@/locales/en/history.json";
 import enLog from "@/locales/en/log.json";
+import enSecurity from "@/locales/en/security.json";
 import enSettings from "@/locales/en/settings.json";
 import enSetup from "@/locales/en/setup.json";
 import enSshKey from "@/locales/en/sshKey.json";
@@ -52,6 +53,7 @@ export function createTestI18n() {
         generate: enGenerate,
         history: enHistory,
         log: enLog,
+        security: enSecurity,
         settings: enSettings,
         setup: enSetup,
         sshKey: enSshKey,

@@ -1,6 +1,7 @@
 {
   "back": "Back",
   "loading": "Loading...",
+  "opensInNewWindow": "opens in a new window",
   "button": {
     "cancel": "Cancel"
   },

@@ -17,6 +17,7 @@ import {
   Lock,
   ScrollText,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
@@ -200,6 +201,24 @@ onMounted(() => {
           <BaseIcon :icon="Database" :size="20" class="text-muted" />
           <span class="hub-title">{{ t("settings.hub.repository") }}</span>
           <span class="hub-value">{{ repositoryValue }}</span>
+          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
+        </div>
+
+        <!-- Security: plain-language explainer of how gpm protects secrets.
+             Carries no secret content, so (like About) it sits below the four
+             category pages. Its summary value is a short hint, not state. -->
+        <div
+          class="hub-row"
+          tabindex="0"
+          role="button"
+          :aria-label="`${t('settings.hub.security')} — ${t('settings.hub.securityHint')}`"
+          @click="router.push({ name: 'security' })"
+          @keydown.enter="router.push({ name: 'security' })"
+          @keydown.space.prevent="router.push({ name: 'security' })"
+        >
+          <BaseIcon :icon="ShieldCheck" :size="20" class="text-muted" />
+          <span class="hub-title">{{ t("settings.hub.security") }}</span>
+          <span class="hub-value">{{ t("settings.hub.securityHint") }}</span>
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>
 

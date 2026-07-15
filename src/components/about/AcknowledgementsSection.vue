@@ -34,6 +34,7 @@ const { t } = useI18n();
         >
           {{ ack.name }}
           <ExternalLink :size="13" class="text-muted" />
+          <span class="sr-only">{{ t("common.opensInNewWindow") }}</span>
         </a>
         <span class="ack-license">{{ ack.license }}</span>
       </div>

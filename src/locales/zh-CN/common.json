@@ -1,6 +1,7 @@
 {
   "back": "返回",
   "loading": "加载中……",
+  "opensInNewWindow": "在新窗口中打开",
   "button": {
     "cancel": "取消"
   },

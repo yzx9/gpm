@@ -5,6 +5,8 @@
     "locking": "Locking & auto-clear",
     "identity": "Identity & unlock",
     "repository": "Repository",
+    "security": "Security",
+    "securityHint": "How gpm protects you",
     "about": "About",
     "logs": "Logs",
     "identityEncrypted": "Encrypted",

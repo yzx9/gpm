@@ -169,6 +169,14 @@ const routes = [
     component: () => import("./pages/LogViewerPage.vue"),
     meta: { secure: true },
   },
+  // Security: plain-language summary of how gpm protects secrets. Carries no
+  // secret content, so NOT marked secure (capturable, like About). Reached via
+  // the Settings hub; the `security` locale namespace auto-loads by route name.
+  {
+    path: "/security",
+    name: "security",
+    component: () => import("./pages/SecurityPage.vue"),
+  },
 ];
 
 const router = createRouter({
