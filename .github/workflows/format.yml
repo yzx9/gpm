@@ -6,35 +6,41 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
 
       - name: Check Rust formatting
-        run: cargo fmt --check
+        run: nix develop --accept-flake-config --command sh -c 'cargo fmt --check'
 
   frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install
+          pnpm_cache: true
 
       - name: Check frontend formatting
-        run: pnpm dlx prettier --check .
+        run: nix develop --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && pnpm exec prettier --check .'
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
+
+      - name: Check Nix formatting
+        run: nix develop --accept-flake-config --command sh -c 'nixfmt --check $(git ls-files "*.nix")'

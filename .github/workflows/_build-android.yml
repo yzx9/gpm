@@ -19,29 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
         with:
-          targets: "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android"
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-          cache: gradle
-
-      - name: Configure Android NDK
-        run: |
-          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-          echo "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+          rust_cache: true
+          pnpm_cache: true
+          java_cache: true
 
       - name: Setup Android signing
         if: inputs.build_type == 'release'
@@ -53,15 +36,23 @@ jobs:
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
       - name: Build APKs
+        # GHA expression string literals need single quotes; lift them into env
+        # so the sh -c body uses plain shell vars (no ${{ }} inside the quotes).
+        env:
+          DEBUG_FLAG: ${{ inputs.build_type == 'debug' && '--debug' || '' }}
+          SPLIT: ${{ inputs.split_per_abi }}
         run: |
-          pnpm install
-          sh scripts/gen-icons.sh
-          if [ "${{ inputs.split_per_abi }}" = "true" ]; then
-            pnpm tauri android build --apk --split-per-abi ${{ inputs.build_type == 'debug' && '--debug' || '' }}
-            pnpm tauri android build --apk ${{ inputs.build_type == 'debug' && '--debug' || '' }}
-          else
-            pnpm tauri android build --apk ${{ inputs.build_type == 'debug' && '--debug' || '' }}
-          fi
+          nix develop --accept-flake-config --command sh -c '
+            set -e
+            pnpm install --frozen-lockfile
+            sh scripts/gen-icons.sh
+            if [ "$SPLIT" = "true" ]; then
+              pnpm tauri android build --apk --split-per-abi $DEBUG_FLAG
+              pnpm tauri android build --apk $DEBUG_FLAG
+            else
+              pnpm tauri android build --apk $DEBUG_FLAG
+            fi
+          '
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4

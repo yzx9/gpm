@@ -6,61 +6,36 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Generate icons
-        run: sh scripts/gen-icons.sh
+          rust_cache: true
+          pnpm_cache: true
 
       - name: Run backend tests
-        run: cargo test --all-features
+        run: nix develop --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && just test-be'
 
   frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Generate icons
-        run: sh scripts/gen-icons.sh
+          pnpm_cache: true
 
       - name: Run frontend tests
-        run: pnpm test
+        run: nix develop --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && just test-fe'
 
   # Runs every local Android plugin's Robolectric/JVM unit tests via the
   # aggregated `testPlugins` gradle task. The tests are pure JVM (no NDK, no Rust
@@ -75,53 +50,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
         with:
-          targets: "aarch64-linux-android"
+          rust_cache: true
+          pnpm_cache: true
+          java_cache: true
 
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-          cache: gradle
-
-      - name: Configure Android NDK
-        run: |
-          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-          echo "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Generate icons
-        run: sh scripts/gen-icons.sh
-
-      - name: Build single-ABI
-        run: pnpm tauri android build --debug --target aarch64
-
-      - name: Verify plugin inclusion + run all plugin unit tests
-        run: |
-          set -e
-          f=src-tauri/gen/android/tauri.settings.gradle
-          if ! grep -qF "$PWD" "$f"; then
-            echo "$f is stale (doesn't reference the current repo root $PWD)" >&2
-            exit 1
-          fi
-          missing=""
-          for p in $(grep -oE 'tauri-plugin-[a-z0-9_-]+ = \{' src-tauri/Cargo.toml | grep -oE 'tauri-plugin-[a-z0-9_-]+'); do
-            grep -q ":$p'" "$f" || missing="$missing $p"
-          done
-          if [ -n "$missing" ]; then
-            echo "missing from $f:$missing — stale generation" >&2
-            exit 1
-          fi
-          cd src-tauri/gen/android && ./gradlew testPlugins --console=plain
+      - name: Build single-ABI + run plugin tests
+        # gen-icons + a single-ABI debug build produce the gitignored
+        # tauri.settings.gradle that gradle needs to configure; `just test-plugin`
+        # then guards that every local plugin in Cargo.toml is included and runs
+        # the aggregated `testPlugins` task on the configured project.
+        run: nix develop --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && pnpm tauri android build --debug --target aarch64 && just test-plugin'
