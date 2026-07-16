@@ -138,7 +138,12 @@ pub(crate) async fn set_verification_mode(
     state: State<'_, AppState>,
     mode: VerifyMode,
 ) -> Result<VerifyMode, Error> {
-    state.store.set_verification_mode(mode).await
+    log::info!("authenticity: set-mode {mode:?}");
+    state
+        .store
+        .set_verification_mode(mode)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: set-mode failed: {e}"))
 }
 
 /// Read the persisted authenticity config (no secrets — public trust anchors).
@@ -158,7 +163,12 @@ pub(crate) async fn add_trusted_key(
     public_key: String,
     label: String,
 ) -> Result<TrustedKey, Error> {
-    state.store.add_trusted_key(&public_key, &label).await
+    log::info!("authenticity: add-key {label}");
+    state
+        .store
+        .add_trusted_key(&public_key, &label)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: add-key failed: {e}"))
 }
 
 /// Remove a trusted signing key by fingerprint (last-key removal in Enforce
@@ -169,7 +179,12 @@ pub(crate) async fn remove_trusted_key(
     state: State<'_, AppState>,
     fingerprint: String,
 ) -> Result<(), Error> {
-    state.store.remove_trusted_key(&fingerprint).await
+    log::info!("authenticity: remove-key {fingerprint}");
+    state
+        .store
+        .remove_trusted_key(&fingerprint)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: remove-key failed: {e}"))
 }
 
 /// Add a trusted signing key from an armored block of EITHER format — the
@@ -184,6 +199,7 @@ pub(crate) async fn add_trusted_signing_key(
     armored: String,
     label: String,
 ) -> Result<AddedTrustedKey, Error> {
+    log::info!("authenticity: add-signing-key {label}");
     if armored
         .trim()
         .starts_with("-----BEGIN PGP PUBLIC KEY BLOCK")
@@ -215,7 +231,11 @@ pub(crate) async fn import_trusted_gpg_key_file(
         .map_err(map_file_picker_error)?;
     let (armored, label) =
         stage_gpg_key_from_bytes(&picked.bytes, picked.filename.as_deref(), &label)?;
-    state.store.add_trusted_gpg_key(&armored, &label).await
+    state
+        .store
+        .add_trusted_gpg_key(&armored, &label)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: import-gpg-key-file failed: {e}"))
 }
 
 /// Remove a trusted GPG key by primary fingerprint (last-key removal in
@@ -226,7 +246,12 @@ pub(crate) async fn remove_trusted_gpg_key(
     state: State<'_, AppState>,
     fingerprint: String,
 ) -> Result<(), Error> {
-    state.store.remove_trusted_gpg_key(&fingerprint).await
+    log::info!("authenticity: remove-gpg-key {fingerprint}");
+    state
+        .store
+        .remove_trusted_gpg_key(&fingerprint)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: remove-gpg-key failed: {e}"))
 }
 
 /// Per-key parse warnings for the persisted trusted GPG keys (Settings-only;
@@ -249,13 +274,18 @@ pub(crate) async fn trust_head_signer(
     state: State<'_, AppState>,
     label: String,
 ) -> Result<TrustedKey, Error> {
+    log::info!("authenticity: trust-head {label}");
     let public_key = state.store.head_signer_public_key().await?.ok_or_else(|| {
         Error::new(
             ErrorCode::SshKeyInvalid,
             "HEAD is not signed by an SSH key — nothing to trust.",
         )
     })?;
-    state.store.add_trusted_key(&public_key, &label).await
+    state
+        .store
+        .add_trusted_key(&public_key, &label)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: trust-head failed: {e}"))
 }
 
 /// Trust the SSH-signature signer of a specific commit ("trust this signer"
@@ -267,7 +297,12 @@ pub(crate) async fn trust_commit_signer(
     commit: String,
     label: String,
 ) -> Result<TrustedKey, Error> {
-    state.store.trust_commit_signer(&commit, &label).await
+    log::info!("authenticity: trust-commit {commit} {label}");
+    state
+        .store
+        .trust_commit_signer(&commit, &label)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: trust-commit failed: {e}"))
 }
 
 /// Dismiss a specific commit's issue (per-commit + per-status ignore). Returns
@@ -279,7 +314,12 @@ pub(crate) async fn ignore_commit_issue(
     state: State<'_, AppState>,
     commit: String,
 ) -> Result<CommitSigInfo, Error> {
-    state.store.ignore_commit_issue(&commit).await
+    log::info!("authenticity: ignore-issue {commit}");
+    state
+        .store
+        .ignore_commit_issue(&commit)
+        .await
+        .inspect_err(|e| log::warn!("authenticity: ignore-issue failed: {e}"))
 }
 
 /// One page of recent commits with per-commit signature status (the `/history`

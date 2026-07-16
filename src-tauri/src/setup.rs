@@ -158,6 +158,7 @@ pub(crate) async fn clone_repo(
     ssh_key: Option<String>,
     ssh_passphrase: Option<String>,
 ) -> Result<(), Error> {
+    log::info!("setup: clone {}", rustpass::config::redact_url(&repo_url));
     let store = state.store.clone();
     crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
         store
@@ -172,6 +173,15 @@ pub(crate) async fn clone_repo(
             .await
     })
     .await
+    // libgit2 may echo the pasted remote into its error message; route the
+    // whole error string through `redact_url` so an embedded credential can't
+    // reach the persisted log (no-op when the message carries no `://` URL).
+    .inspect_err(|e| {
+        log::warn!(
+            "setup: clone failed: {}",
+            rustpass::config::redact_url(&e.to_string())
+        )
+    })
 }
 
 /// Mint a fresh identity for the create flow and stage it in backend
@@ -201,6 +211,7 @@ pub(crate) fn generate_identity_core(
     kind: CreateIdentityKind,
     passphrase: Option<&str>,
 ) -> Result<String, Error> {
+    log::info!("setup: generate-identity {kind:?}");
     let (identity, recipient, info) = match kind {
         CreateIdentityKind::Age => {
             let generated = rustpass::crypto::generate_age_identity();
@@ -260,6 +271,7 @@ pub(crate) async fn create_store(
     ssh_passphrase: Option<String>,
     recipient: String,
 ) -> Result<(), Error> {
+    log::info!("setup: create-store");
     state
         .store
         .create_store(
@@ -270,6 +282,7 @@ pub(crate) async fn create_store(
             &recipient,
         )
         .await
+        .inspect_err(|e| log::warn!("setup: create-store failed: {e}"))
 }
 
 /// Read recipients from the cloned repository for setup step 2.
@@ -286,9 +299,12 @@ pub(crate) async fn list_recipients(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn validate_identity(identity: String) -> Result<IdentityInfoResult, Error> {
-    let info = rustpass::recipient::validate_identity(&identity)?;
+    let info = rustpass::recipient::validate_identity(&identity)
+        .inspect_err(|e| log::warn!("setup: validate-identity failed: {e}"))?;
+    let key_type = key_type_string(info.key_type).to_string();
+    log::info!("setup: validate-identity {key_type}");
     Ok(IdentityInfoResult {
-        key_type: key_type_string(info.key_type).to_string(),
+        key_type,
         encrypted: info.encrypted,
         recipient: info.recipient,
     })
@@ -308,10 +324,12 @@ pub(crate) async fn complete_setup(
     identity: String,
     passphrase: Option<String>,
 ) -> Result<(), Error> {
+    log::info!("setup: complete");
     state
         .store
         .save_identity(&identity, passphrase.as_deref())
-        .await?;
+        .await
+        .inspect_err(|e| log::warn!("setup: complete failed: {e}"))?;
     // Setup may leave an encrypted identity locked (the passphrase isn't cached);
     // emit the real state so the frontend shows the unlock overlay if needed.
     emit_lock_state(&app, &state.store, false).await;
@@ -329,6 +347,7 @@ pub(crate) async fn pick_identity_file(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PickedIdentityResult, Error> {
+    log::info!("setup: pick-identity-file");
     let picked = app
         .file_picker()
         .pick()
@@ -414,6 +433,7 @@ pub(crate) async fn pick_identity_file(
             info,
         });
     }
+    log::info!("setup: picked {:?}", result.filename);
     Ok(result)
 }
 
@@ -427,7 +447,9 @@ pub(crate) async fn verify_picked_identity(
     state: State<'_, AppState>,
     passphrase: String,
 ) -> Result<VerifiedIdentityResult, Error> {
-    verify_picked(&state, passphrase).await
+    verify_picked(&state, passphrase)
+        .await
+        .inspect_err(|e| log::warn!("setup: verify-picked-identity failed: {e}"))
 }
 
 /// Core of [`verify_picked_identity`], taking `&AppState` directly so the
@@ -514,7 +536,9 @@ pub(crate) async fn verify_pasted_identity(
     identity: String,
     passphrase: String,
 ) -> Result<VerifiedIdentityResult, Error> {
-    verify_pasted(identity, passphrase).await
+    verify_pasted(identity, passphrase)
+        .await
+        .inspect_err(|e| log::warn!("setup: verify-pasted-identity failed: {e}"))
 }
 
 /// Testable core of [`verify_pasted_identity`]: classify, then (for encrypted
@@ -560,10 +584,12 @@ pub(crate) async fn complete_setup_from_file(
         .take()
         .ok_or_else(|| Error::new(ErrorCode::NoIdentity, "No identity file selected"))?;
 
+    log::info!("setup: complete-from-file");
     state
         .store
         .save_identity(&pending.identity, passphrase.as_deref())
-        .await?;
+        .await
+        .inspect_err(|e| log::warn!("setup: complete-from-file failed: {e}"))?;
     // See [`complete_setup`]: emit the real post-setup lock state.
     emit_lock_state(&app, &state.store, false).await;
     Ok(())
@@ -574,6 +600,7 @@ pub(crate) async fn complete_setup_from_file(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
 pub(crate) fn clear_pending_identity(state: State<'_, AppState>) -> Result<(), Error> {
+    log::info!("setup: clear-pending-identity");
     let _ = state
         .pending_identity
         .lock()
@@ -596,6 +623,7 @@ pub(crate) async fn setup(
     identity: String,
     identity_passphrase: Option<String>,
 ) -> Result<(), Error> {
+    log::info!("setup: start");
     let store = state.store.clone();
     crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
         store
@@ -612,6 +640,7 @@ pub(crate) async fn setup(
             .await
     })
     .await
+    .inspect_err(|e| log::warn!("setup: start failed: {e}"))
 }
 
 // ---------------------------------------------------------------------------

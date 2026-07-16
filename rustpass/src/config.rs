@@ -552,7 +552,15 @@ impl fmt::Debug for RepoConfig {
 /// Strip any `user:pass@` userinfo from a URL so a credentialed remote cannot
 /// leak through `Debug`. Keeps scheme + host + port + path/query for diagnostics.
 /// A non-URL string (no `://`) is returned unchanged.
-fn redact_url(url: &str) -> String {
+///
+/// `pub` so the app layer can sanitize a pasted remote before logging it
+/// (RFC 0052 phase 3 — a setup URL may embed a PAT).
+// TODO: SCP-style ssh syntax (`user:pass@host:path`, no `://`) is returned
+// unchanged — gpm's SSH remotes authenticate via key, not an embedded password,
+// so this is near-zero likelihood, but extend here if embedded-password SCP
+// remotes ever appear.
+#[must_use]
+pub fn redact_url(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_string();
     };
@@ -651,6 +659,71 @@ mod tests {
         assert_eq!(redact_url("https://host/repo.git"), "https://host/repo.git");
         // No scheme → unchanged.
         assert_eq!(redact_url("just-a-path"), "just-a-path");
+    }
+
+    /// `setup::clone_repo`'s failure path logs `redact_url(&err.to_string())`,
+    /// and a git2 error message may echo the pasted remote. A credentialed URL
+    /// embedded in surrounding error text must still be scrubbed (and the rest
+    /// of the message preserved) so the credential never reaches the log.
+    #[test]
+    fn redact_url_scrubs_credentials_embedded_in_string() {
+        let token = "ghp_logguardSECRET";
+        let msg = format!("invalid url: https://alice:{token}@example.com/o/r.git");
+        let redacted = redact_url(&msg);
+        assert!(!redacted.contains(token), "token leaked: {redacted}");
+        assert!(
+            redacted.contains("example.com/o/r.git"),
+            "host/path dropped: {redacted}"
+        );
+        assert!(
+            redacted.contains("invalid url:"),
+            "prefix dropped: {redacted}"
+        );
+    }
+
+    /// Runtime guard for the "never log a secret" invariant (RFC 0052): the
+    /// setup clone path logs `redact_url(&repo_url)`, so a credentialed URL
+    /// must arrive redacted. This drives the exact log shape `setup::clone_repo`
+    /// emits and asserts the embedded token never reaches the persisted line.
+    #[test]
+    fn redacted_url_log_line_omits_credentials() {
+        use std::sync::Mutex;
+        static CAPTURED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        struct Capture;
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+            fn log(&self, r: &log::Record) {
+                if let Ok(mut v) = CAPTURED.lock() {
+                    v.push(format!("{}", r.args()));
+                }
+            }
+            fn flush(&self) {}
+        }
+        static LOGGER: Capture = Capture;
+        // The `log` facade is inert without a logger; install ours (ignore the
+        // error if another test already installed one this process).
+        let _ = log::set_logger(&LOGGER);
+        log::set_max_level(log::LevelFilter::Trace);
+
+        let token = "ghp_logguard_SECRETVALUE";
+        let url = format!("https://alice:{token}@example.com/o/r.git");
+        log::info!("setup: clone {}", redact_url(&url));
+
+        let lines = CAPTURED.lock().expect("capture lock");
+        let mine: Vec<&String> = lines
+            .iter()
+            .filter(|l| l.contains("setup: clone"))
+            .collect();
+        assert!(!mine.is_empty(), "captured no setup: clone line");
+        for l in &mine {
+            assert!(!l.contains(token), "token leaked into log line: {l}");
+            assert!(
+                l.contains("example.com"),
+                "host/path dropped from log line: {l}"
+            );
+        }
     }
 
     fn create_config() -> (Config, tempfile::TempDir) {

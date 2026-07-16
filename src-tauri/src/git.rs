@@ -104,7 +104,9 @@ where
     let (tx, drain) = spawn_progress_drain(app);
     let result = op(cancel, tx).await;
     disarm_cancel(state);
-    let _ = drain.await;
+    if let Err(e) = drain.await {
+        log::warn!("git: progress drain join failed: {e}");
+    }
     result
 }
 
@@ -120,6 +122,7 @@ pub(crate) fn cancel_git(state: State<'_, AppState>) -> Result<(), Error> {
         .expect("active_cancel_token lock poisoned")
         .take()
     {
+        log::info!("git: cancel");
         token.store(true, Ordering::Relaxed);
     }
     Ok(())
