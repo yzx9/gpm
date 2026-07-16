@@ -139,6 +139,7 @@ pub(crate) async fn create_secret(
     name: String,
     content: String,
 ) -> Result<WriteOutcome, Error> {
+    log::info!("create: {name}");
     let store = state.store.clone();
     let body = content.into_bytes();
     do_save(&state, &app, move || {
@@ -146,6 +147,7 @@ pub(crate) async fn create_secret(
         async move { store.create(&name, &body).await }
     })
     .await
+    .inspect_err(|e| log::warn!("create failed: {e}"))
 }
 
 /// Create a secret from one of the built-in presets, generating it at the
@@ -172,6 +174,7 @@ pub(crate) async fn create_from_preset_secret(
         .map(|(k, v)| (k.as_str(), v.clone()))
         .collect();
     let name = template::preset_name(preset, &fields_ref)?;
+    log::info!("create: {name} (preset {preset_id})");
     let body = template::preset_body(preset, &fields_ref)?;
     let store = state.store.clone();
     do_save(&state, &app, move || {
@@ -179,6 +182,7 @@ pub(crate) async fn create_from_preset_secret(
         async move { store.create(&name, &body).await }
     })
     .await
+    .inspect_err(|e| log::warn!("create failed: {e}"))
 }
 
 /// Delete a secret at an explicit path. The entry is removed and the removal is
@@ -193,12 +197,14 @@ pub(crate) async fn delete_secret(
     app: AppHandle,
     name: String,
 ) -> Result<WriteOutcome, Error> {
+    log::info!("delete: {name}");
     let store = state.store.clone();
     let outcome = autosync_write_command(&state, &app, move || {
         let store = store.clone();
         async move { store.delete(&name).await }
     })
-    .await;
+    .await
+    .inspect_err(|e| log::warn!("delete failed: {e}"));
     // Reset the auto-lock timer on the user's activity whether or not the delete
     // succeeded (mirrors the save path). Delete carries no plaintext and doesn't
     // cache the identity, so no maybe_soft_wipe coupling here — a keep-mine
@@ -220,6 +226,7 @@ pub(crate) async fn edit_secret(
     name: String,
     content: String,
 ) -> Result<WriteOutcome, Error> {
+    log::info!("edit: {name}");
     let store = state.store.clone();
     let body = content.into_bytes();
     do_save(&state, &app, move || {
@@ -227,6 +234,7 @@ pub(crate) async fn edit_secret(
         async move { store.update(&name, &body).await }
     })
     .await
+    .inspect_err(|e| log::warn!("edit failed: {e}"))
 }
 
 /// Pull latest changes from the remote. Returns a `SyncOutcome`: a normal
@@ -239,11 +247,14 @@ pub(crate) async fn pull_repo(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<SyncOutcome, Error> {
+    log::info!("pull: start");
     let store = state.store.clone();
     crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
         store.sync_with(Some(cancel), Some(tx)).await
     })
     .await
+    .inspect(|o| log::info!("pull: done: {o:?}"))
+    .inspect_err(|e| log::warn!("pull failed: {e}"))
 }
 
 /// Manual sync (pull → push) — the Sync button. Reconciles both directions in
@@ -257,11 +268,14 @@ pub(crate) async fn sync_repo(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<SyncOutcome, Error> {
+    log::info!("sync: start");
     let store = state.store.clone();
     crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
         store.sync_repo(Some(cancel), Some(tx)).await
     })
     .await
+    .inspect(|o| log::info!("sync: done: {o:?}"))
+    .inspect_err(|e| log::warn!("sync failed: {e}"))
 }
 
 /// Push the current branch to `origin`. Used by the create flow's deferred first
@@ -271,7 +285,12 @@ pub(crate) async fn sync_repo(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
-    state.store.push().await
+    log::info!("push: start");
+    state
+        .store
+        .push()
+        .await
+        .inspect_err(|e| log::warn!("push failed: {e}"))
 }
 
 /// Resolve a pull/sync/save divergence by applying the user's `choice` against
@@ -288,10 +307,12 @@ pub(crate) async fn resolve_sync_divergence(
     expected_remote_oid: String,
     choice: DivergenceChoice,
 ) -> Result<SyncResult, Error> {
+    log::info!("resolve: {expected_remote_oid} {choice:?}");
     let result = state
         .store
         .resolve_sync_divergence(&expected_remote_oid, choice)
-        .await;
+        .await
+        .inspect_err(|e| log::warn!("resolve failed: {e}"));
     reset_lock_timer(&state, &app);
     // D3: terminal step for a deferred save-divergence — do the wipe the save
     // path skipped (no-op under Idle/Never; under Immediate it clears the
@@ -315,6 +336,7 @@ pub(crate) async fn discard_divergence(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), Error> {
+    log::info!("discard-divergence");
     maybe_soft_wipe(&state, &app).await;
     Ok(())
 }
