@@ -210,6 +210,9 @@ done
         let (home, store_dir) = provision_gopass_store(&recipient);
 
         // Several secret shapes gopass writes and gpm must parse back identically.
+        // The name-shape cases additionally stress gpm's path resolution and
+        // `.age` extension stripping on names gopass produces — a dotted final
+        // component must survive (`svc/api.key.age` lists as `svc/api.key`).
         let cases: &[(&str, &str)] = &[
             ("test/password-only", "s3cret"),
             (
@@ -217,6 +220,10 @@ done
                 "hunter2\nuser: alice\nurl: https://example.com",
             ),
             ("test/unicode", "pässwörd\nnote: 日本語 emoji 🔑"),
+            // Name-shape matrix: deep nesting, dotted final component, non-ASCII name.
+            ("team/infra/prod/db", "deep-pw\nenv: prod\nrole: admin"),
+            ("svc/api.key", "dot-pw\nscope: read"),
+            ("café/login", "uni-pw\nnote: name is non-ASCII"),
         ];
         for (name, plaintext) in cases {
             gopass_insert(home.path(), name, plaintext);
