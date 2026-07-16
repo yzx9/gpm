@@ -52,7 +52,9 @@ pub(super) fn clone_repo(
         // A failed or cancelled clone leaves a partial `dest` on disk (notably
         // `config_dir/repo` after a user cancel). Remove it so the next attempt
         // starts clean, mirroring `Store::create_store`'s failure cleanup.
-        let _ = std::fs::remove_dir_all(dest);
+        if let Err(cleanup) = std::fs::remove_dir_all(dest) {
+            log::warn!("clone: post-failure cleanup failed: {cleanup}");
+        }
         return Err(if transport::cancelled(cancel) {
             Error::new(ErrorCode::Cancelled, "Clone cancelled")
         } else {

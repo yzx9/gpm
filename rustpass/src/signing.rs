@@ -435,10 +435,10 @@ pub fn status_of_commit(
 
     match classify_signature(&sig) {
         SignatureKind::Ssh => {
-            let ssh_sig: SshSig = match sig.parse() {
-                Ok(s) => s,
-                // Armor present but unparseable — corrupt object.
-                Err(_) => return Ok(CommitSigStatus::Unknown),
+            // Armor present but unparseable — corrupt object.
+            let Ok(ssh_sig) = sig.parse::<SshSig>() else {
+                log::debug!("signing: corrupt ssh armor, classifying as Unknown");
+                return Ok(CommitSigStatus::Unknown);
             };
             let signer_fp = ssh_sig_fingerprint(&ssh_sig);
             let embedded: PublicKey = ssh_sig.public_key().clone().into();
@@ -465,15 +465,19 @@ pub fn status_of_commit(
             // header of every pulled commit). Isolate it so a panic on a
             // crafted packet surfaces as `Unknown` instead of unwinding through
             // the whole `verify_range`/pull (RFC 0009 D3).
-            let outcome = match catch_unwind(AssertUnwindSafe(|| {
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
                 let Ok(detached) = openpgp::parse_detached_signature(&sig) else {
+                    log::debug!(
+                        "signing: gpg parse_detached_signature failed, classifying as Unknown"
+                    );
                     return GpgOutcome::Unknown;
                 };
                 openpgp::verify_detached(&detached, &signed_data, &trust.gpg_keys)
-            })) {
-                Ok(o) => o,
-                Err(_) => GpgOutcome::Unknown,
-            };
+            }))
+            .unwrap_or_else(|_| {
+                log::warn!("signing: gpg verify panicked, classifying as Unknown");
+                GpgOutcome::Unknown
+            });
             Ok(match outcome {
                 GpgOutcome::Verified { primary_fp } => CommitSigStatus::Verified {
                     signer_fp: primary_fp,
@@ -487,7 +491,10 @@ pub fn status_of_commit(
         }
         // Header present but unrecognized armor — classify as unknown rather
         // than risking a false BadSignature on something we can't parse.
-        SignatureKind::Other => Ok(CommitSigStatus::Unknown),
+        SignatureKind::Other => {
+            log::debug!("signing: unrecognized signature armor, classifying as Unknown");
+            Ok(CommitSigStatus::Unknown)
+        }
     }
 }
 

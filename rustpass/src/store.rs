@@ -817,9 +817,14 @@ impl Store {
 
         if let Err(e) = bootstrap.await {
             // Best-effort cleanup: a partial repo dir or half-written config must
-            // not leave the store looking initialized.
-            let _ = fs::remove_dir_all(&repo_dir).await;
-            let _ = self.config.clear_all().await;
+            // not leave the store looking initialized. Cleanup failures are
+            // swallowed (the bootstrap error `e` is what we return) — log them.
+            if let Err(cleanup) = fs::remove_dir_all(&repo_dir).await {
+                log::warn!("create-store: partial-repo cleanup failed: {cleanup}");
+            }
+            if let Err(cleanup) = self.config.clear_all().await {
+                log::warn!("create-store: config clear-all cleanup failed: {cleanup}");
+            }
             return Err(e);
         }
         Ok(())
@@ -1245,9 +1250,12 @@ impl Store {
         // network error leaves the local commit to sync later.
         match self.push_locked().await {
             Ok(()) => Ok(WriteOutcome::Written(result)),
-            Err(e) if e.code == "PUSH_REJECTED" => Ok(WriteOutcome::NeedsDivergenceResolve(
-                self.sync_divergence_preview().await?,
-            )),
+            Err(e) if e.code == "PUSH_REJECTED" => {
+                log::warn!("autosync: push rejected, surfacing divergence");
+                Ok(WriteOutcome::NeedsDivergenceResolve(
+                    self.sync_divergence_preview().await?,
+                ))
+            }
             Err(e) => Err(e),
         }
     }
@@ -1792,6 +1800,7 @@ impl Store {
         match self.push_locked().await {
             Ok(()) => Ok(SyncOutcome::FastForwarded(pull_result)),
             Err(e) if e.code == "PUSH_REJECTED" => {
+                log::warn!("sync: push rejected, surfacing divergence");
                 Ok(SyncOutcome::Diverged(self.sync_divergence_preview().await?))
             }
             Err(e) => Err(e),

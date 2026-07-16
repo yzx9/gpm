@@ -4545,6 +4545,7 @@ dependencies = [
  "getrandom 0.2.17",
  "git2",
  "libgit2-sys",
+ "log",
  "nucleo-matcher",
  "openssl",
  "pgp",

@@ -27,6 +27,10 @@ aes-gcm = { workspace = true, features = ["zeroize"] }
 getrandom = { workspace = true }
 # TOTP (RFC 6238) generation for entries storing a 2FA seed (gopass `pkg/otp`).
 totp-rs = { workspace = true }
+# `log` facade for library-layer diagnostics (RFC 0052 phase 3). The backend
+# (`tauri-plugin-log`) is chosen by the app; in `rustpass`'s own tests the macros
+# are no-ops because no logger is installed.
+log = "0.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }

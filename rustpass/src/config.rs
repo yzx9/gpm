@@ -163,7 +163,13 @@ impl Config {
     pub async fn is_identity_encrypted(&self) -> bool {
         match self.load_identity().await {
             Ok(bytes) => classify_identity(&bytes) == IdentityType::AgeEncrypted,
-            Err(_) => false,
+            // A real read error (permission denied, corrupt file) is
+            // indistinguishable from "no identity yet" here — log it so the
+            // false negative leaves a trace instead of vanishing silently.
+            Err(e) => {
+                log::warn!("config: identity load failed, reporting not-encrypted: {e}");
+                false
+            }
         }
     }
 
