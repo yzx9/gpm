@@ -27,7 +27,7 @@ const builtWith = ["Rust", "Tauri", "Vue 3", "age", "libgit2"] as const;
     <!-- Identity -->
     <BaseCard as="section" variant="raised" class="text-center">
       <img
-        src="/icon-128.png"
+        src="/icon-512.png"
         alt=""
         aria-hidden="true"
         class="app-icon mx-auto mb-3"
