@@ -179,6 +179,14 @@
           ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
           ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
           ANDROID_NDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+          # Tauri's Android build reads NDK_HOME (not just ANDROID_NDK_ROOT) and
+          # JAVA_HOME; missing either, `tauri android build` aborts early.
+          NDK_HOME = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+          JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
+          # AGP downloads a generic FHS aapt2 from Maven that the Nix stub-ld
+          # refuses to run; point it at the Nix SDK's patchelf'd aapt2 instead.
+          # Keep this build-tools version in sync with buildToolsVersions above.
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComp.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
 
           # NDK toolchain for cross-compiling native C deps (OpenSSL, libgit2)
           # Fixes: rust-lang/rust#131407 — macOS ar creates corrupt Linux archives.
@@ -214,5 +222,16 @@
             '';
         };
       }
-    );
+    )
+    // {
+      # fenix (Rust toolchain) and git-hooks.nix publish prebuilt artifacts to
+      # the nix-community binary cache, not cache.nixos.org. Without this
+      # substituter, devShells cold-build the Rust toolchain from source.
+      nixConfig = {
+        extra-substituters = [ "https://fenix.cachix.org" ];
+        extra-trusted-public-keys = [
+          "fenix.cachix.org-1:ecJhr+RdYEdcVgUkjruiYhjbBloIEGov7bos90cZi0Q="
+        ];
+      };
+    };
 }
