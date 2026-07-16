@@ -24,6 +24,8 @@ Driving a real gopass to probe this surfaced concrete divergences on the first t
 
 **The reverse direction is gated on giving gopass a decryption key.** gopass will not ingest a plaintext age identity, so the two tools cannot share a raw age key both ways. The clean shared identity for bidirectional interop is an SSH-ed25519 key, which both gpm and gopass load natively as an age identity (gopass through its age SSH-key path). The forward test ships without this; reverse and sync adopt it.
 
+**Re-verify before implementing reverse.** The SSH-ed25519 assumption above may be over-stated: the test harness already provisions gopass its own age identity (decryptable through the mock pinentry), so simply keeping gopass's recipient in `.age-recipients` — instead of rewriting the file to gpm's recipient only — may let gopass decrypt gpm-written secrets without any SSH key at all. Confirm this before building the SSH-key path; if it holds, reverse interop is a much smaller change than this RFC frames.
+
 **Coverage this cannot provide.** Password generation is non-deterministic, so it is verified by property parity, never byte-equality against gopass output. age-plugin/yubikey paths require the plugin binary on both sides and stay desktop-only. MIME/attachment secrets are a separate, larger gap (see its own RFC).
 
 ## Alternatives considered
