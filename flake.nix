@@ -117,6 +117,23 @@
             };
           };
         };
+
+        # Tauri desktop host stack. mkShell has no $out, so nix's cc/ld wrapper
+        # stamps the gpm test binary with a dead RUNPATH (outputs/out/lib);
+        # makeLibraryPath puts these /lib dirs on LD_LIBRARY_PATH so the linker
+        # finds libgdk-3/libgtk-3 at runtime. The list tracks the packages, so
+        # nix roll-forwards need no manual store-hash bumps.
+        linuxDesktopRuntime = with pkgs; [
+          glib
+          gtk3
+          cairo
+          pango
+          gdk-pixbuf
+          atk
+          webkitgtk_4_1
+          libsoup_3
+          dbus
+        ];
       in
       {
         devShells.default = pkgs.mkShell {
@@ -149,19 +166,12 @@
               # `age` CLI (independent of rustpass's own decrypt path).
               age
             ]
-            ++ lib.optionals pkgs.stdenv.isLinux [
-              pkg-config
-              dbus
-              glib
-              # Tauri v2 desktop (host) build — webkit2gtk-4.1 + GTK3 stack
-              gtk3
-              cairo
-              pango
-              gdk-pixbuf
-              atk
-              webkitgtk_4_1
-              libsoup_3
-            ];
+            ++ lib.optionals pkgs.stdenv.isLinux (
+              [
+                pkg-config # pkg-config is build-time only
+              ]
+              ++ linuxDesktopRuntime
+            );
 
           ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
           ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
@@ -190,6 +200,9 @@
             pre-commit-checks.shellHook
             + ''
               export PATH="${ndkBin}:$PATH"
+            ''
+            + lib.optionalString pkgs.stdenv.isLinux ''
+              export LD_LIBRARY_PATH="${lib.makeLibraryPath linuxDesktopRuntime}:$LD_LIBRARY_PATH"
             ''
             + lib.optionalString pkgs.stdenv.isDarwin ''
               export AR="${ndkBin}/llvm-ar"
