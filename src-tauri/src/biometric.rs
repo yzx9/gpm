@@ -51,6 +51,12 @@ impl From<tauri_plugin_biometric_keystore::KeystoreError> for BiometricError {
     }
 }
 
+impl std::fmt::Display for BiometricError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -97,6 +103,7 @@ pub(crate) async fn enable_biometric_unlock(
     passphrase: String,
     prompt_text: Option<tauri_plugin_biometric_keystore::PromptText>,
 ) -> Result<(), BiometricError> {
+    log::info!("biometric: enable");
     // Refuse a plaintext identity before sealing anything: biometric seals a
     // passphrase, which a plaintext identity has none of. The Settings UI hides
     // this control for plaintext identities — this is the backend backstop so a
@@ -128,7 +135,9 @@ pub(crate) async fn biometric_unlock(
     if let Err(e) = unlock_and_arm(&state, &app, &passphrase).await {
         if e.code == "WRONG_PASSPHRASE" {
             // Stale sealed passphrase — clear it so the page reveals the form.
-            let _ = app.keystore().delete().await;
+            if let Err(cleanup) = app.keystore().delete().await {
+                log::warn!("biometric: stale slot cleanup failed: {cleanup:?}");
+            }
         }
         return Err(BiometricError::from(e));
     }
@@ -139,7 +148,12 @@ pub(crate) async fn biometric_unlock(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn disable_biometric_unlock(app: AppHandle) -> Result<(), BiometricError> {
-    app.keystore().delete().await?;
+    log::info!("biometric: disable");
+    app.keystore().delete().await.map_err(|e| {
+        let be: BiometricError = e.into();
+        log::warn!("biometric: disable failed: {be}");
+        be
+    })?;
     Ok(())
 }
 

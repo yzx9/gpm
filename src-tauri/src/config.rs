@@ -24,6 +24,7 @@ pub(crate) async fn get_config(state: State<'_, AppState>) -> Result<RepoConfig,
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> Result<(), Error> {
+    log::info!("config: reset");
     // Cancel timer
     if let Ok(mut timer) = state.lock_timer.lock()
         && let Some(handle) = timer.take()
@@ -46,6 +47,7 @@ pub(crate) async fn set_commit_identity(
     name: Option<String>,
     email: Option<String>,
 ) -> Result<RepoConfig, Error> {
+    log::info!("config: set-commit-identity");
     state.store.set_commit_identity(name, email).await
 }
 
@@ -60,6 +62,7 @@ pub(crate) async fn set_lock_mode(
     app: AppHandle,
     mode: LockMode,
 ) -> Result<AppConfig, Error> {
+    log::info!("config: set-lock-mode: {mode:?}");
     let cfg = state.app_config.set_lock_mode(mode).await?;
     refresh_security_cache(&state).await;
     // Apply the new mode to the live timer (reads the just-refreshed cache).
@@ -75,6 +78,7 @@ pub(crate) async fn set_view_clear_secs(
     state: State<'_, AppState>,
     secs: Option<u64>,
 ) -> Result<AppConfig, Error> {
+    log::info!("config: set-view-clear-secs: {secs:?}");
     state.app_config.set_view_clear_secs(secs).await
 }
 
@@ -87,6 +91,7 @@ pub(crate) async fn set_clipboard_clear_secs(
     state: State<'_, AppState>,
     secs: Option<u64>,
 ) -> Result<AppConfig, Error> {
+    log::info!("config: set-clipboard-clear-secs: {secs:?}");
     let cfg = state.app_config.set_clipboard_clear_secs(secs).await?;
     refresh_security_cache(&state).await;
     Ok(cfg)
@@ -102,6 +107,7 @@ pub(crate) async fn set_autosync(
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<AppConfig, Error> {
+    log::info!("config: set-autosync: {enabled}");
     let cfg = state.app_config.set_autosync(enabled).await?;
     state.store.set_autosync(enabled);
     Ok(cfg)

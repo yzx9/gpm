@@ -76,6 +76,12 @@ impl From<tauri_plugin_secure_keystore::SecureKeystoreError> for AppLockError {
     }
 }
 
+impl std::fmt::Display for AppLockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
 /// Snapshot of the app-lock state, emitted as `app-lock-state` on every
 /// transition and returned by `get_app_lock_state`.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -127,6 +133,7 @@ pub(crate) async fn enable_biometric_app_lock(
     app: AppHandle,
     prompt_text: Option<tauri_plugin_secure_keystore::PromptText>,
 ) -> Result<(), AppLockError> {
+    log::info!("app-lock: enable");
     let ks = app.secure_keystore();
     if !ks.is_biometric_available().await? {
         return Err(AppLockError::from(
@@ -168,6 +175,7 @@ pub(crate) async fn disable_biometric_app_lock(
     app: AppHandle,
     prompt_text: Option<tauri_plugin_secure_keystore::PromptText>,
 ) -> Result<(), AppLockError> {
+    log::info!("app-lock: disable");
     let ks = app.secure_keystore();
     // Retrieve the master key from the biometric store (prompt DECRYPT).
     let b64 = Zeroizing::new(
@@ -193,8 +201,12 @@ pub(crate) async fn disable_biometric_app_lock(
     // persisted flag would silently re-activate auto-unlock with the old sealed
     // passphrase, and the Settings UI (which hides the opt-in while the gate is
     // off) would offer no way to clear it.
-    let _ = state.store.clear_app_identity_pass().await;
-    let _ = state.store.set_unlock_identity_with_app(false).await;
+    if let Err(e) = state.store.clear_app_identity_pass().await {
+        log::warn!("app-lock: clear-app-identity-pass cleanup failed: {e}");
+    }
+    if let Err(e) = state.store.set_unlock_identity_with_app(false).await {
+        log::warn!("app-lock: set-unlock-identity-with-app cleanup failed: {e}");
+    }
 
     state.app_lock_enabled.store(false, Ordering::SeqCst);
     state.app_locked.store(false, Ordering::SeqCst);
@@ -225,10 +237,15 @@ pub(crate) async fn run_seal_migrate_once(state: &AppState) {
         .is_ok()
     {
         match state.store.migrate_seal().await {
-            Ok(()) => state.seal_migrate_state.store(SM_DONE, Ordering::Release),
-            Err(_) => state
-                .seal_migrate_state
-                .store(SM_PENDING, Ordering::Release),
+            Ok(()) => {
+                state.seal_migrate_state.store(SM_DONE, Ordering::Release);
+            }
+            Err(e) => {
+                log::warn!("seal migrate failed, will retry: {e}");
+                state
+                    .seal_migrate_state
+                    .store(SM_PENDING, Ordering::Release);
+            }
         }
     }
 }
@@ -256,8 +273,18 @@ pub(crate) async fn run_backend_resolve_once(state: &AppState) {
         // They read the same sealed repo.json at the same unlock instant, so a
         // failure in either is a failure of the shared config read — retry both
         // on the next unlock.
-        let storage_ok = state.store.resolve_storage().await.is_ok();
-        let crypto_ok = state.store.resolve_crypto().await.is_ok();
+        let storage_ok = state
+            .store
+            .resolve_storage()
+            .await
+            .inspect_err(|e| log::warn!("storage resolve failed: {e}"))
+            .is_ok();
+        let crypto_ok = state
+            .store
+            .resolve_crypto()
+            .await
+            .inspect_err(|e| log::warn!("crypto resolve failed: {e}"))
+            .is_ok();
         state.backend_resolve_state.store(
             if storage_ok && crypto_ok {
                 BR_DONE
@@ -282,6 +309,7 @@ pub(crate) async fn app_unlock(
     app: AppHandle,
     prompt_text: Option<tauri_plugin_secure_keystore::PromptText>,
 ) -> Result<(), AppLockError> {
+    log::info!("app-lock: unlock");
     // Idempotent: if already unlocked (or app-lock is off), skip the biometric
     // prompt entirely. Guards against a double-call re-prompting.
     if !state.app_locked.load(Ordering::SeqCst) {
@@ -290,7 +318,12 @@ pub(crate) async fn app_unlock(
     let ks = app.secure_keystore();
     let b64 = Zeroizing::new(
         ks.retrieve_biometric(prompt_text.as_ref())
-            .await?
+            .await
+            .map_err(|e| {
+                let ae: AppLockError = e.into();
+                log::warn!("app-lock: unlock failed: {ae}");
+                ae
+            })?
             .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
     );
     let key = decode_master_key(&b64)
@@ -338,7 +371,12 @@ async fn try_identity_auto_unlock<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
 ) -> bool {
-    let Ok(rc) = state.store.config().await else {
+    let Ok(rc) = state
+        .store
+        .config()
+        .await
+        .inspect_err(|e| log::debug!("auto-unlock: config read failed, skipping: {e}"))
+    else {
         return false;
     };
     if !rc.unlock_identity_with_app {
@@ -347,20 +385,33 @@ async fn try_identity_auto_unlock<R: Runtime>(
     if !state.store.is_identity_encrypted().await {
         return false;
     }
-    let Ok(pass_bytes) = state.store.load_app_identity_pass().await else {
+    let Ok(pass_bytes) = state
+        .store
+        .load_app_identity_pass()
+        .await
+        .inspect_err(|e| log::debug!("auto-unlock: slot read failed, skipping: {e}"))
+    else {
         return false; // slot absent, or the master key is somehow unavailable
     };
     // age passphrases are UTF-8; an invalid sequence means a corrupt slot.
-    let pass = match std::str::from_utf8(pass_bytes.as_slice()) {
-        Ok(s) => Zeroizing::new(s.to_owned()),
-        Err(_) => return false,
+    let Ok(s) = std::str::from_utf8(pass_bytes.as_slice()) else {
+        log::debug!("auto-unlock: corrupt slot UTF-8, skipping");
+        return false;
     };
+    let pass = Zeroizing::new(s.to_owned());
     match identity::unlock_and_arm(state, app, pass.as_str()).await {
         Ok(()) => true,
         Err(e) => {
             if e.code == "WRONG_PASSPHRASE" {
-                let _ = state.store.clear_app_identity_pass().await;
-                let _ = state.store.set_unlock_identity_with_app(false).await;
+                log::warn!("auto-unlock: stale sealed passphrase, clearing slot");
+                if let Err(cleanup) = state.store.clear_app_identity_pass().await {
+                    log::warn!("auto-unlock: clear-app-identity-pass cleanup failed: {cleanup}");
+                }
+                if let Err(cleanup) = state.store.set_unlock_identity_with_app(false).await {
+                    log::warn!(
+                        "auto-unlock: set-unlock-identity-with-app cleanup failed: {cleanup}"
+                    );
+                }
             }
             false
         }
@@ -376,6 +427,7 @@ pub(crate) async fn app_lock(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), AppLockError> {
+    log::info!("app-lock: lock");
     // Wipe the master key (the store becomes unreadable) and the identity cache.
     // In-flight writes are intentionally allowed to finish: they hold only the
     // already-captured identity bytes (git ops never touch the seal master
@@ -403,6 +455,7 @@ pub(crate) async fn enable_identity_auto_unlock(
     state: State<'_, AppState>,
     passphrase: String,
 ) -> Result<(), AppLockError> {
+    log::info!("identity-auto-unlock: enable");
     if !state.app_lock_enabled.load(Ordering::SeqCst) {
         return Err(AppLockError::failed(
             "Enable the app lock before identity auto-unlock",
@@ -432,6 +485,7 @@ pub(crate) async fn enable_identity_auto_unlock(
 pub(crate) async fn disable_identity_auto_unlock(
     state: State<'_, AppState>,
 ) -> Result<(), AppLockError> {
+    log::info!("identity-auto-unlock: disable");
     state.store.clear_app_identity_pass().await?;
     state.store.set_unlock_identity_with_app(false).await?;
     Ok(())

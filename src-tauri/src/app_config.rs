@@ -277,10 +277,22 @@ impl AppConfigStore {
     #[must_use]
     pub(crate) fn new(config_dir: &Path) -> Self {
         let path = config_dir.join(APP_CONFIG_FILE);
-        let cache = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<AppConfig>(&s).ok())
-            .unwrap_or_default();
+        // A missing file (fresh install) is normal — fall back to defaults
+        // silently. A present-but-unreadable or corrupt file is a real problem:
+        // it would silently revert secure_screen / locale / autosync / lock mode
+        // / clear timers to defaults. Warn so that revert leaves a trace instead
+        // of vanishing (the file is plaintext, so the warn carries no secret).
+        let cache = match std::fs::read_to_string(&path) {
+            Ok(s) => serde_json::from_str::<AppConfig>(&s).unwrap_or_else(|e| {
+                log::warn!("app-config: corrupt app.json, using defaults: {e}");
+                AppConfig::default()
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppConfig::default(),
+            Err(e) => {
+                log::warn!("app-config: app.json unreadable, using defaults: {e}");
+                AppConfig::default()
+            }
+        };
         Self {
             path,
             cache: Mutex::new(cache),
@@ -620,6 +632,45 @@ mod tests {
                 err.message
             );
         }
+    }
+
+    #[test]
+    fn app_config_store_new_missing_file_uses_defaults() {
+        let dir = tempdir().expect("tempdir");
+        let store = AppConfigStore::new(dir.path());
+        assert_eq!(
+            store.get().secure_screen,
+            AppConfig::default().secure_screen,
+            "missing app.json must fall back to the secure default"
+        );
+    }
+
+    #[test]
+    fn app_config_store_new_corrupt_json_uses_defaults() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{not valid json").unwrap();
+        let store = AppConfigStore::new(dir.path());
+        assert_eq!(
+            store.get().secure_screen,
+            AppConfig::default().secure_screen,
+            "corrupt app.json must fall back to the secure default, not panic"
+        );
+    }
+
+    #[test]
+    fn app_config_store_new_valid_file_loads_value() {
+        let dir = tempdir().expect("tempdir");
+        // A non-default value round-trips: secure_screen=false (default is true).
+        std::fs::write(
+            dir.path().join(APP_CONFIG_FILE),
+            serde_json::json!({ "secure_screen": false }).to_string(),
+        )
+        .unwrap();
+        let store = AppConfigStore::new(dir.path());
+        assert!(
+            !store.get().secure_screen,
+            "a valid file's secure_screen=false must load (not revert to default)"
+        );
     }
 
     #[tokio::test]
