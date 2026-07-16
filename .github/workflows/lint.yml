@@ -6,60 +6,36 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
         with:
-          components: clippy
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Generate icons
-        run: sh scripts/gen-icons.sh
+          rust_cache: true
+          pnpm_cache: true
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: nix develop --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && cargo clippy --all-targets --all-features -- -D warnings'
 
   frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci-env
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install
+          pnpm_cache: true
 
       - name: Check locale JSON for duplicate keys
-        run: node scripts/check-locale-keys.mjs
+        run: nix develop .#lite --accept-flake-config --command sh -c 'node scripts/check-locale-keys.mjs'
 
       - name: vue-tsc type check
-        run: pnpm exec vue-tsc --noEmit
+        run: nix develop --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && pnpm exec vue-tsc --noEmit'

@@ -1,0 +1,59 @@
+name: Setup CI environment
+
+inputs:
+  rust_cache:
+    description: Whether to enable rust cache
+    required: false
+    default: "false"
+
+  pnpm_cache:
+    description: Whether to enable pnpm cache
+    required: false
+    default: "false"
+
+  java_cache:
+    description: Whether to enable the Gradle (~/.gradle) cache
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Reclaim disk for the Nix store
+      uses: wimpysworld/nothing-but-nix@v10
+      with:
+        hatchet-protocol: cleave
+        witness-carnage: true
+        root-safe-haven: "30720"
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v31
+
+    - name: Setup rust cache
+      if: inputs.rust_cache == 'true'
+      uses: Swatinem/rust-cache@v2
+      with:
+        # rustc/cargo only exist inside the Nix devShell, so rust-cache must run
+        # them through `nix develop` or its `rustc -vV` key probe fails and the
+        # cache is never read/written.
+        cmd-format: nix develop --accept-flake-config --command {0}
+
+    - name: Cache pnpm store
+      if: inputs.pnpm_cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/share/pnpm/store
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-store-${{ runner.os }}-
+
+    - name: Cache Gradle
+      if: inputs.java_cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: java-${{ runner.os }}-${{ hashFiles('package.json', 'src-tauri/Cargo.toml', 'Cargo.lock') }}
+        restore-keys: |
+          java-${{ runner.os }}-
