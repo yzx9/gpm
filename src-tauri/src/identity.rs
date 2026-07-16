@@ -216,6 +216,7 @@ pub(crate) async fn bump_idle_timer(
 /// Cancels the auto-lock timer, disarms any racing in-flight timer task, wipes
 /// the cached identity, and emits the new lock state.
 pub(crate) async fn do_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+    log::info!("identity: locked");
     // Cancel the armed timer + bump the generation so any in-flight timer task
     // self-disarms (shared with the soft-wipe / reset paths).
     disarm_lock(state);
@@ -232,9 +233,16 @@ pub(crate) async fn set_passphrase(
     app: AppHandle,
     passphrase: String,
 ) -> Result<(), Error> {
-    state.store.set_passphrase(&passphrase).await?;
+    log::info!("identity: set-passphrase");
+    state
+        .store
+        .set_passphrase(&passphrase)
+        .await
+        .inspect_err(|e| log::warn!("identity: set-passphrase failed: {e}"))?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
-    let _ = app.keystore().delete().await;
+    if let Err(e) = app.keystore().delete().await {
+        log::warn!("identity: stale biometric slot delete failed: {e:?}");
+    }
     // Setting a passphrase locks the store (forces re-auth with the new
     // passphrase); emit the real state so the frontend shows the overlay.
     emit_lock_state(&app, &state.store, false).await;
@@ -250,12 +258,16 @@ pub(crate) async fn change_passphrase(
     old_passphrase: String,
     new_passphrase: String,
 ) -> Result<(), Error> {
+    log::info!("identity: change-passphrase");
     state
         .store
         .change_passphrase(&old_passphrase, &new_passphrase)
-        .await?;
+        .await
+        .inspect_err(|e| log::warn!("identity: change-passphrase failed: {e}"))?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
-    let _ = app.keystore().delete().await;
+    if let Err(e) = app.keystore().delete().await {
+        log::warn!("identity: stale biometric slot delete failed: {e:?}");
+    }
     // Changing the passphrase locks the store; emit the real state.
     emit_lock_state(&app, &state.store, false).await;
     Ok(())
@@ -265,7 +277,9 @@ pub(crate) async fn change_passphrase(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn generate_ssh_key(passphrase: Option<String>) -> Result<SshKeyPairResult, Error> {
-    let pair = ssh::generate_keypair(passphrase.as_deref())?;
+    log::info!("identity: generate-ssh-key");
+    let pair = ssh::generate_keypair(passphrase.as_deref())
+        .inspect_err(|e| log::warn!("identity: generate-ssh-key failed: {e}"))?;
     Ok(SshKeyPairResult {
         public_key: pair.public_key,
         private_key: pair.private_key.to_string(),
@@ -292,11 +306,13 @@ pub(crate) async fn get_ssh_public_key(
 pub(crate) async fn export_ssh_private_key(
     state: State<'_, AppState>,
 ) -> Result<SshPrivateKeyResult, Error> {
+    log::info!("identity: export-ssh-private-key");
     let config = state.store.config().await?;
     let private_key_pem = config
         .ssh_key
         .ok_or_else(|| Error::new(ErrorCode::SshKeyInvalid, "No SSH key configured"))?;
-    let private_key = ssh::export_private_key(&private_key_pem)?;
+    let private_key = ssh::export_private_key(&private_key_pem)
+        .inspect_err(|e| log::warn!("identity: export-ssh-private-key failed: {e}"))?;
     Ok(SshPrivateKeyResult {
         private_key: private_key.to_string(),
     })
@@ -317,7 +333,12 @@ pub(crate) async fn unlock_and_arm<R: Runtime>(
     app: &AppHandle<R>,
     passphrase: &str,
 ) -> Result<(), Error> {
-    state.store.unlock(passphrase).await?;
+    state
+        .store
+        .unlock(passphrase)
+        .await
+        .inspect_err(|e| log::warn!("identity: unlock failed: {e}"))?;
+    log::info!("identity: unlocked");
     // Refresh the cached effective lock_mode so reset_lock_timer branches on the
     // user's actual setting (config may have changed since the last refresh).
     refresh_security_cache(state).await;
@@ -450,6 +471,7 @@ pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<
             return;
         }
 
+        log::info!("identity: locked (idle)");
         // Lock the real store (clears cached identity + passphrase)
         store.lock();
 
@@ -545,7 +567,9 @@ pub(crate) fn arm_clipboard_clear<R: Runtime>(
             },
             move || async move {
                 // No manual clear — fire the auto-clear + dismiss.
-                let _ = app_for_clear.clipboard().write_text(String::new());
+                if let Err(e) = app_for_clear.clipboard().write_text(String::new()) {
+                    log::warn!("clipboard: auto-clear write failed: {e}");
+                }
                 app_for_clear.clipboard_notify().dismiss().await;
             },
         )

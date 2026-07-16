@@ -153,7 +153,7 @@ pub(crate) async fn copy_password(
     let secret = state.store.get(&entry_path).await;
     reset_lock_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
-    let secret = secret?;
+    let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
 
     // Clipboard write + cancellable auto-clear + sticky notification, shared
     // with `copy_totp` via the helper. The password never reaches the WebView —
@@ -183,10 +183,13 @@ pub(crate) async fn show_password_core<R: Runtime>(
     app: &AppHandle<R>,
     entry_path: &str,
 ) -> Result<SensitiveContent, Error> {
+    log::info!("show: {}", entry_path.trim_end_matches(".age"));
     let secret = state.store.get(entry_path).await;
     reset_lock_timer(state, app);
     maybe_soft_wipe(state, app).await;
-    let secret = secret?;
+    let secret = secret.inspect_err(|e| {
+        log::warn!("show failed: {}: {e}", entry_path.trim_end_matches(".age"));
+    })?;
     Ok(SensitiveContent {
         password: Zeroizing::new(secret.password().to_string()),
         notes: Zeroizing::new(secret.body().to_string()),
@@ -225,7 +228,7 @@ pub(crate) async fn copy_totp(
     let secret = state.store.get(&entry_path).await;
     reset_lock_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
-    let secret = secret?;
+    let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
 
     let Some(otp) = rustpass::totp::extract(secret.body())? else {
         // No TOTP seed: don't touch the clipboard. A prior copy's auto-clear

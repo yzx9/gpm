@@ -75,8 +75,10 @@ pub(crate) async fn copy_generated_password(
     text: Zeroizing<String>,
     notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
 ) -> Result<(), Error> {
+    log::info!("copy: generated");
     write_and_schedule_clear(&state, &app, (*text).clone(), notify_text.as_ref())
         .await
+        .inspect_err(|e| log::warn!("copy failed: generated: {e}"))
         .map(|_| ())
 }
 
