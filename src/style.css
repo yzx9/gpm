@@ -110,10 +110,18 @@
      so the app's own pull-to-refresh owns the gesture. This is global (every
      page), which is benign: short pages lose native rubber-band feedback but
      nothing else. Must sit on html/body (the elements that carry the window
-     scroll) — overscroll-behavior on a non-scrolling descendant is a no-op. */
+     scroll) — overscroll-behavior on a non-scrolling descendant is a no-op.
+
+     touch-action disables pinch-to-zoom / double-tap-to-zoom at the gesture
+     level. The viewport meta (user-scalable=no) is the authoritative guard;
+     this is a second layer so a lenient WebView build still can't scale the
+     app. Only zoom is dropped — panning is unchanged from `auto`, so native
+     scroll and the app's pull-to-refresh (which overtakes touchmove via
+     preventDefault at the list top) behave exactly as before. */
   html,
   body {
     overscroll-behavior-y: contain;
+    touch-action: pan-x pan-y;
   }
 
   .app-shell {

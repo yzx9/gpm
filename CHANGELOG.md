@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Most Settings screens — the Settings hub, General, Locking, Add-trusted-key, and Logs — no longer block screenshots and screen recording on Android. They show only non-secret configuration (your language, lock timing, public signing-key fingerprints, or log entries), so they're now treated like the secret list and history, which were already capturable. The Repository, Identity, and SSH Key screens still block screenshots: Repository shows your full git remote address (which can contain an embedded access token), and Identity and SSH Key can reveal a passphrase or your private key.
 
+### Fixed
+
+- Pinching with two fingers (or double-tapping) used to zoom the app's interface, which could accidentally scale it out of shape and break the layout. The app now stays at its fixed size, like a native app.
+
 ## [v0.13.0] - 2026-07-17
 
 ### Added
