@@ -15,7 +15,33 @@ import enSecurity from "@/locales/en/security.json";
 import enSettings from "@/locales/en/settings.json";
 import enSetup from "@/locales/en/setup.json";
 import enSshKey from "@/locales/en/sshKey.json";
-import { createI18n } from "vue-i18n";
+import { defineComponent, h, type Component } from "vue";
+import { createI18n, useI18n } from "vue-i18n";
+
+/**
+ * The default-locale bundles that tested components render, inlined so their
+ * `t()` calls resolve in tests (page-bundle keys that no test asserts on still
+ * resolve to their key strings). Add a page's `en` bundle when its test asserts
+ * on its text. Shared by both the global test i18n (below) and the local-scope
+ * wrapper ({@link withI18nScope}).
+ */
+const TEST_MESSAGES = {
+  en: {
+    common: enCommon,
+    about: enAbout,
+    entries: enEntries,
+    entry: enEntry,
+    create: enCreate,
+    generate: enGenerate,
+    history: enHistory,
+    log: enLog,
+    security: enSecurity,
+    settings: enSettings,
+    setup: enSetup,
+    sshKey: enSshKey,
+    addKey: enAddKey,
+  },
+};
 
 /**
  * Build a minimal vue-i18n instance for component tests. Installed globally
@@ -30,11 +56,6 @@ import { createI18n } from "vue-i18n";
  * this lives in its own file rather than `appTestUtils.ts` — that module pulls
  * `@/composables`, which reaches `@/api` for the same reason.
  *
- * The default-locale bundles that tested components render are inlined here so
- * their `t()` calls resolve in tests (page-bundle keys that no test asserts on
- * still resolve to their key strings). Add a page's `en` bundle when its test
- * asserts on its text.
- *
  * A test that needs a locale-aware mount can override the global via
  * `mount(comp, { global: { plugins: [createTestI18n()] } })`.
  */
@@ -43,22 +64,33 @@ export function createTestI18n() {
     legacy: false,
     locale: "en",
     fallbackLocale: "en",
-    messages: {
-      en: {
-        common: enCommon,
-        about: enAbout,
-        entries: enEntries,
-        entry: enEntry,
-        create: enCreate,
-        generate: enGenerate,
-        history: enHistory,
-        log: enLog,
-        security: enSecurity,
-        settings: enSettings,
-        setup: enSetup,
-        sshKey: enSshKey,
-        addKey: enAddKey,
-      },
+    messages: TEST_MESSAGES,
+  });
+}
+
+/**
+ * Wrap `comp` in a host that establishes a local i18n scope, then bake its
+ * props in. Mount the returned component via `mountWithApp` (or `mount`).
+ *
+ * For components rendered with `<i18n-t>`: that translation component resolves
+ * its messages through `useScope: 'parent'`, and emits the dev warning
+ * `[intlify] Not found parent scope. use the global scope.` when its host is
+ * mounted at the `@vue/test-utils` root (no ancestor provides a composer). The
+ * host's `useI18n({ messages })` creates a local composer it provides, so
+ * `<i18n-t>` finds its parent scope; the local scope carries {@link
+ * TEST_MESSAGES}, so keys still resolve exactly as under the global test i18n.
+ *
+ * `wrapper.text()` / queries traverse into `comp` as usual — the host only adds
+ * the i18n scope around it.
+ */
+export function withI18nScope<P extends Record<string, unknown>>(
+  comp: Component,
+  props?: P,
+) {
+  return defineComponent({
+    setup() {
+      useI18n({ messages: TEST_MESSAGES });
+      return () => h(comp, props);
     },
   });
 }

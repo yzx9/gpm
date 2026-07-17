@@ -4,6 +4,7 @@
 
 import type { CommitSigInfo } from "@/api";
 import { mountWithApp } from "@/test/appTestUtils";
+import { withI18nScope } from "@/test/i18n";
 import { enableAutoUnmount, flushPromises } from "@vue/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import AuthenticityBlockModal from "./AuthenticityBlockModal.vue";
@@ -25,9 +26,12 @@ const unverifiedIssue: CommitSigInfo = {
 
 describe("AuthenticityBlockModal", () => {
   it("renders the GPG notice with the offending commit hash and the settings link", async () => {
-    const { wrapper } = mountWithApp(AuthenticityBlockModal, {
-      mountOpts: { props: { issues: [unverifiedIssue] } },
-    });
+    // Wrapped in a host that provides a local i18n scope: <i18n-t> resolves its
+    // parent scope from it instead of emitting "[intlify] Not found parent
+    // scope" when mounted at the test root.
+    const { wrapper } = mountWithApp(
+      withI18nScope(AuthenticityBlockModal, { issues: [unverifiedIssue] }),
+    );
     await flushPromises();
 
     // The {hash} placeholder must render the commit's short hash. Regression
