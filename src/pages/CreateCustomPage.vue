@@ -16,6 +16,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
+import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
   useDivergence,

@@ -4,6 +4,7 @@
 
 <script setup lang="ts">
 import { addTrustedSigningKey, type AppError } from "@/api";
+import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseInput from "@/components/base/BaseInput.vue";

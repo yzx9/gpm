@@ -20,6 +20,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
   useDivergence,
