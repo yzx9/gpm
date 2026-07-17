@@ -1,2 +1,4 @@
 allowBuilds:
   esbuild: true
+
+pmOnFail: warn # we use Nix to manage the pnpm version
