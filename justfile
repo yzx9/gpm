@@ -39,10 +39,14 @@ test-plugin:
 [group('test')]
 test: test-be test-fe test-plugin
 
-# Clippy + vue-tsc type check
-lint: gen-icons
+# Clippy + vue-tsc type check + locale key check
+lint: gen-icons check-i18n
   cargo clippy --all-targets --all-features -- -D warnings
   pnpm exec vue-tsc --noEmit
+
+# Reject duplicate keys in locale JSON (JSON.parse silently shadows repeats)
+check-i18n:
+  node scripts/check-locale-keys.mjs
 
 # Format Rust + Vue + Nix code
 fmt:

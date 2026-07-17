@@ -58,5 +58,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Check locale JSON for duplicate keys
+        run: node scripts/check-locale-keys.mjs
+
       - name: vue-tsc type check
         run: pnpm exec vue-tsc --noEmit
