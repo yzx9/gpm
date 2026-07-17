@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.13.0] - 2026-07-17
+
 ### Added
 
 - gpm can now copy the current two-factor (TOTP) code for an entry that stores one. Add a `totp:` line or an `otpauth://` link to an entry's notes — the same format gopass uses — then use the new **Copy 2FA Code** button on that entry's detail page. Like copying a password, the code goes straight to your clipboard and clears automatically; the 2FA seed itself never leaves the app's encrypted core. See the security model for when it's better to keep a 2FA code in a separate app instead.
@@ -290,7 +292,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.13.0...HEAD
+[v0.13.0]: https://github.com/yzx9/gpm/compare/v0.12.1...v0.13.0
 [v0.12.1]: https://github.com/yzx9/gpm/compare/v0.12.0...v0.12.1
 [v0.12.0]: https://github.com/yzx9/gpm/compare/v0.11.0...v0.12.0
 [v0.11.0]: https://github.com/yzx9/gpm/compare/v0.10.0...v0.11.0
