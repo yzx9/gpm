@@ -165,26 +165,17 @@ describe("installRouteGuards", () => {
     delete fresh.settings;
 
     await router.push("/sub");
-    // loadBundle is fire-and-forget; its dynamic import settles on the
-    // microtask queue, which under a fuller module graph can take more than one
-    // flushPromises tick. Flush until the namespace lands (bounded).
-    for (let i = 0; i < 20; i++) {
-      await flushPromises();
-      if (
+    // loadBundle is fire-and-forget; its cold dynamic import settles on the
+    // module graph's async queue and can take a variable number of event-loop
+    // turns (worse under a loaded runner). Wait for the namespace against a real
+    // timeout instead of a fixed flushPromises tick count, which flakes when the
+    // count is too small. Presence of `settings` proves the guard loaded
+    // `meta.bundle` ("settings"), not the route name (for which no bundle ships).
+    await vi.waitFor(() => {
+      expect(
         (i18n.global.getLocaleMessage(locale) as Record<string, unknown>)
-          .settings
-      )
-        break;
-    }
-
-    // The `settings` namespace merged into the locale's messages — proving the
-    // guard loaded `meta.bundle` ("settings"), not the route name (for which no
-    // bundle ships). `settingsGeneral` is unique to this test file, so presence
-    // here is attributable solely to the override.
-    const msgs = i18n.global.getLocaleMessage(locale) as Record<
-      string,
-      unknown
-    >;
-    expect(msgs.settings).toBeDefined();
+          .settings,
+      ).toBeDefined();
+    });
   });
 });
