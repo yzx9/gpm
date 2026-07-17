@@ -108,19 +108,19 @@ const routes = [
     // bundle) but is set on the hub + its sub-pages for uniformity. The sibling
     // `sshKey`/`addKey` routes intentionally keep their own namespaces (those
     // pages read `sshKey.*`/`addKey.*`, not `settings.*`).
-    meta: { secure: true, bundle: "settings" },
+    meta: { bundle: "settings" },
   },
   {
     path: "/settings/general",
     name: "settingsGeneral",
     component: () => import("./pages/SettingsGeneralPage.vue"),
-    meta: { secure: true, bundle: "settings" },
+    meta: { bundle: "settings" },
   },
   {
     path: "/settings/locking",
     name: "settingsLocking",
     component: () => import("./pages/SettingsLockingPage.vue"),
-    meta: { secure: true, bundle: "settings" },
+    meta: { bundle: "settings" },
   },
   {
     path: "/settings/identity",
@@ -144,7 +144,6 @@ const routes = [
     path: "/settings/add-key",
     name: "addKey",
     component: () => import("./pages/AddKeyPage.vue"),
-    meta: { secure: true },
   },
   {
     path: "/history",
@@ -161,13 +160,12 @@ const routes = [
     component: () => import("./pages/AboutPage.vue"),
   },
   // Diagnostics log viewer (RFC 0052). Standalone namespace like About — the log
-  // is a self-contained viewer, not a settings category — but `secure: true`
-  // because the log surfaces entry names (screen-protected metadata).
+  // is a self-contained viewer, not a settings category. NOT marked secure: the
+  // log surfaces only entry names, which (like the entry list) carry no secret.
   {
     path: "/settings/log",
     name: "log",
     component: () => import("./pages/LogViewerPage.vue"),
-    meta: { secure: true },
   },
   // Security: plain-language summary of how gpm protects secrets. Carries no
   // secret content, so NOT marked secure (capturable, like About). Reached via
