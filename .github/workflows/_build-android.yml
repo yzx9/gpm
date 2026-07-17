@@ -40,6 +40,9 @@ jobs:
         # so the sh -c body uses plain shell vars (no ${{ }} inside the quotes).
         env:
           DEBUG_FLAG: ${{ inputs.build_type == 'debug' && '--debug' || '' }}
+          # Debug builds (PR + main) cross-compile aarch64 only — 4 Rust targets
+          # down to 1. Release/tag builds keep the full ABI set via --split-per-abi.
+          TARGET: ${{ inputs.build_type == 'debug' && '--target aarch64' || '' }}
           SPLIT: ${{ inputs.split_per_abi }}
         run: |
           nix develop .#full --accept-flake-config --command sh -c '
@@ -50,7 +53,7 @@ jobs:
               pnpm tauri android build --apk --split-per-abi $DEBUG_FLAG
               pnpm tauri android build --apk $DEBUG_FLAG
             else
-              pnpm tauri android build --apk $DEBUG_FLAG
+              pnpm tauri android build --apk $DEBUG_FLAG $TARGET
             fi
           '
 
