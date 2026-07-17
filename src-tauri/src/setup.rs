@@ -180,7 +180,7 @@ pub(crate) async fn clone_repo(
         log::warn!(
             "setup: clone failed: {}",
             rustpass::config::redact_url(&e.to_string())
-        )
+        );
     })
 }
 
