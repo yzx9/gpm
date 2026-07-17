@@ -47,7 +47,7 @@ function onDone() {
       <!-- Mode switch (a <select>, not buttons — see script comment). -->
       <div class="flex flex-col gap-1 mb-6">
         <label for="setup-mode" class="text-sm font-medium">{{
-          t("setup.mode")
+          t("setup.mode.label")
         }}</label>
         <select
           id="setup-mode"
@@ -55,8 +55,8 @@ function onDone() {
           class="input-base"
           autocomplete="off"
         >
-          <option value="clone">{{ t("setup.clone") }}</option>
-          <option value="create">{{ t("setup.create") }}</option>
+          <option value="clone">{{ t("setup.mode.clone") }}</option>
+          <option value="create">{{ t("setup.mode.create") }}</option>
         </select>
       </div>
 

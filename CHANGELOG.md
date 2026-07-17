@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - When creating a custom or preset secret hit a sync conflict — the same secret changed on another device since you last synced — the "keep mine / adopt remote" choice never appeared, so you couldn't resolve the conflict from the create screen. The prompt now shows as intended.
 - Adding a trusted signing key in Settings silently dropped its error message when the add failed; the message is now shown again.
+- On the first setup screen, the "Clone an existing store" and "Create a new store" choices could show their internal labels (e.g. `setup.clone`) instead of the readable text.
 
 ## [v0.12.1] - 2026-07-14
 

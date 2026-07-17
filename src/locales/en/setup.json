@@ -1,8 +1,10 @@
 {
   "tagline": "Age-only gopass password client",
-  "mode": "Mode",
-  "clone": "Clone an existing store",
-  "create": "Create a new store",
+  "mode": {
+    "label": "Mode",
+    "clone": "Clone an existing store",
+    "create": "Create a new store"
+  },
   "auth": {
     "repoUrlLabel": "Git Repository URL",
     "repoUrlPlaceholder": "https://github.com/user/password-store.git",
