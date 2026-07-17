@@ -19,7 +19,7 @@ jobs:
         uses: ./.github/actions/setup-ci-env
 
       - name: Check Rust formatting
-        run: nix develop --accept-flake-config --command sh -c 'cargo fmt --check'
+        run: nix develop .#lite --accept-flake-config --command sh -c 'cargo fmt --check'
 
   frontend:
     runs-on: ubuntu-latest
@@ -32,7 +32,7 @@ jobs:
           pnpm_cache: true
 
       - name: Check frontend formatting
-        run: nix develop --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && pnpm exec prettier --check .'
+        run: nix develop .#lite --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && pnpm exec prettier --check .'
 
   nix:
     runs-on: ubuntu-latest
@@ -43,4 +43,4 @@ jobs:
         uses: ./.github/actions/setup-ci-env
 
       - name: Check Nix formatting
-        run: nix develop --accept-flake-config --command sh -c 'nixfmt --check $(git ls-files "*.nix")'
+        run: nix develop .#lite --accept-flake-config --command sh -c 'nixfmt --check $(git ls-files "*.nix")'

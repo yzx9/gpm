@@ -16,6 +16,7 @@
 
   outputs =
     {
+      self,
       nixpkgs,
       systems,
       fenix,
@@ -48,6 +49,7 @@
           };
         };
 
+        # Full Rust toolchain: host stable + the four Android targets.
         rustToolchain = fenix.packages.${system}.combine [
           fenix.packages.${system}.stable.toolchain
           fenix.packages.${system}.targets.aarch64-linux-android.stable.rust-std
@@ -55,6 +57,9 @@
           fenix.packages.${system}.targets.x86_64-linux-android.stable.rust-std
           fenix.packages.${system}.targets.i686-linux-android.stable.rust-std
         ];
+
+        # Host-only stable toolchain (no Android targets) for the lighter shells.
+        hostRustToolchain = fenix.packages.${system}.stable.toolchain;
 
         androidEnv = pkgs.androidenv.override { licenseAccepted = true; };
         androidComp = androidEnv.composeAndroidPackages {
@@ -134,92 +139,136 @@
           libsoup_3
           dbus
         ];
+
+        # shellHook fragment: the desktop runtime on LD_LIBRARY_PATH (see above).
+        # Shared by `full` and `lite` — the two shells that link Tauri for the host.
+        linuxDesktopLdHook = lib.optionalString pkgs.stdenv.isLinux ''
+          export LD_LIBRARY_PATH="${lib.makeLibraryPath linuxDesktopRuntime}:$LD_LIBRARY_PATH"
+        '';
       in
       {
-        devShells.default = pkgs.mkShell {
-          packages =
-            with pkgs;
-            [
-              # Rust
-              rustToolchain
-              rust-analyzer
-              cargo-audit
-              cargo-release
-              cargo-outdated
-              sccache # shared compile cache across worktrees (RUSTC_WRAPPER below)
+        devShells = {
+          default = self.devShells.${system}.full;
 
-              # Frontend
-              nodejs
-              pnpm
-
-              # Android
-              jdk17
-              androidComp.androidsdk
-
-              # Utils
-              just
-              jq
-              nixfmt
-              prettier
-
-              # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
-              # `age` CLI (independent of rustpass's own decrypt path).
-              age
-              # Cross-tool store interop: drive the real `gopass` binary (age backend)
-              # so the gopass-interop tests verify gpm reads a store gopass produced.
-              gopass
-            ]
-            ++ lib.optionals pkgs.stdenv.isLinux (
+          # `full`: every toolchain the repo touches — the four Android Rust
+          # targets, the Android SDK/NDK, JDK, and the desktop runtime. Used by CD
+          # and test-android (the Android builds); also what `default` (bare
+          # `nix develop`) resolves to for local development.
+          full = pkgs.mkShell {
+            packages =
+              with pkgs;
               [
-                pkg-config # pkg-config is build-time only
+                # Rust
+                rustToolchain
+                rust-analyzer
+                cargo-audit
+                cargo-release
+                cargo-outdated
+                sccache # shared compile cache across worktrees (RUSTC_WRAPPER below)
+
+                # Frontend
+                nodejs
+                pnpm
+
+                # Android
+                jdk17
+                androidComp.androidsdk
+
+                # Utils
+                just
+                jq
+                nixfmt
+                prettier
+
+                # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
+                # `age` CLI (independent of rustpass's own decrypt path).
+                age
+
+                # Cross-tool store interop: drive the real `gopass` binary (age backend)
+                # so the gopass-interop tests verify gpm reads a store gopass produced.
+                gopass
               ]
-              ++ linuxDesktopRuntime
-            );
+              ++ lib.optionals pkgs.stdenv.isLinux (
+                [
+                  pkg-config # pkg-config is build-time only
+                ]
+                ++ linuxDesktopRuntime
+              );
 
-          ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
-          ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
-          ANDROID_NDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
-          # Tauri's Android build reads NDK_HOME (not just ANDROID_NDK_ROOT) and
-          # JAVA_HOME; missing either, `tauri android build` aborts early.
-          NDK_HOME = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
-          JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
-          # AGP downloads a generic FHS aapt2 from Maven that the Nix stub-ld
-          # refuses to run; point it at the Nix SDK's patchelf'd aapt2 instead.
-          # Keep this build-tools version in sync with buildToolsVersions above.
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComp.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
+            ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
+            ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
+            ANDROID_NDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+            # Tauri's Android build reads NDK_HOME (not just ANDROID_NDK_ROOT) and
+            # JAVA_HOME; missing either, `tauri android build` aborts early.
+            NDK_HOME = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+            JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
+            # AGP downloads a generic FHS aapt2 from Maven that the Nix stub-ld
+            # refuses to run; point it at the Nix SDK's patchelf'd aapt2 instead.
+            # Keep this build-tools version in sync with buildToolsVersions above.
+            GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComp.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
 
-          # NDK toolchain for cross-compiling native C deps (OpenSSL, libgit2)
-          # Fixes: rust-lang/rust#131407 — macOS ar creates corrupt Linux archives.
-          # llvm-ar produces GNU-format archives that rustc can handle cross-platform.
-          CC_aarch64_linux_android = "${ndkBin}/aarch64-linux-android28-clang";
-          CC_armv7_linux_androideabi = "${ndkBin}/armv7a-linux-androideabi28-clang";
-          CC_x86_64_linux_android = "${ndkBin}/x86_64-linux-android28-clang";
-          CC_i686_linux_android = "${ndkBin}/i686-linux-android28-clang";
+            # NDK toolchain for cross-compiling native C deps (OpenSSL, libgit2)
+            # Fixes: rust-lang/rust#131407 — macOS ar creates corrupt Linux archives.
+            # llvm-ar produces GNU-format archives that rustc can handle cross-platform.
+            CC_aarch64_linux_android = "${ndkBin}/aarch64-linux-android28-clang";
+            CC_armv7_linux_androideabi = "${ndkBin}/armv7a-linux-androideabi28-clang";
+            CC_x86_64_linux_android = "${ndkBin}/x86_64-linux-android28-clang";
+            CC_i686_linux_android = "${ndkBin}/i686-linux-android28-clang";
 
-          # sccache wraps rustc; its cache is machine-global, so a fresh worktree reuses
-          # compiles from other worktrees instead of rebuilding target/ from scratch.
-          # For max cold-build hits, run that build with CARGO_INCREMENTAL=0 (don't set it
-          # here — it would slow `just dev` warm rebuilds). rust-analyzer ignores this.
-          RUSTC_WRAPPER = "sccache";
+            # sccache wraps rustc; its cache is machine-global, so a fresh worktree reuses
+            # compiles from other worktrees instead of rebuilding target/ from scratch.
+            # For max cold-build hits, run that build with CARGO_INCREMENTAL=0 (don't set it
+            # here — it would slow `just dev` warm rebuilds). rust-analyzer ignores this.
+            RUSTC_WRAPPER = "sccache";
 
-          # Use shellHook for PATH and AR/RANLIB — plain attr may be overridden by shell profile.
-          # Both TARGET_AR and plain AR are set so openssl-sys's build script picks them up
-          # regardless of which fallback it checks.
-          # macOS-only: rust-lang/rust#131407 — macOS ar creates BSD-format archives
-          # that rustc cannot handle when cross-compiling to Linux/Android targets.
-          shellHook =
-            pre-commit-checks.shellHook
-            + ''
-              export PATH="${ndkBin}:$PATH"
-            ''
-            + lib.optionalString pkgs.stdenv.isLinux ''
-              export LD_LIBRARY_PATH="${lib.makeLibraryPath linuxDesktopRuntime}:$LD_LIBRARY_PATH"
-            ''
-            + lib.optionalString pkgs.stdenv.isDarwin ''
-              export AR="${ndkBin}/llvm-ar"
-              export TARGET_AR="${ndkBin}/llvm-ar"
-              export RANLIB="${ndkBin}/llvm-ranlib"
-            '';
+            # Use shellHook for PATH and AR/RANLIB — plain attr may be overridden by shell profile.
+            # Both TARGET_AR and plain AR are set so openssl-sys's build script picks them up
+            # regardless of which fallback it checks.
+            # macOS-only: rust-lang/rust#131407 — macOS ar creates BSD-format archives
+            # that rustc cannot handle when cross-compiling to Linux/Android targets.
+            shellHook =
+              pre-commit-checks.shellHook
+              + ''
+                export PATH="${ndkBin}:$PATH"
+              ''
+              + linuxDesktopLdHook
+              + lib.optionalString pkgs.stdenv.isDarwin ''
+                export AR="${ndkBin}/llvm-ar"
+                export TARGET_AR="${ndkBin}/llvm-ar"
+                export RANLIB="${ndkBin}/llvm-ranlib"
+              '';
+          };
+
+          # `lite`: host Rust + Tauri desktop runtime + frontend/tools, but NO
+          # Android SDK/NDK/JDK/android targets. For lint, test (be/fe) and
+          # format-fe — everything that compiles/links Tauri for the host or runs
+          # the frontend, but never cross-compiles to Android.
+          lite = pkgs.mkShell {
+            packages =
+              with pkgs;
+              [
+                hostRustToolchain
+                sccache
+                nodejs
+                pnpm
+                just
+                nixfmt
+                prettier
+                age
+              ]
+              ++ lib.optionals pkgs.stdenv.isLinux (
+                [
+                  pkg-config
+                ]
+                ++ linuxDesktopRuntime
+              );
+
+            RUSTC_WRAPPER = "sccache";
+
+            # CI-only shell (local dev uses `default`/`full`): skip the pre-commit
+            # hook install, just expose the desktop runtime for linking Tauri.
+            shellHook = linuxDesktopLdHook;
+          };
         };
       }
     )
