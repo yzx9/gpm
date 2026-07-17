@@ -72,3 +72,44 @@ bech32 = { version = "0.9", default-features = false }
 # `qr` is deliberately off — unused, and it would pull `qrcode` + `image` and
 # bloat the Android build.
 totp-rs = { version = "5", default-features = false, features = ["otpauth", "zeroize"] }
+
+# --- Build profiles -----------------------------------------------------------
+# Tuned after measuring the Android debug artifact (`tauri android build --debug`):
+# the default dev profile produced a ~774MB libgpm_lib.a / ~287MB .so, almost all
+# debuginfo rather than code (the stripped .so is only ~39MB).
+
+[profile.dev]
+# Keep symbol names + line tables (panic backtraces still resolve to `file:line`)
+# but drop the variable/type DWARF that `debug = 2` emits. On Android that DWARF is
+# dead weight: the device never reads it, and source-level debugging resolves
+# symbols from the unstripped `.so` in `target/`, not the copy packaged in the APK.
+# Measured ~2x shrink across every artifact (.a 774→387MB, .so 287→128MB) at ~0
+# compile-time cost. Tradeoff: lldb variable inspection needs `debug = 2` again.
+debug = "line-tables-only"
+# Light optimization so the dev app runs faster than the unoptimized default
+# without the multi-minute cost of `opt-level >= 2`; clean aarch64 build ~1min.
+opt-level = 1
+
+# Dependencies are compiled once and rarely change, so pay for `opt-level = 3`
+# up front: dev-app runtime approaches release speed while the workspace crates
+# (gpm, rustpass) stay at `opt-level = 1` above for fast incremental rebuilds.
+# Cost: a slower first clean build.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Measured on the Android `.so` that ships in the APK (aarch64, clean build,
+# fat LTO + codegen-units = 1 + strip = symbols): opt-level "z" beats "s" across
+# every artifact (.so 17MB vs 18MB; .a 260 vs 265MB) and also compiled faster.
+# `lto = "fat"` + `codegen-units = 1` compound the size win at the cost of a
+# multi-minute release link — acceptable since releases are infrequent; drop to
+# `lto = "thin"` if that ever bites. `strip = "symbols"` removes the `.so`
+# symbol table; panic `file:line` is unaffected (embedded string data), only
+# backtrace frames become address-only. `panic` is intentionally left at the
+# default `unwind`: rustpass wraps rpgp in `catch_unwind` to turn panics on
+# attacker-controlled OpenPGP input into `StoreError`, which `panic = "abort"`
+# would defeat.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
