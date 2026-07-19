@@ -56,14 +56,17 @@ function select(v: T) {
 </template>
 
 <style scoped>
+/* No border + a recessed track bg: the pill reads as a sunken segment of the
+   card rather than a second framed box nested inside it. The card already
+   owns the edge border + radius, so echoing it on every pill produces a
+   "box-in-a-box" frame; a tinted fill gives hierarchy without the redundancy. */
 .mode-pill {
   flex: 1;
   text-align: center;
   padding: 0.5rem 0.6rem;
   font-size: var(--text-sm);
-  border: 1px solid var(--color-edge);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
+  background: var(--color-input);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   /* .mode-pill is a <label>, so the global button user-select rule misses it;
@@ -74,17 +77,25 @@ function select(v: T) {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
 }
-.mode-pill:active {
+.mode-pill:not(.mode-active):active {
   background: var(--color-hover);
 }
 @media (hover: hover) {
-  .mode-pill:hover {
+  .mode-pill:not(.mode-active):hover {
     background: var(--color-hover);
   }
 }
+/* Selected segment "raises" out of the track (surface bg + accent edge + halo)
+   entirely via box-shadow — no layout border, so toggling never shifts the
+   pill by a border-width. */
 .mode-active {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
+  background: var(--color-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--color-accent),
+    0 0 0 2px var(--color-accent-ring);
 }
 </style>
