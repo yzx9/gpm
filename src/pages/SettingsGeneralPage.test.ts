@@ -238,4 +238,76 @@ describe("SettingsGeneralPage", () => {
       expect(invoke).toHaveBeenCalledWith("set_locale_pref", { locale: null });
     });
   });
+
+  describe("theme picker", () => {
+    // applyTheme mutates the real <html data-theme>; reset it between tests so
+    // one test's pinned attribute can't leak into another's assertions.
+    beforeEach(() => {
+      delete document.documentElement.dataset.theme;
+    });
+
+    function findThemePicker(wrapper: ReturnType<typeof mountPage>) {
+      return (
+        wrapper.findAllComponents(
+          BaseSegmentedControl,
+        ) as unknown as VueWrapper<any>[]
+      ).find((c) => c.props("name") === "theme-mode");
+    }
+
+    it("reflects the persisted theme_mode on load", async () => {
+      when("get_app_config", { secure_screen: true, theme_mode: "dark" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(findThemePicker(wrapper)?.props("modelValue")).toBe("dark");
+    });
+
+    it("applies a pinned theme to <html data-theme> and persists it", async () => {
+      when("get_app_config", { secure_screen: true }); // no theme_mode ⇒ system
+      const { wrapper, toast } = mountWithApp(SettingsGeneralPage);
+      await flushPromises();
+
+      const picker = findThemePicker(wrapper)!;
+      picker.vm.$emit("change", "dark");
+      await flushPromises();
+
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      expect(invoke).toHaveBeenCalledWith("set_theme_mode", { mode: "dark" });
+      expect(toast.toasts.value.some((t) => t.message.includes("Theme"))).toBe(
+        true,
+      );
+    });
+
+    it("rolls back the picker and the applied theme when persisting fails", async () => {
+      when("get_app_config", { secure_screen: true, theme_mode: "light" }); // prior = light
+      reject("set_theme_mode", { code: "CONFIG_ERROR", message: "no" });
+      const { wrapper, toast } = mountWithApp(SettingsGeneralPage);
+      await flushPromises();
+
+      const picker = findThemePicker(wrapper)!;
+      picker.vm.$emit("change", "dark"); // applies dark in-memory, then fails
+      await flushPromises();
+
+      expect(picker?.props("modelValue")).toBe("light");
+      expect(document.documentElement.dataset.theme).toBe("light");
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("Couldn't save theme"),
+        ),
+      ).toBe(true);
+    });
+
+    it("'system' clears the override (persists null and removes the attribute)", async () => {
+      when("get_app_config", { secure_screen: true, theme_mode: "dark" }); // prior = dark
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const picker = findThemePicker(wrapper)!;
+      picker.vm.$emit("change", "system");
+      await flushPromises();
+
+      expect(document.documentElement.dataset.theme).toBeUndefined();
+      expect(invoke).toHaveBeenCalledWith("set_theme_mode", { mode: null });
+    });
+  });
 });

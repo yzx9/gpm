@@ -23,6 +23,16 @@
     "applied": "Display language updated",
     "failed": "Couldn't save display language — try again"
   },
+  "theme": {
+    "title": "Theme",
+    "legend": "Theme",
+    "description": "Choose the app's color scheme. “System default” follows your device setting.",
+    "system": "System default",
+    "light": "Light",
+    "dark": "Dark",
+    "applied": "Theme updated",
+    "failed": "Couldn't save theme — try again"
+  },
   "repo": {
     "title": "Repository",
     "auth": {

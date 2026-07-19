@@ -23,6 +23,16 @@
     "applied": "显示语言已更新",
     "failed": "无法保存显示语言 —— 请重试"
   },
+  "theme": {
+    "title": "主题",
+    "legend": "主题",
+    "description": "选择应用的颜色方案。“跟随系统”将跟随你的设备设置。",
+    "system": "跟随系统",
+    "light": "浅色",
+    "dark": "深色",
+    "applied": "主题已更新",
+    "failed": "无法保存主题 —— 请重试"
+  },
   "repo": {
     "title": "仓库",
     "auth": {

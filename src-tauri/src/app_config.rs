@@ -83,6 +83,16 @@ pub(crate) struct AppConfig {
     /// on round-trip, so adding the field is non-breaking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) locale: Option<String>,
+    /// Color-scheme (light/dark) override. `None` (the default) means "track the
+    /// system preference" — the frontend's `prefers-color-scheme` CSS media
+    /// query governs, zero-JS and zero-flash. `Some("light")` / `Some("dark")`
+    /// pins it via a `<html data-theme>` attribute the frontend sets after
+    /// reading this. Plaintext here (not sealed) for the same reason as
+    /// `locale`: it must render before unlock and survive `reset_config`.
+    /// `skip_serializing_if` keeps existing `app.json` files byte-identical on
+    /// round-trip, so adding the field is non-breaking (mirrors `locale`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) theme_mode: Option<String>,
     /// How the app auto-locks the identity cache. Skipped from serialization
     /// when default (`Immediate`), so an uncustomized config is byte-identical
     /// to one written before this field moved here.
@@ -130,6 +140,7 @@ impl Default for AppConfig {
         Self {
             secure_screen: default_secure_screen(),
             locale: None,
+            theme_mode: None,
             lock_mode: LockMode::default(),
             view_clear_secs: None,
             clipboard_clear_secs: None,
@@ -201,6 +212,28 @@ fn validate_locale(locale: Option<&str>) -> Result<(), Error> {
         return Err(Error::new(
             ErrorCode::ConfigError,
             format!("Unsupported locale code '{code}'"),
+        ));
+    }
+    Ok(())
+}
+
+/// Color-scheme overrides the settings page exposes. `None` (track system) is
+/// always valid and is not listed here; an explicit `Some` must be one of these.
+/// Do NOT add `"system"` here: the frontend sends `null` for "track system"
+/// (never the string), and persisting `Some("system")` would break the
+/// byte-identical-on-default invariant `locale`/`log_level` rely on.
+const SUPPORTED_THEME_MODES: [&str; 2] = ["light", "dark"];
+
+/// Reject an unsupported explicit theme mode. `None` (track system) is always
+/// valid; `Some(mode)` must be in [`SUPPORTED_THEME_MODES`]. Mirrors
+/// `validate_locale` / `validate_log_level`.
+fn validate_theme_mode(mode: Option<&str>) -> Result<(), Error> {
+    if let Some(m) = mode
+        && !SUPPORTED_THEME_MODES.contains(&m)
+    {
+        return Err(Error::new(
+            ErrorCode::ConfigError,
+            format!("Unsupported theme mode '{m}'"),
         ));
     }
     Ok(())
@@ -400,6 +433,16 @@ impl AppConfigStore {
         validate_log_level(level.as_deref())?;
         self.update(|cfg| cfg.log_level = level).await
     }
+
+    /// Set the persisted color-scheme override (`None` ⇒ track system). `Some`
+    /// must be one of [`SUPPORTED_THEME_MODES`]; a bad value returns
+    /// `ConfigError`. The frontend applies the runtime effect (the `data-theme`
+    /// attribute) on receipt, so this stays a pure persistence step mirroring
+    /// `set_locale`/`set_log_level`.
+    pub(crate) async fn set_theme_mode(&self, mode: Option<String>) -> Result<AppConfig, Error> {
+        validate_theme_mode(mode.as_deref())?;
+        self.update(|cfg| cfg.theme_mode = mode).await
+    }
 }
 
 /// Whether the screen-secure plugin is available on this platform. Compile-time
@@ -449,6 +492,19 @@ pub(crate) async fn set_locale_pref(
     cfg.locale = locale;
     state.app_config.save(&cfg).await?;
     Ok(cfg)
+}
+
+/// Set the color-scheme preference and persist it. `mode: null` clears the
+/// override (track system); `"light"` / `"dark"` pin it. Returns the updated
+/// config. The frontend re-applies the theme (the `data-theme` attribute) on
+/// receipt.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_theme_mode(
+    state: State<'_, AppState>,
+    mode: Option<String>,
+) -> Result<AppConfig, Error> {
+    state.app_config.set_theme_mode(mode).await
 }
 
 /// The authoritative locale the app should render in. The frontend uses this at
@@ -611,6 +667,107 @@ mod tests {
         assert_eq!(err.code, "CONFIG_ERROR");
         assert!(err.message.contains("zh-TW"));
         assert!(validate_locale(Some("fr")).is_err());
+    }
+
+    #[test]
+    fn default_theme_mode_is_none() {
+        assert!(AppConfig::default().theme_mode.is_none());
+    }
+
+    #[tokio::test]
+    async fn theme_mode_roundtrips_through_save() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                theme_mode: Some("dark".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let reloaded = store_at(dir.path()).get();
+        assert_eq!(reloaded.theme_mode.as_deref(), Some("dark"));
+    }
+
+    #[tokio::test]
+    async fn theme_mode_omitted_on_disk_when_none() {
+        // skip_serializing_if keeps theme_mode out of app.json when None, so
+        // existing files stay byte-identical and carry no null.
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                theme_mode: None,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        assert!(
+            !on_disk.contains("theme_mode"),
+            "theme_mode key must be absent when None; got: {on_disk}"
+        );
+    }
+
+    #[test]
+    fn existing_app_json_without_theme_mode_loads() {
+        // An app.json written before theme_mode existed must still parse, with
+        // theme_mode defaulting to None (backward compatibility — adding the
+        // optional field is non-breaking, like locale).
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(APP_CONFIG_FILE),
+            r#"{"secure_screen":true}"#,
+        )
+        .unwrap();
+        let cfg = store_at(dir.path()).get();
+        assert!(cfg.secure_screen);
+        assert!(cfg.theme_mode.is_none());
+    }
+
+    #[test]
+    fn validate_theme_mode_accepts_supported_and_none() {
+        assert!(validate_theme_mode(None).is_ok());
+        assert!(validate_theme_mode(Some("light")).is_ok());
+        assert!(validate_theme_mode(Some("dark")).is_ok());
+    }
+
+    #[test]
+    fn validate_theme_mode_rejects_unknown() {
+        // "system" is intentionally NOT a stored value — the frontend sends
+        // `null` for "track system", so a literal "system" is rejected.
+        for bad in ["system", "auto", "DARK", "", "blue"] {
+            let err = validate_theme_mode(Some(bad)).unwrap_err();
+            assert_eq!(err.code, "CONFIG_ERROR", "reject {bad:?}");
+            assert!(
+                err.message.contains(bad),
+                "message names {bad:?}: {}",
+                err.message
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn set_theme_mode_persists_validates_and_clears() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .set_theme_mode(Some("dark".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(store.get().theme_mode.as_deref(), Some("dark"));
+        // An unsupported value is rejected and must not mutate the store.
+        let err = store
+            .set_theme_mode(Some("blue".to_string()))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "CONFIG_ERROR");
+        assert_eq!(store.get().theme_mode.as_deref(), Some("dark"));
+        // null clears the override (track system).
+        store.set_theme_mode(None).await.unwrap();
+        assert!(store.get().theme_mode.is_none());
     }
 
     #[test]

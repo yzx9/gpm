@@ -364,11 +364,12 @@ pub fn run() {
             config::set_autosync,
             config::get_commit_identity_default,
             config::reset_config,
-            // app config: screen-capture master toggle + display language + platform availability
+            // app config: screen-capture master toggle + display language + theme + platform availability
             app_config::get_app_config,
             app_config::set_secure_screen,
             app_config::set_locale_pref,
             app_config::resolved_locale,
+            app_config::set_theme_mode,
             app_config::screen_secure_available,
             // logging: in-app diagnostics viewer + runtime level control
             logging::read_log,

@@ -34,6 +34,8 @@ export interface SafeAreaInsets {
  *  - `secure_screen`: master screen-capture-protection toggle.
  *  - `locale`: display-language override. Absent (not `null`) ⇒ track system;
  *    `"en"` / `"zh-CN"` ⇒ pinned.
+ *  - `theme_mode`: color-scheme override. Absent (not `null`) ⇒ track system
+ *    (the CSS `prefers-color-scheme` media query); `"light"` / `"dark"` ⇒ pinned.
  *  - `lock_mode` / `view_clear_secs` / `clipboard_clear_secs` / `autosync` /
  *    `biometric_app_lock`: behavior prefs (absent ⇒ default). */
 export interface AppConfig {
@@ -41,6 +43,9 @@ export interface AppConfig {
   schema_version?: number;
   secure_screen: boolean;
   locale?: string;
+  /** Color-scheme override. Absent ⇒ track system; `"light"` / `"dark"` ⇒
+   *  pinned (applied via a `<html data-theme>` attribute by `@/theme`). */
+  theme_mode?: string;
   /** App auto-lock mode. Absent ⇒ Immediate. Mirrors Rust `LockMode`. */
   lock_mode?: LockMode;
   /** Password-view auto-clear seconds. Absent/null ⇒ default (45); 0 ⇒ never. */
@@ -82,6 +87,15 @@ export async function setSecureScreen(enabled: boolean): Promise<void> {
  */
 export async function setLocalePref(locale: string | null): Promise<AppConfig> {
   return invoke<AppConfig>("set_locale_pref", { locale });
+}
+
+/**
+ * Persist the color-scheme preference (`set_theme_mode`). `null` clears the
+ * override (track system); `"light"` / `"dark"` pin it. Returns the updated
+ * config; the caller re-applies the theme on receipt.
+ */
+export async function setThemeMode(mode: string | null): Promise<AppConfig> {
+  return invoke<AppConfig>("set_theme_mode", { mode });
 }
 
 /**

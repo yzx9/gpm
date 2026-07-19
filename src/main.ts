@@ -30,6 +30,7 @@ import {
   reconcileLocaleFromBackend,
 } from "./i18n";
 import { installRouteGuards } from "./router-guards";
+import { reconcileThemeFromBackend } from "./theme";
 
 // App-shell singletons — created once here (the composition root), provided
 // app-wide, and held by direct ref where non-setup code needs them. The router
@@ -234,4 +235,9 @@ void (async () => {
   await loadBundle(boot, "native").catch(() => {});
   app.mount("#app");
   void reconcileLocaleFromBackend();
+  // Apply a pinned color-scheme preference within a frame of first paint. The
+  // System default needs no JS (the CSS media query owns it), so this is only
+  // load-bearing for a pinned Light/Dark — and like the locale reconcile, a
+  // pinned theme can flash for ~one frame before this resolves.
+  void reconcileThemeFromBackend();
 })();

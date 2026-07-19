@@ -56,9 +56,22 @@
   --radius-lg: 12px;
 }
 
-/* Dark mode — override @theme CSS variables */
+/* Default color-scheme follows the light tokens above. Declared so native UA
+   chrome (scrollbars, form controls, autofill) matches the app and so the dark
+   rules below can override it. */
+:root {
+  color-scheme: light;
+}
+
+/* Dark mode — applies under a dark system preference (the default "track
+   system" path: pure media query, zero JS, live-reactive to OS changes) OR is
+   forced by the matching [data-theme="dark"] rule below. A pinned-light
+   [data-theme="light"] opts OUT here via :not() so it stays light on a dark
+   system. KEEP IN SYNC with the :root[data-theme="dark"] block — a future dark
+   variable added in one place but not the other drifts silently. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --color-page: #0d1117;
     --color-surface: #161b22;
     --color-input: #1a1a2e;
@@ -80,6 +93,40 @@
     --color-warning: #d9a441;
     --color-warning-soft: #3a2a1a;
   }
+}
+
+/* Forced dark — the user pinned Dark via <html data-theme="dark">. Overrides a
+   light system. KEEP IN SYNC with the media-query block above. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-page: #0d1117;
+  --color-surface: #161b22;
+  --color-input: #1a1a2e;
+  --color-hover: #2f2f50;
+  --color-default: #e6edf3;
+  --color-muted: #9ba4ae;
+  --color-subtle: #6e7681;
+  --color-edge: #444;
+  --color-accent: #7c95ff;
+  --color-accent-deep: #5b7bf5;
+  --color-on-accent: #0d1117;
+  --color-danger: #ff6b6b;
+  --color-danger-soft: #3a1a1a;
+  --color-danger-edge: #5a2a2a;
+  --color-success: #4ade80;
+  --color-success-soft: #1a3a1a;
+  --color-info: #5fa8f5;
+  --color-info-soft: #1a2a3a;
+  --color-warning: #d9a441;
+  --color-warning-soft: #3a2a1a;
+}
+
+/* Forced light — the user pinned Light via <html data-theme="light">. The dark
+   media query's :not([data-theme="light"]) skips it, so this only needs to pin
+   color-scheme for native chrome; the light @theme defaults already govern the
+   app colors. */
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 /* Base styles */

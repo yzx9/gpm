@@ -10,6 +10,7 @@ import {
   resolvedLocale,
   setAutosync,
   setLocalePref,
+  setThemeMode,
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -21,6 +22,7 @@ import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import { useSecureScreen, useToast } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
+import { applyTheme, normalizeThemeMode, type ThemeMode } from "@/theme";
 import { SlidersHorizontal, Trash2 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -68,6 +70,34 @@ async function onLocaleChange(selection: string): Promise<void> {
   }
 }
 
+// Color-scheme preference: "system" (track the OS via the CSS media query) or a
+// pinned light/dark. Loaded from app.json on mount; the picker applies it live.
+const themeSelection = ref<ThemeMode>("system");
+// Guards the picker against rapid taps firing concurrent set_theme_mode calls —
+// without it, the last IPC to resolve wins regardless of tap order (the same
+// get→mutate→save race autosyncLoading guards on the AutoSync toggle).
+const themeLoading = ref(false);
+
+async function onThemeChange(selection: string): Promise<void> {
+  if (themeLoading.value) return;
+  const prev = themeSelection.value;
+  const mode = normalizeThemeMode(selection);
+  // Apply in-memory first and persist only on success, mirroring onLocaleChange.
+  applyTheme(mode);
+  themeSelection.value = mode;
+  themeLoading.value = true;
+  try {
+    await setThemeMode(mode === "system" ? null : mode);
+    toast.success(t("settings.theme.applied"));
+  } catch {
+    themeSelection.value = prev; // roll back the picker + the applied theme
+    applyTheme(prev);
+    toast.danger(t("settings.theme.failed"));
+  } finally {
+    themeLoading.value = false;
+  }
+}
+
 const appConfig = ref<AppConfig | null>(null);
 const loading = ref(false);
 const error = ref("");
@@ -79,6 +109,7 @@ async function loadConfig() {
   error.value = "";
   try {
     appConfig.value = await getAppConfig();
+    themeSelection.value = normalizeThemeMode(appConfig.value.theme_mode);
     await loadLocalePref();
   } catch (e) {
     const appError = e as AppError;
@@ -191,6 +222,29 @@ onMounted(() => {
             { label: t('settings.language.chinese'), value: 'zh-CN' },
           ]"
           @change="onLocaleChange"
+        />
+      </BaseCard>
+
+      <!-- Theme (System / Light / Dark) — System tracks the OS via the CSS
+           media query; Light/Dark pin via <html data-theme>. -->
+      <BaseCard as="section">
+        <h2 class="text-sm font-medium mb-2">
+          {{ t("settings.theme.title") }}
+        </h2>
+        <p class="text-xs text-muted mb-3">
+          {{ t("settings.theme.description") }}
+        </p>
+        <BaseSegmentedControl
+          name="theme-mode"
+          :legend="t('settings.theme.legend')"
+          :model-value="themeSelection"
+          :options="[
+            { label: t('settings.theme.system'), value: 'system' },
+            { label: t('settings.theme.light'), value: 'light' },
+            { label: t('settings.theme.dark'), value: 'dark' },
+          ]"
+          :disabled="themeLoading"
+          @change="onThemeChange"
         />
       </BaseCard>
 
