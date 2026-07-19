@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Pinching with two fingers (or double-tapping) used to zoom the app's interface, which could accidentally scale it out of shape and break the layout. The app now stays at its fixed size, like a native app.
+- With the Android "Screen capture protection" setting turned off, sliding between screens is now consistent everywhere. A move between a page that can show a secret (an entry's detail, the create or generate screens, the identity or repository settings) and one that can't (the list, history) used to snap instantly with no slide, because that transition was frozen on secure↔non-secure boundaries regardless of the setting. With protection on, those boundaries still snap on purpose — so a secret page is never caught mid-slide while capture protection is being cleared.
 
 ## [v0.13.0] - 2026-07-17
 

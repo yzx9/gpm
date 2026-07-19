@@ -203,8 +203,10 @@ void (async () => {
   installFrontendLogger(app);
   // Direction tracker for the <router-view> slide transition. Registered after
   // the secure-screen guards so its afterEach runs alongside them. The
-  // secure-boundary gate inside it keeps FLAG_SECURE safe (see useNavDirection).
-  const navDirection = createNavDirection(router);
+  // secure-boundary gate inside it keeps FLAG_SECURE safe (see useNavDirection),
+  // reading the live protection state so slides animate everywhere when the
+  // screen-capture toggle is off.
+  const navDirection = createNavDirection(router, secureScreenState);
   app.provide(LOCK_KEY, lockState);
   app.provide(APP_LOCK_KEY, appLockStore);
   app.provide(NAV_DIRECTION_KEY, navDirection);
