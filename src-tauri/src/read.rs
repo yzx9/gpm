@@ -26,6 +26,10 @@ pub(crate) struct CopyResult {
     success: bool,
     entry_name: String,
     cleared_after_secs: u32,
+    /// A free byproduct of this decrypt: whether the entry's body carries a
+    /// TOTP seed, so the UI can show/hide the 2FA affordance without a second
+    /// read. No secret data.
+    has_totp: bool,
 }
 
 /// Returned by `copy_totp`. Like [`CopyResult`] but distinguishes "copied a
@@ -44,6 +48,10 @@ pub(crate) struct TotpCopyResult {
 pub(crate) struct SensitiveContent {
     pub(crate) password: Zeroizing<String>,
     pub(crate) notes: Zeroizing<String>,
+    /// A free byproduct of this decrypt: whether the entry's body carries a
+    /// TOTP seed, so the UI can show/hide the 2FA affordance without a second
+    /// read. Not itself secret.
+    pub(crate) has_totp: bool,
 }
 
 /// Redacts secrets — mirrors `rustpass::Secret` so `Debug` never leaks plaintext.
@@ -170,6 +178,7 @@ pub(crate) async fn copy_password(
         success: true,
         entry_name,
         cleared_after_secs,
+        has_totp: rustpass::totp::has_totp(secret.body()),
     })
 }
 
@@ -193,6 +202,7 @@ pub(crate) async fn show_password_core<R: Runtime>(
     Ok(SensitiveContent {
         password: Zeroizing::new(secret.password().to_string()),
         notes: Zeroizing::new(secret.body().to_string()),
+        has_totp: rustpass::totp::has_totp(secret.body()),
     })
 }
 
@@ -252,6 +262,37 @@ pub(crate) async fn copy_totp(
         entry_name,
         cleared_after_secs,
     })
+}
+
+/// Whether `entry_path`'s body carries a TOTP seed — a probe that **never
+/// triggers an unlock**. The only "would need a prompt" outcome is an encrypted
+/// identity that is not cached: `Store::get` then fails with
+/// `IDENTITY_ENCRYPTED`, and we return `Ok(None)` ("unknown") instead of
+/// prompting. Every other path decrypted without a prompt — a plaintext
+/// identity read straight from disk, or a cached session identity — so the
+/// probe is free and returns `Some(bool)`. No seed crosses IPC. Mirrors the
+/// read commands' lock-timer reset + Immediate wipe on the decrypt path, so
+/// under Idle this counts as the user activity it is (the user opened the
+/// entry); the not-cached branch touches no timers (no access happened).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn has_totp(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    entry_path: String,
+) -> Result<Option<bool>, Error> {
+    let secret = state.store.get(&entry_path).await;
+    // Encrypted + not cached ⇒ would need an unlock prompt. Signal "unknown"
+    // and never prompt. (The frontend already gates on the cached flag; this is
+    // the race-safe authority.)
+    let secret = match secret {
+        Err(e) if e.code == "IDENTITY_ENCRYPTED" => return Ok(None),
+        s => s,
+    };
+    reset_lock_timer(&state, &app);
+    maybe_soft_wipe(&state, &app).await;
+    let secret = secret.inspect_err(|e| log::warn!("has-totp failed: {entry_path}: {e}"))?;
+    Ok(Some(rustpass::totp::has_totp(secret.body())))
 }
 
 #[cfg(test)]
@@ -327,10 +368,11 @@ mod tests {
         let content = SensitiveContent {
             password: Zeroizing::new("hunter2".to_string()),
             notes: Zeroizing::new("username: alice".to_string()),
+            has_totp: true,
         };
         assert_eq!(
             serde_json::to_string(&content).expect("serialize"),
-            r#"{"password":"hunter2","notes":"username: alice"}"#
+            r#"{"password":"hunter2","notes":"username: alice","has_totp":true}"#
         );
         assert!(!format!("{content:?}").contains("hunter2"));
     }

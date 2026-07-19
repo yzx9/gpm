@@ -273,7 +273,11 @@ describe("EntryDetailPage", () => {
 
     it("clears sensitive data immediately after copy", async () => {
       // First reveal the password
+      // The page probes `has_totp` on mount (identity is cached by default), so
+      // the first queued response is that probe — queue it before the two the
+      // test actually drives (show_password, then copy_password).
       vi.mocked(invoke)
+        .mockResolvedValueOnce(true)
         .mockResolvedValueOnce({ password: "s3cret", notes: "" })
         .mockResolvedValueOnce({ entry_name: "prod", cleared_after_secs: 45 });
 
@@ -493,7 +497,10 @@ describe("EntryDetailPage", () => {
     });
 
     it("on delete divergence, surfaces the shared modal and adopt resolves", async () => {
+      // First queued response is the mount-time `has_totp` probe (identity is
+      // cached by default); the next two are the delete + its resolve.
       vi.mocked(invoke)
+        .mockResolvedValueOnce(true)
         .mockResolvedValueOnce({
           kind: "needs_divergence_resolve",
           local_ahead: 1,
@@ -579,8 +586,41 @@ describe("EntryDetailPage", () => {
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
 
-      expect(invoke).not.toHaveBeenCalled();
+      // The mount-time `has_totp` probe still runs; assert the delete itself
+      // never happened rather than total invoke silence.
+      expect(invoke).not.toHaveBeenCalledWith(
+        "delete_secret",
+        expect.anything(),
+      );
       expect(mockPush).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("2FA button visibility", () => {
+    const totpBtn = () => 'button[aria-label="Copy 2FA code to clipboard"]';
+
+    it("shows the button when the entry has a seed (identity cached → free probe)", async () => {
+      vi.mocked(invoke).mockResolvedValue(true); // has_totp probe → seed present
+      const wrapper = mountPage();
+      await flushPromises();
+      expect(wrapper.find(totpBtn()).exists()).toBe(true);
+    });
+
+    it("hides the button when the entry has no seed (identity cached → free probe)", async () => {
+      vi.mocked(invoke).mockResolvedValue(false); // has_totp probe → no seed
+      const wrapper = mountPage();
+      await flushPromises();
+      expect(wrapper.find(totpBtn()).exists()).toBe(false);
+    });
+
+    it("shows the button as a fallback when the identity is not cached (no probe, no unlock)", async () => {
+      // unlocked:false → identity NOT cached → the mount probe is skipped so it
+      // can never force an unlock. The button stays as the always-try fallback
+      // until the user authenticates and an action reports the truth.
+      const { wrapper } = mountWithApp(EntryDetailPage, { unlocked: false });
+      await flushPromises();
+      expect(wrapper.find(totpBtn()).exists()).toBe(true);
+      expect(invoke).not.toHaveBeenCalled();
     });
   });
 });

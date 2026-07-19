@@ -35,6 +35,9 @@ export interface CopyResult {
   success: boolean;
   entry_name: string;
   cleared_after_secs: number;
+  /** Free byproduct of the decrypt: whether the entry's body carries a TOTP
+   *  seed, so the UI can show/hide the 2FA button without a second read. */
+  has_totp: boolean;
 }
 
 /** Result of `copy_totp`: `copied` is `false` when the entry has no TOTP seed
@@ -49,6 +52,9 @@ export interface TotpCopyResult {
 export interface SensitiveContent {
   password: string;
   notes: string;
+  /** Free byproduct of the decrypt: whether the entry's body carries a TOTP
+   *  seed, so the UI can show/hide the 2FA button without a second read. */
+  has_totp: boolean;
 }
 
 /** One input field of a create preset (mirrors `rustpass::template::PresetField`). */
@@ -132,6 +138,14 @@ export async function copyTotp(
   notify?: ClipboardNotifyText,
 ): Promise<TotpCopyResult> {
   return invoke<TotpCopyResult>("copy_totp", { entryPath, notifyText: notify });
+}
+
+/** Whether the entry's body carries a TOTP seed — a **cache-only** probe that
+ *  never triggers an unlock: returns `null` when the identity is not currently
+ *  cached, so the caller can fall back to showing the 2FA button until the user
+ *  performs an authenticated action. Never returns the seed. */
+export async function hasTotp(entryPath: string): Promise<boolean | null> {
+  return invoke<boolean | null>("has_totp", { entryPath });
 }
 
 /** Decrypt + return the entry's content for in-app reveal. */

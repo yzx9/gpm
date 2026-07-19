@@ -67,6 +67,17 @@ pub fn extract(body: &str) -> Result<Option<Otp>, Error> {
     Ok(None)
 }
 
+/// Whether `body` carries a TOTP seed — the UI's "does this entry have a 2FA
+/// code?" probe, without minting one. Returns `true` whenever [`extract`] finds
+/// a seed (`Ok(Some)`) **or** hits a candidate that failed to parse (`Err`): a
+/// malformed `otpauth:`/`totp:` line still signals 2FA intent, so the affordance
+/// stays visible and the parse error surfaces when the user actually requests a
+/// code. Returns `false` only on a clean `Ok(None)` — no seed at all.
+#[must_use]
+pub fn has_totp(body: &str) -> bool {
+    !matches!(extract(body), Ok(None))
+}
+
 /// Produce the current one-time code at `now`. `now` is a parameter (not read
 /// from the system clock internally) so RFC 6238 vectors can drive it
 /// deterministically in tests.
@@ -347,6 +358,33 @@ mod tests {
         );
         assert!(extract("just a password").unwrap().is_none());
         assert!(extract("").unwrap().is_none());
+    }
+
+    #[test]
+    fn has_totp_tracks_extract_presence() {
+        // Clean seed → true (otpauth, bare, all match extract's Some branch).
+        assert!(has_totp(&format!(
+            "pw\notpauth: otpauth://totp/Ex:a?secret={SECRET}"
+        )));
+        assert!(has_totp(&format!(
+            "pw\notpauth://totp/Ex:a?secret={SECRET}"
+        )));
+        assert!(has_totp(&format!("pw\ntotp: {SECRET}")));
+        // No seed anywhere → false.
+        assert!(!has_totp("pw\nusername: alice\nurl: example.com"));
+        assert!(!has_totp("just a password"));
+        assert!(!has_totp(""));
+    }
+
+    #[test]
+    fn has_totp_true_for_malformed_seed() {
+        // A present-but-broken candidate (HOTP URI) is an `Err`, not `Ok(None)`:
+        // the entry signals 2FA intent, so the affordance stays visible and the
+        // error surfaces on a real copy attempt.
+        assert!(has_totp(&format!(
+            "pw\notpauth://hotp/A:x?secret={SECRET}&counter=1"
+        )));
+        assert!(has_totp("pw\ntotp: ABCD"));
     }
 
     #[test]

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The **Copy 2FA Code** button on an entry's detail page now appears only for entries that actually store a 2FA code, instead of on every entry. When your lock setting keeps you unlocked between actions, gpm detects this automatically as you open each entry; when it locks again after each action, the button shows on first view and then settles to the right state once you copy or view that entry.
 - Most Settings screens — the Settings hub, General, Locking, Add-trusted-key, and Logs — no longer block screenshots and screen recording on Android. They show only non-secret configuration (your language, lock timing, public signing-key fingerprints, or log entries), so they're now treated like the secret list and history, which were already capturable. The Repository, Identity, and SSH Key screens still block screenshots: Repository shows your full git remote address (which can contain an embedded access token), and Identity and SSH Key can reveal a passphrase or your private key.
 
 ### Fixed

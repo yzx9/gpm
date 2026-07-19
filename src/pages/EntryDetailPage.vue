@@ -7,6 +7,7 @@ import {
   copyPassword as copyPasswordCmd,
   copyTotp as copyTotpCmd,
   deleteSecret as deleteSecretCmd,
+  hasTotp as hasTotpCmd,
   showPassword as showPasswordCmd,
   type AppError,
   type DivergenceChoice,
@@ -30,14 +31,14 @@ import {
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
 import { Clock, Copy, Eye } from "@lucide/vue";
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const { runWithAuth } = useLockState();
+const { runWithAuth, identityCached } = useLockState();
 const { toast } = useToast();
 
 const pathMatch = route.params.pathMatch;
@@ -59,6 +60,40 @@ const error = ref("");
 // alongside `error` at the start of every action.
 const decryptError = ref(false);
 const deleting = ref(false);
+
+// 2FA affordance visibility. `null` = unknown (not yet probed): show the button
+// as a fallback so the user can always try; `true`/`false` once we know. The
+// probe runs only when the identity is already cached — so it never triggers an
+// unlock. Under a per-op lock the button stays as the fallback until the first
+// copy/show on this entry reports the truth back.
+const showTotp = ref<boolean | null>(null);
+const totpProbing = ref(false);
+const totpButtonVisible = computed(() => {
+  if (showTotp.value === false) return false;
+  // While a free (cached) probe is in flight, hold the button to avoid a
+  // show→hide flash; once it resolves, `showTotp` drives visibility.
+  return !totpProbing.value;
+});
+
+async function probeTotp() {
+  if (!identityCached.value || showTotp.value !== null || totpProbing.value) {
+    return;
+  }
+  totpProbing.value = true;
+  try {
+    const has = await hasTotpCmd(entryPath);
+    if (has !== null) showTotp.value = has;
+  } catch {
+    // Probe failed (rare) — leave unknown; the button stays as the fallback.
+  } finally {
+    totpProbing.value = false;
+  }
+}
+
+// Probe on open when the identity is cached (free — no unlock). When it isn't
+// (a per-op lock, or before the first unlock), the button stays as the fallback
+// until the first copy/show on this entry reports the truth back via its result.
+onMounted(probeTotp);
 
 // Delete divergence (the edit flow now lives on /edit/:path, which has its own
 // useDivergence instance).
@@ -97,6 +132,7 @@ async function showPassword() {
   decryptError.value = false;
   try {
     const result = await runWithAuth(() => showPasswordCmd(entryPath));
+    showTotp.value = result.has_totp;
     reveal(result);
   } catch (e) {
     if (isAuthCancelled(e)) return;
@@ -116,6 +152,7 @@ async function copyPassword() {
     const result = await runWithAuth(() =>
       copyPasswordCmd(entryPath, clipboardNotifyText()),
     );
+    showTotp.value = result.has_totp;
     clear();
     toast.success(
       t("entry.copied", {
@@ -138,6 +175,9 @@ async function copyTotp() {
     const result = await runWithAuth(() =>
       copyTotpCmd(entryPath, clipboardNotifyText()),
     );
+    // `copied` is false exactly when the entry has no TOTP seed — reuse it as
+    // the presence signal so the button settles to the right state after a tap.
+    showTotp.value = result.copied;
     if (result.copied) {
       toast.success(
         t("entry.totpCopied", {
@@ -256,6 +296,7 @@ function handleKeydown(e: KeyboardEvent) {
     </div>
 
     <BaseButton
+      v-if="totpButtonVisible"
       variant="outline"
       block
       class="mb-3"

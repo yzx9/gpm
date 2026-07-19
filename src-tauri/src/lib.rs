@@ -335,6 +335,7 @@ pub fn run() {
             read::copy_password,
             read::show_password,
             read::copy_totp,
+            read::has_totp,
             clipboard::copy_generated_password,
             clipboard::are_clipboard_notifications_enabled,
             clipboard::request_clipboard_notifications_permission,
