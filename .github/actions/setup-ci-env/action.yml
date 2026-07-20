@@ -22,9 +22,13 @@ runs:
     - name: Reclaim disk for the Nix store
       uses: wimpysworld/nothing-but-nix@v10
       with:
-        hatchet-protocol: cleave
+        # holster skips the bloat purge (~60s faster); mnt-safe-haven shrinks
+        # the /nix loopback so ~50 GB stays on the root disk for the build
+        # (holster alone filled / and the build ran out of space).
+        hatchet-protocol: holster
         witness-carnage: true
         root-safe-haven: "30720"
+        mnt-safe-haven: "50000"
 
     - name: Install Nix
       uses: cachix/install-nix-action@v31
