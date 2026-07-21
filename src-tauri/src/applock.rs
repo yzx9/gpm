@@ -333,7 +333,7 @@ pub(crate) async fn app_unlock(
     // app.json BEFORE anything reads them — the first unlock, and the cache
     // refresh inside try_identity_auto_unlock, must see the migrated values, not
     // the defaults. The master key is now in memory, so the sealed read succeeds.
-    crate::migrate::migrate_config_scope(state.inner()).await;
+    crate::migrations::run_app_migrations(state.inner()).await;
     // One-shot legacy-envelope migrate, BEFORE the unlock emit so the app isn't
     // interactive while repo.json is re-wrapped (no race with a settings write).
     // Under App Lock the key is absent at cold start, so convert it now.

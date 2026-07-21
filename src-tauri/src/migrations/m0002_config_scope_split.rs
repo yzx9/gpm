@@ -2,35 +2,30 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! One-shot config-scope migration (RFC 0038).
+//! Migration `0002_config_scope_split` (RFC 0038).
 //!
 //! Copies the 5 app-scoped behavior prefs out of a pre-split `repo.json` into
 //! `app.json`, then bumps `schema_version` so it never runs again. The slimmed
 //! [`rustpass::RepoConfig`] drops those fields on deserialize, so the legacy
 //! shape is read via [`LegacyRepoConfig`].
 //!
-//! Idempotent (gated on `schema_version`) and safe to call on every startup and
-//! `app_unlock`. Runs as the FIRST step of `app_unlock` (before
-//! `refresh_security_cache` / `try_identity_auto_unlock`) so the first unlock
-//! sees the migrated values, not the defaults.
+//! Idempotent (the engine gates on `schema_version`) and safe to call on every
+//! startup and `app_unlock`.
 
-use rustpass::LockMode;
+use rustpass::{Error, LockMode};
 use serde::Deserialize;
 
 use crate::AppState;
-use crate::app_config::APP_CONFIG_SCHEMA_VERSION;
 use crate::identity::apply_security_caches;
+use crate::migrations::MigrationOutcome;
 
-// TODO: v1.0.0 — remove this module (`migrate_config_scope` +
-// `LegacyRepoConfig`), the `schema_version` gate on `AppConfig`, and the call
-// sites (`init_state`, `app_unlock`) once all users have migrated. Mirrors
-// `run_seal_migrate_once`'s removal TODO in `applock.rs`. (Plain `//`, not a doc
-// comment — this is a free-floating reminder, not an item doc.)
+// NOTE: this migration carries the v1.0.0 removal TODO for the whole registry —
+// see `migrations/mod.rs`.
 
 /// The legacy `repo.json` shape for the 5 fields that moved to `AppConfig`.
-/// Deserialize-only — used by [`migrate_config_scope`] to recover values the
-/// slimmed `RepoConfig` drops on deserialize (serde ignores unknown fields, so
-/// this reads a pre-split `repo.json` even though it also carries repo-scoped
+/// Deserialize-only — used by [`apply`] to recover values the slimmed
+/// `RepoConfig` drops on deserialize (serde ignores unknown fields, so this
+/// reads a pre-split `repo.json` even though it also carries repo-scoped
 /// fields). Defaults mirror the old `RepoConfig` so a file missing some keys
 /// still parses.
 #[derive(Debug, Deserialize)]
@@ -55,23 +50,24 @@ fn default_autosync_true() -> bool {
 }
 
 /// Copy the 5 app-scoped behavior prefs from a pre-split `repo.json` into
-/// `app.json` (mutating the cached `AppConfig`, preserving `secure_screen`/
-/// `locale`), bump `schema_version`, save, and re-seed the security caches +
-/// the `Store`'s injected `autosync`.
+/// `app.json` (mutating the cached `AppConfig`, preserving the app-scoped prefs
+/// already there), bump `schema_version`, save, and re-seed the security caches
+/// + the `Store`'s injected `autosync`.
 ///
-/// Soft-skips (stays pending) when the master key is unavailable — the app-lock
-/// case, where the sealed `repo.json` read fails `SEAL_KEY_UNAVAILABLE` until
-/// biometric injects the key; retried on the next `app_unlock`. On a missing or
-/// unparseable `repo.json` (fresh install / post-reset), marks the migration
-/// done without copying anything.
-pub(crate) async fn migrate_config_scope(state: &AppState) {
-    if state.app_config.get().schema_version >= APP_CONFIG_SCHEMA_VERSION {
-        return;
-    }
+/// Outcomes:
+/// - `SEAL_KEY_UNAVAILABLE` → [`MigrationOutcome::Pending`] (app-lock; the
+///   sealed `repo.json` read fails until biometric injects the key; retried on
+///   the next `app_unlock`).
+/// - missing/unparseable `repo.json` (fresh install / post-reset / parse error)
+///   → bump `schema_version` and return `Done` with nothing copied.
+/// - otherwise → copy, bump, save, re-seed, `Done`. A save failure is
+///   propagated as `Err` so the engine leaves `schema_version` below target and
+///   retries on the next run (never marks itself done without persisting).
+pub(crate) async fn apply(state: &AppState) -> Result<MigrationOutcome, Error> {
     match state.store.load_repo_config_as::<LegacyRepoConfig>().await {
         Ok(legacy) => {
             // Mutate the cached AppConfig — never build a fresh one (would wipe
-            // secure_screen/locale). Preserve everything but the 5 fields + the
+            // the app-scoped prefs). Preserve everything but the 5 fields + the
             // version.
             let mut cfg = state.app_config.get();
             cfg.lock_mode = legacy.lock_mode;
@@ -79,26 +75,30 @@ pub(crate) async fn migrate_config_scope(state: &AppState) {
             cfg.clipboard_clear_secs = legacy.clipboard_clear_secs;
             cfg.autosync = legacy.autosync;
             cfg.biometric_app_lock = legacy.biometric_app_lock;
-            cfg.schema_version = APP_CONFIG_SCHEMA_VERSION;
-            if let Err(e) = state.app_config.save(&cfg).await {
-                log::warn!("config-scope migration save failed: {e}");
-                return; // stay below target; retried on the next run
-            }
+            cfg.schema_version = super::APP_CONFIG_SCHEMA_VERSION;
+            // Propagate a save failure as Err so the engine leaves schema below
+            // target and retries — never mark Done without persisting.
+            state.app_config.save(&cfg).await?;
             // Re-seed every cache that reads these values.
             apply_security_caches(state);
             state.store.set_autosync(cfg.autosync);
+            Ok(MigrationOutcome::Done)
         }
         Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => {
             // App-lock: master key not available yet. Stay pending; the next
             // app_unlock (after biometric injects the key) retries.
+            Ok(MigrationOutcome::Pending)
         }
         Err(e) => {
             // No repo.json (fresh install / post-reset) or a parse error — bump
-            // schema_version so we don't retry forever; nothing to copy.
-            log::warn!("config-scope migration: nothing to copy ({e}); marking done");
+            // schema_version so we don't retry forever; nothing to copy. The
+            // schema-bump save is best-effort (a failure here just retries the
+            // no-op bump next run).
+            log::warn!("0002_config_scope_split: nothing to copy ({e}); marking done");
             let mut cfg = state.app_config.get();
-            cfg.schema_version = APP_CONFIG_SCHEMA_VERSION;
+            cfg.schema_version = super::APP_CONFIG_SCHEMA_VERSION;
             let _ = state.app_config.save(&cfg).await;
+            Ok(MigrationOutcome::Done)
         }
     }
 }

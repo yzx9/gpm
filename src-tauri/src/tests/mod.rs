@@ -18,7 +18,7 @@
 mod clipboard_clear;
 mod git_commands;
 mod lock_state;
-mod migrate;
+mod migrations;
 mod read_commands;
 mod seal_migrate;
 mod setup_flow;

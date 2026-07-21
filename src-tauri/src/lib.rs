@@ -38,7 +38,7 @@ mod generator;
 mod git;
 mod identity;
 mod logging;
-mod migrate;
+mod migrations;
 mod page;
 mod read;
 mod setup;
@@ -254,7 +254,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // Copy the app-scoped behavior prefs out of a pre-split repo.json into
     // app.json (no-op once migrated; soft-skips under app-lock — retried on
     // app_unlock). Safe at startup when the master key is available (no app-lock).
-    tauri::async_runtime::block_on(migrate::migrate_config_scope(&app_state));
+    tauri::async_runtime::block_on(migrations::run_app_migrations(&app_state));
     app_state
 }
 

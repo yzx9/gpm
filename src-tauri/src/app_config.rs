@@ -120,8 +120,8 @@ pub(crate) struct AppConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) biometric_app_lock: bool,
     /// Persisted-schema version for one-shot migrations. `1` is the pre-split
-    /// shape; `migrate_config_scope` bumps it to `2` after copying the behavior
-    /// prefs out of `repo.json`.
+    /// shape; the `migrations` registry bumps it as each step runs (target:
+    /// `migrations::APP_CONFIG_SCHEMA_VERSION`).
     #[serde(default = "default_schema_version")]
     pub(crate) schema_version: u32,
     /// Persisted diagnostics log level (`None` ⇒ default `Info`). One of
@@ -192,11 +192,6 @@ impl AppConfig {
             .unwrap_or(DEFAULT_CLIPBOARD_CLEAR_SECS)
     }
 }
-
-/// `app.json` schema version once [`migrate_config_scope`] has copied the
-/// behavior prefs out of `repo.json`. The migration gates on
-/// `schema_version < APP_CONFIG_SCHEMA_VERSION`.
-pub(crate) const APP_CONFIG_SCHEMA_VERSION: u32 = 2;
 
 /// True if `code` is one of [`SUPPORTED_LOCALES`].
 fn is_supported_locale(code: &str) -> bool {

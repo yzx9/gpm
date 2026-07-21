@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex};
 use rustpass::{LockMode, Store};
 
 use crate::AppState;
-use crate::app_config::{APP_CONFIG_SCHEMA_VERSION, AppConfigStore};
-use crate::migrate::migrate_config_scope;
+use crate::app_config::AppConfigStore;
+use crate::migrations::{APP_CONFIG_SCHEMA_VERSION, run_app_migrations};
 
 /// Build an `AppState` over `store` + `app_config` with inert default caches.
 /// The migration only touches `app_config`, `store`, and the `lock_mode` /
@@ -70,7 +70,7 @@ async fn migrate_copies_non_default_prefs_and_preserves_app_prefs() {
         AppConfigStore::new(dir.path()),
     );
 
-    migrate_config_scope(&state).await;
+    run_app_migrations(&state).await;
 
     let reloaded = AppConfigStore::new(dir.path()).get();
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
@@ -102,13 +102,13 @@ async fn migrate_is_idempotent() {
         AppConfigStore::new(dir.path()),
     );
 
-    migrate_config_scope(&state).await;
+    run_app_migrations(&state).await;
     let after_first = AppConfigStore::new(dir.path()).get();
     assert_eq!(after_first.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(after_first.lock_mode, LockMode::Idle(300));
 
     // Second run is a no-op (schema_version already at target).
-    migrate_config_scope(&state).await;
+    run_app_migrations(&state).await;
     let after_second = AppConfigStore::new(dir.path()).get();
     assert_eq!(after_second.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(after_second.lock_mode, LockMode::Idle(300));
@@ -124,7 +124,7 @@ async fn migrate_noops_and_marks_done_when_no_repo_json() {
         AppConfigStore::new(dir.path()),
     );
 
-    migrate_config_scope(&state).await;
+    run_app_migrations(&state).await;
 
     let reloaded = AppConfigStore::new(dir.path()).get();
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
