@@ -9,7 +9,7 @@ import {
   type PluginListener,
 } from "@tauri-apps/api/core";
 
-import type { LockMode } from "./common";
+import type { LockMode, SecureScreenMode } from "./common";
 
 /**
  * Device/platform IPC — mirrors `src-tauri/src/app_config.rs` plus the local
@@ -31,7 +31,7 @@ export interface SafeAreaInsets {
  *  before unlock for the first-paint injection + app-lock biometric screen, so
  *  the whole file stays master-key-independent. The behavior prefs moved here
  *  from `RepoConfig` in the RFC 0038 scope split.
- *  - `secure_screen`: master screen-capture-protection toggle.
+ *  - `secure_screen_mode`: three-state screen-capture-protection mode.
  *  - `locale`: display-language override. Absent (not `null`) ⇒ track system;
  *    `"en"` / `"zh-CN"` ⇒ pinned.
  *  - `theme_mode`: color-scheme override. Absent (not `null`) ⇒ track system
@@ -41,7 +41,9 @@ export interface SafeAreaInsets {
 export interface AppConfig {
   /** Persisted-schema version (one-shot migration gate). Absent ⇒ 1. */
   schema_version?: number;
-  secure_screen: boolean;
+  /** Three-state screen-capture protection (mirrors Rust `SecureScreenMode`).
+   *  Absent ⇒ `"sensitive"`. */
+  secure_screen_mode?: SecureScreenMode;
   locale?: string;
   /** Color-scheme override. Absent ⇒ track system; `"light"` / `"dark"` ⇒
    *  pinned (applied via a `<html data-theme>` attribute by `@/theme`). */
@@ -65,19 +67,23 @@ export interface AppConfig {
 }
 
 /**
- * Read the persisted app config. {@link AppConfig.secure_screen} is the master
- * screen-capture-protection toggle.
+ * Read the persisted app config. {@link AppConfig.secure_screen_mode} is the
+ * three-state screen-capture-protection mode.
  */
 export async function getAppConfig(): Promise<AppConfig> {
   return invoke<AppConfig>("get_app_config");
 }
 
 /**
- * Persist the master screen-capture-protection toggle (`set_secure_screen`).
- * Independent of the per-route plugin flag pushed by {@link setSecure}.
+ * Persist the three-state screen-capture-protection mode
+ * (`set_secure_screen_mode`). Returns the updated config; the caller re-applies
+ * the current route's secure state on receipt. Independent of the per-route
+ * plugin flag pushed by {@link setSecure}.
  */
-export async function setSecureScreen(enabled: boolean): Promise<void> {
-  await invoke("set_secure_screen", { enabled });
+export async function setSecureScreenMode(
+  mode: SecureScreenMode,
+): Promise<AppConfig> {
+  return invoke<AppConfig>("set_secure_screen_mode", { mode });
 }
 
 /**

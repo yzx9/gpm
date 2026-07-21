@@ -128,7 +128,6 @@ describe("EntryDetailPage", () => {
 
       // Lowering the setting to 10s re-arms from a fresh deadline.
       securitySettings.applySecurityConfig({
-        secure_screen: true,
         view_clear_secs: 10,
       });
       await flushPromises();

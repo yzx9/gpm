@@ -132,15 +132,18 @@
   },
   "secureScreen": {
     "title": "截屏保护",
-    "description": "在显示敏感信息的页面（设置、创建、生成、条目、设置 —— 含 SSH 密钥导出）阻止截屏与录屏。仅 Android 可用。",
+    "description": "阻止截屏与录屏。仅 Android 可用。",
     "legend": "阻止截屏",
-    "on": "开",
-    "off": "关",
-    "onHint": "敏感页面已阻止截屏；条目列表与历史记录仍可截取。",
+    "off": "关闭",
+    "sensitive": "敏感",
+    "always": "始终",
     "offHint": "无页面阻止截屏。",
-    "saveFailed": "无法保存截屏设置 —— 请重试",
-    "blockedToast": "敏感页面已阻止截屏",
-    "allowedToast": "已允许截屏"
+    "sensitiveHint": "设置、创建、生成、条目、编辑与身份页面阻止截屏；条目列表、历史记录及其他非敏感页面仍可截取。",
+    "alwaysHint": "所有页面始终阻止截屏。",
+    "offToast": "已允许截屏",
+    "sensitiveToast": "敏感页面已阻止截屏",
+    "alwaysToast": "所有页面已阻止截屏",
+    "saveFailed": "无法保存截屏设置 —— 请重试"
   },
   "autosync": {
     "title": "自动同步",

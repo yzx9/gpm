@@ -38,13 +38,13 @@ function historyPosition(): number {
  * entry by the time router guards run, so a before-capture cannot tell back
  * from forward. Comparing two settled positions dodges that entirely.
  *
- * Secure↔non-secure transitions are forced to `""` (no animation) ONLY while
- * screen-capture protection is active (`secureAvailable && secureScreen`): a
- * simultaneous slide there would leave the departing secure page visible while
- * the secure-screen guard (in `main.ts`) clears `FLAG_SECURE` for the arriving
- * non-secure route — a capture window. With protection off (or on desktop,
- * where `FLAG_SECURE` is never set) the window flag is constant across routes,
- * so there is no boundary to freeze on and every navigation animates for a
+ * Secure↔non-secure transitions are forced to `""` (no animation) ONLY in
+ * `"sensitive"` mode (when `secureAvailable`): a simultaneous slide there would
+ * leave the departing secure page visible while the secure-screen guard (in
+ * `main.ts`) clears `FLAG_SECURE` for the arriving non-secure route — a capture
+ * window. Under `"off"` / `"always"` (or on desktop, where `FLAG_SECURE` is
+ * never set, or is constant) the window flag does not toggle across routes, so
+ * there is no boundary to freeze on and every navigation animates for a
  * consistent feel. Like-to-like swaps carry no secure-screen concern and
  * animate freely.
  */
@@ -65,13 +65,16 @@ export function createNavDirection(
       return;
     }
     // Only the realistic capture window (protection active) freezes the slide.
-    // With the master toggle off / on desktop, FLAG_SECURE never toggles between
-    // routes, so there's no boundary — animate every navigation for consistency.
-    // Pre-`initSecureScreen`, `secureAvailable` is briefly false on Android; the
-    // initial nav never animates, and the `MainActivity.onCreate` secure-boot
-    // default holds FLAG_SECURE on until then — so no window opens early.
+    // FLAG_SECURE only toggles between routes in `"sensitive"` mode (a secret
+    // route vs. the capturable list); under `"off"` / `"always"` it is constant,
+    // so there's no boundary — animate every navigation for consistency. On
+    // desktop `secureAvailable` is false, so the same holds. Pre-`initSecureScreen`
+    // `secureAvailable` is briefly false on Android; the initial nav never
+    // animates, and the `MainActivity.onCreate` secure-boot default holds
+    // FLAG_SECURE on until then — so no window opens early.
     const protectionActive =
-      secureState.secureAvailable.value && secureState.secureScreen.value;
+      secureState.secureAvailable.value &&
+      secureState.secureScreenMode.value === "sensitive";
     const crossesSecure =
       protectionActive && !!from.meta?.secure !== !!to.meta?.secure;
     if (crossesSecure) {

@@ -77,7 +77,7 @@ describe("createNavDirection", () => {
   });
 
   it("freezes the transition on a secure boundary while protection is on", async () => {
-    const secureState = createSecureScreen({ available: true }); // toggle ON
+    const secureState = createSecureScreen({ available: true }); // sensitive (default)
     const router = buildRouter();
     const { transitionName } = createNavDirection(router, secureState);
 
@@ -88,16 +88,27 @@ describe("createNavDirection", () => {
     expect(transitionName.value).toBe("");
   });
 
-  it("slides across a secure boundary when the master toggle is off", async () => {
-    const secureState = createSecureScreen({ available: true });
-    secureState.secureScreen.value = false; // user disabled screen-capture protection
+  it("slides across a secure boundary under off mode", async () => {
+    const secureState = createSecureScreen({ available: true, mode: "off" });
     const router = buildRouter();
     const { transitionName } = createNavDirection(router, secureState);
 
     await goto(router, "/secret", 1); // initial paint ⇒ ""
-    // Same secure→non-secure boundary as above, but protection is off so
+    // Same secure→non-secure boundary as above, but under off mode
     // FLAG_SECURE never toggles between routes — the slide animates normally.
     await goto(router, "/", 2);
+    expect(transitionName.value).toBe("slide-forward");
+  });
+
+  it("slides across a secure boundary under always mode", async () => {
+    // Under always, FLAG_SECURE is constant across routes (always on), so the
+    // boundary freeze (a sensitive-only behavior) does not apply either.
+    const secureState = createSecureScreen({ available: true, mode: "always" });
+    const router = buildRouter();
+    const { transitionName } = createNavDirection(router, secureState);
+
+    await goto(router, "/secret", 1); // initial paint ⇒ ""
+    await goto(router, "/", 2); // secure→non-secure boundary, always ⇒ slide
     expect(transitionName.value).toBe("slide-forward");
   });
 

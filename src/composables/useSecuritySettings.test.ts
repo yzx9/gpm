@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/api/core");
 
 /** Minimal AppConfig varying view-clear seconds and (optionally) lock mode. */
 function cfg(view_clear_secs: number | null, lock_mode?: LockMode): AppConfig {
-  return { secure_screen: true, view_clear_secs, lock_mode };
+  return { view_clear_secs, lock_mode };
 }
 
 describe("useSecuritySettings", () => {

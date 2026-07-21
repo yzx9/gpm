@@ -132,15 +132,18 @@
   },
   "secureScreen": {
     "title": "Screen capture protection",
-    "description": "Block screenshots and screen recording on pages that show secrets (setup, create, generate, entry, settings — including the SSH key export). Android only.",
+    "description": "Block screenshots and screen recording. Android only.",
     "legend": "Block screen capture",
-    "on": "On",
     "off": "Off",
-    "onHint": "Sensitive pages block capture; the entry list and history stay capturable.",
-    "offHint": "No page blocks screen capture.",
-    "saveFailed": "Couldn't save screen-capture setting — try again",
-    "blockedToast": "Screen capture blocked on sensitive pages",
-    "allowedToast": "Screen capture allowed"
+    "sensitive": "Sensitive",
+    "always": "Always",
+    "offHint": "No screen blocks capture.",
+    "sensitiveHint": "Setup, create, generate, entry, edit and identity screens block capture; the entry list, history and other non-secret screens stay capturable.",
+    "alwaysHint": "Every screen blocks capture at all times.",
+    "offToast": "Screen capture allowed",
+    "sensitiveToast": "Screen capture blocked on sensitive screens",
+    "alwaysToast": "Screen capture blocked on every screen",
+    "saveFailed": "Couldn't save screen-capture setting — try again"
   },
   "autosync": {
     "title": "AutoSync",

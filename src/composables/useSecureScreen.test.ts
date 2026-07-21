@@ -22,7 +22,7 @@ describe("useSecureScreen", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("applySecureForRoute sets secure=true on Android for a sensitive route with the toggle ON", async () => {
+  it("applySecureForRoute sets secure=true on Android for a sensitive route under the default (sensitive) mode", async () => {
     fn().mockResolvedValue(undefined);
     const { secureAvailable, applySecureForRoute } = createSecureScreen();
     secureAvailable.value = true;
@@ -33,27 +33,39 @@ describe("useSecureScreen", () => {
     });
   });
 
-  it("applySecureForRoute sets secure=false for a non-sensitive route", async () => {
+  it("applySecureForRoute sets secure=false for a non-sensitive route under sensitive mode", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, secureScreen, applySecureForRoute } =
+    const { secureAvailable, secureScreenMode, applySecureForRoute } =
       createSecureScreen();
     secureAvailable.value = true;
-    secureScreen.value = true;
+    secureScreenMode.value = "sensitive";
     await applySecureForRoute(false);
     expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });
   });
 
-  it("applySecureForRoute sets secure=false on a sensitive route when the toggle is OFF (master override)", async () => {
+  it("applySecureForRoute forces secure=false on every route under off mode (master override)", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, secureScreen, applySecureForRoute } =
+    const { secureAvailable, secureScreenMode, applySecureForRoute } =
       createSecureScreen();
     secureAvailable.value = true;
-    secureScreen.value = false;
-    await applySecureForRoute(true);
+    secureScreenMode.value = "off";
+    await applySecureForRoute(true); // even a sensitive route
     expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
+    });
+  });
+
+  it("applySecureForRoute forces secure=true on every route under always mode", async () => {
+    fn().mockResolvedValue(undefined);
+    const { secureAvailable, secureScreenMode, applySecureForRoute } =
+      createSecureScreen();
+    secureAvailable.value = true;
+    secureScreenMode.value = "always";
+    await applySecureForRoute(false); // even a non-sensitive route
+    expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
+      secure: true,
     });
   });
 
@@ -65,22 +77,34 @@ describe("useSecureScreen", () => {
     expect(ok).toBe(false);
   });
 
-  it("initSecureScreen loads availability + toggle and reconciles the current route", async () => {
+  it("initSecureScreen loads availability + mode and reconciles the current route", async () => {
     fn().mockImplementation((cmd: string) => {
       if (cmd === "screen_secure_available") return Promise.resolve(true);
       if (cmd === "get_app_config")
-        return Promise.resolve({ secure_screen: false });
+        return Promise.resolve({ secure_screen_mode: "off" });
       return Promise.resolve(undefined); // plugin:screen-secure|set_secure
     });
-    const { secureAvailable, secureScreen, initSecureScreen } =
+    const { secureAvailable, secureScreenMode, initSecureScreen } =
       createSecureScreen();
     await initSecureScreen();
     expect(secureAvailable.value).toBe(true);
-    expect(secureScreen.value).toBe(false);
-    // Reconcile ran for the default route (non-sensitive) → shouldSecure=false.
+    expect(secureScreenMode.value).toBe("off");
+    // Reconcile ran for the default route (non-sensitive) under off → secure=false.
     expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });
+  });
+
+  it("initSecureScreen resolves an unrecognized backend mode (unknown) to sensitive", async () => {
+    fn().mockImplementation((cmd: string) => {
+      if (cmd === "screen_secure_available") return Promise.resolve(true);
+      if (cmd === "get_app_config")
+        return Promise.resolve({ secure_screen_mode: "unknown" });
+      return Promise.resolve(undefined);
+    });
+    const { secureScreenMode, initSecureScreen } = createSecureScreen();
+    await initSecureScreen();
+    expect(secureScreenMode.value).toBe("sensitive");
   });
 
   it("initSecureScreen is idempotent (availability fetched once)", async () => {
@@ -94,22 +118,22 @@ describe("useSecureScreen", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("setSecureScreen persists the toggle and re-applies the current route", async () => {
+  it("setSecureScreenMode persists the mode and re-applies the current route", async () => {
     fn().mockResolvedValue(undefined);
     const {
       secureAvailable,
-      secureScreen,
+      secureScreenMode,
       applySecureForRoute,
-      setSecureScreen,
+      setSecureScreenMode,
     } = createSecureScreen();
     secureAvailable.value = true;
-    await applySecureForRoute(true); // current route = sensitive
-    await setSecureScreen(false);
-    expect(secureScreen.value).toBe(false);
-    expect(invoke).toHaveBeenCalledWith("set_secure_screen", {
-      enabled: false,
+    await applySecureForRoute(true); // current route = sensitive (default mode)
+    await setSecureScreenMode("off");
+    expect(secureScreenMode.value).toBe("off");
+    expect(invoke).toHaveBeenCalledWith("set_secure_screen_mode", {
+      mode: "off",
     });
-    // Re-applied with the new toggle: shouldSecure = false → secure=false.
+    // Re-applied under off: secure=false.
     expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });
@@ -123,35 +147,36 @@ describe("useSecureScreen", () => {
     expect(secureAvailable.value).toBe(true);
   });
 
-  it("initSecureScreen keeps the default ON when get_app_config rejects", async () => {
+  it("initSecureScreen keeps the default sensitive mode when get_app_config rejects", async () => {
     fn().mockImplementation((cmd: string) => {
       if (cmd === "screen_secure_available") return Promise.resolve(true);
       if (cmd === "get_app_config")
         return Promise.reject(new Error("pre-setup"));
       return Promise.resolve(undefined); // plugin:screen-secure|set_secure
     });
-    const { secureScreen, initSecureScreen } = createSecureScreen();
+    const { secureScreenMode, initSecureScreen } = createSecureScreen();
     await initSecureScreen();
-    expect(secureScreen.value).toBe(true);
+    expect(secureScreenMode.value).toBe("sensitive");
   });
 
-  it("setSecureScreen reverts the ref and returns false when persistence rejects", async () => {
+  it("setSecureScreenMode reverts the ref and returns false when persistence rejects", async () => {
     fn().mockImplementation((cmd: string) => {
-      if (cmd === "set_secure_screen") return Promise.reject(new Error("disk"));
+      if (cmd === "set_secure_screen_mode")
+        return Promise.reject(new Error("disk"));
       return Promise.resolve(undefined);
     });
     const {
       secureAvailable,
-      secureScreen,
+      secureScreenMode,
       applySecureForRoute,
-      setSecureScreen,
+      setSecureScreenMode,
     } = createSecureScreen();
     secureAvailable.value = true;
-    await applySecureForRoute(true); // settle a sensitive route (toggle ON)
-    const ok = await setSecureScreen(false);
+    await applySecureForRoute(true); // settle a sensitive route (default mode)
+    const ok = await setSecureScreenMode("off");
     expect(ok).toBe(false);
     // Reverted to the prior persisted value, so UI/disk/window never desync.
-    expect(secureScreen.value).toBe(true);
+    expect(secureScreenMode.value).toBe("sensitive");
   });
 
   it("raiseSecureForRoute covers a departing secret page during the transition without committing the route level", async () => {
@@ -175,7 +200,7 @@ describe("useSecureScreen", () => {
     });
   });
 
-  it("setSecureOverlay forces FLAG_SECURE on for a non-sensitive route while the overlay is up", async () => {
+  it("setSecureOverlay forces FLAG_SECURE on for a non-sensitive route under sensitive mode while the overlay is up", async () => {
     fn().mockResolvedValue(undefined);
     const { secureAvailable, applySecureForRoute, setSecureOverlay } =
       createSecureScreen();

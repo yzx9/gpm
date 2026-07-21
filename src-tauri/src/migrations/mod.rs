@@ -28,6 +28,7 @@ use rustpass::Error;
 use crate::AppState;
 
 pub(crate) mod m0002_config_scope_split;
+pub(crate) mod m0003_secure_screen_mode;
 
 /// Outcome of a single migration step.
 ///
@@ -42,7 +43,10 @@ pub(crate) enum MigrationOutcome {
 /// Ordered `(target_version, display_name)` pairs. The engine runs each whose
 /// target exceeds the on-disk `schema_version`, in order. The last entry's
 /// version is the schema target ([`APP_CONFIG_SCHEMA_VERSION`]).
-const MIGRATIONS: &[(u32, &str)] = &[(2, "0002_config_scope_split")];
+const MIGRATIONS: &[(u32, &str)] = &[
+    (2, "0002_config_scope_split"),
+    (3, "0003_secure_screen_mode"),
+];
 
 /// The `app.json` schema version once every registered migration has run.
 /// Derived from [`MIGRATIONS`] so it never drifts from the last migration's
@@ -73,7 +77,8 @@ pub(crate) async fn run_app_migrations(state: &AppState) {
 /// Dispatch one migration by its target schema version.
 async fn apply_migration(state: &AppState, version: u32) -> Result<MigrationOutcome, Error> {
     match version {
-        2 => m0002_config_scope_split::apply(state).await,
+        2 => m0002_config_scope_split::apply(state, version).await,
+        3 => m0003_secure_screen_mode::apply(state, version).await,
         _ => unreachable!("no migration registered for schema version {version}"),
     }
 }

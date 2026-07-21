@@ -23,6 +23,12 @@ export function asAppError(e: unknown): AppError {
   return e as AppError;
 }
 
+/** Three-state screen-capture protection mode (mirrors Rust `SecureScreenMode`).
+ *  Serialized kebab-case: `"off"` / `"sensitive"` / `"always"`. The backend may
+ *  also send `"unknown"` (a forward-compat sink for a value from a newer build)
+ *  or omit the field — `useSecureScreen` resolves both to `"sensitive"`. */
+export type SecureScreenMode = "off" | "sensitive" | "always";
+
 export interface RepoConfig {
   url: string;
   pat: string | null;

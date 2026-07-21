@@ -188,7 +188,7 @@ describe("SettingsGeneralPage", () => {
     }
 
     it("applies a pinned locale in-memory first, then persists it", async () => {
-      when("get_app_config", { secure_screen: true }); // no locale ⇒ "system"
+      when("get_app_config", {}); // no locale ⇒ "system"
       const { wrapper, toast } = mountWithApp(SettingsGeneralPage);
       await flushPromises();
 
@@ -206,7 +206,7 @@ describe("SettingsGeneralPage", () => {
     });
 
     it("rolls back to the prior selection when persisting fails", async () => {
-      when("get_app_config", { secure_screen: true, locale: "en" }); // prior = en
+      when("get_app_config", { locale: "en" }); // prior = en
       reject("set_locale_pref", { code: "CONFIG_ERROR", message: "no" });
       const { wrapper, toast } = mountWithApp(SettingsGeneralPage);
       await flushPromises();
@@ -224,7 +224,7 @@ describe("SettingsGeneralPage", () => {
     });
 
     it("'system' resolves through the backend and clears the override", async () => {
-      when("get_app_config", { secure_screen: true, locale: "en" });
+      when("get_app_config", { locale: "en" });
       when("resolved_locale", "zh-CN");
       const wrapper = mountPage();
       await flushPromises();
@@ -255,7 +255,7 @@ describe("SettingsGeneralPage", () => {
     }
 
     it("reflects the persisted theme_mode on load", async () => {
-      when("get_app_config", { secure_screen: true, theme_mode: "dark" });
+      when("get_app_config", { theme_mode: "dark" });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -263,7 +263,7 @@ describe("SettingsGeneralPage", () => {
     });
 
     it("applies a pinned theme to <html data-theme> and persists it", async () => {
-      when("get_app_config", { secure_screen: true }); // no theme_mode ⇒ system
+      when("get_app_config", {}); // no theme_mode ⇒ system
       const { wrapper, toast } = mountWithApp(SettingsGeneralPage);
       await flushPromises();
 
@@ -279,7 +279,7 @@ describe("SettingsGeneralPage", () => {
     });
 
     it("rolls back the picker and the applied theme when persisting fails", async () => {
-      when("get_app_config", { secure_screen: true, theme_mode: "light" }); // prior = light
+      when("get_app_config", { theme_mode: "light" }); // prior = light
       reject("set_theme_mode", { code: "CONFIG_ERROR", message: "no" });
       const { wrapper, toast } = mountWithApp(SettingsGeneralPage);
       await flushPromises();
@@ -298,7 +298,7 @@ describe("SettingsGeneralPage", () => {
     });
 
     it("'system' clears the override (persists null and removes the attribute)", async () => {
-      when("get_app_config", { secure_screen: true, theme_mode: "dark" }); // prior = dark
+      when("get_app_config", { theme_mode: "dark" }); // prior = dark
       const wrapper = mountPage();
       await flushPromises();
 
@@ -308,6 +308,41 @@ describe("SettingsGeneralPage", () => {
 
       expect(document.documentElement.dataset.theme).toBeUndefined();
       expect(invoke).toHaveBeenCalledWith("set_theme_mode", { mode: null });
+    });
+  });
+
+  describe("secure-screen picker", () => {
+    function findSecurePicker(wrapper: ReturnType<typeof mountPage>) {
+      return (
+        wrapper.findAllComponents(
+          BaseSegmentedControl,
+        ) as unknown as VueWrapper<any>[]
+      ).find((c) => c.props("name") === "secure-screen");
+    }
+
+    it("renders the three-state picker defaulting to sensitive", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const picker = findSecurePicker(wrapper);
+      expect(picker).toBeTruthy();
+      expect(picker?.props("modelValue")).toBe("sensitive");
+    });
+
+    it("persists a new mode via set_secure_screen_mode and toasts", async () => {
+      const { wrapper, toast } = mountWithApp(SettingsGeneralPage);
+      await flushPromises();
+
+      const picker = findSecurePicker(wrapper)!;
+      picker.vm.$emit("change", "always");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_secure_screen_mode", {
+        mode: "always",
+      });
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("every screen")),
+      ).toBe(true);
     });
   });
 });

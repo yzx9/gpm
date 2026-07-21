@@ -69,13 +69,39 @@ const DEFAULT_LOCALE: &str = "en";
 /// The behavior prefs (`lock_mode`, clear timers, `autosync`,
 /// `biometric_app_lock`) moved here from `RepoConfig` (the RFC 0038 scope split)
 /// so they survive a repository re-setup instead of being wiped with repo data.
+/// Three-state screen-capture protection mode. Serialized kebab-case as
+/// `"off"` / `"sensitive"` / `"always"`. [`SecureScreenMode::Unknown`] is a
+/// forward-compatibility sink (`#[serde(other)]`): a value written by a newer
+/// build deserializes to `Unknown` instead of failing `AppConfig` parsing
+/// (which would wipe the whole config back to defaults). The frontend treats
+/// `None` and `Unknown` as the sensitive default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SecureScreenMode {
+    Off,
+    Sensitive,
+    Always,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AppConfig {
-    /// Master toggle for per-page screen-capture protection. Default ON
-    /// (`true`): sensitive routes block screenshots/recording. When `false`,
-    /// no page is ever secured (the user explicitly allowed capture).
+    /// **Deprecated** boolean master toggle, kept only so migration
+    /// `0003_secure_screen_mode` can recover the pre-three-state value; removed
+    /// at v1.0.0 with the rest of the migration registry. Default ON (`true`).
     #[serde(default = "default_secure_screen")]
     pub(crate) secure_screen: bool,
+    /// Three-state screen-capture protection. `None` (the default) ⇒
+    /// `Sensitive` (the frontend resolves `None`/`Unknown` to `Sensitive`):
+    /// sensitive routes + nav transitions + the unlock overlay block capture,
+    /// the entry list / history stay capturable. `Off` ⇒ no screen is ever
+    /// secured (the user explicitly allowed capture, including the unlock
+    /// overlay). `Always` ⇒ every screen is secured at all times.
+    /// `skip_serializing_if` keeps the field out of `app.json` while `None`, so
+    /// a default config stays byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) secure_screen_mode: Option<SecureScreenMode>,
     /// Display-language override. `None` (the default) means "track the system
     /// language" — the backend resolves the system locale at boot. `Some("en")`
     /// / `Some("zh-CN")` pins the locale explicitly. `skip_serializing_if`
@@ -139,6 +165,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             secure_screen: default_secure_screen(),
+            secure_screen_mode: None,
             locale: None,
             theme_mode: None,
             lock_mode: LockMode::default(),
@@ -146,7 +173,10 @@ impl Default for AppConfig {
             clipboard_clear_secs: None,
             autosync: default_autosync_true(),
             biometric_app_lock: false,
-            schema_version: default_schema_version(),
+            // A brand-new config starts at the current target so it skips the
+            // legacy no-op migrations. (The serde missing-key default below
+            // stays at 1 so a pre-split app.json still runs the registry.)
+            schema_version: crate::migrations::APP_CONFIG_SCHEMA_VERSION,
             log_level: None,
         }
     }
@@ -177,8 +207,13 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
-/// Serde default for [`AppConfig::schema_version`] — `1` (the version before
-/// the config-scope migration existed). The migration bumps it to `2`.
+/// Serde default for [`AppConfig::schema_version`] when the key is missing —
+/// `1`, the version before the config-scope migration existed. A pre-split
+/// `app.json` that omits the key must still run the registry (otherwise it
+/// would skip straight to the target and silently lose the scope split + the
+/// bool→mode conversion), so this stays at `1`. A brand-new install is built
+/// via [`AppConfig::default`], which starts at `APP_CONFIG_SCHEMA_VERSION`
+/// instead (skipping the legacy no-op steps) — the two differ on purpose.
 fn default_schema_version() -> u32 {
     1
 }
@@ -438,6 +473,23 @@ impl AppConfigStore {
         validate_theme_mode(mode.as_deref())?;
         self.update(|cfg| cfg.theme_mode = mode).await
     }
+
+    /// Set the persisted three-state screen-capture mode. Rejects
+    /// [`SecureScreenMode::Unknown`] (a deserialization sink, not a settable
+    /// value). The frontend re-applies the route's secure state on receipt, so
+    /// this stays a pure persistence step mirroring `set_theme_mode`.
+    pub(crate) async fn set_secure_screen_mode(
+        &self,
+        mode: SecureScreenMode,
+    ) -> Result<AppConfig, Error> {
+        if mode == SecureScreenMode::Unknown {
+            return Err(Error::new(
+                ErrorCode::ConfigError,
+                "Unknown is not a settable screen-capture mode",
+            ));
+        }
+        self.update(|cfg| cfg.secure_screen_mode = Some(mode)).await
+    }
 }
 
 /// Whether the screen-secure plugin is available on this platform. Compile-time
@@ -459,18 +511,17 @@ pub(crate) fn get_app_config(state: State<'_, AppState>) -> AppConfig {
     state.app_config.get()
 }
 
-/// Set the screen-capture master toggle and persist it. Returns the updated
-/// config; the frontend re-applies the current route's secure state on receipt.
+/// Set the three-state screen-capture protection mode and persist it. Returns
+/// the updated config; the frontend re-applies the current route's secure
+/// state on receipt. [`SecureScreenMode::Unknown`] is rejected — it is a
+/// deserialization sink, not a value the UI may set.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn set_secure_screen(
+pub(crate) async fn set_secure_screen_mode(
     state: State<'_, AppState>,
-    enabled: bool,
+    mode: SecureScreenMode,
 ) -> Result<AppConfig, Error> {
-    let mut cfg = state.app_config.get();
-    cfg.secure_screen = enabled;
-    state.app_config.save(&cfg).await?;
-    Ok(cfg)
+    state.app_config.set_secure_screen_mode(mode).await
 }
 
 /// Set the display-language preference and persist it. `locale: null` clears
@@ -961,6 +1012,113 @@ mod tests {
         assert!(
             is_supported_locale(&resolved),
             "init script locale must be supported, got {resolved}"
+        );
+    }
+
+    #[test]
+    fn default_secure_screen_mode_is_none() {
+        assert!(AppConfig::default().secure_screen_mode.is_none());
+    }
+
+    /// `#[serde(other)]` sinks a value written by a newer build to `Unknown`
+    /// instead of failing `AppConfig` deserialization (which would wipe the
+    /// whole config). The frontend resolves `Unknown` to the sensitive default.
+    #[test]
+    fn secure_screen_mode_unknown_sinks_via_serde_other() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(APP_CONFIG_FILE),
+            r#"{"secure_screen_mode":"some-future-mode"}"#,
+        )
+        .unwrap();
+        let cfg = store_at(dir.path()).get();
+        assert_eq!(cfg.secure_screen_mode, Some(SecureScreenMode::Unknown));
+    }
+
+    #[tokio::test]
+    async fn secure_screen_mode_roundtrips_through_save() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        for mode in [
+            SecureScreenMode::Off,
+            SecureScreenMode::Sensitive,
+            SecureScreenMode::Always,
+        ] {
+            store
+                .set_secure_screen_mode(mode)
+                .await
+                .expect("set succeeds");
+            assert_eq!(
+                store_at(dir.path()).get().secure_screen_mode,
+                Some(mode),
+                "{mode:?} round-trips",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn secure_screen_mode_omitted_on_disk_when_none() {
+        // skip_serializing_if keeps the field out of app.json while None, so a
+        // default config stays byte-identical.
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .save(&AppConfig {
+                secure_screen_mode: None,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        assert!(
+            !on_disk.contains("secure_screen_mode"),
+            "secure_screen_mode must be absent when None; got: {on_disk}",
+        );
+    }
+
+    #[tokio::test]
+    async fn set_secure_screen_mode_persists_and_rejects_unknown() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store
+            .set_secure_screen_mode(SecureScreenMode::Always)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get().secure_screen_mode,
+            Some(SecureScreenMode::Always)
+        );
+        // Unknown is a deserialization sink, not a settable value.
+        let err = store
+            .set_secure_screen_mode(SecureScreenMode::Unknown)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "CONFIG_ERROR");
+        // The rejected value did not mutate the store.
+        assert_eq!(
+            store.get().secure_screen_mode,
+            Some(SecureScreenMode::Always)
+        );
+    }
+
+    #[test]
+    fn serde_missing_key_schema_default_stays_at_one() {
+        // The serde missing-key default stays at 1: a pre-split app.json that
+        // omits the key must still run the registry (otherwise it would skip
+        // straight to the target and silently lose the scope split + the
+        // bool→mode conversion). A brand-new config uses AppConfig::default,
+        // tested below.
+        assert_eq!(default_schema_version(), 1);
+    }
+
+    #[test]
+    fn default_config_starts_at_current_schema_target() {
+        // A brand-new install skips the legacy no-op migrations by starting at
+        // the registry's target. (Existing files keep their own schema_version;
+        // only a missing key falls back to the serde default of 1.)
+        assert_eq!(
+            AppConfig::default().schema_version,
+            crate::migrations::APP_CONFIG_SCHEMA_VERSION,
         );
     }
 }

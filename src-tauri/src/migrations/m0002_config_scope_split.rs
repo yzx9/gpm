@@ -63,7 +63,7 @@ fn default_autosync_true() -> bool {
 /// - otherwise → copy, bump, save, re-seed, `Done`. A save failure is
 ///   propagated as `Err` so the engine leaves `schema_version` below target and
 ///   retries on the next run (never marks itself done without persisting).
-pub(crate) async fn apply(state: &AppState) -> Result<MigrationOutcome, Error> {
+pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOutcome, Error> {
     match state.store.load_repo_config_as::<LegacyRepoConfig>().await {
         Ok(legacy) => {
             // Mutate the cached AppConfig — never build a fresh one (would wipe
@@ -75,7 +75,7 @@ pub(crate) async fn apply(state: &AppState) -> Result<MigrationOutcome, Error> {
             cfg.clipboard_clear_secs = legacy.clipboard_clear_secs;
             cfg.autosync = legacy.autosync;
             cfg.biometric_app_lock = legacy.biometric_app_lock;
-            cfg.schema_version = super::APP_CONFIG_SCHEMA_VERSION;
+            cfg.schema_version = version;
             // Propagate a save failure as Err so the engine leaves schema below
             // target and retries — never mark Done without persisting.
             state.app_config.save(&cfg).await?;
@@ -91,13 +91,14 @@ pub(crate) async fn apply(state: &AppState) -> Result<MigrationOutcome, Error> {
         }
         Err(e) => {
             // No repo.json (fresh install / post-reset) or a parse error — bump
-            // schema_version so we don't retry forever; nothing to copy. The
-            // schema-bump save is best-effort (a failure here just retries the
-            // no-op bump next run).
+            // schema_version so we don't retry forever; nothing to copy. A save
+            // failure is propagated so the engine retries (matching the copy
+            // branch above) — never return Done without persisting the bump, or
+            // the engine's `debug_assert_eq!(schema_version, version)` fires.
             log::warn!("0002_config_scope_split: nothing to copy ({e}); marking done");
             let mut cfg = state.app_config.get();
-            cfg.schema_version = super::APP_CONFIG_SCHEMA_VERSION;
-            let _ = state.app_config.save(&cfg).await;
+            cfg.schema_version = version;
+            state.app_config.save(&cfg).await?;
             Ok(MigrationOutcome::Done)
         }
     }

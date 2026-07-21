@@ -76,7 +76,7 @@ describe("SettingsLockingPage", () => {
   });
 
   it("switching the auto-lock mode invokes set_lock_mode", async () => {
-    when("set_lock_mode", { secure_screen: true, lock_mode: { idle: 60 } });
+    when("set_lock_mode", { lock_mode: { idle: 60 } });
     const wrapper = mountPage();
     await flushPromises();
 
@@ -90,7 +90,7 @@ describe("SettingsLockingPage", () => {
   });
 
   it("switching the view auto-clear invokes set_view_clear_secs", async () => {
-    when("set_view_clear_secs", { secure_screen: true, view_clear_secs: 10 });
+    when("set_view_clear_secs", { view_clear_secs: 10 });
     const wrapper = mountPage();
     await flushPromises();
 

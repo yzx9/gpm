@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import type { AppConfig, AppError } from "@/api";
+import type { AppConfig, AppError, SecureScreenMode } from "@/api";
 import {
   resetConfig as apiResetConfig,
   getAppConfig,
@@ -102,7 +102,8 @@ const appConfig = ref<AppConfig | null>(null);
 const loading = ref(false);
 const error = ref("");
 
-const { secureScreen, secureAvailable, setSecureScreen } = useSecureScreen();
+const { secureScreenMode, secureAvailable, setSecureScreenMode } =
+  useSecureScreen();
 
 async function loadConfig() {
   loading.value = true;
@@ -119,17 +120,27 @@ async function loadConfig() {
   }
 }
 
-async function onSecureScreenChange(enabled: boolean) {
-  const ok = await setSecureScreen(enabled);
-  if (!ok) {
-    toast.danger(t("settings.secureScreen.saveFailed"));
-    return;
+// Guards the picker against rapid taps firing concurrent setSecureScreenMode
+// calls — mirrors the theme picker's loading guard.
+const secureScreenLoading = ref(false);
+
+async function onSecureScreenChange(selection: string) {
+  if (secureScreenLoading.value) return;
+  // The picker emits the option value; narrow to the union. An unexpected value
+  // (defensive) resolves to "sensitive".
+  const mode: SecureScreenMode =
+    selection === "off" || selection === "always" ? selection : "sensitive";
+  secureScreenLoading.value = true;
+  try {
+    const ok = await setSecureScreenMode(mode);
+    if (!ok) {
+      toast.danger(t("settings.secureScreen.saveFailed"));
+      return;
+    }
+    toast.success(t(`settings.secureScreen.${mode}Toast`));
+  } finally {
+    secureScreenLoading.value = false;
   }
-  toast.success(
-    enabled
-      ? t("settings.secureScreen.blockedToast")
-      : t("settings.secureScreen.allowedToast"),
-  );
 }
 
 const autosyncEnabled = computed(() => appConfig.value?.autosync ?? true);
@@ -259,21 +270,21 @@ onMounted(() => {
         <BaseSegmentedControl
           name="secure-screen"
           :legend="t('settings.secureScreen.legend')"
-          :model-value="secureScreen"
+          :model-value="secureScreenMode"
           :options="[
-            { label: t('settings.secureScreen.on'), value: true },
-            { label: t('settings.secureScreen.off'), value: false },
+            { label: t('settings.secureScreen.off'), value: 'off' },
+            {
+              label: t('settings.secureScreen.sensitive'),
+              value: 'sensitive',
+            },
+            { label: t('settings.secureScreen.always'), value: 'always' },
           ]"
+          :disabled="secureScreenLoading"
           @change="onSecureScreenChange"
         >
           <template #hint>
             <p class="text-xs text-muted mt-1">
-              <template v-if="secureScreen">{{
-                t("settings.secureScreen.onHint")
-              }}</template>
-              <template v-else>{{
-                t("settings.secureScreen.offHint")
-              }}</template>
+              {{ t(`settings.secureScreen.${secureScreenMode}Hint`) }}
             </p>
           </template>
         </BaseSegmentedControl>

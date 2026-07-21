@@ -367,7 +367,7 @@ pub fn run() {
             config::reset_config,
             // app config: screen-capture master toggle + display language + theme + platform availability
             app_config::get_app_config,
-            app_config::set_secure_screen,
+            app_config::set_secure_screen_mode,
             app_config::set_locale_pref,
             app_config::resolved_locale,
             app_config::set_theme_mode,

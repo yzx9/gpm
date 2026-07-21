@@ -43,7 +43,7 @@ export const httpsConfig = {
  */
 export const baseDefaults: Record<string, unknown> = {
   get_config: httpsConfig,
-  get_app_config: { secure_screen: true },
+  get_app_config: {},
   // App-launch biometric gate reads Keystore truth (Path B), not the flag.
   get_app_lock_state: { enabled: false, locked: false },
   get_auth_state: {
