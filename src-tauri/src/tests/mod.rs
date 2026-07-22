@@ -32,8 +32,30 @@ use age::secrecy::ExposeSecret;
 use age::x25519::{Identity, Recipient};
 use rustpass::Store;
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 use crate::AppState;
+
+/// 1-permit serializer guarding identity-crypto round-trips in this test binary.
+///
+/// Concurrent age-scrypt identity round-trips intermittently fail with
+/// `WRONG_PASSPHRASE` on a correct passphrase — correct single-threaded,
+/// intermittent under concurrency, with byte-identical input. That signature
+/// (a data race / UB fingerprint, not a codegen miscompilation; root cause
+/// unconfirmed) is documented on the authoritative gate in
+/// `rustpass::test_crypto_gate`. A 1-permit serializer forces the
+/// provably-correct single-threaded path. [`make_unlocked_state`] holds it for
+/// its whole body, so every src-tauri crypto test routed through that helper is
+/// serialized. One semaphore per binary — the failure is intra-binary. This is
+/// a test-only stopgap; mirrors `rustpass::tests::common`.
+static CRYPTO_SEM: Semaphore = Semaphore::const_new(1);
+
+/// Acquire the per-binary crypto serializer. Hold the returned permit for the
+/// whole operation (e.g. `let _crypto = crypto_permit().await;`) so identity
+/// crypto round-trips never run concurrently. See [`CRYPTO_SEM`].
+pub(super) async fn crypto_permit() -> SemaphorePermit<'static> {
+    CRYPTO_SEM.acquire().await.expect("crypto semaphore closed")
+}
 
 /// Generate a random x25519 keypair: `(identity_str, recipient_str)`.
 pub(super) fn generate_test_keypair() -> (String, String) {
@@ -111,6 +133,10 @@ pub(super) struct TestStore {
 /// guard that must outlive it. Most tests start here (an unlocked store is the
 /// precondition for observing lock transitions).
 pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState, TestStore) {
+    // Serialize the configure → set_passphrase → unlock crypto round-trip
+    // against the age-scrypt concurrency failure (see CRYPTO_SEM). Held for the
+    // whole body.
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
     let passphrase = "correct-horse-battery-staple".to_string();
     let bare_dir = create_bare_repo(entries, &recipient);

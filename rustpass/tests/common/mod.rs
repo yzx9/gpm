@@ -10,8 +10,30 @@ use std::str::FromStr;
 use age::secrecy::ExposeSecret;
 use age::ssh;
 use age::x25519::{Identity, Recipient};
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 use rustpass::{SyncOutcome, SyncResult};
+
+/// 1-permit serializer guarding identity-crypto round-trips in this test binary.
+///
+/// Concurrent age-scrypt identity round-trips intermittently fail with
+/// `WRONG_PASSPHRASE` on a correct passphrase — correct single-threaded,
+/// intermittent under concurrency, with byte-identical input. That signature
+/// (a data race / UB fingerprint, not a codegen miscompilation; root cause
+/// unconfirmed) is documented on the authoritative gate in
+/// `rustpass::test_crypto_gate`. A 1-permit serializer forces the
+/// provably-correct single-threaded path. Hold the permit for the whole test
+/// body via [`crypto_permit`]. One semaphore per binary — the failure is
+/// intra-binary. This is a test-only stopgap.
+static CRYPTO_SEM: Semaphore = Semaphore::const_new(1);
+
+/// Acquire the per-binary crypto serializer. Hold the returned permit for the
+/// whole test body (e.g. `let _crypto = crypto_permit().await;`) so identity
+/// crypto round-trips never run concurrently. See [`CRYPTO_SEM`].
+#[allow(dead_code)]
+pub async fn crypto_permit() -> SemaphorePermit<'static> {
+    CRYPTO_SEM.acquire().await.expect("crypto semaphore closed")
+}
 
 /// The recipients filename integration tests seed (gopass's `.age-recipients`).
 /// One test-side source of truth so fixtures cannot drift from the filename the

@@ -10,6 +10,7 @@ use rustpass::store::Store;
 /// Configure with encrypted identity → unlock → get → lock.
 #[tokio::test]
 async fn encrypted_identity_full_lifecycle() {
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
     let passphrase = "correct-horse-battery-staple";
 
@@ -90,6 +91,7 @@ async fn encrypted_identity_full_lifecycle() {
 /// Two-step setup with passphrase, then unlock.
 #[tokio::test]
 async fn two_step_setup_with_passphrase() {
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("test.age", b"hello")], &recipient);
@@ -130,6 +132,7 @@ async fn two_step_setup_with_passphrase() {
 /// Change passphrase: unlock with old → change → unlock with new.
 #[tokio::test]
 async fn change_passphrase_flow() {
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("data.age", b"s3cret")], &recipient);
@@ -180,6 +183,7 @@ async fn change_passphrase_flow() {
 /// Reset clears the cache.
 #[tokio::test]
 async fn reset_clears_cache() {
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("x.age", b"pw")], &recipient);
@@ -212,6 +216,7 @@ async fn reset_clears_cache() {
 /// Unlock is idempotent (calling twice is fine).
 #[tokio::test]
 async fn unlock_is_idempotent() {
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("a.age", b"x")], &recipient);
@@ -247,6 +252,7 @@ async fn unlock_is_idempotent() {
 /// Lock is idempotent when not unlocked.
 #[tokio::test]
 async fn lock_is_idempotent() {
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("b.age", b"y")], &recipient);
@@ -277,6 +283,7 @@ async fn lock_is_idempotent() {
 /// set_passphrase rejects when already encrypted.
 #[tokio::test]
 async fn set_passphrase_rejects_already_encrypted() {
+    let _crypto = crypto_permit().await;
     let (identity, recipient) = generate_test_keypair();
 
     let (bare_dir, _clone_dir) = create_test_git_repo(vec![("c.age", b"z")], &recipient);

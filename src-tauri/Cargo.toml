@@ -37,8 +37,9 @@ log = "0.4"
 tempfile = { workspace = true }
 age = { workspace = true }
 git2 = { workspace = true }
-# `macros` + `rt-multi-thread` for `#[tokio::test]`; `time` comes from the workspace dep.
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# `macros` + `rt-multi-thread` for `#[tokio::test]`; `sync` for the test-only
+# crypto serializer (tokio::sync::Semaphore); `time` comes from the workspace dep.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 # Enables `tauri::test` (the mock-runtime harness) during `cargo test`. Cargo
 # unifies this with the [dependencies] tauri, so it adds the feature only for
 # test builds.

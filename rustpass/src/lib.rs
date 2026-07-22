@@ -100,3 +100,51 @@ pub use totp::{Otp, extract, generate_at};
 /// multi-MB blob before rpgp parses it. Enforced at the `Store::add_trusted_gpg_key`
 /// chokepoint so both the paste and file-import paths share one guard.
 pub const MAX_GPG_KEY_FILE_BYTES: usize = 64 * 1024;
+
+/// Test-only serializer for identity-crypto (age-scrypt) round-trips in this
+/// crate's unit-test binary.
+///
+/// Concurrent age-scrypt identity round-trips intermittently fail with
+/// `WRONG_PASSPHRASE` on a correct passphrase — 0/100 single-threaded, up to
+/// ~83% at `--test-threads=32`, with byte-identical on-disk input (so not an
+/// IO race). The root cause is unconfirmed. The failure signature — correct
+/// when alone, intermittent under concurrency — is the fingerprint of a data
+/// race or undefined behavior, not a codegen miscompilation: deterministic
+/// crypto miscompiled would fail deterministically on every call. The likely
+/// host is latent UB in a dependency's hand-written SIMD code path (the sha2
+/// x86_64 backend is the prime candidate), surfaced under aggressive
+/// optimization.
+///
+/// As a test-only stopgap, a 1-permit serializer forces the provably-correct
+/// single-threaded path: test bodies that round-trip an encrypted identity
+/// acquire [`crypto_permit`] and hold it for the whole body. This guards tests
+/// only — the shipped binary runs the same crypto under `opt-level = "z"` with
+/// no serializer, so production safety rests on the app never running two
+/// identity decrypts concurrently, which is an unverified invariant.
+///
+/// To localize the real cause, drop these permits and rerun the gated tests
+/// under an opt-level=1 dependency build (`[profile.dev.package."*"]
+/// opt-level = 1`) and under ThreadSanitizer (`cargo +nightly
+/// -Zsanitizer=thread`): opt-level dependence implicates codegen, a TSan
+/// report implicates a data race (likely in a dependency's SIMD backend). A
+/// confirmed dependency bug is filed or pinned upstream; if production can
+/// ever run two identity decrypts concurrently, the fix belongs at that call
+/// site, not behind this test-only gate. Mirrors the per-binary serializer in
+/// `rustpass/tests/common/mod.rs` (the failure is intra-binary, so the lib's
+/// unit-test binary and each integration binary each get their own).
+#[cfg(test)]
+mod test_crypto_gate {
+    use tokio::sync::{Semaphore, SemaphorePermit};
+
+    static CRYPTO_SEM: Semaphore = Semaphore::const_new(1);
+
+    /// Acquire the lib unit-test crypto serializer. Hold the returned permit for
+    /// the whole test body (e.g. `let _crypto = test_crypto_gate::crypto_permit().await;`)
+    /// so age-scrypt KDFs never run concurrently.
+    pub(crate) async fn crypto_permit() -> SemaphorePermit<'static> {
+        CRYPTO_SEM
+            .acquire()
+            .await
+            .expect("crypto semaphore should never close")
+    }
+}

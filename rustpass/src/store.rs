@@ -3225,6 +3225,7 @@ mod tests {
 
     #[tokio::test]
     async fn is_identity_encrypted_true_after_encrypted_save() {
+        let _crypto = crate::test_crypto_gate::crypto_permit().await;
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf(), None);
         config
@@ -3308,6 +3309,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_passphrase_rejects_already_encrypted() {
+        let _crypto = crate::test_crypto_gate::crypto_permit().await;
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf(), None);
         config
@@ -3337,6 +3339,7 @@ mod tests {
 
     #[tokio::test]
     async fn change_passphrase_rejects_empty() {
+        let _crypto = crate::test_crypto_gate::crypto_permit().await;
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf(), None);
         config
@@ -3395,6 +3398,7 @@ mod tests {
 
     #[tokio::test]
     async fn validate_passphrase_age_roundtrip() {
+        let _crypto = crate::test_crypto_gate::crypto_permit().await;
         let dir = tempfile::tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf(), None);
         // Save an age-encrypted identity (uses a fixed test recipient).

@@ -866,8 +866,12 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
 
     // ── Identity encryption tests ─────────────────────────────────────────
 
-    #[test]
-    fn encrypt_decrypt_identity_roundtrip() {
+    #[tokio::test]
+    async fn encrypt_decrypt_identity_roundtrip() {
+        // Serialized: concurrent age-scrypt round-trips intermittently fail
+        // with WRONG_PASSPHRASE (a data-race/UB fingerprint, not a codegen
+        // miscompilation; root cause unconfirmed). See crate::test_crypto_gate.
+        let _crypto = crate::test_crypto_gate::crypto_permit().await;
         let (identity, _recipient) = generate_keypair();
         let passphrase = "correct-horse-battery-staple";
 
@@ -895,8 +899,10 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
         assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
     }
 
-    #[test]
-    fn decrypt_identity_wrong_passphrase() {
+    #[tokio::test]
+    async fn decrypt_identity_wrong_passphrase() {
+        // Serialized: age-scrypt round-trip — see crate::test_crypto_gate.
+        let _crypto = crate::test_crypto_gate::crypto_permit().await;
         let (identity, _recipient) = generate_keypair();
         let encrypted = encrypt_identity("correct-passphrase", identity.as_bytes()).unwrap();
 

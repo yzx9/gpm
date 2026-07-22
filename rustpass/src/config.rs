@@ -745,6 +745,7 @@ mod tests {
 
     #[tokio::test]
     async fn save_load_encrypted_identity_roundtrip() {
+        let _crypto = crate::test_crypto_gate::crypto_permit().await;
         let (config, _dir) = create_config();
         let identity = b"AGE-SECRET-KEY-1TEST1234567890";
 
