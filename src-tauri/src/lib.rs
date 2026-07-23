@@ -270,11 +270,13 @@ pub fn run() {
         // Logger is registered first so every subsequent plugin/setup line can
         // emit to the rotated file + Android logcat. `Stdout` auto-routes to
         // logcat on Android (there is no separate Logcat target in v2); `LogDir`
-        // writes a rotated file under app_log_dir(). Configured at Trace so the
-        // runtime level gate (`log::set_max_level`, applied in `init_state` from
-        // the persisted app.json value) can be raised or lowered at runtime: the
-        // `log` macros short-circuit at `max_level`, so Debug/Trace cost nothing
-        // while gated down to Info (the default).
+        // writes a rotated file under app_log_dir(). Capped at Debug, not Trace:
+        // gpm emits no trace-level records, so Trace only admits third-party
+        // chatter — the `jni` crate logs every JNI method lookup/call at TRACE and
+        // would flood the file (notably during the startup window, before
+        // `init_state` lowers the runtime `log::set_max_level` gate to the
+        // persisted level — Info by default). The Debug ceiling takes effect the
+        // instant the plugin initializes, so trace is excluded at every phase.
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -283,7 +285,7 @@ pub fn run() {
                         file_name: None,
                     }),
                 ])
-                .level(log::LevelFilter::Trace)
+                .level(log::LevelFilter::Debug)
                 .max_file_size(1_000_000)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseUtc)

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Settings → Logs screen no longer fills with low-level system trace lines on Android — in particular the repeating JNI method-call chatter that appeared around startup. gpm records no trace-level diagnostics of its own, so those lines carried no useful information; the log now stays focused on meaningful app activity.
+
 ## [v0.14.0] - 2026-07-23
 
 ### Added
