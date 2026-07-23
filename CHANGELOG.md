@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The Settings → Logs screen no longer fills with low-level system trace lines on Android — in particular the repeating JNI method-call chatter that appeared around startup. gpm records no trace-level diagnostics of its own, so those lines carried no useful information; the log now stays focused on meaningful app activity.
+- When you returned to gpm after it had auto-locked — with App Lock and fingerprint/face unlock both turned on — unlocking could take several seconds, sometimes much longer, or appear stuck on the spinner. A second biometric prompt was being triggered on top of the app-unlock one. Unlocking now happens once, so returning to a locked app is as quick as a fresh launch.
 
 ## [v0.14.0] - 2026-07-23
 

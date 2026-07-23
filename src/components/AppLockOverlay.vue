@@ -9,7 +9,7 @@ import { useAppLockState } from "@/composables";
 import { reconcileLocaleFromBackend } from "@/i18n";
 import { appLockUnlockPrompt } from "@/i18n/native";
 import { LockKeyhole, ScanFace } from "@lucide/vue";
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
@@ -70,7 +70,12 @@ async function tryUnlock() {
 }
 
 onMounted(() => {
+  console.info("[gpm:ui] app-lock overlay shown");
   void tryUnlock();
+});
+
+onUnmounted(() => {
+  console.info("[gpm:ui] app-lock overlay closed");
 });
 </script>
 

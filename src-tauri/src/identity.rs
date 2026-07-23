@@ -333,6 +333,7 @@ pub(crate) async fn unlock_and_arm<R: Runtime>(
     app: &AppHandle<R>,
     passphrase: &str,
 ) -> Result<(), Error> {
+    log::info!("identity: unlocking");
     state
         .store
         .unlock(passphrase)

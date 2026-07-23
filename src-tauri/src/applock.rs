@@ -329,6 +329,7 @@ pub(crate) async fn app_unlock(
     let key = decode_master_key(&b64)
         .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;
     state.store.set_master_key(Some(key));
+    log::info!("app-lock: master key retrieved");
     // Copy the app-scoped behavior prefs out of a pre-split repo.json into
     // app.json BEFORE anything reads them — the first unlock, and the cache
     // refresh inside try_identity_auto_unlock, must see the migrated values, not
@@ -344,18 +345,31 @@ pub(crate) async fn app_unlock(
     // resolved backend (not BackendNotAvailable). Mirrors the seal-migrate
     // one-shot; on a hard failure the error is stashed in Store for storage().
     run_backend_resolve_once(&state).await;
+    // Identity-auto-unlock opt-in FIRST, before announcing the app is unlocked.
+    // unlock_and_arm emits identity-lock-state{locked:false}, but the frontend's
+    // UnlockModal is suppressed while `appLocked` is still true (its v-if gates
+    // on `!appLocked`). Emitting app-unlocked BEFORE this runs opens an "app
+    // unlocked / identity still locked" window where the frontend mounts
+    // UnlockModal and, with identity biometric on, auto-fires a DUPLICATE
+    // biometric unlock — a second BiometricPrompt right after the master-key
+    // prompt plus a second scrypt (the "resume unlock spins forever" symptom).
+    // Run the auto-unlock first so that by the time the app-unlock event lands,
+    // the identity is already unlocked and UnlockModal never mounts.
+    let auto_unlocked = try_identity_auto_unlock(&state, &app).await;
+    log::info!(
+        "app-lock: identity auto-unlock {}",
+        if auto_unlocked { "done" } else { "skipped" }
+    );
     state.app_locked.store(false, Ordering::SeqCst);
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
     emit_app_lock_state(&app, enabled, false);
-    // Identity-auto-unlock opt-in: if on and the identity is encrypted, unlock
-    // it now with the passphrase sealed under the (just-injected) master key —
-    // no second prompt. unlock_and_arm emits identity-lock-state{locked:false}.
-    // Otherwise, only for a passphrase-encrypted identity, a SOFT identity event
-    // tells the frontend to use per-op auth (no overlay over the just-unlocked
-    // app). A plaintext identity is always readable straight from disk, so it
-    // must NOT receive a soft event — that would force runWithAuth to raise an
-    // unusable UnlockModal (no passphrase to enter) on every copy/show.
-    if !try_identity_auto_unlock(&state, &app).await && state.store.is_identity_encrypted().await {
+    // Auto-unlock was off / no sealed passphrase / failed: for a passphrase-
+    // encrypted identity, a SOFT identity event tells the frontend to use per-op
+    // auth (no overlay over the just-unlocked app). A plaintext identity is
+    // always readable straight from disk, so it must NOT receive a soft event —
+    // that would force runWithAuth to raise an unusable UnlockModal (no
+    // passphrase to enter) on every copy/show.
+    if !auto_unlocked && state.store.is_identity_encrypted().await {
         identity::emit_lock_state(&app, &state.store, true).await;
     }
     Ok(())

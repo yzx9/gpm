@@ -18,7 +18,7 @@ import { useWipeOnLeave } from "@/composables";
 import { reconcileLocaleFromBackend } from "@/i18n";
 import { identityUnlockPrompt } from "@/i18n/native";
 import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import BaseAlert from "./base/BaseAlert.vue";
 import BaseButton from "./base/BaseButton.vue";
@@ -170,6 +170,7 @@ async function onUnlock() {
 // reinstalling — see AppLockOverlay for that dead-end guidance).
 
 onMounted(async () => {
+  console.info("[gpm:ui] unlock modal shown");
   biometricAvailable.value = await isBiometricAvailable();
   biometricEnabled.value = await isBiometricUnlockEnabled();
   // Pick the mode before un-gating so the first paint is correct (no flash of
@@ -190,6 +191,10 @@ onMounted(async () => {
   } catch {
     // keep default
   }
+});
+
+onUnmounted(() => {
+  console.info("[gpm:ui] unlock modal closed");
 });
 </script>
 

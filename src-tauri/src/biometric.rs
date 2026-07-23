@@ -129,6 +129,7 @@ pub(crate) async fn biometric_unlock(
     app: AppHandle,
     prompt_text: Option<tauri_plugin_biometric_keystore::PromptText>,
 ) -> Result<(), BiometricError> {
+    log::info!("biometric: unlock");
     // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used.
     let passphrase = Zeroizing::new(app.keystore().retrieve(prompt_text.as_ref()).await?);
 
