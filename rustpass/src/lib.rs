@@ -112,7 +112,7 @@ pub const MAX_GPG_KEY_FILE_BYTES: usize = 64 * 1024;
 /// race or undefined behavior, not a codegen miscompilation: deterministic
 /// crypto miscompiled would fail deterministically on every call. The likely
 /// host is latent UB in a dependency's hand-written SIMD code path (the sha2
-/// x86_64 backend is the prime candidate), surfaced under aggressive
+/// `x86_64` backend is the prime candidate), surfaced under aggressive
 /// optimization.
 ///
 /// As a test-only stopgap, a 1-permit serializer forces the provably-correct
@@ -124,8 +124,8 @@ pub const MAX_GPG_KEY_FILE_BYTES: usize = 64 * 1024;
 ///
 /// To localize the real cause, drop these permits and rerun the gated tests
 /// under an opt-level=1 dependency build (`[profile.dev.package."*"]
-/// opt-level = 1`) and under ThreadSanitizer (`cargo +nightly
-/// -Zsanitizer=thread`): opt-level dependence implicates codegen, a TSan
+/// opt-level = 1`) and under `ThreadSanitizer` (`cargo +nightly
+/// -Zsanitizer=thread`): opt-level dependence implicates codegen, a `TSan`
 /// report implicates a data race (likely in a dependency's SIMD backend). A
 /// confirmed dependency bug is filed or pinned upstream; if production can
 /// ever run two identity decrypts concurrently, the fix belongs at that call
