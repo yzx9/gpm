@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.14.0] - 2026-07-23
+
 ### Added
 
 - You can now pin the app's color scheme to Light or Dark from Settings → General, right under Display Language. "System default" (the previous, and still the default, behavior) keeps following your device's light/dark setting with no flash; pinning Light or Dark overrides it so the app stays in your chosen scheme even when your device disagrees.
@@ -314,7 +316,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.14.0...HEAD
+[v0.14.0]: https://github.com/yzx9/gpm/compare/v0.13.0...v0.14.0
 [v0.13.0]: https://github.com/yzx9/gpm/compare/v0.12.1...v0.13.0
 [v0.12.1]: https://github.com/yzx9/gpm/compare/v0.12.0...v0.12.1
 [v0.12.0]: https://github.com/yzx9/gpm/compare/v0.11.0...v0.12.0
