@@ -1,0 +1,57 @@
+name: Build Android APK
+description: "Builds (and signs for release) Android APKs. Release callers must provide the ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_KEYSTORE_BASE64 env vars."
+
+inputs:
+  build_type:
+    description: "Build type: debug or release"
+    required: true
+  split_per_abi:
+    description: "Build per-architecture APKs ('true' / 'false')"
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # Caller must actions/checkout first — local actions are read from the workspace.
+    - name: Setup CI environment
+      uses: ./.github/actions/setup-ci-env
+      with:
+        # Release skips the rust cache: it recompiles fresh and a 4-ABI target/ would evict the debug/backend caches.
+        rust_cache: ${{ inputs.build_type != 'release' }}
+        pnpm_cache: true
+        java_cache: true
+
+    - name: Setup Android signing
+      if: inputs.build_type == 'release'
+      shell: bash
+      run: |
+        cd src-tauri/gen/android
+        echo "keyAlias=$ANDROID_KEY_ALIAS" > keystore.properties
+        echo "password=$ANDROID_KEY_PASSWORD" >> keystore.properties
+        base64 -d <<< "$ANDROID_KEYSTORE_BASE64" > "$RUNNER_TEMP/keystore.jks"
+        echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
+
+    - name: Build APKs
+      shell: nix develop .#ci-full --accept-flake-config --command sh -e {0}
+      env:
+        DEBUG_FLAG: ${{ inputs.build_type == 'debug' && '--debug' || '' }}
+        # Debug cross-compiles aarch64 only; release builds all ABIs via --split-per-abi.
+        TARGET: ${{ inputs.build_type == 'debug' && '--target aarch64' || '' }}
+        SPLIT: ${{ inputs.split_per_abi }}
+      run: |
+        pnpm install --frozen-lockfile
+        sh scripts/gen-icons.sh
+        if [ "$SPLIT" = "true" ]; then
+          pnpm tauri android build --apk --split-per-abi $DEBUG_FLAG
+          pnpm tauri android build --apk $DEBUG_FLAG
+        else
+          pnpm tauri android build --apk $DEBUG_FLAG $TARGET
+        fi
+
+    - name: Upload APKs
+      uses: actions/upload-artifact@v4
+      with:
+        name: apk-${{ inputs.build_type }}
+        path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+        retention-days: 5
