@@ -22,7 +22,7 @@ jobs:
           pnpm_cache: true
 
       - name: Run backend tests
-        run: nix develop .#lite --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && just test-be'
+        run: nix develop .#ci-lite --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && just test-be'
 
   frontend:
     runs-on: ubuntu-latest
@@ -35,7 +35,7 @@ jobs:
           pnpm_cache: true
 
       - name: Run frontend tests
-        run: nix develop .#lite --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && just test-fe'
+        run: nix develop .#ci-lite --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && just test-fe'
 
   # Runs every local Android plugin's Robolectric/JVM unit tests via the
   # aggregated `testPlugins` gradle task. The tests are pure JVM (no NDK, no Rust
@@ -62,4 +62,4 @@ jobs:
         # tauri.settings.gradle that gradle needs to configure; `just test-plugin`
         # then guards that every local plugin in Cargo.toml is included and runs
         # the aggregated `testPlugins` task on the configured project.
-        run: nix develop .#full --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && pnpm tauri android build --debug --target aarch64 && just test-plugin'
+        run: nix develop .#ci-full --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && pnpm tauri android build --debug --target aarch64 && just test-plugin'
