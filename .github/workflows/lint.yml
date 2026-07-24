@@ -22,7 +22,11 @@ jobs:
           pnpm_cache: true
 
       - name: Clippy
-        run: nix develop .#ci-lite --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && sh scripts/gen-icons.sh && cargo clippy --all-targets --all-features -- -D warnings'
+        shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
+        run: |
+          pnpm install --frozen-lockfile
+          sh scripts/gen-icons.sh
+          cargo clippy --all-targets --all-features -- -D warnings
 
   frontend:
     runs-on: ubuntu-latest
@@ -35,7 +39,11 @@ jobs:
           pnpm_cache: true
 
       - name: Check locale JSON for duplicate keys
-        run: nix develop .#ci-lite --accept-flake-config --command sh -c 'node scripts/check-locale-keys.mjs'
+        shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
+        run: node scripts/check-locale-keys.mjs
 
       - name: vue-tsc type check
-        run: nix develop .#ci-lite --accept-flake-config --command sh -c 'pnpm install --frozen-lockfile && pnpm exec vue-tsc --noEmit'
+        shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec vue-tsc --noEmit
