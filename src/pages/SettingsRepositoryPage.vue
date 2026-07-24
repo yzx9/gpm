@@ -127,11 +127,13 @@ const trustedKeyRows = computed<
 });
 
 // Verification-mode pills (labels capitalize via CSS to match the prior look).
+// Ordered most-secure → least-secure (left → right) to match the AutoLock
+// convention: the riskier "off" sits rightmost, aligned with the other settings.
 const VERIFY_MODES: {
   label: VerifyMode;
   value: VerifyMode;
   labelClass: string;
-}[] = (["off", "audit", "enforce"] as VerifyMode[]).map((m) => ({
+}[] = (["enforce", "audit", "off"] as VerifyMode[]).map((m) => ({
   label: m,
   value: m,
   labelClass: "capitalize",

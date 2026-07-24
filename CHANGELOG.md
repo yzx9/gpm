@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- In Settings, the option pickers now all run in the same left-to-right direction — the more cautious choice on the left, the less cautious on the right — matching the Auto-lock and auto-clear pickers that already worked that way. Screen capture protection now reads Always → Sensitive → Off, commit signature verification reads Enforce → Audit → Off, and Auto-sync reads Off → On. Nothing about what each option does has changed; only the order they sit in.
+
 ### Fixed
 
 - On the About → Licenses screen, the search box sat a little narrower than the license rows beneath it. It now lines up flush with them.

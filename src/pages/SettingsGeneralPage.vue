@@ -272,12 +272,12 @@ onMounted(() => {
           :legend="t('settings.secureScreen.legend')"
           :model-value="secureScreenMode"
           :options="[
-            { label: t('settings.secureScreen.off'), value: 'off' },
+            { label: t('settings.secureScreen.always'), value: 'always' },
             {
               label: t('settings.secureScreen.sensitive'),
               value: 'sensitive',
             },
-            { label: t('settings.secureScreen.always'), value: 'always' },
+            { label: t('settings.secureScreen.off'), value: 'off' },
           ]"
           :disabled="secureScreenLoading"
           @change="onSecureScreenChange"
@@ -301,8 +301,8 @@ onMounted(() => {
           :legend="t('settings.autosync.legend')"
           :model-value="autosyncEnabled"
           :options="[
-            { label: t('settings.autosync.on'), value: true },
             { label: t('settings.autosync.off'), value: false },
+            { label: t('settings.autosync.on'), value: true },
           ]"
           :disabled="autosyncLoading"
           @change="onAutosyncChange"
