@@ -45,7 +45,7 @@ jobs:
           TARGET: ${{ inputs.build_type == 'debug' && '--target aarch64' || '' }}
           SPLIT: ${{ inputs.split_per_abi }}
         run: |
-          nix develop .#full --accept-flake-config --command sh -c '
+          nix develop .#ci-full --accept-flake-config --command sh -c '
             set -e
             pnpm install --frozen-lockfile
             sh scripts/gen-icons.sh

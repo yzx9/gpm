@@ -39,8 +39,8 @@ runs:
       with:
         # rustc/cargo only exist inside the Nix devShell, so rust-cache must run
         # them through `nix develop` or its `rustc -vV` key probe fails and the
-        # cache is never read/written. `.#lite` shares rustc's version with `.#full`.
-        cmd-format: nix develop .#lite --accept-flake-config --command {0}
+        # cache is never read/written. `.#ci-lite` shares rustc's version with `.#ci-full`.
+        cmd-format: nix develop .#ci-lite --accept-flake-config --command {0}
 
     - name: Cache pnpm store
       if: inputs.pnpm_cache == 'true'
