@@ -199,8 +199,11 @@ function togglePkg(p: LicensePackage) {
   color: var(--color-muted, var(--color-edge));
   pointer-events: none;
 }
-/* Pad the input so text clears the leading search icon. */
+/* Full-width so the field matches the group/package rows below it: BaseInput
+   sets no width, so without this the <input> shrinks to its default size=20. */
 .search-bar :deep(input) {
+  width: 100%;
+  /* Pad so text clears the leading search icon. */
   padding-left: 2rem;
 }
 .state-row {
