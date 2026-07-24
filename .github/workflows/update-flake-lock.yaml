@@ -20,7 +20,34 @@ jobs:
         uses: cachix/install-nix-action@v31
 
       - name: Update flake.lock
+        id: update
         uses: DeterminateSystems/update-flake-lock@v24
         with:
           pr-title: "build(deps): bump flake.lock"
           commit-msg: "build(deps): bump flake.lock"
+
+      # pnpm ships via nixpkgs, so a flake bump can move its version and leave
+      # package.json#packageManager stale (pnpm then warns on every run). The
+      # new version isn't known until flake.lock is bumped, so re-pin it here,
+      # on the PR branch the action just opened.
+      - name: Sync packageManager to the flake's pnpm
+        if: steps.update.outputs.pull-request-operation == 'created' || steps.update.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr checkout "${{ steps.update.outputs.pull-request-number }}"
+          # Read the pnpm version the flake's nixpkgs actually ships. `pnpm
+          # --version` is no good here: with `packageManager` set, pnpm reports
+          # the *declared* version, so this would read the stale value back and
+          # never update it.
+          NEW_PM="$(nix --accept-flake-config eval --raw --impure --expr \
+            'let f = builtins.getFlake (toString ./.); in f.inputs.nixpkgs.legacyPackages.x86_64-linux.pnpm.version')"
+          nix --accept-flake-config develop .#ci-lite --command pnpm pkg set "packageManager=pnpm@${NEW_PM}"
+          if ! git diff --quiet -- package.json; then
+            git add package.json
+            git -c user.name='${{ github.actor }}' \
+                -c user.email='${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com' \
+                commit -m "build(deps): sync packageManager to pnpm@${NEW_PM}"
+            git push
+          fi
