@@ -10,11 +10,17 @@ permissions:
 
 jobs:
   build:
-    uses: ./.github/workflows/_build-android.yml
-    with:
-      build_type: release
-      split_per_abi: true
-    secrets: inherit
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-android
+        with:
+          build_type: release
+          split_per_abi: true
 
   release:
     needs: build
