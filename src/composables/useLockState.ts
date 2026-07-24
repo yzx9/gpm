@@ -5,6 +5,7 @@
 import {
   getAuthState,
   subscribeIdentityLockState,
+  type IdentityLockReason,
   type UnlistenFn,
 } from "@/api";
 import {
@@ -68,6 +69,13 @@ export interface LockState {
   readonly identityCached: Readonly<Ref<boolean>>;
   /** False until `init()` has reconciled with the backend. */
   readonly ready: Readonly<Ref<boolean>>;
+  /** Why the most recent hard lock happened (an `IdentityLockReason`), or `null`
+   *  until the first one this session. Drives `shouldAutoPromptBiometric`. */
+  readonly lastLockReason: Readonly<Ref<IdentityLockReason | null>>;
+  /** Whether the unlock overlay should auto-fire the biometric prompt on mount.
+   *  Suppressed only for an idle hard-lock re-lock (the user likely stepped
+   *  away); per-op auth and manual/boot locks keep the auto-prompt. */
+  readonly shouldAutoPromptBiometric: ComputedRef<boolean>;
   /** Reflect backend state and arm the single `identity-lock-state` listener. Idempotent. */
   init: () => Promise<void>;
   /** Flip the hard-lock state (mirrors the cache, fires `onLock` clearers on lock). */
@@ -123,6 +131,11 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
   // fresh hard lock re-shows it (setLocked(true) resets it). Per-op auth never
   // sets this; cancelAuth handles its own dismiss.
   const overlayDismissed = ref(false);
+  // Why the most recent hard lock happened — recorded from the backend `reason`
+  // tag so `shouldAutoPromptBiometric` can suppress the auto-prompt on an idle
+  // re-lock. `null` until the first hard lock (boot window) is treated as "not
+  // idle", so the cold-start overlay still auto-prompts.
+  const lastLockReason = ref<IdentityLockReason | null>(null);
 
   /// The shared promise awaiting op callers park on while the per-op auth overlay
   /// is up. All concurrent callers await the same one (single-flight: one prompt,
@@ -144,6 +157,14 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
   const overlayUp = computed(
     () => (locked.value || authPrompted.value) && !overlayDismissed.value,
   );
+
+  /** Whether the unlock overlay should auto-fire biometric on mount. Per-op auth
+   *  (the user just tapped a secret) always auto-prompts; a hard lock
+   *  auto-prompts unless it was an idle re-lock. */
+  const shouldAutoPromptBiometric = computed(() => {
+    if (authPrompted.value) return true;
+    return lastLockReason.value !== "idle";
+  });
 
   /**
    * Register a callback to run whenever the identity becomes _hard_-locked (manual
@@ -170,7 +191,7 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
    * `identity-lock-state` listener. Idempotent. Call once from `App.vue` on mount.
    *
    * The backend is the single source of truth: it emits `identity-lock-state`
-   * `{ locked, soft }` on every transition. `locked` reports whether the identity
+   * `{ locked, soft, reason }` on every transition. `locked` reports whether the identity
    * is NOT cached; `soft` marks a soft wipe (Immediate post-op) that must leave the
    * overlay down. This instance never decides state on its own.
    */
@@ -199,13 +220,15 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
     ready.value = true;
   }
 
-  /** Backend lock-state event → the two refs. Soft wipes touch only the cache. */
+  /** Backend lock-state event → the refs. Soft wipes touch only the cache. */
   function onLockEvent({
     locked: l,
     soft,
+    reason,
   }: {
     locked: boolean;
     soft: boolean;
+    reason: IdentityLockReason;
   }) {
     if (soft) {
       // Soft wipe: identity not cached, but the overlay stays down and onLock does
@@ -213,6 +236,13 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
       // one case where `identityCached` and `locked` diverge.
       identityCached.value = false;
       return;
+    }
+    if (l) {
+      // Record why we hard-locked, so `shouldAutoPromptBiometric` can suppress the
+      // auto-prompt on an idle re-lock. An unlock (l == false) leaves the prior
+      // reason as-is — it only matters while a hard-lock overlay is up, which an
+      // unlock ends.
+      lastLockReason.value = reason;
     }
     // Hard transition: setLocked drives `locked`, fires onLock, and mirrors
     // `identityCached` (a hard lock wipes the cache; an unlock restores it).
@@ -341,6 +371,8 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
     overlayUp,
     identityCached,
     ready,
+    lastLockReason,
+    shouldAutoPromptBiometric,
     init,
     setLocked,
     onLock,

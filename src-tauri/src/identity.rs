@@ -16,9 +16,9 @@
 //! a secret the user is still viewing:
 //! - A **hard** lock (`do_lock`, or the idle timer firing under `Idle` mode)
 //!   wipes the identity, raises the unlock overlay, and clears revealed secrets
-//!   — `emit_lock_state(_, _, false)`.
+//!   — `emit_lock_state(_, _, false, reason)` (`reason` is the transition cause).
 //! - A **soft** wipe (`soft_wipe`, the `Immediate` no-cache mode's post-op
-//!   step) wipes the identity *only* and emits `emit_lock_state(_, _, true)` —
+//!   step) wipes the identity *only* and emits `emit_lock_state(_, _, true, reason)` —
 //!   the overlay stays down and a just-revealed secret stays on screen until
 //!   its own view-clear timer. `maybe_soft_wipe` is the gated wrapper the
 //!   read/write commands call after each op.
@@ -140,27 +140,69 @@ mod redaction_tests {
 /// lock state on its own (it used to, after its own `unlock` call, which desynced
 /// from the backend on reset and on setup of an encrypted identity).
 ///
-/// `soft` distinguishes the two wipe paths: a _hard_ lock (`soft == false`,
-/// manual/idle) raises the unlock overlay and clears revealed secrets — today's
-/// behavior. A _soft_ wipe (`soft == true`, the no-cache mode's post-op step)
-/// only reports that the identity is no longer cached; the frontend leaves the
-/// overlay down and any revealed secret on screen (it clears on its own
-/// view-clear timer).
+/// Why an `identity-lock-state` event fired — the cause of this lock-state
+/// transition, surfaced so the frontend can decide whether to auto-fire the
+/// biometric prompt on the unlock overlay. `Idle` (the idle timer fired; the
+/// user likely stepped away) suppresses the auto-prompt: a pre-emptive system
+/// `BiometricPrompt` would just expire before they return, so the overlay shows
+/// and they tap when ready. Every other variant keeps the auto-prompt — either
+/// the user is present (they locked manually, changed a passphrase, or just
+/// finished setup) or there is no overlay up to prompt (an unlock, a soft wipe,
+/// or a reset).
+///
+/// Hard-lock causes: `Manual` (explicit lock, or a passphrase set/change),
+/// `Idle` (inactivity timeout), `Setup` (the post-setup lock). The non-lock
+/// transitions carry their kind too so every emit is self-describing: `Unlock`,
+/// `SoftWipe`, `Reset`. Extensible by design: a future trigger (e.g. a re-lock
+/// after repeated unlock failures) adds a variant here and tags its call site —
+/// the wire schema needs no further change.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum LockEventReason {
+    Manual,
+    Idle,
+    Setup,
+    Unlock,
+    SoftWipe,
+    Reset,
+}
+
+/// `soft` distinguishes the two wipe paths: a _hard_ lock (`soft == false`)
+/// raises the unlock overlay and clears revealed secrets — today's behavior. A
+/// _soft_ wipe (`soft == true`, the no-cache mode's post-op step) only reports
+/// that the identity is no longer cached; the frontend leaves the overlay down
+/// and any revealed secret on screen (it clears on its own view-clear timer).
+///
+/// `reason` is the cause of this transition (see [`LockEventReason`]).
 #[derive(Debug, Clone, Copy, Serialize)]
 struct LockState {
     locked: bool,
     soft: bool,
+    reason: LockEventReason,
 }
 
 /// Compute the current lock state from the store and emit it as
 /// `identity-lock-state`, so the frontend mirrors the backend. `soft` marks a
-/// soft wipe (no-cache mode) — see [`LockState`].
+/// soft wipe (no-cache mode) — see [`LockState`]. `reason` is the cause of this
+/// transition (see [`LockEventReason`]).
 ///
 /// Runtime-generic so tests can drive it with the mock runtime; production
 /// always calls with the default (`Wry`) runtime.
-pub(crate) async fn emit_lock_state<R: Runtime>(app: &AppHandle<R>, store: &Store, soft: bool) {
+pub(crate) async fn emit_lock_state<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &Store,
+    soft: bool,
+    reason: LockEventReason,
+) {
     let locked = store.is_identity_encrypted().await && !store.is_unlocked();
-    let _ = app.emit("identity-lock-state", LockState { locked, soft });
+    let _ = app.emit(
+        "identity-lock-state",
+        LockState {
+            locked,
+            soft,
+            reason,
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +264,7 @@ pub(crate) async fn do_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHa
     disarm_lock(state);
     state.store.lock();
     // Emit the current lock state — same path the auto-lock timer takes.
-    emit_lock_state(app, &state.store, false).await;
+    emit_lock_state(app, &state.store, false, LockEventReason::Manual).await;
 }
 
 /// Set a passphrase on an existing plaintext identity.
@@ -245,7 +287,7 @@ pub(crate) async fn set_passphrase(
     }
     // Setting a passphrase locks the store (forces re-auth with the new
     // passphrase); emit the real state so the frontend shows the overlay.
-    emit_lock_state(&app, &state.store, false).await;
+    emit_lock_state(&app, &state.store, false, LockEventReason::Manual).await;
     Ok(())
 }
 
@@ -269,7 +311,7 @@ pub(crate) async fn change_passphrase(
         log::warn!("identity: stale biometric slot delete failed: {e:?}");
     }
     // Changing the passphrase locks the store; emit the real state.
-    emit_lock_state(&app, &state.store, false).await;
+    emit_lock_state(&app, &state.store, false, LockEventReason::Manual).await;
     Ok(())
 }
 
@@ -345,7 +387,7 @@ pub(crate) async fn unlock_and_arm<R: Runtime>(
     refresh_security_cache(state).await;
     reset_lock_timer(state, app);
     // The backend is the single source of truth for lock state; tell the frontend.
-    emit_lock_state(app, &state.store, false).await;
+    emit_lock_state(app, &state.store, false, LockEventReason::Unlock).await;
     Ok(())
 }
 
@@ -416,7 +458,7 @@ pub(crate) fn disarm_lock(state: &State<'_, AppState>) {
 pub(crate) async fn soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
     disarm_lock(state);
     state.store.lock();
-    emit_lock_state(app, &state.store, true).await;
+    emit_lock_state(app, &state.store, true, LockEventReason::SoftWipe).await;
 }
 
 /// After a secret operation: under `Immediate` (no-cache) mode, soft-wipe the
@@ -478,7 +520,7 @@ pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<
 
         // Emit the current lock state so the frontend shows the unlock overlay
         // + clears revealed secrets (a hard lock, not a soft wipe).
-        emit_lock_state(&app_handle, &store, false).await;
+        emit_lock_state(&app_handle, &store, false, LockEventReason::Idle).await;
     });
 
     *timer = Some(handle);

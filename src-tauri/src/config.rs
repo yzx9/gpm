@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 
 use crate::AppState;
 use crate::app_config::AppConfig;
-use crate::identity::{emit_lock_state, refresh_security_cache, reset_lock_timer};
+use crate::identity::{LockEventReason, emit_lock_state, refresh_security_cache, reset_lock_timer};
 
 /// Get the current repo config (for display in settings).
 #[tauri::command]
@@ -34,7 +34,7 @@ pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> 
     state.store.reset().await?;
     // After a reset there is no identity, so the app is no longer locked — emit
     // the real state so any open unlock overlay closes.
-    emit_lock_state(&app, &state.store, false).await;
+    emit_lock_state(&app, &state.store, false, LockEventReason::Reset).await;
     Ok(())
 }
 

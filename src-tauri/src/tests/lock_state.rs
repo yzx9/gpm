@@ -8,8 +8,8 @@
 //! These run on a headless [`MockRuntime`][tauri::test::MockRuntime] app and
 //! drive the runtime-generic command cores (`do_lock`, `arm_lock`) directly.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rustpass::LockMode;
@@ -177,5 +177,80 @@ async fn reset_lock_timer_branches_on_mode() {
     assert!(
         app_state.lock_timer.lock().unwrap().is_some(),
         "Idle must arm an idle timer"
+    );
+}
+
+// ── lock reason (drives the frontend's auto-biometric-prompt decision) ────
+
+/// Capture the last `identity-lock-state` payload (as serialized JSON) so a test
+/// can assert the `reason` tag the frontend keys its auto-prompt off of.
+fn last_lock_payload(app: &tauri::App<tauri::test::MockRuntime>) -> Arc<Mutex<String>> {
+    let payload = Arc::new(Mutex::new(String::new()));
+    let payload_clone = payload.clone();
+    app.listen("identity-lock-state", move |e| {
+        if let Ok(mut p) = payload_clone.lock() {
+            *p = e.payload().to_string();
+        }
+    });
+    payload
+}
+
+/// A manual lock tags its event `reason: "manual"` so the frontend keeps
+/// auto-prompting biometric (the user is present and wants back in).
+#[tokio::test]
+async fn do_lock_tags_reason_manual() {
+    let (state, _guard) = make_unlocked_state(&[("foo.age", b"x\n")]).await;
+    let app = mock_app(state);
+    let payload = last_lock_payload(&app);
+
+    let app_state = app.state::<AppState>();
+    identity::do_lock(&app_state, app.handle()).await;
+
+    let p = payload.lock().unwrap().clone();
+    assert!(p.contains("\"locked\":true"), "payload: {p}");
+    assert!(
+        p.contains("\"reason\":\"manual\""),
+        "manual lock tags reason=manual: {p}"
+    );
+}
+
+/// The idle timer tags its event `reason: "idle"` so the frontend suppresses the
+/// auto biometric prompt — the user likely stepped away, so a pre-emptive prompt
+/// would just expire before they return.
+#[tokio::test]
+async fn auto_lock_timer_tags_reason_idle() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    let payload = last_lock_payload(&app);
+
+    let app_state = app.state::<AppState>();
+    identity::arm_lock(&app_state, app.handle(), 0);
+    // Current-thread runtime: the spawned task runs while we await.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let p = payload.lock().unwrap().clone();
+    assert!(p.contains("\"locked\":true"), "payload: {p}");
+    assert!(
+        p.contains("\"reason\":\"idle\""),
+        "idle timer tags reason=idle: {p}"
+    );
+}
+
+/// A soft wipe tags its event `reason: "soft-wipe"`. The value is unused by the
+/// frontend (the soft branch returns before reading it) but kept honest on the
+/// wire — and this pins the kebab-case serialization of `SoftWipe`.
+#[tokio::test]
+async fn soft_wipe_tags_reason_soft_wipe() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    let payload = last_lock_payload(&app);
+
+    let app_state = app.state::<AppState>();
+    identity::soft_wipe(&app_state, app.handle()).await;
+
+    let p = payload.lock().unwrap().clone();
+    assert!(
+        p.contains("\"reason\":\"soft-wipe\""),
+        "soft wipe tags reason=soft-wipe: {p}"
     );
 }

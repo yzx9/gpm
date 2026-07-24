@@ -15,7 +15,7 @@ use tauri_plugin_file_picker::FilePickerExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
-use crate::identity::emit_lock_state;
+use crate::identity::{LockEventReason, emit_lock_state};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -332,7 +332,7 @@ pub(crate) async fn complete_setup(
         .inspect_err(|e| log::warn!("setup: complete failed: {e}"))?;
     // Setup may leave an encrypted identity locked (the passphrase isn't cached);
     // emit the real state so the frontend shows the unlock overlay if needed.
-    emit_lock_state(&app, &state.store, false).await;
+    emit_lock_state(&app, &state.store, false, LockEventReason::Setup).await;
     Ok(())
 }
 
@@ -591,7 +591,7 @@ pub(crate) async fn complete_setup_from_file(
         .await
         .inspect_err(|e| log::warn!("setup: complete-from-file failed: {e}"))?;
     // See [`complete_setup`]: emit the real post-setup lock state.
-    emit_lock_state(&app, &state.store, false).await;
+    emit_lock_state(&app, &state.store, false, LockEventReason::Setup).await;
     Ok(())
 }
 

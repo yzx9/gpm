@@ -26,6 +26,16 @@ import BaseIcon from "./base/BaseIcon.vue";
 import BaseInput from "./base/BaseInput.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
+const props = withDefaults(
+  defineProps<{
+    /** Whether to auto-fire the system biometric prompt on mount. Suppressed
+     *  for an idle-timeout re-lock (the user likely stepped away) — the overlay
+     *  still renders in biometric mode so the user can tap to unlock. */
+    autoPromptBiometric?: boolean;
+  }>(),
+  { autoPromptBiometric: true },
+);
+
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const { t } = useI18n();
@@ -174,12 +184,16 @@ onMounted(async () => {
   biometricAvailable.value = await isBiometricAvailable();
   biometricEnabled.value = await isBiometricUnlockEnabled();
   // Pick the mode before un-gating so the first paint is correct (no flash of
-  // the passphrase form on the biometric path), then auto-prompt if usable.
+  // the passphrase form on the biometric path), then auto-prompt if usable AND
+  // the lock reason warrants it. An idle-timeout re-lock
+  // (autoPromptBiometric == false) skips the system prompt — the user likely
+  // stepped away, so it would just expire before they return — but stays in
+  // biometric mode so the button is ready to tap.
   if (biometricUsable.value) mode.value = "biometric";
   resolved.value = true;
-  if (biometricUsable.value) {
+  if (biometricUsable.value && props.autoPromptBiometric) {
     await tryBiometricUnlock();
-  } else {
+  } else if (!biometricUsable.value) {
     // Passphrase mode is the initial render here — focus the input ourselves
     // since `autofocus` doesn't fire on this dynamically (v-if) mounted field.
     nextTick(() => passphraseInputRef.value?.focus());

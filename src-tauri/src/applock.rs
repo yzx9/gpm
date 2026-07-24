@@ -370,7 +370,13 @@ pub(crate) async fn app_unlock(
     // that would force runWithAuth to raise an unusable UnlockModal (no
     // passphrase to enter) on every copy/show.
     if !auto_unlocked && state.store.is_identity_encrypted().await {
-        identity::emit_lock_state(&app, &state.store, true).await;
+        identity::emit_lock_state(
+            &app,
+            &state.store,
+            true,
+            identity::LockEventReason::SoftWipe,
+        )
+        .await;
     }
     Ok(())
 }

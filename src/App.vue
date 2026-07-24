@@ -17,8 +17,14 @@ import {
 } from "./composables";
 import { applySafeAreaInsets } from "./utils/safe-area";
 
-const { overlayUp, ready, init, dismissOverlay, identityCached } =
-  useLockState();
+const {
+  overlayUp,
+  ready,
+  init,
+  dismissOverlay,
+  identityCached,
+  shouldAutoPromptBiometric,
+} = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
 const { loadSecuritySettings, lockMode } = useSecuritySettings();
 // Activity bumper: any in-app tap/scroll/key extends the identity idle-lock
@@ -89,6 +95,7 @@ onMounted(() => {
     -->
     <UnlockModal
       v-if="ready && overlayUp && !appLocked"
+      :auto-prompt-biometric="shouldAutoPromptBiometric"
       @close="dismissOverlay"
     />
   </div>

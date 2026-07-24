@@ -47,13 +47,28 @@ export async function bumpIdleTimer(): Promise<void> {
   }
 }
 
+/** Why an `identity-lock-state` event fired — the cause of the lock-state
+ *  transition. The unlock overlay keys its auto-biometric-prompt decision off
+ *  this: `"idle"` (the idle timer fired; the user likely stepped away) suppresses
+ *  the auto-prompt; every other value keeps it (the user is present, or no
+ *  overlay is up to prompt). Mirrors the backend `LockEventReason` enum. */
+export type IdentityLockReason =
+  | "manual"
+  | "idle"
+  | "setup"
+  | "unlock"
+  | "soft-wipe"
+  | "reset";
+
 /** Payload of the `identity-lock-state` event: the backend's identity-cache
  *  lock snapshot. `locked` = the decrypted identity is NOT cached (the next
  *  identity-needing op will require auth); `soft` = a soft wipe (Immediate
- *  post-op) that emptied the cache without raising the hard-lock overlay. */
+ *  post-op) that emptied the cache without raising the hard-lock overlay;
+ *  `reason` is the transition cause (see {@link IdentityLockReason}). */
 export interface IdentityLockState {
   locked: boolean;
   soft: boolean;
+  reason: IdentityLockReason;
 }
 
 /** Subscribe to backend identity lock-state transitions — hard locks/unlocks

@@ -64,6 +64,26 @@ describe("UnlockModal", () => {
     expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
   });
 
+  it("does not auto-prompt biometric after an idle re-lock (autoPromptBiometric=false)", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(true) // is_biometric_available
+      .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
+      .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
+    const wrapper = mount(UnlockModal, {
+      props: { autoPromptBiometric: false },
+    });
+    await flushPromises();
+
+    // No auto system prompt on an idle re-lock — but biometric mode still
+    // renders so the user can tap to unlock when they return.
+    expect(invoke).not.toHaveBeenCalledWith(
+      "biometric_unlock",
+      expect.anything(),
+    );
+    expect(wrapper.text()).toContain("Unlock with biometric");
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false);
+  });
+
   it("stays in biometric mode when the prompt is cancelled (passphrase behind the switch)", async () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce(true) // is_biometric_available

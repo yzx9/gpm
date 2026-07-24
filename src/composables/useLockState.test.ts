@@ -120,6 +120,46 @@ describe("useLockState", () => {
     expect(s.locked.value).toBe(false);
   });
 
+  it("records the lock reason and gates the auto biometric prompt", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: true,
+      identity_type: "x25519",
+    });
+    await s.init();
+
+    const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
+      payload: {
+        locked: boolean;
+        soft?: boolean;
+        reason: "manual" | "idle" | "soft-wipe";
+      };
+    }) => void;
+
+    // No hard lock yet this session (boot): null reason → auto-prompt the
+    // cold-start overlay.
+    expect(s.lastLockReason.value).toBeNull();
+    expect(s.shouldAutoPromptBiometric.value).toBe(true);
+
+    // Idle re-lock: the user likely stepped away → suppress the auto-prompt.
+    handler({ payload: { locked: true, soft: false, reason: "idle" } });
+    expect(s.lastLockReason.value).toBe("idle");
+    expect(s.shouldAutoPromptBiometric.value).toBe(false);
+
+    // Manual lock: the user is present → keep the auto-prompt. The reason
+    // updates even though `locked` is already true (a re-lock while locked).
+    handler({ payload: { locked: true, soft: false, reason: "manual" } });
+    expect(s.lastLockReason.value).toBe("manual");
+    expect(s.shouldAutoPromptBiometric.value).toBe(true);
+
+    // A soft wipe carries its own reason, but the handler returns before reading
+    // it, so lastLockReason stays untouched.
+    handler({ payload: { locked: true, soft: true, reason: "soft-wipe" } });
+    expect(s.lastLockReason.value).toBe("manual");
+    expect(s.shouldAutoPromptBiometric.value).toBe(true);
+  });
+
   it("setLocked(true) fires onLock callbacks AFTER flipping the ref", () => {
     const seen: boolean[] = [];
     s.onLock(() => seen.push(s.locked.value));
