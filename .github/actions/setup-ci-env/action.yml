@@ -1,4 +1,5 @@
 name: Setup CI environment
+description: "Sets up the Nix-based CI environment with optional rust, pnpm, and Gradle caches."
 
 inputs:
   rust_cache:
