@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Settings → Logs screen replaces its four-level log selector (Errors / Warnings / Info / Debug) with a single **Verbose** toggle. Turn it on to capture everything — Debug level — for about ten minutes, handy for attaching to a bug report; it turns itself off after the window so logging stays focused the rest of the time. A verbose session survives a restart, so relaunching to reproduce an issue keeps capturing (including startup), and gpm lets you know when you relaunch with verbose still on. Outside that window the app records at the Info level as before.
 - On Android, copying a secret no longer shows gpm's own "Allow notifications?" confirmation before the system notification-permission prompt — gpm now goes straight to the system prompt. If you had dismissed gpm's old in-app prompt, the next copy surfaces the Android permission dialog for the first time. After you allow or deny twice, Android stops re-asking; change the choice any time from Android's notification settings. The clipboard auto-clear timer is unaffected either way.
 
+### Fixed
+
+- On Android, tapping a control no longer leaves it stuck in a highlighted state until you tap somewhere else. The highlight that previews a press now only appears for a mouse or trackpad, the way it does on desktop; touch press feedback is unchanged.
+
 ## [v0.14.2] - 2026-07-27
 
 ### Changed

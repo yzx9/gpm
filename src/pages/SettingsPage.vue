@@ -275,10 +275,14 @@ onMounted(() => {
 .hub-row + .hub-row {
   border-top: 1px solid var(--color-edge);
 }
-.hub-row:hover,
 .hub-row:focus-visible {
   background: var(--color-hover, var(--color-edge));
   outline: none;
+}
+@media (hover: hover) {
+  .hub-row:hover {
+    background: var(--color-hover, var(--color-edge));
+  }
 }
 .hub-title {
   font-size: 0.95rem;

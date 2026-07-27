@@ -911,8 +911,10 @@ defineExpose({ syncRepo });
 .sig-light:active {
   opacity: 0.7;
 }
-.sig-light:hover {
-  opacity: 0.7;
+@media (hover: hover) {
+  .sig-light:hover {
+    opacity: 0.7;
+  }
 }
 .sig-light:focus-visible {
   outline: 2px solid var(--color-accent);
