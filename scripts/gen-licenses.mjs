@@ -16,10 +16,11 @@
 //  - Rust crates:  `cargo metadata --format-version 1` (always available with
 //                  a cargo toolchain; no extra install). Workspace members are
 //                  gpm's own crates and are excluded (acknowledged separately).
-//  - npm packages: the runtime transitive closure of `dependencies`, resolved
-//                  via Node's own module resolver (createRequire) so pnpm's
-//                  symlink layout is honored. Dev tooling (vite/vitest/
-//                  tailwind) is excluded — it never ships in the Tauri bundle.
+//  - npm packages: the full transitive closure of the root `dependencies` AND
+//                  `devDependencies`, resolved via Node's own module resolver
+//                  (createRequire) so pnpm's symlink layout is honored. Dev
+//                  tooling (vite/vitest/tailwind) is included even though it
+//                  never ships in the Tauri bundle — see the policy note below.
 //
 // Not yet covered: Android Gradle dependencies (androidx, Kotlin stdlib, …)
 // ship in the APK but aren't scanned here (needs a gradle dependency walk).
@@ -195,16 +196,23 @@ function scanRustFromLock(root) {
   return pkgs;
 }
 
-// Policy note — why Rust and npm are scoped differently:
+// Policy note — both ecosystems take the maximalist view: list everything the
+// toolchain resolves, not just what ships in the binary.
 //  - Rust:  the binary links across the *full* resolved tree (and build/proc-
 //           macro crates are part of the resolved Cargo.lock), so we list every
 //           crate `cargo metadata` reports — matching `cargo about` and the
 //           "About → Open-source licenses" convention (VS Code, Android's
 //           oss-licenses plugin).
-//  - npm:   only the runtime transitive closure of `dependencies` ships in the
-//           Tauri bundle. Dev tooling (vite, vitest, tailwind, prettier) never
-//           reaches users, so we exclude `devDependencies` rather than claim
-//           credit for tools we don't distribute.
+//  - npm:   the seed is the root `dependencies` AND `devDependencies`, then we
+//           walk each package's runtime `dependencies`. Dev tooling (vite,
+//           vitest, tailwind) never reaches users, but the tree is permissive
+//           (no GPL/AGPL/LGPL-only npm packages), attribution is cheap, and
+//           matching the Rust convention keeps the page honest about every
+//           tool the project relies on. Sub-package devDependencies aren't
+//           walked — pnpm doesn't install them, so resolution would just
+//           noisily fail. A peer-only tool the project uses (prettier, via
+//           prettier-plugin-organize-imports) is added as an explicit root
+//           devDep so the BFS can reach it.
 
 /** Read a package.json as JSON, or null on any failure. */
 function readPackageJson(path) {
@@ -240,31 +248,57 @@ function npmEntry(pj, dir) {
   };
 }
 
-/** Resolve `<name>/package.json` reachable from `fromDir` (a package directory),
- *  honoring pnpm's symlink layout via Node's own resolver. Returns the path or
- *  null if the package isn't installed/ resolvable. */
+/** Resolve `<name>`'s package.json reachable from `fromDir` (a package
+ *  directory), honoring pnpm's symlink layout via Node's own resolver. Returns
+ *  the path or null if the package isn't installed/resolvable.
+ *
+ *  Two strategies: first try the `<name>/package.json` subpath (fast path for
+ *  packages without a restrictive `exports` map). If that throws — modern
+ *  packages whose `exports` field doesn't expose `'./package.json'`
+ *  (ERR_PACKAGE_PATH_NOT_EXPORTED) — fall back to resolving the bare `<name>`
+ *  (always allowed via the `.` export / `main`) and walking up to the nearest
+ *  package.json. Without the fallback, packages like
+ *  @tauri-apps/plugin-clipboard-manager would be silently dropped from the
+ *  inventory while `complete` stayed `true`. */
 function resolvePkgJsonPath(name, fromDir) {
+  const req = createRequire(join(fromDir, "package.json"));
   try {
-    return createRequire(join(fromDir, "package.json")).resolve(
-      `${name}/package.json`,
-    );
+    return req.resolve(`${name}/package.json`);
   } catch {
+    // Restrictive exports map — resolve the package main and walk up to its
+    // package.json, bypassing the exports block for the manifest read.
+    try {
+      let dir = dirname(req.resolve(name));
+      while (dir !== dirname(dir)) {
+        const cand = join(dir, "package.json");
+        if (existsSync(cand)) return cand;
+        dir = dirname(dir);
+      }
+    } catch {
+      // bare-name resolve also failed — package not installed/importable
+    }
     return null;
   }
 }
 
-/** Walk the runtime transitive closure of the root `dependencies`, starting
- *  from the repo root. Dev tooling is excluded (see policy note above). */
-function scanNpm(root) {
+/** Walk the transitive closure of the root `dependencies` AND `devDependencies`,
+ *  starting from the repo root. Sub-package recursion uses each package's
+ *  `dependencies` only — see the policy note above. */
+export function scanNpm(root) {
   const rootPj = readPackageJson(join(root, "package.json"));
   if (!rootPj) return [];
   const seen = new Set();
   const packages = [];
-  // BFS queue of [depName, fromDir]. Root deps resolve from the repo root.
-  const queue = Object.keys(rootPj.dependencies ?? {}).map((name) => [
-    name,
-    root,
-  ]);
+  // Seed from BOTH the runtime and dev dependency sets — see the policy note
+  // above for why dev tooling is included despite not shipping. Sub-package
+  // recursion stays `dependencies`-only (pnpm doesn't install nested
+  // devDependencies), so dev tooling's own runtime deps are seeded here and
+  // followed normally below. Queue holds [depName, fromDir]; root deps resolve
+  // from the repo root.
+  const queue = Object.keys({
+    ...(rootPj.dependencies ?? {}),
+    ...(rootPj.devDependencies ?? {}),
+  }).map((name) => [name, root]);
   while (queue.length) {
     const [name, fromDir] = queue.shift();
     const pjPath = resolvePkgJsonPath(name, fromDir);
