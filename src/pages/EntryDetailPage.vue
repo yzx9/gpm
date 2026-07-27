@@ -7,6 +7,7 @@ import {
   copyPassword as copyPasswordCmd,
   copyTotp as copyTotpCmd,
   deleteSecret as deleteSecretCmd,
+  ensureClipboardNotifyPermission,
   hasTotp as hasTotpCmd,
   showPassword as showPasswordCmd,
   type AppError,
@@ -20,7 +21,6 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import {
-  ensureClipboardNotifyPermission,
   isAuthCancelled,
   useDivergence,
   useLockState,

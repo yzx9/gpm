@@ -7,16 +7,15 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * Clipboard-clear notification permission IPC — mirrors
  * `src-tauri/src/clipboard.rs`. The notification is the sticky Android toast
- * shown while a password is on the clipboard so the user can clear it early;
- * these two commands drive the ask-once permission flow
- * ({@link ../composables/useClipboardNotify}). Desktop has no
- * notification-permission model — both report `true` there.
+ * shown while a password is on the clipboard so the user can clear it early.
+ * Desktop has no notification-permission model — both commands report `true`
+ * there, so {@link ensureClipboardNotifyPermission} is a no-op on desktop.
  */
 
 /**
  * Whether the app may post notifications (Android 13+ runtime permission).
- * Cheap and non-prompting — the ask-once flow calls this before copying to
- * decide whether to prompt. Always `true` on desktop.
+ * Cheap and non-prompting — callers check this before copying to skip the
+ * system dialog when already granted. Always `true` on desktop.
  */
 export async function areClipboardNotificationsEnabled(): Promise<boolean> {
   return invoke<boolean>("are_clipboard_notifications_enabled");
@@ -28,4 +27,24 @@ export async function areClipboardNotificationsEnabled(): Promise<boolean> {
  */
 export async function requestClipboardNotificationsPermission(): Promise<boolean> {
   return invoke<boolean>("request_clipboard_notifications_permission");
+}
+
+/**
+ * Before a copy, request the clipboard-clear notification permission via the
+ * system `POST_NOTIFICATIONS` dialog whenever the enabled-probe reports false
+ * (so every copy that finds notifications disabled fires it, until Android's
+ * own two-denial suppression takes over). Best-effort: any failure degrades to
+ * "skip, still copy" — the notification is a UX affordance and never gates the
+ * copy (the auto-clear timer is the independent security control). No-op on
+ * desktop.
+ */
+export async function ensureClipboardNotifyPermission(): Promise<void> {
+  try {
+    if (await areClipboardNotificationsEnabled()) return;
+    await requestClipboardNotificationsPermission();
+  } catch (e) {
+    // A broken probe must never block the copy — degrade, but log the
+    // unexpected failure so a missing plugin or Kotlin crash stays diagnosable.
+    console.warn("clipboard notify permission probe failed", e);
+  }
 }

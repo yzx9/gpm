@@ -271,14 +271,26 @@ describe("EntryDetailPage", () => {
     });
 
     it("clears sensitive data immediately after copy", async () => {
-      // First reveal the password
-      // The page probes `has_totp` on mount (identity is cached by default), so
-      // the first queued response is that probe — queue it before the two the
-      // test actually drives (show_password, then copy_password).
-      vi.mocked(invoke)
-        .mockResolvedValueOnce(true)
-        .mockResolvedValueOnce({ password: "s3cret", notes: "" })
-        .mockResolvedValueOnce({ entry_name: "prod", cleared_after_secs: 45 });
+      // Dispatch by command name, not call order: copyPassword's
+      // ensureClipboardNotifyPermission adds an are_clipboard_notifications_enabled
+      // probe between show_password and copy_password, so an order-based Once
+      // queue drifts and only passes via a sibling test's leaked default.
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        switch (cmd) {
+          case "has_totp":
+          case "are_clipboard_notifications_enabled":
+            return Promise.resolve(true);
+          case "show_password":
+            return Promise.resolve({ password: "s3cret", notes: "" });
+          case "copy_password":
+            return Promise.resolve({
+              entry_name: "prod",
+              cleared_after_secs: 45,
+            });
+          default:
+            return Promise.resolve(undefined);
+        }
+      });
 
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");

@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import {
   copyGeneratedPassword,
+  ensureClipboardNotifyPermission,
   generatePasswordBatch,
   type AppError,
   type GenerateMode,
@@ -14,11 +15,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
-import {
-  ensureClipboardNotifyPermission,
-  useToast,
-  useWipeOnLeave,
-} from "@/composables";
+import { useToast, useWipeOnLeave } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { Copy, Dices } from "@lucide/vue";
 import { computed, ref } from "vue";
