@@ -554,7 +554,7 @@ impl fmt::Debug for RepoConfig {
 /// A non-URL string (no `://`) is returned unchanged.
 ///
 /// `pub` so the app layer can sanitize a pasted remote before logging it
-/// (RFC 0052 phase 3 — a setup URL may embed a PAT).
+/// (a setup URL may embed a PAT).
 // TODO: SCP-style ssh syntax (`user:pass@host:path`, no `://`) is returned
 // unchanged — gpm's SSH remotes authenticate via key, not an embedded password,
 // so this is near-zero likelihood, but extend here if embedded-password SCP
@@ -681,7 +681,7 @@ mod tests {
         );
     }
 
-    /// Runtime guard for the "never log a secret" invariant (RFC 0052): the
+    /// Runtime guard for the "never log a secret" invariant: the
     /// setup clone path logs `redact_url(&repo_url)`, so a credentialed URL
     /// must arrive redacted. This drives the exact log shape `setup::clone_repo`
     /// emits and asserts the embedded token never reaches the persisted line.

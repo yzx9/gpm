@@ -8,7 +8,8 @@ import type { App } from "vue";
 /**
  * Diagnostics logging IPC — mirrors `src-tauri/src/logging.rs`. The in-app
  * viewer (Settings → Logs) reads and clears the rotated log file via these. The
- * app logs at the fixed Info default, so there is no runtime level control here.
+ * runtime level (Info default, an optional time-boxed Verbose/Debug window) is
+ * controlled via the app-config IPC, not here.
  *
  * The frontend logging bridge (`installFrontendLogger`) writes uncaught frontend
  * errors into the same backend pipeline through `write_log`, so a bug report has
@@ -48,7 +49,7 @@ function formatErr(e: unknown): string {
 }
 
 /**
- * Install the frontend logging bridge (RFC 0052, phase 2): route uncaught errors
+ * Install the frontend logging bridge: route uncaught errors
  * into the backend log so they leave a persisted trace. Each handler is
  * fire-and-forget with a swallowed rejection — logging must never break
  * rendering or re-enter itself on failure.

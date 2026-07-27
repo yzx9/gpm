@@ -160,7 +160,7 @@ const routes = [
     name: "about",
     component: () => import("./pages/AboutPage.vue"),
   },
-  // Diagnostics log viewer (RFC 0052). Standalone namespace like About — the log
+  // Diagnostics log viewer. Standalone namespace like About — the log
   // is a self-contained viewer, not a settings category. NOT marked secure: the
   // log surfaces only entry names, which (like the entry list) carry no secret.
   {
@@ -198,7 +198,7 @@ void (async () => {
   const app = createApp(App);
   app.use(router);
   app.use(i18n);
-  // Frontend logging bridge (RFC 0052): route uncaught frontend errors into the
+  // Frontend logging bridge: route uncaught frontend errors into the
   // backend log so a bug report has a persisted frontend trace. Fire-and-forget
   // with a recursion guard — it must never break rendering.
   installFrontendLogger(app);

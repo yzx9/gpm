@@ -5,17 +5,17 @@
 //! In-app diagnostics viewer commands — read and clear the rotated log file the
 //! `tauri-plugin-log` `LogDir` target writes under `app_log_dir()`. The plugin
 //! exposes no read/clear command of its own (only the JS→Rust `log` forwarder),
-//! so these are thin, best-effort helpers for the Settings → Logs viewer
-//! (RFC 0052, phase 2).
+//! so these are thin, best-effort helpers for the Settings → Logs viewer.
 //!
 //! The heavy lifting lives in [`read_log_from`] / [`clear_log_in`] — pure `&Path`
 //! helpers split out so the ordering, truncation, and clear semantics are
 //! unit-testable with a tempdir (the Tauri commands just resolve the dir + base
 //! name and delegate).
 //!
-//! Security: the log is plaintext by design (RFC 0052) — only entry names and
-//! operation outcomes are ever logged, never secret content. The viewer route is
-//! `secure: true` so entry-name metadata is screen-protected.
+//! Security: the log is plaintext by design — only entry names and operation
+//! outcomes are ever logged, never secret content (see SECURITY.md § Diagnostics
+//! logging for the threat model). The viewer route is intentionally NOT marked
+//! secure: entry-name metadata carries no secret, like the entry list.
 
 use std::path::Path;
 
@@ -144,7 +144,7 @@ pub(crate) async fn clear_log(app: AppHandle) -> Result<(), Error> {
     clear_log_in(&log_dir(&app)?, &log_base(&app)).await
 }
 
-/// Frontend logging bridge (RFC 0052, phase 2): write a frontend-emitted record
+/// Frontend logging bridge: write a frontend-emitted record
 /// into the same backend pipeline. The global error handlers in `main.ts` call
 /// this so an uncaught frontend error leaves a persisted trace for bug reports.
 ///
