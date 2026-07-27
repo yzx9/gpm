@@ -182,6 +182,8 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
+        verbose_timer: Mutex::new(None),
+        verbose_generation: Arc::new(AtomicU64::new(0)),
     };
     (
         state,

@@ -31,6 +31,8 @@ use tauri_plugin_secure_keystore::SecureKeystoreExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
+use crate::migrations::run_app_migrations;
+use crate::verbose::arm_verbose_timer;
 use crate::{decode_master_key, identity};
 
 // ---------------------------------------------------------------------------
@@ -334,7 +336,21 @@ pub(crate) async fn app_unlock(
     // app.json BEFORE anything reads them — the first unlock, and the cache
     // refresh inside try_identity_auto_unlock, must see the migrated values, not
     // the defaults. The master key is now in memory, so the sealed read succeeds.
-    crate::migrations::run_app_migrations(state.inner()).await;
+    run_app_migrations(state.inner()).await;
+    // Re-apply the runtime log gate after migrations: under app-lock, the
+    // verbose carry-over (m0004) runs here, not in init_state. Without this an
+    // upgrading user previously pinned to "debug" would spend this first session
+    // at Info — the data lands on disk (verbose_until set), but the runtime gate
+    // was last set at cold start (Info) and nothing re-applied it. Mirrors the
+    // post-migration block in init_state.
+    let _ = state
+        .app_config
+        .clear_expired_verbose()
+        .await
+        .map_err(|e| log::warn!("app-config: clear_expired_verbose failed: {e}"));
+    log::set_max_level(state.app_config.effective_log_filter());
+    // Re-arm the mid-session revert timer if a verbose window is still live.
+    arm_verbose_timer(state.inner(), &app);
     // One-shot legacy-envelope migrate, BEFORE the unlock emit so the app isn't
     // interactive while repo.json is re-wrapped (no race with a settings write).
     // Under App Lock the key is absent at cold start, so convert it now.

@@ -11,6 +11,7 @@
     "clipboard-manager:allow-clear",
     "safe-area:default",
     "screen-secure:default",
-    "opener:allow-open-url"
+    "opener:allow-open-url",
+    "notification:default"
   ]
 }

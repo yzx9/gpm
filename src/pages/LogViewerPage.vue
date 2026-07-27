@@ -3,74 +3,164 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import type { AppError } from "@/api";
-import { clearLog, getLogLevel, readLog, setLogLevel } from "@/api";
+import type { AppConfig, AppError } from "@/api";
+import { clearLog, getAppConfig, readLog, setVerbose } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { useToast } from "@/composables";
 import { RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
+import { listen } from "@tauri-apps/api/event";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 const { toast } = useToast();
 
 const logText = ref("");
-const level = ref("info");
 const loading = ref(false);
 const clearing = ref(false);
 const error = ref("");
 
-const LEVELS = ["error", "warn", "info", "debug"] as const;
-// Computed so the labels re-translate if the locale changes while the page is open.
-const levelOptions = computed(() =>
-  LEVELS.map((value) => ({ label: t(`log.levels.${value}`), value })),
-);
+// Verbose (Debug) toggle state. `verbose_until` is a Unix-seconds deadline set
+// by `set_verbose`; the level is Debug while it is live. A backend deadline
+// timer auto-reverts to Info when the window elapses — mid-session, emitting
+// `verbose-reverted`, which this page listens for (onVerboseReverted) to flip
+// the toggle Off. If the process is killed first, the next launch clears the
+// expired deadline at startup.
+const appConfig = ref<AppConfig | null>(null);
+const verboseLoading = ref(false);
+// Ticked once a second while verbose is active, so the countdown + active/expired
+// hint stay live. Vanilla setInterval (the app has no VueUse dep); cleared on
+// unmount and when verbose goes inactive.
+const nowTick = ref(Date.now());
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
-onMounted(load);
+/** Toggle position: On while a deadline is set (Debug this session). */
+const verboseOn = computed(() => appConfig.value?.verbose_until != null);
+/** Hint phase: `on` while the window is live, `elapsed` once it has passed. */
+const verboseState = computed<"off" | "on" | "elapsed">(() => {
+  const v = appConfig.value?.verbose_until;
+  if (v == null) return "off";
+  return v * 1000 > nowTick.value ? "on" : "elapsed";
+});
+/** Remaining window as `m:ss`, recomputed each tick. */
+const remainingLabel = computed(() => {
+  const v = appConfig.value?.verbose_until;
+  if (typeof v !== "number") return "";
+  const secs = Math.max(0, v - Math.floor(nowTick.value / 1000));
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+});
 
-/** Read the log + current level (refresh-on-open; no live tail — RFC 0052). */
+function startCountdown() {
+  if (countdownTimer) return;
+  countdownTimer = setInterval(() => {
+    nowTick.value = Date.now();
+    // Stop ticking once the window has elapsed (the hint flips to "elapsed").
+    if (verboseState.value !== "on") stopCountdown();
+  }, 1000);
+}
+function stopCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+}
+
+/** Backend auto-reverted verbose to Info (the deadline elapsed). Re-read the
+ *  config rather than clearing locally: a toggle-On that landed between the
+ *  revert and this queued event would otherwise be clobbered, leaving the UI
+ *  showing Off while the backend logs at Debug. The App shell posts the OS
+ *  notification off the same event. */
+async function onVerboseReverted() {
+  stopCountdown();
+  try {
+    appConfig.value = await getAppConfig();
+  } catch {
+    // best-effort — the next load/visibility re-syncs the toggle
+  }
+}
+
+let disposed = false;
+let verboseRevertedUnlisten: (() => void) | null = null;
+
+onMounted(() => {
+  void load();
+  void listen<null>("verbose-reverted", onVerboseReverted)
+    .then((un) => {
+      // If the page unmounted before listen resolved, unlisten immediately.
+      if (disposed) un();
+      else verboseRevertedUnlisten = un;
+    })
+    .catch(() => {});
+});
+onUnmounted(() => {
+  disposed = true;
+  verboseRevertedUnlisten?.();
+  verboseRevertedUnlisten = null;
+  stopCountdown();
+});
+
+/** Read the log + the verbose state (refresh-on-open; no live tail). */
 async function load() {
   loading.value = true;
   error.value = "";
-  // allSettled: a getLogLevel() failure must not hide the log text — readLog is
-  // the load-bearing call (mirrors SettingsPage's loadSummaries resilience).
-  const [textRes, lvlRes] = await Promise.allSettled([
-    readLog(),
-    getLogLevel(),
-  ]);
-  if (textRes.status === "fulfilled") {
-    logText.value = textRes.value;
-  } else {
-    const appError = textRes.reason as AppError;
+  try {
+    logText.value = await readLog();
+  } catch (e) {
+    const appError = e as AppError;
     error.value = appError?.message || t("log.loadFailed");
+  } finally {
+    loading.value = false;
   }
-  if (lvlRes.status === "fulfilled") {
-    level.value = lvlRes.value;
-  } // else: leave level as-is; the selector still works and next load re-reads
-  loading.value = false;
+  // Verbose state is secondary — a fetch failure must not block the log view.
+  try {
+    appConfig.value = await getAppConfig();
+    if (verboseState.value === "on") startCountdown();
+  } catch {
+    // leave the toggle at its default (off); non-fatal
+  }
 }
 
-/** Persist + apply the level at runtime (the backend calls `set_max_level`). */
-async function onLevelChange(next: string) {
-  level.value = next; // optimistic — the segmented control updates immediately
+async function onVerboseChange(enabled: boolean) {
+  if (verboseLoading.value || enabled === verboseOn.value) return;
+  verboseLoading.value = true;
   try {
-    await setLogLevel(next);
-  } catch (e) {
-    // Re-read the real backend level rather than reverting to a captured prev:
-    // two rapid changes can interleave, and a stale prev would clobber a newer
-    // optimistic value. The backend is the source of truth.
-    try {
-      level.value = await getLogLevel();
-    } catch {
-      // re-read also failed — leave the selector as-is (next load reconciles)
+    appConfig.value = await setVerbose(
+      enabled,
+      // Stage the localized revert-notification text (the backend posts it from
+      // Rust when the window elapses, so it fires even when backgrounded).
+      enabled
+        ? {
+            title: t("log.verboseNotifTitle"),
+            body: t("log.verboseRevertedNotifBody"),
+          }
+        : undefined,
+    );
+    // Refresh the tick before reading `remainingLabel`: the interval only ticks
+    // while a countdown is already running, so at enable-time `nowTick` can be
+    // stale from mount and would inflate the toast's remaining time.
+    nowTick.value = Date.now();
+    if (verboseState.value === "on") {
+      // Notify immediately: verbose is now on for the bounded window.
+      toast.info(
+        t("log.verboseActiveToast", { remaining: remainingLabel.value }),
+      );
+      startCountdown();
+    } else {
+      stopCountdown();
     }
+  } catch (e) {
     const appError = e as AppError;
-    toast.danger(appError?.message || t("log.levelFailed"));
+    toast.danger(appError?.message || t("log.loadFailed"));
+  } finally {
+    verboseLoading.value = false;
   }
 }
 
@@ -114,15 +204,31 @@ async function onClear() {
       </template>
     </BaseHeader>
 
-    <section class="mb-4">
+    <BaseCard as="section" class="mb-4">
       <BaseSegmentedControl
-        :options="levelOptions"
-        :model-value="level"
-        name="log-level"
-        :legend="t('log.levelLabel')"
-        @change="onLevelChange"
-      />
-    </section>
+        name="verbose"
+        :legend="t('log.verboseLegend')"
+        :model-value="verboseOn"
+        :options="[
+          { label: t('log.verboseOn'), value: true },
+          { label: t('log.verboseOff'), value: false },
+        ]"
+        :disabled="verboseLoading"
+        @change="onVerboseChange"
+      >
+        <template #hint>
+          <p class="text-xs text-muted mt-1">
+            <template v-if="verboseState === 'on'">{{
+              t("log.verboseOnHint", { remaining: remainingLabel })
+            }}</template>
+            <template v-else-if="verboseState === 'elapsed'">{{
+              t("log.verboseElapsedHint")
+            }}</template>
+            <template v-else>{{ t("log.verboseOffHint") }}</template>
+          </p>
+        </template>
+      </BaseSegmentedControl>
+    </BaseCard>
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">{{
       error

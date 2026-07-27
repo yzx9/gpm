@@ -717,6 +717,8 @@ mod tests {
             seal_migrate_state: std::sync::atomic::AtomicU8::new(0),
             backend_resolve_state: std::sync::atomic::AtomicU8::new(0),
             active_cancel_token: Mutex::new(None),
+            verbose_timer: Mutex::new(None),
+            verbose_generation: Arc::new(AtomicU64::new(0)),
         };
         (state, dir)
     }

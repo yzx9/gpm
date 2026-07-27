@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Settings → Logs screen replaces its four-level log selector (Errors / Warnings / Info / Debug) with a single **Verbose** toggle. Turn it on to capture everything — Debug level — for about ten minutes, handy for attaching to a bug report; it turns itself off after the window so logging stays focused the rest of the time. A verbose session survives a restart, so relaunching to reproduce an issue keeps capturing (including startup), and gpm lets you know when you relaunch with verbose still on. Outside that window the app records at the Info level as before.
+
 ## [v0.14.2] - 2026-07-27
 
 ### Changed

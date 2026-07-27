@@ -1,12 +1,5 @@
 {
   "title": "日志",
-  "levelLabel": "级别",
-  "levels": {
-    "error": "仅错误",
-    "warn": "警告",
-    "info": "信息",
-    "debug": "调试"
-  },
   "refresh": "刷新",
   "clear": "清空日志",
   "clearConfirm": "确认清空日志？此操作不可撤销。",
@@ -14,5 +7,14 @@
   "loadFailed": "无法加载日志。",
   "clearFailed": "无法清空日志。",
   "cleared": "日志已清空。",
-  "levelFailed": "无法设置日志级别。"
+  "verboseLegend": "详细日志",
+  "verboseOn": "开",
+  "verboseOff": "关",
+  "verboseOffHint": "开启后将以 Debug 级别记录约 10 分钟的全部日志，方便附在问题报告中。",
+  "verboseOnHint": "详细日志已开启。窗口结束后（剩余 {remaining}），下次启动将恢复为 Info 级别。",
+  "verboseElapsedHint": "详细日志窗口已结束。在下次启动或你手动关闭前，仍保持 Debug 级别。",
+  "verboseActiveToast": "详细日志已开启——窗口结束后（剩余 {remaining}）下次启动恢复 Info 级别。",
+  "verboseNotifTitle": "详细日志",
+  "verboseBootNotifBody": "仍开启——下次启动后恢复 Info 级别（剩余 {remaining}）。",
+  "verboseRevertedNotifBody": "已恢复为 Info 级别——调试窗口结束。"
 }

@@ -8,6 +8,11 @@ import {
   invoke,
   type PluginListener,
 } from "@tauri-apps/api/core";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 
 import type { LockMode, SecureScreenMode } from "./common";
 
@@ -61,9 +66,16 @@ export interface AppConfig {
    *  Settings toggle + runtime gate read `getAppLockState` (Keystore truth),
    *  not this flag; it exists only as a persisted record. */
   biometric_app_lock?: boolean;
-  /** Persisted diagnostics log level (`"error"|"warn"|"info"|"debug"`). Absent ⇒
-   *  the default `info`. Applied at startup + on the `set_log_level` command. */
+  /** **Deprecated** persisted diagnostics level (`"error"|"warn"|"info"|"debug"`).
+   *  Backend-only: no runtime logic reads it; kept so migration `m0004` can carry
+   *  a pinned `"debug"` into `verbose_until`, then removed at v1.0.0. Ignore on
+   *  the frontend — use {@link isVerboseActive} / {@link verbose_until}. */
   log_level?: string;
+  /** Verbose-logging deadline as Unix seconds. Set + unexpired ⇒ the app logs at
+   *  Debug this session (and on any relaunch within the window); absent/expired ⇒
+   *  Info. Apply via {@link setVerbose}; check liveness via
+   *  {@link isVerboseActive}. See RFC 0055. */
+  verbose_until?: number;
 }
 
 /**
@@ -102,6 +114,66 @@ export async function setLocalePref(locale: string | null): Promise<AppConfig> {
  */
 export async function setThemeMode(mode: string | null): Promise<AppConfig> {
   return invoke<AppConfig>("set_theme_mode", { mode });
+}
+
+/**
+ * Localized text for the verbose-revert OS notification. Passed to
+ * {@link setVerbose} on enable; the backend stages it and posts it (from Rust,
+ * not the WebView) when the window elapses, so the notice fires even if the app
+ * is backgrounded. Mirrors how clipboard-notify takes its text from the frontend.
+ */
+export interface VerboseNotifyText {
+  title: string;
+  body: string;
+}
+
+/**
+ * Turn verbose (Debug) logging on for a bounded window (~10 min), or off
+ * (`set_verbose`). Returns the updated config; the backend re-applies the
+ * runtime log gate so the level takes effect immediately. On enable, `revertNotify`
+ * stages the localized text for the OS notification the deadline timer posts when
+ * the window elapses. Verbose persists; the deadline auto-reverts to Info
+ * (mid-session via the timer, or at the next launch if the process was killed).
+ * See RFC 0055.
+ */
+export async function setVerbose(
+  enabled: boolean,
+  revertNotify?: VerboseNotifyText,
+): Promise<AppConfig> {
+  return invoke<AppConfig>("set_verbose", { enabled, revertNotify });
+}
+
+/**
+ * Whether a verbose deadline is still in the future (`verbose_until` is Unix
+ * seconds). Pure so both the Logs toggle and the boot notification share one
+ * liveness check.
+ */
+export function isVerboseActive(verboseUntil: number | undefined): boolean {
+  return typeof verboseUntil === "number" && verboseUntil * 1000 > Date.now();
+}
+
+/** Seconds remaining in the verbose window (`≤ 0` if expired/unset). Pure. */
+export function verboseRemainingSecs(verboseUntil: number | undefined): number {
+  if (typeof verboseUntil !== "number") return 0;
+  return Math.max(0, verboseUntil - Math.floor(Date.now() / 1000));
+}
+
+/**
+ * Post an OS notification (`tauri-plugin-notification`), requesting permission
+ * first if not yet granted. Best-effort: any failure is swallowed —
+ * notifications are non-critical. `POST_NOTIFICATIONS` is already declared and
+ * typically granted via the clipboard-notify flow, so this normally does not
+ * prompt. No-op-ish on desktop (the plugin posts a native notification there).
+ */
+export async function notifyOs(title: string, body?: string): Promise<void> {
+  try {
+    if (!(await isPermissionGranted())) {
+      if ((await requestPermission()) !== "granted") return;
+    }
+    sendNotification({ title, body });
+  } catch {
+    // best-effort — a missing notification never fails the caller
+  }
 }
 
 /**

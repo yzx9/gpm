@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use rustpass::{LockMode, Store};
 
 use crate::AppState;
-use crate::app_config::{AppConfigStore, SecureScreenMode};
+use crate::app_config::{AppConfigStore, SecureScreenMode, VERBOSE_WINDOW_SECS, now_unix};
 use crate::migrations::{APP_CONFIG_SCHEMA_VERSION, run_app_migrations};
 
 /// Build an `AppState` over `store` + `app_config` with inert default caches.
@@ -39,6 +39,8 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
+        verbose_timer: Mutex::new(None),
+        verbose_generation: Arc::new(AtomicU64::new(0)),
     }
 }
 
@@ -294,5 +296,101 @@ async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
     assert_eq!(
         AppConfigStore::new(dir.path()).get().schema_version,
         APP_CONFIG_SCHEMA_VERSION,
+    );
+}
+
+/// m0004 carries a previously pinned `"debug"` level into the verbose flag: a v3
+/// file with `log_level:"debug"` lands a `verbose_until` deadline ~one window
+/// ahead, so the upgrade keeps Debug then expires under the same time-box (RFC
+/// 0055). `schema_version` bumps to 4.
+#[tokio::test]
+async fn m0004_carries_pinned_debug_into_verbose() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("app.json"),
+        r#"{"schema_version":3,"log_level":"debug"}"#,
+    )
+    .unwrap();
+    let state = build_state(
+        Arc::new(Store::new(dir.path().to_path_buf(), None)),
+        AppConfigStore::new(dir.path()),
+    );
+
+    run_app_migrations(&state).await;
+
+    let reloaded = AppConfigStore::new(dir.path()).get();
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    let deadline = reloaded
+        .verbose_until
+        .expect("debug ⇒ verbose_until stamped");
+    assert!(deadline > now_unix(), "deadline is in the future");
+    assert!(deadline <= now_unix() + VERBOSE_WINDOW_SECS);
+    assert!(
+        reloaded.log_level.is_none(),
+        "the deprecated log_level is cleared once carried"
+    );
+}
+
+/// Every level other than `"debug"` collapses to the Info default: a v3 file
+/// with `log_level` of `"warn"` / `"info"` / `"error"` leaves `verbose_until`
+/// as `None` (no verbose session started).
+#[tokio::test]
+async fn m0004_collapses_non_debug_levels_to_info_default() {
+    for level in ["warn", "info", "error"] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("app.json"),
+            format!(r#"{{"schema_version":3,"log_level":"{level}"}}"#),
+        )
+        .unwrap();
+        let state = build_state(
+            Arc::new(Store::new(dir.path().to_path_buf(), None)),
+            AppConfigStore::new(dir.path()),
+        );
+
+        run_app_migrations(&state).await;
+
+        let reloaded = AppConfigStore::new(dir.path()).get();
+        assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+        assert!(
+            reloaded.verbose_until.is_none(),
+            "{level} must collapse to the Info default"
+        );
+        assert!(
+            reloaded.log_level.is_none(),
+            "{level}: the deprecated log_level is cleared once considered"
+        );
+    }
+}
+
+/// m0004 leaves an already-set `verbose_until` alone even when `log_level` is
+/// `"debug"` — a partially-migrated file re-running this step keeps its value
+/// rather than restamping the deadline.
+#[tokio::test]
+async fn m0004_preserves_an_already_set_verbose_until() {
+    let dir = tempfile::tempdir().unwrap();
+    let pinned = now_unix() + 42; // an arbitrary pre-existing deadline
+    std::fs::write(
+        dir.path().join("app.json"),
+        format!(r#"{{"schema_version":3,"log_level":"debug","verbose_until":{pinned}}}"#),
+    )
+    .unwrap();
+    let state = build_state(
+        Arc::new(Store::new(dir.path().to_path_buf(), None)),
+        AppConfigStore::new(dir.path()),
+    );
+
+    run_app_migrations(&state).await;
+
+    let reloaded = AppConfigStore::new(dir.path()).get();
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    assert_eq!(
+        reloaded.verbose_until,
+        Some(pinned),
+        "an existing verbose_until is not overwritten by the debug carry-over"
+    );
+    assert!(
+        reloaded.log_level.is_none(),
+        "the deprecated log_level is cleared even when verbose_until was preserved"
     );
 }

@@ -40,6 +40,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS;
 use rustpass::{Error, ErrorCode, LockMode, clamp_lock_mode, normalize_clear_secs};
@@ -47,6 +48,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppState;
+use crate::verbose::{arm_verbose_timer, disarm_verbose_timer};
 
 /// File name of the app-level config, inside the config directory.
 const APP_CONFIG_FILE: &str = "app.json";
@@ -58,6 +60,33 @@ const SUPPORTED_LOCALES: [&str; 2] = ["en", "zh-CN"];
 /// The locale used when no preference is set and the system locale is neither
 /// English nor Chinese — keeps an unsupported system from rendering blank keys.
 const DEFAULT_LOCALE: &str = "en";
+
+/// How long a verbose session stays on, in seconds. Verbose lifts the runtime
+/// log gate to Debug for a bounded window so it cannot be left on indefinitely;
+/// the deadline persists so the window survives a restart (a relaunch made with
+/// verbose on runs the whole session — including startup — at Debug). See RFC
+/// 0055; ~10 min fits the rotation budget and the "capture one repro" use case.
+pub(crate) const VERBOSE_WINDOW_SECS: u64 = 10 * 60;
+
+/// Current time as Unix seconds. A pre-epoch clock skew (impossible in practice)
+/// degrades to `0` ⇒ any deadline reads as expired ⇒ Info, which is safe.
+pub(crate) fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Localized text for the verbose-revert OS notification. Staged when verbose is
+/// enabled (the frontend passes the already-localized title/body) and consumed —
+/// posted by the deadline timer — when the window elapses. Held in memory only
+/// (UI text, not config). If absent at fire time (a relaunch re-armed the timer
+/// with no staged text), the revert still happens; the level + on-disk deadline
+/// are the source of truth, the notice is simply skipped.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VerboseNotifyText {
+    pub(crate) title: String,
+    pub(crate) body: String,
+}
 
 /// App-level (non-repo) preferences. Plaintext on disk — no secrets, only UI
 /// behavior prefs. Plaintext (not sealed) is forced: `locale` must be readable
@@ -150,15 +179,25 @@ pub(crate) struct AppConfig {
     /// `migrations::APP_CONFIG_SCHEMA_VERSION`).
     #[serde(default = "default_schema_version")]
     pub(crate) schema_version: u32,
-    /// Persisted diagnostics log level (`None` ⇒ default `Info`). One of
-    /// `"error"`, `"warn"`, `"info"`, `"debug"`. Applied at startup via
-    /// `log::set_max_level` (see `logging`/`lib::init_state`) and on the
-    /// `set_log_level` command. Plaintext here (not sealed) so it is readable
-    /// before unlock and survives `reset_config` — same rationale as `locale`.
-    /// Omitted from `app.json` while `None` (the default) so existing files stay
-    /// byte-identical on round-trip.
+    /// **Deprecated** persisted diagnostics level (`"error"` / `"warn"` / `"info"`
+    /// / `"debug"`), kept only so migration `0004_verbose_from_debug` can carry a
+    /// previously pinned `"debug"` into the new [`Self::verbose_until`] flag;
+    /// removed at v1.0.0 with the rest of the migration registry (mirrors the
+    /// `secure_screen` bool → `m0003` pattern). No runtime logic reads this —
+    /// [`AppConfigStore::effective_log_filter`] drives the level from
+    /// `verbose_until`. Omitted from `app.json` while `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) log_level: Option<String>,
+    /// Verbose-logging deadline as Unix seconds, or `None` (the Info default).
+    /// While set and not yet past, the runtime log gate is Debug; once past (or
+    /// `None`) it is Info. Persisted in plaintext (same rationale as `locale`:
+    /// readable before unlock, survives `reset_config`, non-confidential) so a
+    /// launch made with verbose on records startup at Debug. Stored as Unix
+    /// seconds via `std::time` — the crate has no `chrono` / `time` dependency,
+    /// matching the rest of the app. See RFC 0055. Omitted from `app.json` while
+    /// `None` so a default config stays byte-identical on round-trip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) verbose_until: Option<u64>,
 }
 
 impl Default for AppConfig {
@@ -178,6 +217,7 @@ impl Default for AppConfig {
             // stays at 1 so a pre-split app.json still runs the registry.)
             schema_version: crate::migrations::APP_CONFIG_SCHEMA_VERSION,
             log_level: None,
+            verbose_until: None,
         }
     }
 }
@@ -251,12 +291,13 @@ fn validate_locale(locale: Option<&str>) -> Result<(), Error> {
 /// always valid and is not listed here; an explicit `Some` must be one of these.
 /// Do NOT add `"system"` here: the frontend sends `null` for "track system"
 /// (never the string), and persisting `Some("system")` would break the
-/// byte-identical-on-default invariant `locale`/`log_level` rely on.
+/// byte-identical-on-default invariant `locale` / `log_level` / `verbose_until`
+/// rely on.
 const SUPPORTED_THEME_MODES: [&str; 2] = ["light", "dark"];
 
 /// Reject an unsupported explicit theme mode. `None` (track system) is always
 /// valid; `Some(mode)` must be in [`SUPPORTED_THEME_MODES`]. Mirrors
-/// `validate_locale` / `validate_log_level`.
+/// `validate_locale`.
 fn validate_theme_mode(mode: Option<&str>) -> Result<(), Error> {
     if let Some(m) = mode
         && !SUPPORTED_THEME_MODES.contains(&m)
@@ -264,24 +305,6 @@ fn validate_theme_mode(mode: Option<&str>) -> Result<(), Error> {
         return Err(Error::new(
             ErrorCode::ConfigError,
             format!("Unsupported theme mode '{m}'"),
-        ));
-    }
-    Ok(())
-}
-
-/// Log levels the diagnostics viewer exposes (lowercase, matching `log::Level`).
-/// `trace`/`off` are intentionally excluded — too noisy / disables logging.
-const LOG_LEVELS: [&str; 4] = ["error", "warn", "info", "debug"];
-
-/// Reject an unsupported log level. `None` (use the default `Info`) is always
-/// valid; `Some(level)` must be one of [`LOG_LEVELS`]. Mirrors `validate_locale`.
-fn validate_log_level(level: Option<&str>) -> Result<(), Error> {
-    if let Some(lvl) = level
-        && !LOG_LEVELS.contains(&lvl)
-    {
-        return Err(Error::new(
-            ErrorCode::ConfigError,
-            format!("Unsupported log level '{lvl}'"),
         ));
     }
     Ok(())
@@ -332,6 +355,9 @@ pub(crate) fn locale_init_script() -> String {
 pub(crate) struct AppConfigStore {
     path: PathBuf,
     cache: Mutex<AppConfig>,
+    /// Staged text for the verbose-revert OS notification (posted by the
+    /// deadline timer). Memory-only; `None` until verbose is enabled.
+    revert_notify: Mutex<Option<VerboseNotifyText>>,
 }
 
 impl AppConfigStore {
@@ -359,7 +385,27 @@ impl AppConfigStore {
         Self {
             path,
             cache: Mutex::new(cache),
+            revert_notify: Mutex::new(None),
         }
+    }
+
+    /// Stage (or clear, on `None`) the localized text for the verbose-revert OS
+    /// notification. Set when verbose is enabled; the deadline timer consumes it.
+    pub(crate) fn set_revert_notify(&self, text: Option<VerboseNotifyText>) {
+        *self
+            .revert_notify
+            .lock()
+            .expect("revert_notify lock poisoned") = text;
+    }
+
+    /// Take the staged revert-notification text (or `None` if none was staged).
+    /// The deadline timer calls this at fire time — consuming ensures a single
+    /// post even if the timer somehow fires twice.
+    pub(crate) fn take_revert_notify(&self) -> Option<VerboseNotifyText> {
+        self.revert_notify
+            .lock()
+            .expect("revert_notify lock poisoned")
+            .take()
     }
 
     /// Snapshot the cached config.
@@ -382,18 +428,17 @@ impl AppConfigStore {
         }
     }
 
-    /// Effective log level as a `log::LevelFilter`: the persisted value if set and
-    /// supported, else `Info`. An unsupported on-disk value (hand-edited or from a
-    /// newer build) degrades to `Info` rather than poisoning logging — mirroring
-    /// `resolved_locale`'s resilience.
+    /// Effective runtime log filter: `Debug` while a verbose deadline is set and
+    /// not yet past, else `Info`. Lazy — an expired deadline reads as Info here
+    /// without being cleared; the startup path calls [`Self::clear_expired_verbose`]
+    /// to persist the revert. Mirrors `resolved_locale`'s degrade-don't-poison
+    /// resilience (a corrupt/future value can never raise the level past Debug,
+    /// which is the logger's ceiling anyway).
     #[must_use]
-    pub(crate) fn effective_log_level(&self) -> log::LevelFilter {
-        match self.get().log_level.as_deref() {
-            Some("error") => log::LevelFilter::Error,
-            Some("warn") => log::LevelFilter::Warn,
-            Some("debug") => log::LevelFilter::Debug,
-            // "info" and None/unsupported both resolve to Info — folding "info"
-            // into the wildcard avoids clippy::match_same_arms.
+    pub(crate) fn effective_log_filter(&self) -> log::LevelFilter {
+        match self.get().verbose_until {
+            Some(deadline) if deadline > now_unix() => log::LevelFilter::Debug,
+            // None, expired, or a stale value all resolve to Info.
             _ => log::LevelFilter::Info,
         }
     }
@@ -456,22 +501,48 @@ impl AppConfigStore {
         self.update(|cfg| cfg.biometric_app_lock = enabled).await
     }
 
-    /// Set the persisted log level (`None` ⇒ default Info). `Some` must be one of
-    /// [`LOG_LEVELS`]; a bad value returns `ConfigError`. The caller applies the
-    /// runtime effect (`log::set_max_level`) so this stays a pure persistence step.
-    pub(crate) async fn set_log_level(&self, level: Option<String>) -> Result<AppConfig, Error> {
-        validate_log_level(level.as_deref())?;
-        self.update(|cfg| cfg.log_level = level).await
-    }
-
     /// Set the persisted color-scheme override (`None` ⇒ track system). `Some`
     /// must be one of [`SUPPORTED_THEME_MODES`]; a bad value returns
     /// `ConfigError`. The frontend applies the runtime effect (the `data-theme`
     /// attribute) on receipt, so this stays a pure persistence step mirroring
-    /// `set_locale`/`set_log_level`.
+    /// `set_locale`.
     pub(crate) async fn set_theme_mode(&self, mode: Option<String>) -> Result<AppConfig, Error> {
         validate_theme_mode(mode.as_deref())?;
         self.update(|cfg| cfg.theme_mode = mode).await
+    }
+
+    /// Turn verbose (Debug) logging on for [`VERBOSE_WINDOW_SECS`], or off. `on`
+    /// stamps a fresh deadline measured from now (the window restarts, never
+    /// extends); `off` clears it immediately. Persists + returns the updated
+    /// config. The runtime gate is re-applied by the caller (the `set_verbose`
+    /// command) so the level changes within the current session, not just on the
+    /// next launch.
+    pub(crate) async fn set_verbose(&self, on: bool) -> Result<AppConfig, Error> {
+        self.update(|cfg| {
+            cfg.verbose_until = on.then(|| now_unix() + VERBOSE_WINDOW_SECS);
+        })
+        .await
+    }
+
+    /// Persist-clear an expired verbose deadline (keeps `app.json` tidy once the
+    /// window has passed). Best-effort at startup: the level is already lazy-Info
+    /// via [`Self::effective_log_filter`], so a failure here is non-fatal — the
+    /// next launch retries.
+    pub(crate) async fn clear_expired_verbose(&self) -> Result<(), Error> {
+        // Fast path: no deadline set ⇒ nothing to do (the common case at startup).
+        if self.get().verbose_until.is_none() {
+            return Ok(());
+        }
+        // Re-check expiry INSIDE the closure so the read-modify-write is atomic
+        // with other `update` callers — a `set_verbose(true)` landing between the
+        // outer check and the swap must not be clobbered by an unconditional None.
+        self.update(|cfg| {
+            if cfg.verbose_until.is_some_and(|d| d <= now_unix()) {
+                cfg.verbose_until = None;
+            }
+        })
+        .await?;
+        Ok(())
     }
 
     /// Set the persisted three-state screen-capture mode. Rejects
@@ -553,6 +624,37 @@ pub(crate) async fn set_theme_mode(
     state.app_config.set_theme_mode(mode).await
 }
 
+/// Turn verbose (Debug) logging on for a bounded window, or off. Returns the
+/// updated config and re-applies the runtime log gate so the level takes effect
+/// immediately. On enable, `revert_notify` stages the localized text the deadline
+/// timer posts as an OS notification when the window elapses (so the notice fires
+/// even if the `WebView` is backgrounded). Verbose persists; the deadline
+/// auto-reverts to Info when it elapses (mid-session via the timer, or at the
+/// next launch if the process was killed). See RFC 0055.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_verbose(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    enabled: bool,
+    revert_notify: Option<VerboseNotifyText>,
+) -> Result<AppConfig, Error> {
+    let cfg = state.app_config.set_verbose(enabled).await?;
+    // Re-apply the runtime gate so the level changes within this session, not
+    // just on the next launch.
+    log::set_max_level(state.app_config.effective_log_filter());
+    if enabled {
+        // Stage the revert-notification text + arm the mid-session revert timer.
+        state.app_config.set_revert_notify(revert_notify);
+        arm_verbose_timer(&state, &app);
+    } else {
+        // Cancel any in-flight revert + drop the staged text.
+        state.app_config.set_revert_notify(None);
+        disarm_verbose_timer(&state);
+    }
+    Ok(cfg)
+}
+
 /// The authoritative locale the app should render in. The frontend uses this at
 /// boot to reconcile against the best-effort value baked into the `WebView` init
 /// script (which can only carry the system locale, not a pinned preference).
@@ -560,31 +662,6 @@ pub(crate) async fn set_theme_mode(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn resolved_locale(state: State<'_, AppState>) -> String {
     state.app_config.resolved_locale()
-}
-
-/// The effective diagnostics log level (persisted value or `"info"` default).
-/// Read by the viewer's level selector.
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub(crate) fn get_log_level(state: State<'_, AppState>) -> String {
-    match state.app_config.get().log_level.as_deref() {
-        Some(lvl) if LOG_LEVELS.contains(&lvl) => lvl.to_string(),
-        _ => "info".to_string(),
-    }
-}
-
-/// Persist the log level and apply it at runtime immediately via
-/// `log::set_max_level` (no restart — the `log` macros short-circuit at
-/// `max_level`). `null` clears the override (back to the Info default).
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn set_log_level(
-    state: State<'_, AppState>,
-    level: Option<String>,
-) -> Result<(), Error> {
-    state.app_config.set_log_level(level).await?;
-    log::set_max_level(state.app_config.effective_log_level());
-    Ok(())
 }
 
 #[cfg(test)]
@@ -817,27 +894,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_log_level_accepts_supported_and_none() {
-        assert!(validate_log_level(None).is_ok());
-        for lvl in LOG_LEVELS {
-            assert!(validate_log_level(Some(lvl)).is_ok(), "accept {lvl}");
-        }
-    }
-
-    #[test]
-    fn validate_log_level_rejects_unknown() {
-        for bad in ["trace", "off", "DEBUG", "", "verbose"] {
-            let err = validate_log_level(Some(bad)).unwrap_err();
-            assert_eq!(err.code, "CONFIG_ERROR", "reject {bad:?}");
-            assert!(
-                err.message.contains(bad),
-                "message names {bad:?}: {}",
-                err.message
-            );
-        }
-    }
-
-    #[test]
     fn app_config_store_new_missing_file_uses_defaults() {
         let dir = tempdir().expect("tempdir");
         let store = AppConfigStore::new(dir.path());
@@ -877,71 +933,117 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn log_level_roundtrips_through_save() {
+    async fn verbose_until_roundtrips_through_save() {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
             .save(&AppConfig {
                 secure_screen: true,
-                log_level: Some("debug".to_string()),
+                verbose_until: Some(1_700_000_000),
                 ..Default::default()
             })
             .await
             .unwrap();
         let reloaded = store_at(dir.path()).get();
-        assert_eq!(reloaded.log_level.as_deref(), Some("debug"));
+        assert_eq!(reloaded.verbose_until, Some(1_700_000_000));
     }
 
     #[tokio::test]
-    async fn log_level_omitted_on_disk_when_none() {
+    async fn verbose_until_omitted_on_disk_when_none() {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
             .save(&AppConfig {
                 secure_screen: true,
-                log_level: None,
+                verbose_until: None,
                 ..Default::default()
             })
             .await
             .unwrap();
         let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
-            !on_disk.contains("log_level"),
-            "log_level key must be absent when None; got: {on_disk}"
+            !on_disk.contains("verbose_until"),
+            "verbose_until key must be absent when None; got: {on_disk}"
         );
     }
 
     #[tokio::test]
-    async fn effective_log_level_degrades_unsupported_to_info() {
+    async fn effective_log_filter_reflects_verbose_deadline() {
+        let dir = tempdir().expect("tempdir");
+        // None ⇒ Info (a fresh dir loads the default, which has no deadline).
+        assert_eq!(
+            store_at(dir.path()).effective_log_filter(),
+            log::LevelFilter::Info
+        );
+        let store = store_at(dir.path());
+        // A future deadline ⇒ Debug.
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                verbose_until: Some(now_unix() + VERBOSE_WINDOW_SECS),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(store.effective_log_filter(), log::LevelFilter::Debug);
+        // A past deadline ⇒ Info (lazy revert — not yet cleared on disk).
+        store
+            .save(&AppConfig {
+                secure_screen: true,
+                verbose_until: Some(now_unix().saturating_sub(1)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(store.effective_log_filter(), log::LevelFilter::Info);
+    }
+
+    #[tokio::test]
+    async fn set_verbose_stamps_and_clears_deadline() {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
-        // A raw "trace" (rejected by set_log_level, but a hand-edited file or
-        // newer build could carry it) must degrade to Info, not panic or poison.
+        assert!(store.get().verbose_until.is_none());
+        // On ⇒ a deadline ~VERBOSE_WINDOW_SECS ahead.
+        let cfg = store.set_verbose(true).await.unwrap();
+        let deadline = cfg.verbose_until.expect("on stamps a deadline");
+        assert!(deadline > now_unix());
+        assert!(deadline <= now_unix() + VERBOSE_WINDOW_SECS);
+        assert_eq!(store.effective_log_filter(), log::LevelFilter::Debug);
+        // Off ⇒ cleared.
+        let cfg = store.set_verbose(false).await.unwrap();
+        assert!(cfg.verbose_until.is_none());
+        assert_eq!(store.effective_log_filter(), log::LevelFilter::Info);
+    }
+
+    #[tokio::test]
+    async fn clear_expired_verbose_persists_the_revert() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        // An expired deadline is cleared on disk.
         store
             .save(&AppConfig {
                 secure_screen: true,
-                log_level: Some("trace".to_string()),
+                verbose_until: Some(now_unix().saturating_sub(60)),
                 ..Default::default()
             })
             .await
             .unwrap();
-        assert_eq!(store.effective_log_level(), log::LevelFilter::Info);
-        // A supported value resolves directly.
+        store.clear_expired_verbose().await.unwrap();
+        assert!(
+            store_at(dir.path()).get().verbose_until.is_none(),
+            "an expired deadline must be cleared on disk"
+        );
+        // An active deadline is left intact.
         store
             .save(&AppConfig {
                 secure_screen: true,
-                log_level: Some("debug".to_string()),
+                verbose_until: Some(now_unix() + VERBOSE_WINDOW_SECS),
                 ..Default::default()
             })
             .await
             .unwrap();
-        assert_eq!(store.effective_log_level(), log::LevelFilter::Debug);
-        // None → Info: a brand-new dir (no app.json) loads the default, which
-        // has no log_level and degrades to Info. Reusing `dir` would re-read
-        // the "debug" persisted above and wrongly resolve to Debug.
-        let fresh_dir = tempdir().expect("tempdir");
-        let fresh = store_at(fresh_dir.path());
-        assert_eq!(fresh.effective_log_level(), log::LevelFilter::Info);
+        store.clear_expired_verbose().await.unwrap();
+        assert!(store_at(dir.path()).get().verbose_until.is_some());
     }
 
     #[test]

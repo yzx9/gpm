@@ -24,6 +24,7 @@ tauri-plugin-file-picker = { path = "../tauri-plugin-file-picker" }
 tauri-plugin-screen-secure = { path = "../tauri-plugin-screen-secure" }
 tauri-plugin-clipboard-notify = { path = "../tauri-plugin-clipboard-notify" }
 tauri-plugin-log = "2"
+tauri-plugin-notification = "2"
 rustpass = { path = "../rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }

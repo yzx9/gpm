@@ -6,9 +6,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { App } from "vue";
 
 /**
- * Diagnostics logging IPC — mirrors `src-tauri/src/logging.rs` +
- * `app_config::{get,set}_log_level`. The in-app viewer (Settings → Logs) reads,
- * clears, and sets the level of the rotated log file via these.
+ * Diagnostics logging IPC — mirrors `src-tauri/src/logging.rs`. The in-app
+ * viewer (Settings → Logs) reads and clears the rotated log file via these. The
+ * app logs at the fixed Info default, so there is no runtime level control here.
  *
  * The frontend logging bridge (`installFrontendLogger`) writes uncaught frontend
  * errors into the same backend pipeline through `write_log`, so a bug report has
@@ -23,16 +23,6 @@ export async function readLog(): Promise<string> {
 /** Clear the log (rotated removed, active truncated in place). */
 export async function clearLog(): Promise<void> {
   await invoke("clear_log");
-}
-
-/** The effective log level (`"error"|"warn"|"info"|"debug"`; default `"info"`). */
-export async function getLogLevel(): Promise<string> {
-  return invoke<string>("get_log_level");
-}
-
-/** Persist + apply a log level at runtime (`null` clears to the default). */
-export async function setLogLevel(level: string | null): Promise<void> {
-  await invoke("set_log_level", { level });
 }
 
 /** Write a frontend-emitted record into the backend log. */

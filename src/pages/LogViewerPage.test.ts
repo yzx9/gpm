@@ -14,9 +14,9 @@ import LogViewerPage from "./LogViewerPage.vue";
 // test drives `invoke` per-call via `vi.mocked(invoke).mockImplementation`.
 vi.mock("@tauri-apps/api/core");
 
-/** The four commands `src/api/log.ts` calls (`read_log`, `get_log_level`,
- *  `set_log_level`, `clear_log`). `routeInvoke` resolves the `ok` map, rejects
- *  the `reject` map, and defaults anything else (set/clear/write) to success. */
+/** The commands this page calls: `read_log` + `get_app_config` on load,
+ *  `clear_log` on clear, `set_verbose` on toggle. `routeInvoke` resolves the
+ *  `ok` map, rejects the `reject` map, and defaults anything else to success. */
 function routeInvoke(
   ok: Record<string, unknown>,
   reject: Record<string, unknown> = {},
@@ -33,41 +33,137 @@ describe("LogViewerPage", () => {
     vi.clearAllMocks();
     // confirm() defaults to true (src/test/setup.ts); reset per test.
     vi.mocked(globalThis.confirm).mockReturnValue(true);
-    routeInvoke({ read_log: "line one\nline two", get_log_level: "info" });
+    // Default: log text present, no verbose deadline ⇒ toggle Off.
+    routeInvoke({ read_log: "line one\nline two", get_app_config: {} });
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("loads the log text and level on mount", async () => {
+  it("loads the log text on mount", async () => {
     const { wrapper } = mountWithApp(LogViewerPage);
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("read_log");
-    expect(invoke).toHaveBeenCalledWith("get_log_level");
     const pre = wrapper.find("pre.log-display");
     expect(pre.exists()).toBe(true);
     expect(pre.text()).toContain("line one");
     expect(pre.text()).toContain("line two");
   });
 
+  it("renders a verbose On/Off toggle, Off by default", async () => {
+    const { wrapper } = mountWithApp(LogViewerPage);
+    await flushPromises();
+
+    expect(
+      wrapper.findComponent({ name: "BaseSegmentedControl" }).exists(),
+    ).toBe(true);
+    const radios = wrapper.findAll('input[name="verbose"]');
+    expect(radios).toHaveLength(2);
+    // No verbose_until ⇒ the Off option (second) is checked.
+    expect((radios[1].element as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("turning verbose on calls set_verbose and notifies", async () => {
+    routeInvoke({
+      read_log: "line one\nline two",
+      get_app_config: {},
+      // set_verbose returns the post-enable config (a fresh deadline) so the
+      // success path is exercised — otherwise appConfig stays undefined and the
+      // state-gated toast/countdown never fire.
+      set_verbose: { verbose_until: Math.floor(Date.now() / 1000) + 600 },
+    });
+    const { wrapper, toast } = mountWithApp(LogViewerPage);
+    const infoSpy = vi.spyOn(toast.toast, "info");
+    await flushPromises();
+
+    const radios = wrapper.findAll('input[name="verbose"]');
+    await radios[0].trigger("change"); // On
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith(
+      "set_verbose",
+      expect.objectContaining({
+        enabled: true,
+        revertNotify: expect.objectContaining({
+          title: expect.any(String),
+          body: expect.any(String),
+        }),
+      }),
+    );
+    expect(infoSpy).toHaveBeenCalled();
+    // Stop the live countdown the enable path started (avoids a leaked timer).
+    wrapper.unmount();
+  });
+
+  it("turning verbose off calls set_verbose(false) and does not notify", async () => {
+    routeInvoke({
+      read_log: "",
+      get_app_config: { verbose_until: Math.floor(Date.now() / 1000) + 300 },
+      set_verbose: {},
+    });
+    const { wrapper, toast } = mountWithApp(LogViewerPage);
+    const infoSpy = vi.spyOn(toast.toast, "info");
+    await flushPromises();
+
+    const radios = wrapper.findAll('input[name="verbose"]');
+    await radios[1].trigger("change"); // Off
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith(
+      "set_verbose",
+      expect.objectContaining({ enabled: false }),
+    );
+    expect(infoSpy).not.toHaveBeenCalled(); // the Off path does not toast
+    wrapper.unmount();
+  });
+
+  it("renders the off hint when verbose is not configured", async () => {
+    const { wrapper } = mountWithApp(LogViewerPage);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Turn on to capture everything");
+  });
+
+  it("renders the on hint with a countdown while verbose is active", async () => {
+    routeInvoke({
+      read_log: "",
+      get_app_config: { verbose_until: Math.floor(Date.now() / 1000) + 595 },
+    });
+    const { wrapper } = mountWithApp(LogViewerPage);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Debug logging is on");
+    expect(wrapper.text()).toMatch(/\d{1,2}:\d\d/); // a m:ss countdown renders
+    wrapper.unmount(); // stop the live countdown started on load
+  });
+
+  it("renders the elapsed hint when the deadline has passed", async () => {
+    routeInvoke({
+      read_log: "",
+      get_app_config: { verbose_until: Math.floor(Date.now() / 1000) - 60 },
+    });
+    const { wrapper } = mountWithApp(LogViewerPage);
+    await flushPromises();
+    expect(wrapper.text()).toContain("verbose window has elapsed");
+  });
+
+  it("shows verbose On when a deadline is set, even if elapsed", async () => {
+    // An expired deadline is still "On" this session (no mid-session revert —
+    // the level stays Debug until the next launch clears it; RFC 0055).
+    routeInvoke({
+      read_log: "",
+      get_app_config: { verbose_until: Math.floor(Date.now() / 1000) - 60 },
+    });
+    const { wrapper } = mountWithApp(LogViewerPage);
+    await flushPromises();
+
+    const radios = wrapper.findAll('input[name="verbose"]');
+    expect((radios[0].element as HTMLInputElement).checked).toBe(true);
+  });
+
   it("shows the empty state when the log is empty", async () => {
-    routeInvoke({ read_log: "", get_log_level: "info" });
+    routeInvoke({ read_log: "" });
     const { wrapper } = mountWithApp(LogViewerPage);
     await flushPromises();
 
     expect(wrapper.find("pre.log-display").exists()).toBe(false);
-  });
-
-  it("changes the level via the selector (calls set_log_level)", async () => {
-    const { wrapper } = mountWithApp(LogViewerPage);
-    await flushPromises();
-
-    // LEVELS order: error(0), warn(1), info(2), debug(3).
-    const radios = wrapper.findAll('input[type="radio"]');
-    expect(radios).toHaveLength(4);
-    await radios[3]!.trigger("change"); // → debug
-    await flushPromises();
-
-    expect(invoke).toHaveBeenCalledWith("set_log_level", { level: "debug" });
   });
 
   it("clears the log after confirm() (Clear button)", async () => {
@@ -102,32 +198,12 @@ describe("LogViewerPage", () => {
   });
 
   it("shows an error alert (not a toast) when read_log fails", async () => {
-    routeInvoke({ get_log_level: "info" }, { read_log: { message: "boom" } });
+    routeInvoke({}, { read_log: { message: "boom" } });
     const { wrapper, toast } = mountWithApp(LogViewerPage);
     const dangerSpy = vi.spyOn(toast.toast, "danger");
     await flushPromises();
 
     expect(wrapper.findComponent({ name: "BaseAlert" }).exists()).toBe(true);
     expect(dangerSpy).not.toHaveBeenCalled();
-  });
-
-  it("toasts danger when set_log_level fails (re-reads the real level)", async () => {
-    const { wrapper, toast } = mountWithApp(LogViewerPage);
-    const dangerSpy = vi.spyOn(toast.toast, "danger");
-    await flushPromises();
-
-    // After load, make set_log_level reject (getLogLevel still resolves, which
-    // onLevelChange re-reads on failure).
-    routeInvoke(
-      { read_log: "x", get_log_level: "info" },
-      { set_log_level: { message: "nope" } },
-    );
-    const radios = wrapper.findAll('input[type="radio"]');
-    await radios[0]!.trigger("change"); // → error (fails to persist)
-    await flushPromises();
-
-    expect(dangerSpy).toHaveBeenCalled();
-    // Re-read reconciled the selector back to the real backend level.
-    expect(invoke).toHaveBeenCalledWith("get_log_level");
   });
 });

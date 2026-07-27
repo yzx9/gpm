@@ -3,7 +3,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
+import {
+  getAppConfig,
+  isVerboseActive,
+  notifyOs,
+  verboseRemainingSecs,
+} from "@/api";
 import { onMounted, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
 import ToastHost from "./components/ToastHost.vue";
 import UnlockModal from "./components/UnlockModal.vue";
@@ -35,6 +42,7 @@ const { initSecureScreen, setSecureOverlay } = useSecureScreen();
 // "slide-back" on a pop, "" (instant) on secure↔non-secure boundaries and
 // replace navigations. See useNavDirection for the secure-boundary gate.
 const { transitionName } = useNavDirection();
+const { t } = useI18n();
 
 // The global unlock overlay collects the identity passphrase — a credential.
 // Force FLAG_SECURE on whenever it's up, even on an otherwise-capturable route
@@ -42,6 +50,32 @@ const { transitionName } = useNavDirection();
 watch(overlayUp, (up) => {
   void setSecureOverlay(up);
 });
+
+/** Format the verbose window's remaining seconds as `m:ss`. */
+function formatRemaining(secs: number): string {
+  return `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, "0")}`;
+}
+
+/**
+ * If verbose logging is still active at boot (the user relaunched inside the
+ * window), surface an OS notification so they know — Debug is on and reverts to
+ * Info at the deadline. Sent via the system notification channel (not an in-app
+ * toast) so it isn't hidden under the unlock/app-lock overlay. Best-effort.
+ */
+async function notifyVerboseOnBoot() {
+  try {
+    const deadline = (await getAppConfig()).verbose_until;
+    if (!isVerboseActive(deadline)) return;
+    void notifyOs(
+      t("log.verboseNotifTitle"),
+      t("log.verboseBootNotifBody", {
+        remaining: formatRemaining(verboseRemainingSecs(deadline)),
+      }),
+    );
+  } catch {
+    // non-fatal — best-effort boot notice
+  }
+}
 
 onMounted(() => {
   applySafeAreaInsets();
@@ -57,6 +91,8 @@ onMounted(() => {
   // reconcile FLAG_SECURE for the current route. The boot default in
   // MainActivity.onCreate keeps every screen secure until this runs.
   initSecureScreen();
+  // Surface a notice if a verbose session is still active from a prior launch.
+  void notifyVerboseOnBoot();
 });
 </script>
 

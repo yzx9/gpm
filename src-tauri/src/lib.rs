@@ -42,6 +42,7 @@ mod migrations;
 mod page;
 mod read;
 mod setup;
+mod verbose;
 mod write;
 
 #[cfg(test)]
@@ -108,6 +109,14 @@ pub(crate) struct AppState {
     /// `cancel_git` command; cleared by the owning command once the operation
     /// settles. `None` outside a user-initiated clone/pull.
     pub(crate) active_cancel_token: Mutex<Option<rustpass::CancelToken>>,
+    /// Verbose deadline timer handle — cancel-and-respawn pattern, same shape
+    /// as `clipboard_clear_handle`. Holds the in-flight revert task so a fresh
+    /// arm (or a manual Off) aborts the prior one.
+    pub(crate) verbose_timer: Mutex<Option<JoinHandle<()>>>,
+    /// Monotonic generation tag for the verbose timer; bumped on every (re)arm
+    /// and on disarm. The spawned task captures its generation and self-disarms
+    /// if a newer arm happened while it slept.
+    pub(crate) verbose_generation: Arc<AtomicU64>,
     /// App-shell (non-repo) preferences — screen-capture toggle, locale, and the
     /// behavior prefs (lock mode, clear timers, autosync, app-lock flag) moved
     /// here from `RepoConfig`. Persists at `app.json`; survives `reset_config`.
@@ -199,10 +208,12 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // toggle. Borrows `config_dir` before it is moved into `Store` below.
     let app_config = app_config::AppConfigStore::new(&config_dir);
     // Apply the persisted log level NOW (right after app.json loads and the log
-    // plugin has initialized). The plugin is configured at Trace (see `run()`),
-    // so this `set_max_level` is the runtime gate — immediate, symmetric, and
-    // survives restart. `None` ⇒ Info (the default).
-    log::set_max_level(app_config.effective_log_level());
+    // plugin has initialized). The plugin is capped at Debug (see `run()`), so
+    // this `set_max_level` is the runtime gate — a live `verbose_until` ⇒ Debug,
+    // else Info. Applied twice on purpose: here (the common Info case, early so
+    // startup stays quiet) and again after `run_app_migrations` below, so an
+    // upgrading `m0004` debug user gets Debug continuity on the first launch.
+    log::set_max_level(app_config.effective_log_filter());
     let store = Arc::new(Store::new(config_dir, master_key));
     // Seed the Store's injected `autosync` cache from the authoritative app
     // config (autosync_write reads it). One of the three re-push points — the
@@ -250,11 +261,24 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),
         active_cancel_token: Mutex::new(None),
+        verbose_timer: Mutex::new(None),
+        verbose_generation: Arc::new(AtomicU64::new(0)),
     };
     // Copy the app-scoped behavior prefs out of a pre-split repo.json into
     // app.json (no-op once migrated; soft-skips under app-lock — retried on
     // app_unlock). Safe at startup when the master key is available (no app-lock).
     tauri::async_runtime::block_on(migrations::run_app_migrations(&app_state));
+    // Re-apply the log level after migrations: `m0004` may have just carried a
+    // pinned "debug" into `verbose_until` (so the upgrading user gets Debug on
+    // this launch, not Info), and an already-expired deadline is cleared off
+    // disk. Best-effort — the early apply above already lowered the gate for the
+    // common case; this corrects it post-migration.
+    let _ = tauri::async_runtime::block_on(app_state.app_config.clear_expired_verbose())
+        .map_err(|e| log::warn!("app-config: clear_expired_verbose failed: {e}"));
+    log::set_max_level(app_state.app_config.effective_log_filter());
+    // Arm the mid-session revert timer if a verbose window is still live (a
+    // relaunch inside the window keeps capturing at Debug, then auto-reverts).
+    verbose::arm_verbose_timer(&app_state, app.handle());
     app_state
 }
 
@@ -299,6 +323,11 @@ pub fn run() {
         .plugin(tauri_plugin_screen_secure::init())
         .plugin(tauri_plugin_clipboard_notify::init())
         .plugin(tauri_plugin_opener::init())
+        // OS notifications (tauri-plugin-notification). POST_NOTIFICATIONS is
+        // already declared via the clipboard-notify manifest merge, so this
+        // adds no new permission prompt. Used by the frontend for the unsolicited
+        // verbose notices (boot-still-active, deadline-reverted).
+        .plugin(tauri_plugin_notification::init())
         // Best-effort display language baked in pre-paint; `resolved_locale` IPC reconciles a pinned preference after mount (see `app_config`).
         .append_invoke_initialization_script(app_config::locale_init_script())
         .setup(|app| {
@@ -373,13 +402,14 @@ pub fn run() {
             app_config::set_locale_pref,
             app_config::resolved_locale,
             app_config::set_theme_mode,
+            app_config::set_verbose,
             app_config::screen_secure_available,
-            // logging: in-app diagnostics viewer + runtime level control
+            // logging: in-app diagnostics viewer + the verbose (Debug) toggle.
+            // The level is applied at startup via effective_log_filter in
+            // init_state; `set_verbose` re-applies it within a session.
             logging::read_log,
             logging::clear_log,
             logging::write_log,
-            app_config::get_log_level,
-            app_config::set_log_level,
             // biometric
             biometric::is_biometric_available,
             biometric::is_biometric_unlock_enabled,
