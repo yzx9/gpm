@@ -16,6 +16,7 @@ import {
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
+import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import { useWipeOnLeave } from "@/composables";
@@ -72,6 +73,16 @@ const ackRequired = computed(
 watch(passphrase, () => {
   ackAge.value = false;
 });
+
+// Identity-kind options for the segmented control. `computed` keeps the labels
+// reactive to locale changes and pins the value type so the control's generic
+// parameter resolves to CreateIdentityKind (not string).
+const IDENTITY_KIND_OPTIONS = computed<
+  { label: string; value: CreateIdentityKind }[]
+>(() => [
+  { label: t("setup.create.tabAge"), value: "age" },
+  { label: t("setup.create.tabSsh"), value: "ssh" },
+]);
 
 function selectKind(kind: CreateIdentityKind) {
   if (identityKind.value === kind) return;
@@ -254,34 +265,13 @@ async function onCreate() {
       <span class="text-sm font-medium">{{
         t("setup.create.identityTypeLabel")
       }}</span>
-      <div class="flex gap-1 border border-edge rounded-md overflow-hidden">
-        <button
-          type="button"
-          :disabled="generating || loading"
-          :class="[
-            'flex-1 py-2 text-sm font-medium transition-colors',
-            identityKind === 'age'
-              ? 'bg-accent text-on-accent active:bg-accent-deep'
-              : 'bg-surface active:bg-hover',
-          ]"
-          @click="selectKind('age')"
-        >
-          {{ t("setup.create.tabAge") }}
-        </button>
-        <button
-          type="button"
-          :disabled="generating || loading"
-          :class="[
-            'flex-1 py-2 text-sm font-medium transition-colors',
-            identityKind === 'ssh'
-              ? 'bg-accent text-on-accent active:bg-accent-deep'
-              : 'bg-surface active:bg-hover',
-          ]"
-          @click="selectKind('ssh')"
-        >
-          {{ t("setup.create.tabSsh") }}
-        </button>
-      </div>
+      <BaseSegmentedControl
+        name="create-identity-kind"
+        :model-value="identityKind"
+        :disabled="generating || loading"
+        :options="IDENTITY_KIND_OPTIONS"
+        @change="selectKind"
+      />
     </div>
 
     <!-- Passphrase (applied at generate for SSH, seal for age) -->

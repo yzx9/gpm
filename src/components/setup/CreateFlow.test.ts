@@ -59,6 +59,17 @@ describe("CreateFlow", () => {
     await flushPromises();
   }
 
+  /// BaseSegmentedControl renders sr-only radios (not buttons), keyed by the
+  /// `name` prop; option order is [age, ssh]. Trigger `change` to select.
+  async function selectKind(
+    wrapper: ReturnType<typeof mount>,
+    kind: "age" | "ssh",
+  ) {
+    const radios = wrapper.findAll('input[name="create-identity-kind"]');
+    await radios[kind === "age" ? 0 : 1]!.trigger("change");
+    await flushPromises();
+  }
+
   // ── age identity path ──────────────────────────────────────────────────
 
   it("generates an age identity (recipient only) and creates a local-only store", async () => {
@@ -194,7 +205,7 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
 
-    await clickButton(wrapper, "SSH (ed25519)");
+    await selectKind(wrapper, "ssh");
     // Switching kind cleared any prior identity — no recipient yet.
     expect(wrapper.text()).not.toContain("ssh-ed25519");
     await clickButton(wrapper, "Generate SSH key");
@@ -420,7 +431,7 @@ describe("CreateFlow", () => {
 
     // Switching to SSH must drop the staged age identity so it can't be saved
     // stale — the backend is told to forget it, and the recipient panel clears.
-    await clickButton(wrapper, "SSH (ed25519)");
+    await selectKind(wrapper, "ssh");
     expect(invoke).toHaveBeenCalledWith("clear_pending_identity");
     expect(wrapper.text()).not.toContain("age1r");
   });
@@ -444,7 +455,7 @@ describe("CreateFlow", () => {
 
     const wrapper = mount(CreateFlow);
     await flushPromises();
-    await clickButton(wrapper, "SSH (ed25519)");
+    await selectKind(wrapper, "ssh");
     const passInput = wrapper.find('input[id="create-passphrase"]');
     // Editable before generation.
     expect(passInput.attributes("disabled")).toBeUndefined();
@@ -471,7 +482,7 @@ describe("CreateFlow", () => {
 
     const wrapper = mount(CreateFlow);
     await flushPromises();
-    await clickButton(wrapper, "SSH (ed25519)");
+    await selectKind(wrapper, "ssh");
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
     await wrapper
       .find('input[id="create-passphrase-confirm"]')
@@ -638,7 +649,7 @@ describe("CreateFlow", () => {
     mockInvoke({ generate_identity: () => "ssh-ed25519 AAAApub" });
     const wrapper = mount(CreateFlow);
     await flushPromises();
-    await clickButton(wrapper, "SSH (ed25519)");
+    await selectKind(wrapper, "ssh");
     // SSH key-gen uses SSH's own native passphrase protection → no ack.
     await wrapper.find('input[id="create-passphrase"]').setValue("ssh-pass");
     await wrapper
@@ -671,8 +682,8 @@ describe("CreateFlow", () => {
     expect((ack.element as HTMLInputElement).checked).toBe(true);
 
     // Switch to SSH then back to age — the ack must have reset to unchecked.
-    await clickButton(wrapper, "SSH (ed25519)");
-    await clickButton(wrapper, "Age (x25519)");
+    await selectKind(wrapper, "ssh");
+    await selectKind(wrapper, "age");
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
     await wrapper
       .find('input[id="create-passphrase-confirm"]')
