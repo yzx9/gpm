@@ -129,6 +129,60 @@ pub(crate) enum SecureScreenMode {
     Unknown,
 }
 
+/// App-launch-biometric-gate in-app idle timeout (sealed behavior). `Off` =
+/// never idle-lock the gate; `After(n)` = lock after `n` seconds
+/// foregrounded-but-idle. Both variants persist — a user who turns it off keeps
+/// that choice across reloads — so this is an enum, not `Option<u64>` (with a
+/// unified non-`None` default, `None`-means-off could not persist through
+/// `skip_serializing_if`). Mirrors `LockMode`'s shape (a lock-timeout mode).
+/// Serialized externally-tagged kebab-case: `"off"` / `{"after": secs}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum GateIdle {
+    Off,
+    After(u64),
+}
+
+/// The gate idle-timeout default for new installs (5 min). Deliberately coarser
+/// than the identity's 30s floor: a whole-store lock (master-key wipe → full
+/// biometric + re-seal) is heavier than an identity re-lock, so the gate
+/// shouldn't fire that often. Existing configs are migrated to `Off` by `m0006`
+/// (a deliberate, discoverable default choice — not a struct-vs-serde split).
+pub(crate) const GATE_IDLE_DEFAULT_SECS: u64 = 300;
+
+/// The gate idle-timeout preset floor/ceiling (5 / 30 min). Sub-5-min values
+/// aren't offered — a whole-store lock that often is too disruptive.
+pub(crate) const GATE_IDLE_SECS_MIN: u64 = 300;
+pub(crate) const GATE_IDLE_SECS_MAX: u64 = 1800;
+
+impl Default for GateIdle {
+    /// `After(GATE_IDLE_DEFAULT_SECS)` — the single, unified default used by
+    /// BOTH `AppConfig::default()` / `BehaviorConfig::default()` and the serde
+    /// missing-key default. No divergence between the two.
+    fn default() -> Self {
+        Self::After(GATE_IDLE_DEFAULT_SECS)
+    }
+}
+
+impl GateIdle {
+    /// True at the unified default, so `skip_serializing_if` omits it and a
+    /// fresh, uncustomized config stays byte-identical.
+    fn is_default(&self) -> bool {
+        matches!(self, Self::After(GATE_IDLE_DEFAULT_SECS))
+    }
+}
+
+/// Clamp `After(n)` to the gate's preset range; `Off` passes through. Mirrors
+/// `rustpass::clamp_lock_mode`.
+pub(crate) fn clamp_gate_idle(mode: GateIdle) -> GateIdle {
+    match mode {
+        GateIdle::After(secs) => {
+            GateIdle::After(secs.clamp(GATE_IDLE_SECS_MIN, GATE_IDLE_SECS_MAX))
+        }
+        GateIdle::Off => GateIdle::Off,
+    }
+}
+
 /// App-level (non-repo) preferences — the **merged IPC view** of the plaintext
 /// display prefs ([`PrefConfig`]) and the sealed behavior prefs
 /// ([`BehaviorConfig`]). Constructed on demand by [`AppConfigStore::get`];
@@ -199,6 +253,12 @@ pub(crate) struct AppConfig {
     /// `false`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) biometric_app_lock: bool,
+    /// App-launch-gate in-app idle timeout (sealed app.json). Defaults to
+    /// `After(300)` (5 min) for new installs; `m0006` sets existing configs to
+    /// `Off`. `skip_serializing_if` omits the default so a fresh config stays
+    /// byte-identical.
+    #[serde(default, skip_serializing_if = "GateIdle::is_default")]
+    pub(crate) gate_idle: GateIdle,
     /// Persisted-schema version for one-shot migrations (pref.json). `1` is the
     /// pre-split shape; the `migrations` registry bumps it as each step runs
     /// (target: `migrations::APP_CONFIG_SCHEMA_VERSION`).
@@ -226,6 +286,7 @@ impl Default for AppConfig {
             clipboard_clear_secs: None,
             autosync: default_autosync_true(),
             biometric_app_lock: false,
+            gate_idle: GateIdle::default(),
             // A brand-new config starts at the current target so it skips the
             // legacy no-op migrations. (The serde missing-key default below
             // stays at 1 so a pre-split app.json still runs the registry.)
@@ -327,6 +388,11 @@ pub(crate) struct BehaviorConfig {
     /// this flag. Skipped when `false`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) biometric_app_lock: bool,
+    /// App-launch-gate in-app idle timeout. Defaults to `After(300)` (5 min) for
+    /// new installs; `m0006` sets existing configs to `Off`. `skip_serializing_if`
+    /// omits the default so the behavior file stays byte-identical.
+    #[serde(default, skip_serializing_if = "GateIdle::is_default")]
+    pub(crate) gate_idle: GateIdle,
     /// Three-state screen-capture protection. `None` (the default) ⇒
     /// `Sensitive`. `skip_serializing_if` keeps the field out while `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -341,6 +407,7 @@ impl Default for BehaviorConfig {
             clipboard_clear_secs: None,
             autosync: default_autosync_true(),
             biometric_app_lock: false,
+            gate_idle: GateIdle::default(),
             secure_screen_mode: None,
         }
     }
@@ -359,6 +426,9 @@ impl BehaviorConfig {
             clipboard_clear_secs: cfg.clipboard_clear_secs,
             autosync: cfg.autosync,
             biometric_app_lock: cfg.biometric_app_lock,
+            // gate_idle is a new field — a legacy config never had it, so the
+            // lift defaults it (m0006 later pins existing users to Off).
+            gate_idle: GateIdle::default(),
             secure_screen_mode: cfg.secure_screen_mode,
         }
     }
@@ -805,6 +875,7 @@ impl AppConfigStore {
             clipboard_clear_secs: behavior.clipboard_clear_secs,
             autosync: behavior.autosync,
             biometric_app_lock: behavior.biometric_app_lock,
+            gate_idle: behavior.gate_idle,
             schema_version: pref.schema_version,
             verbose_until: pref.verbose_until,
         }
@@ -1006,6 +1077,14 @@ impl AppConfigStore {
     /// behavior; write-only mirror of the Keystore-probed runtime state).
     pub(crate) async fn set_biometric_app_lock(&self, enabled: bool) -> Result<AppConfig, Error> {
         self.update_behavior(|b| b.biometric_app_lock = enabled)
+            .await
+    }
+
+    /// Set the app-launch-gate in-app idle timeout (sealed behavior). `After(n)`
+    /// is clamped to the preset range first. No `AppState` cache update — the
+    /// idle timer is frontend-owned.
+    pub(crate) async fn set_gate_idle(&self, mode: GateIdle) -> Result<AppConfig, Error> {
+        self.update_behavior(|b| b.gate_idle = clamp_gate_idle(mode))
             .await
     }
 
@@ -1683,6 +1762,95 @@ mod tests {
         assert!(
             LegacyAppConfig::default().secure_screen,
             "LegacyAppConfig::default must agree with the serde default (true)"
+        );
+    }
+
+    #[test]
+    fn gate_idle_default_is_after_300() {
+        // The unified default for both the IPC view and the sealed behavior
+        // half — new installs get a 5-min idle timeout.
+        assert_eq!(
+            AppConfig::default().gate_idle,
+            GateIdle::After(GATE_IDLE_DEFAULT_SECS)
+        );
+        assert_eq!(
+            BehaviorConfig::default().gate_idle,
+            GateIdle::After(GATE_IDLE_DEFAULT_SECS)
+        );
+    }
+
+    #[test]
+    fn gate_idle_serde_round_trips() {
+        for mode in [
+            GateIdle::Off,
+            GateIdle::After(600),
+            GateIdle::After(GATE_IDLE_DEFAULT_SECS),
+        ] {
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(serde_json::from_str::<GateIdle>(&json).unwrap(), mode);
+        }
+        // The default is omitted from the behavior file (skip_serializing_if).
+        assert!(
+            !serde_json::to_string(&BehaviorConfig::default())
+                .unwrap()
+                .contains("gate_idle")
+        );
+    }
+
+    #[tokio::test]
+    async fn gate_idle_omitted_on_disk_when_default() {
+        // skip_serializing_if keeps gate_idle out of the behavior file while at
+        // the default, so a fresh config stays byte-identical.
+        let dir = tempdir().expect("tempdir");
+        let store = store_with_desktop_store(dir.path()).await;
+        store
+            .save_behavior(&BehaviorConfig::default())
+            .await
+            .unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        assert!(
+            !on_disk.contains("gate_idle"),
+            "gate_idle must be absent at default; got: {on_disk}",
+        );
+    }
+
+    #[tokio::test]
+    async fn gate_idle_round_trips_off_and_after() {
+        let dir = tempdir().expect("tempdir");
+        for mode in [GateIdle::Off, GateIdle::After(900)] {
+            let store = store_with_desktop_store(dir.path()).await;
+            store.set_gate_idle(mode).await.unwrap();
+            assert_eq!(
+                store_with_desktop_store(dir.path()).await.get().gate_idle,
+                mode,
+                "{mode:?} round-trips",
+            );
+        }
+    }
+
+    #[test]
+    fn clamp_gate_idle_keeps_off_and_clamps_after() {
+        assert_eq!(clamp_gate_idle(GateIdle::Off), GateIdle::Off);
+        assert_eq!(
+            clamp_gate_idle(GateIdle::After(60)),
+            GateIdle::After(GATE_IDLE_SECS_MIN)
+        );
+        assert_eq!(clamp_gate_idle(GateIdle::After(300)), GateIdle::After(300));
+        assert_eq!(
+            clamp_gate_idle(GateIdle::After(9999)),
+            GateIdle::After(GATE_IDLE_SECS_MAX)
+        );
+    }
+
+    #[test]
+    fn behavior_config_from_legacy_defaults_gate_idle() {
+        // gate_idle is a new field — from_legacy does not carry it from a legacy
+        // config (which never had it); it defaults, and m0006 later pins existing
+        // users to Off.
+        let app = LegacyAppConfig::default();
+        assert_eq!(
+            BehaviorConfig::from_legacy(&app).gate_idle,
+            GateIdle::default()
         );
     }
 

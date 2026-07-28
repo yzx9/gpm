@@ -10,7 +10,7 @@ use rustpass::{CommitIdentity, Error, LockMode, RepoConfig, Store};
 use tauri::{AppHandle, State};
 
 use crate::AppState;
-use crate::app_config::AppConfig;
+use crate::app_config::{AppConfig, GateIdle};
 use crate::identity::{LockEventReason, emit_lock_state, refresh_security_cache, reset_lock_timer};
 
 /// Get the current repo config (for display in settings).
@@ -68,6 +68,20 @@ pub(crate) async fn set_lock_mode(
     // Apply the new mode to the live timer (reads the just-refreshed cache).
     reset_lock_timer(&state, &app);
     Ok(cfg)
+}
+
+/// Set the app-launch-gate in-app idle timeout (`"off"` / `{ "after": secs }`).
+/// Returns the updated app config; the frontend re-arms its idle timer on
+/// receipt. No `refresh_security_cache` — `gate_idle` isn't cached in `AppState`
+/// (the idle timer is frontend-owned).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_gate_idle(
+    state: State<'_, AppState>,
+    mode: GateIdle,
+) -> Result<AppConfig, Error> {
+    log::info!("config: set-gate-idle: {mode:?}");
+    state.app_config.set_gate_idle(mode).await
 }
 
 /// Set the password-view auto-clear override (`null` = default, `0` = never).

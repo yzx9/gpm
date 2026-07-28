@@ -408,6 +408,7 @@ pub fn run() {
             config::get_config,
             config::set_commit_identity,
             config::set_lock_mode,
+            config::set_gate_idle,
             config::set_view_clear_secs,
             config::set_clipboard_clear_secs,
             config::set_autosync,

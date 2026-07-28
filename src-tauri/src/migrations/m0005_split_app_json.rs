@@ -42,7 +42,7 @@ use std::sync::atomic::Ordering;
 use rustpass::Error;
 
 use crate::AppState;
-use crate::app_config::{BehaviorConfig, PrefConfig};
+use crate::app_config::{BehaviorConfig, GateIdle, PrefConfig};
 use crate::migrations::MigrationOutcome;
 use crate::migrations::m0004_verbose_from_debug::AppConfigV4;
 
@@ -163,6 +163,9 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
         autosync: v4.autosync,
         biometric_app_lock: v4.biometric_app_lock,
         secure_screen_mode: v4.secure_screen_mode,
+        // gate_idle is new (not in V4); default it, and m0006 pins existing
+        // users to Off on the next step.
+        gate_idle: GateIdle::default(),
     };
     if let Err(e) = state.app_config.save_behavior(&behavior).await {
         if e.code == "SEAL_KEY_UNAVAILABLE" {
@@ -223,6 +226,7 @@ mod tests {
             autosync: v4.autosync,
             biometric_app_lock: v4.biometric_app_lock,
             secure_screen_mode: v4.secure_screen_mode,
+            gate_idle: GateIdle::default(),
         };
         assert_eq!(b.secure_screen_mode, Some(SecureScreenMode::Always));
         assert_eq!(b.lock_mode, rustpass::LockMode::Idle(120));
@@ -230,5 +234,7 @@ mod tests {
         assert_eq!(b.clipboard_clear_secs, Some(180));
         assert!(!b.autosync);
         assert!(b.biometric_app_lock);
+        // gate_idle is new (not in V4) — defaulted, not pulled.
+        assert_eq!(b.gate_idle, GateIdle::default());
     }
 }
