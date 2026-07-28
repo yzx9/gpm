@@ -48,13 +48,13 @@ Local Tauri plugin crates. Each follows the standard Tauri mobile-plugin layout:
 - `copy_password` is the primary operation — password never reaches WebView
 - `show_password` is secondary — configurable auto-clear (default 45s) with lifecycle cleanup
 - Biometric (keystore) unlock is called from Rust app commands, with the passphrase passed from Kotlin to Rust and never exposed to the WebView.
-- `repo.json`, `identity`, and the app-shell behavior preferences (lock mode, clear timers, autosync, app-lock intent, screen-capture mode — kept in `app.json`) are encrypted at rest on Android (AES-256-GCM; master key sealed in the auth-free Keystore). Display preferences that must render before unlock (locale, theme, verbose logging) stay plaintext in `pref.json`. A read attacker / forensic dump gets ciphertext, and a tampered config fails the AEAD tag. Desktop has no Keystore equivalent, so files stay plaintext there. The store assumes no local write attacker; a missing/unsealable key degrades to re-setup.
+- `repo.json` and `identity` are encrypted at rest on Android (AES-256-GCM; master key sealed in the auth-free Keystore). A read attacker / forensic dump gets ciphertext, and a tampered config fails the AEAD tag. Desktop has no Keystore equivalent, so files stay plaintext there. The store assumes no local write attacker; a missing/unsealable key degrades to re-setup.
 - age plugin recipients (e.g. age-plugin-yubikey's `age1yubikey1...`) are recognized and can be encrypted to: the age library spawns the user-installed `age-plugin-<name>` subprocess to wrap the file key — desktop only, since Android can't run such a binary. That subprocess is the same trust boundary the `age` CLI and gopass already assume; no secret reaches the WebView, only age file keys/stanzas cross the plugin's stdio protocol. Plugin _identities_ (decrypting with a hardware key) are recognized but not yet supported. A missing binary surfaces as a clear `PluginUnavailable` error instead of a silent write failure.
 - All decrypted content uses `Zeroizing<String>` and is wiped after use
 - Error messages are sanitized to never contain secrets
 - CSP restricts script/connect sources to `self` + IPC only
 - Auto-lock: the identity is decrypted per copy/show/create and wiped right after, so the master key sits in memory only for the operation, not the whole session. Browsing the list needs no identity. The identity cache is also wiped on a failed op. Writes are local-only, then published by the autosync orchestrator (pull → write → push); there is no conflict stash, so the Immediate wipe always proceeds — except on a `NeedsDivergenceResolve` outcome, where the wipe is deferred so a keep-mine resolve can reuse the cached identity without a second unlock; that deferred wipe runs both in the resolve step and on resolve-cancel (`discard_divergence`), so abandoning the modal never strands the key. Idle-timeout and Never modes keep the session cached as before. Under Idle the timer also resets on in-app activity, not just secret operations.
-- AutoSync: when on, every save pull-write-pushes automatically; when off, saves are local-only until a manual Sync (pull + push) publishes them. The divergence resolve prompt catches only the push-rejection race (a save that directly collides with a newer remote); a save built on an out-of-date read can still fast-forward over and silently overwrite a newer remote change — recoverable in git history, surfaced as a note under the AutoSync setting (RFC 0026 is the base-version-aware fix).
+- AutoSync: when on, every save pull-write-pushes automatically; when off, saves are local-only until a manual Sync (pull + push) publishes them. The divergence resolve prompt catches only the push-rejection race (a save that directly collides with a newer remote); a save built on an out-of-date read can still fast-forward over and silently overwrite a newer remote change — recoverable in git history, surfaced as a note under the AutoSync setting.
 
 See [SECURITY.md](docs/SECURITY.md) for the full threat model and known limitations.
 
@@ -74,24 +74,24 @@ The local Android plugins' Robolectric/JVM unit tests run via `just test-plugin`
 - The Android debug build sets `applicationIdSuffix = ".debug"` (installs as `xyz.yzx9.gpm.debug`) so it coexists with the release — install a debug build for diagnostics without uninstalling.
 - Update `CHANGELOG.md` when adding user-facing changes. Keep entries user-focused (no technical internals).
 
-## Design RFCs
+## Docs — specs, RFCs, ADRs
 
-`docs/rfcs` holds lightweight design RFCs. It is the parking lot for work that is deliberately out of the current PR or phase: ideas discovered during implementation, deferred scope, and larger future improvements. An RFC captures the **problem, the design decision, and the rationale** — not the implementation.
+Product and design knowledge lives under `docs/` in three layers, each with its own number prefix so a bare number is never ambiguous across layers:
 
-Write an RFC when:
+- **`docs/specs/` — feature PRDs (product requirements).** One subdirectory per feature (`NNN-<slug>/prd.md`, bare 3-digit `001`–`NNN`) holding functional + non-functional requirements and user characteristics — _not_ implementation. How something is built lives in the code/git; keep "current state" to a few sentences. Start from `docs/specs/000-template/` — only `prd.md` is required; `design.md` / `security.md` / `research.md` are optional companions.
 
-- A decision is non-obvious, reversible only with effort, or touches the architecture or threat model.
-- A thought came up during implementation but does not belong in the current PR.
-- A phase just landed and you want to record the next, larger improvement.
+  **Personas** — Jordan (primary, self-hosting gopass user) and Casey (secondary, mobile-first newcomer), plus anti-personas — live in [`docs/personas.md`](docs/personas.md). Each PRD's Use-Cases notes how they act _in that feature_, not who they are.
 
-When writing one:
+- **`docs/rfcs/` — design RFCs.** The "how + why" for a piece of work: design rationale, alternatives considered, effort, and Priority / Status / Phase. One file per RFC (`RNNN-<slug>.md`, `R`-prefixed 3-digit). The name is a slight misnomer — these aren't IETF Requests for Comments; "RFC" is kept for familiarity (see `docs/rfcs/R000-template.md` for the rationale). When the RFC's feature ships, delete the file — the rationale then lives in the code / threat model / the feature's `design.md`, and the numbering gaps this leaves are expected.
+- **`docs/adr/` — architecture decision records.** Foundational, cross-cutting, hard-to-reverse choices (`ANNN-<slug>.md`, `A`-prefixed 3-digit). Frozen and append-only — mark `Superseded` if reversed, never delete or rewrite.
 
-- **Read `0000-rfc-template.md` first, before writing anything.** It is the spec: the header metadata, the section structure, the file-naming / numbering rules, and the altitude rule all live there.
+  **When to write an ADR.** Write one when a decision is all three: _foundational / cross-cutting_ (it shapes many features, not one), _hard to reverse_ (undoing it means re-architecting), and _not recoverable from the code_. Examples: the Tauri/Rust/age-only stack (A001), rust-first-without-gopass (A002), config-storage tiering (A003). Don't write an ADR for: a single feature's design (use an RFC, or the feature's `design.md`), a small reversible choice (just do it, or open an Issue), or product behavior (that's a spec).
 
-RFC references and lifecycle:
+Principles:
 
-- Do not reference temporary RFCs, review labels, or planning artifacts in code, docs, comments, or commit messages; instead, write self-contained explanations of the what and why.
-- If an RFC is completed or superseded, it may be removed.
+- Write down what the code/git cannot reconstruct: requirements, user personas, and the _why_ of non-obvious decisions. Don't duplicate implementation detail.
+- Number prefixes disambiguate across layers: bare `NNN` = spec/feature, `RNNN` = RFC, `ANNN` = ADR.
+- Reference direction: any doc may cite an ADR, and RFCs may reference features — but **feature docs do not reference RFCs** (which RFC implements a feature is read from the code, not asserted in the PRD). Don't reference temporary planning artifacts in code, commit messages, or docs — write self-contained explanations of the what and why.
 
 ## Compact Instructions
 

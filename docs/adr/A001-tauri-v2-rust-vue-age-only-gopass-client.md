@@ -1,4 +1,4 @@
-# ADR 0001: gpm Foundational Architecture — Tauri v2 + Rust + Vue 3, Age-Only, Read-Only MVP
+# A001: gpm Foundational Architecture — Tauri v2 + Rust + Vue 3, Age-Only, Read-Only MVP
 
 **Status:** Accepted
 
@@ -130,5 +130,5 @@ fn show_password(repo_path: String, entry_path: String) -> Result<SensitiveConte
 - **Compact backend:** 1,537 lines of Rust for full read-only password manager functionality.
 - **Strong security posture:** Full-chain zeroize on the primary operation. Acknowledged limitations on the secondary operation (JS heap, JVM heap).
 - **Android-first but not Android-only:** Same Rust core runs on desktop. Build once, target both.
-- **Age-only limitation:** GPG users cannot use gpm. See ADR 0002 for the decision not to integrate gopass (which would add GPG support).
+- **Age-only limitation:** GPG users cannot use gpm. See A002 for the decision not to integrate gopass (which would add GPG support).
 - **Read-only limitation:** Write operations (create, edit, delete) are post-MVP. Will be implemented in Rust using existing `age` + `git2` crates.

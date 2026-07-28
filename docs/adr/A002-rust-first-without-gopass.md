@@ -1,4 +1,4 @@
-# ADR 0001: Rust-First Architecture Without gopass Integration
+# A002: Rust-First Architecture Without gopass Integration
 
 **Status:** Accepted
 

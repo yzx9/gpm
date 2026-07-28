@@ -14,7 +14,7 @@ the focused screen's view tree, the service locates the username/password fields
 unlocks through the existing biometric path, and fills, reusing the existing
 search-and-pick UI rather than introducing a parallel one. This RFC records the
 decision to scope to the Android Autofill Framework and to defer
-Accessibility-based and Credential-Manager-based variants.
+Accessibility-based and Credential-Manager-based variants. Serves `docs/specs/008-android-autofill`.
 
 ## Why
 
@@ -27,7 +27,7 @@ removes: the credential goes straight into the target field and never reaches th
 clipboard, consistent with how the primary copy path already keeps the password
 out of the webview.
 
-The feature was deliberately excluded at launch (ADR 0001) on the grounds that
+The feature was deliberately excluded at launch (A001) on the grounds that
 the store, the at-rest sealing, the app-lock biometric gate, and the local-plugin
 pattern all needed to exist first. They do now, so this RFC re-evaluates that
 exclusion and records the shape a service would take — without yet committing to
@@ -127,7 +127,7 @@ dominates.
 
 ## Depends on / Supersedes
 
-Re-evaluates the autofill exclusion in ADR 0001 (launch scope). Relates to
+Re-evaluates the autofill exclusion in A001 (launch scope). Relates to
 `0042-identity-agent`: an autofill service is the clearest second consumer of
 unlocked-identity state outside the main activity — the pressure that RFC
 anticipates and defers — and building it may force the agent extraction 0042
