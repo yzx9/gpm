@@ -33,22 +33,46 @@ const {
   shouldAutoPromptBiometric,
 } = useLockState();
 const { appLocked, appReady, init: initAppLock } = useAppLockState();
-const { loadSecuritySettings, lockMode } = useSecuritySettings();
+const {
+  loadSecuritySettings,
+  lockMode,
+  reload: reloadSecurity,
+} = useSecuritySettings();
 // Activity bumper: any in-app tap/scroll/key extends the identity idle-lock
 // timer (no-op under Immediate/Never; throttled; backend timer authoritative).
 const lockActivity = createLockActivity(lockMode, identityCached);
-const { initSecureScreen, setSecureOverlay } = useSecureScreen();
+const {
+  initSecureScreen,
+  setSecureOverlay,
+  reload: reloadSecureScreen,
+} = useSecureScreen();
 // Drives the <router-view> slide transition: "slide-forward" on a push,
 // "slide-back" on a pop, "" (instant) on secure↔non-secure boundaries and
 // replace navigations. See useNavDirection for the secure-boundary gate.
 const { transitionName } = useNavDirection();
 const { t } = useI18n();
 
-// The global unlock overlay collects the identity passphrase — a credential.
-// Force FLAG_SECURE on whenever it's up, even on an otherwise-capturable route
-// (e.g. /entries), and restore the route's level when it dismisses.
-watch(overlayUp, (up) => {
-  void setSecureOverlay(up);
+// Both credential overlays — the identity UnlockModal (`overlayUp`) and the
+// app-launch AppLockOverlay (`appLocked`) — must force FLAG_SECURE on whenever
+// either is up, even on an otherwise-capturable route (e.g. /entries) and even
+// under screen-mode "off". `setSecureOverlay` drives `desiredSecure`'s
+// `overlayActive`, which every mode secures. Combined so the two overlays can't
+// clobber each other's secure state.
+watch([overlayUp, appLocked], ([up, locked]) => {
+  void setSecureOverlay(up || locked);
+});
+
+// On a real app-unlock (locked→false) the sealed behavior config is now readable
+// on the backend; reload the security + secure-screen caches (their cold-start
+// load ran under the app-lock overlay and read defaults). The backend loads
+// behavior + reseeds autosync before emitting locked:false, so the real values
+// are ready. `appLocked` is a clean boolean from backend events (the resume
+// re-lock debounce doesn't flap it), so this fires once per real unlock.
+watch(appLocked, (locked, prev) => {
+  if (prev && !locked) {
+    void reloadSecurity();
+    void reloadSecureScreen();
+  }
 });
 
 /** Format the verbose window's remaining seconds as `m:ss`. */

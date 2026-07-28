@@ -24,15 +24,19 @@ gpm's private files — the age/SSH `identity` and `repo.json` (which carries th
 git credentials and the `authenticity` trust set) — are sensitive. What is
 protected, and against whom, differs by threat:
 
-**Defended on Android (at-rest encryption).** `identity` and `repo.json` are
-encrypted at rest with a master key sealed in the Android Keystore
-(hardware-backed, auth-free AES-GCM). An attacker who can _read_ the app's
-private storage — a stolen backup, a forensic dump, a non-root malicious app
-with storage access — gets ciphertext, not the git credentials or the trust
-set. The same authenticated encryption also gives these files **integrity**: a
+**Defended on Android (at-rest encryption).** `identity`, `repo.json`, and the
+app-shell behavior preferences (lock mode, clear timers, autosync, app-lock
+intent, screen-capture mode — kept in `app.json`) are encrypted at rest with a
+master key sealed in the Android Keystore (hardware-backed, auth-free AES-GCM).
+An attacker who can _read_ the app's private storage — a stolen backup, a
+forensic dump, a non-root malicious app with storage access — gets ciphertext,
+not the git credentials, the trust set, or those security-relevant preferences.
+The same authenticated encryption also gives these files **integrity**: a
 modified `repo.json` (flipping the verification mode, injecting an attacker
-signing key) or a swapped `identity` fails the authentication tag and is
-rejected rather than silently accepted.
+signing key), a swapped `identity`, or a tampered behavior file fails the
+authentication tag and is rejected rather than silently accepted. Display
+preferences that must render before unlock (locale, theme, verbose logging) stay
+plaintext in `pref.json`; they are non-confidential.
 
 **Still assumed, not solved by at-rest encryption.** gpm continues to assume
 that **no local attacker has write access** to the app's private storage. In

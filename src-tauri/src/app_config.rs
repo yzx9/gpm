@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! App-shell configuration that must persist before any repo is set up, and
-//! survive a repository re-setup. See RFC 0038 for the full model.
+//! survive a repository re-setup.
 //!
 //! # The three persistence tiers
 //!
@@ -12,45 +12,61 @@
 //! 1. **Git** — the cloned gopass repository of age-encrypted secrets, version-
 //!    controlled and synced via `git pull`/`push`. The only tier that leaves the
 //!    device. (The on-disk clone lives under the path `repo.json` points at.)
-//! 2. **Sealed files** — `repo.json` (repo-scoped config) and `identity`, sealed
-//!    at rest with AEAD on Android, plaintext on desktop. Owned by `rustpass`.
-//!    See [`rustpass::config::Config`].
-//! 3. **Plaintext files** — **`app.json` (this module)**, always plaintext.
+//! 2. **Sealed files** — `repo.json` (repo-scoped config), `identity`, and the
+//!    post-split behavior slot in `app.json`, sealed at rest with AEAD on
+//!    Android, plaintext on desktop. Owned by `rustpass`. See
+//!    [`rustpass::config::Config`].
+//! 3. **Plaintext files** — **`pref.json` (this module)**, always plaintext.
 //!
-//! `app.json` is **plaintext on disk**, and this is forced, not a shortcut:
-//! `locale` must be readable before unlock (first-paint injection + the app-lock
-//! biometric screen), and sealing `app.json` would make it unreadable at setup
+//! # The display/behavior split
+//!
+//! The single plaintext `app.json` is split into two files:
+//! - **`pref.json`** (plaintext, this module) — display prefs that must render
+//!   before unlock: `locale`, `theme_mode`, `log_level`, `schema_version`, and
+//!   the deprecated `secure_screen` bool (kept for `m0003` recovery).
+//! - **`app.json`** (sealed via `Store::save_app_behavior`) — behavior prefs
+//!   that are confidential security choices: `lock_mode`, the view/clipboard
+//!   clear timers, `autosync`, `biometric_app_lock`, `secure_screen_mode`. On
+//!   Android these are AEAD-sealed under the master key (unreadable until
+//!   unlock); on desktop the seal is passthrough plaintext.
+//!
+//! `pref.json` is plaintext on disk, and this is forced, not a shortcut: the
+//! `locale` must be readable before unlock (first-paint injection + the
+//! app-lock biometric screen), and sealing it would make it unreadable at setup
 //! when app-lock is on. None of these prefs are confidential, and the local
 //! write attacker is out of scope per the threat model, so plaintext is
-//! consistent. (The `WebView`'s `localStorage` is explicitly not a tier — it may
-//! be cleared by the system, so it is never authoritative for settings.)
+//! consistent. (The `WebView`'s `localStorage` is explicitly not a tier — it
+//! may be cleared by the system, so it is never authoritative for settings.)
 //!
-//! # What lives here
+//! `m0004` owns the split: it reads the legacy plaintext `app.json`, writes the
+//! display half to `pref.json`, then seals the behavior half via the Store. The
+//! schema version (tracked in `pref.json` post-split) advances only after the
+//! sealed write succeeds, so a Pending (app-lock) resume re-enters cleanly.
 //!
-//! The screen-capture master toggle ([`AppConfig::secure_screen`]), the
-//! display-language preference ([`AppConfig::locale`]), and the behavior prefs
-//! that moved here from `RepoConfig` in the RFC 0038 scope split: `lock_mode`,
-//! the view/clipboard clear timers, `autosync`, and `biometric_app_lock`. All
-//! are application-scoped (survive a repository re-setup) and non-confidential.
-//!
-//! `app.json` intentionally survives `reset_config` (which wipes the repo dir,
-//! `identity`, `repo.json`, and the `app_id_pass` slot): these are device-level
-//! preferences, not repo data, so re-setting up the repo does not reset the
-//! user's language, timers, autosync, or app-lock choice.
+//! `pref.json` and the sealed `app.json` both intentionally survive
+//! `reset_config` (which wipes the repo dir, `identity`, `repo.json`, and the
+//! `app_id_pass` slot): these are device-level preferences, not repo data, so
+//! re-setting up the repo does not reset the user's language, timers, autosync,
+//! or app-lock choice.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS;
-use rustpass::{Error, ErrorCode, LockMode, clamp_lock_mode, normalize_clear_secs};
+use rustpass::config::{DEFAULT_CLIPBOARD_CLEAR_SECS, save_atomic};
+use rustpass::{Error, ErrorCode, LockMode, Store, clamp_lock_mode, normalize_clear_secs};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppState;
 use crate::verbose::{arm_verbose_timer, disarm_verbose_timer};
 
-/// File name of the app-level config, inside the config directory.
+/// File name of the plaintext display-prefs file (post-split).
+const PREF_FILE: &str = "pref.json";
+
+/// File name of the legacy single-shape app config (pre-split) AND the sealed
+/// behavior slot (post-split). The `m0004` migration repurposes it from
+/// plaintext-legacy to sealed-behavior.
 const APP_CONFIG_FILE: &str = "app.json";
 
 /// Locales the app ships translations for. An explicit preference must be one
@@ -88,22 +104,12 @@ pub(crate) struct VerboseNotifyText {
     pub(crate) body: String,
 }
 
-/// App-level (non-repo) preferences. Plaintext on disk — no secrets, only UI
-/// behavior prefs. Plaintext (not sealed) is forced: `locale` must be readable
-/// before unlock for the first-paint injection + app-lock biometric screen, and
-/// sealing `app.json` would make it unreadable at setup when app-lock is on. The
-/// other prefs ride along (none are confidential; the local write attacker is
-/// out of scope per the threat model).
-///
-/// The behavior prefs (`lock_mode`, clear timers, `autosync`,
-/// `biometric_app_lock`) moved here from `RepoConfig` (the RFC 0038 scope split)
-/// so they survive a repository re-setup instead of being wiped with repo data.
 /// Three-state screen-capture protection mode. Serialized kebab-case as
 /// `"off"` / `"sensitive"` / `"always"`. [`SecureScreenMode::Unknown`] is a
 /// forward-compatibility sink (`#[serde(other)]`): a value written by a newer
-/// build deserializes to `Unknown` instead of failing `AppConfig` parsing
-/// (which would wipe the whole config back to defaults). The frontend treats
-/// `None` and `Unknown` as the sensitive default.
+/// build deserializes to `Unknown` instead of failing the surrounding config
+/// parse (which would wipe the whole config back to defaults). The frontend
+/// treats `None` and `Unknown` as the sensitive default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum SecureScreenMode {
@@ -114,88 +120,101 @@ pub(crate) enum SecureScreenMode {
     Unknown,
 }
 
+/// App-level (non-repo) preferences — the **merged IPC view** of the plaintext
+/// display prefs ([`PrefConfig`]) and the sealed behavior prefs
+/// ([`BehaviorConfig`]). Constructed on demand by [`AppConfigStore::get`];
+/// never persisted as a single shape post-split (the legacy single-file shape
+/// is preserved for `m0002`/`m0003` via [`AppConfigStore::save_legacy_app_json`]).
+///
+/// Field docs intentionally describe semantics rather than storage location
+/// (which the split redistribute); see [`PrefConfig`] and [`BehaviorConfig`]
+/// for which side of the split each field lives on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AppConfig {
-    /// **Deprecated** boolean master toggle, kept only so migration
+    /// **Deprecated** boolean master toggle (pref.json), kept only so migration
     /// `0003_secure_screen_mode` can recover the pre-three-state value; removed
     /// at v1.0.0 with the rest of the migration registry. Default ON (`true`).
     #[serde(default = "default_secure_screen")]
     pub(crate) secure_screen: bool,
-    /// Three-state screen-capture protection. `None` (the default) ⇒
-    /// `Sensitive` (the frontend resolves `None`/`Unknown` to `Sensitive`):
-    /// sensitive routes + nav transitions + the unlock overlay block capture,
-    /// the entry list / history stay capturable. `Off` ⇒ no screen is ever
-    /// secured (the user explicitly allowed capture, including the unlock
-    /// overlay). `Always` ⇒ every screen is secured at all times.
+    /// Three-state screen-capture protection (sealed app.json). `None` (the
+    /// default) ⇒ `Sensitive` (the frontend resolves `None`/`Unknown` to
+    /// `Sensitive`): sensitive routes + nav transitions + the unlock overlay
+    /// block capture, the entry list / history stay capturable. `Off` ⇒ no
+    /// screen is ever secured (the user explicitly allowed capture, including
+    /// the unlock overlay). `Always` ⇒ every screen is secured at all times.
     /// `skip_serializing_if` keeps the field out of `app.json` while `None`, so
     /// a default config stays byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) secure_screen_mode: Option<SecureScreenMode>,
-    /// Display-language override. `None` (the default) means "track the system
-    /// language" — the backend resolves the system locale at boot. `Some("en")`
-    /// / `Some("zh-CN")` pins the locale explicitly. `skip_serializing_if`
-    /// keeps existing `app.json` files (which predate this field) byte-identical
-    /// on round-trip, so adding the field is non-breaking.
+    /// Display-language override (pref.json). `None` (the default) means "track
+    /// the system language" — the backend resolves the system locale at boot.
+    /// `Some("en")` / `Some("zh-CN")` pins the locale explicitly.
+    /// `skip_serializing_if` keeps existing files (which predate this field)
+    /// byte-identical on round-trip, so adding the field is non-breaking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) locale: Option<String>,
-    /// Color-scheme (light/dark) override. `None` (the default) means "track the
-    /// system preference" — the frontend's `prefers-color-scheme` CSS media
-    /// query governs, zero-JS and zero-flash. `Some("light")` / `Some("dark")`
-    /// pins it via a `<html data-theme>` attribute the frontend sets after
-    /// reading this. Plaintext here (not sealed) for the same reason as
-    /// `locale`: it must render before unlock and survive `reset_config`.
-    /// `skip_serializing_if` keeps existing `app.json` files byte-identical on
-    /// round-trip, so adding the field is non-breaking (mirrors `locale`).
+    /// Color-scheme (light/dark) override (pref.json). `None` (the default)
+    /// means "track the system preference" — the frontend's
+    /// `prefers-color-scheme` CSS media query governs, zero-JS and zero-flash.
+    /// `Some("light")` / `Some("dark")` pins it via a `<html data-theme>`
+    /// attribute the frontend sets after reading this. Plaintext here (not
+    /// sealed) for the same reason as `locale`: it must render before unlock
+    /// and survive `reset_config`. `skip_serializing_if` keeps existing files
+    /// byte-identical on round-trip, so adding the field is non-breaking
+    /// (mirrors `locale`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) theme_mode: Option<String>,
-    /// How the app auto-locks the identity cache. Skipped from serialization
-    /// when default (`Immediate`), so an uncustomized config is byte-identical
-    /// to one written before this field moved here.
+    /// How the app auto-locks the identity cache (sealed app.json). Skipped
+    /// from serialization when default (`Immediate`), so an uncustomized config
+    /// is byte-identical to one written before this field moved here.
     #[serde(default, skip_serializing_if = "LockMode::is_default")]
     pub(crate) lock_mode: LockMode,
-    /// Seconds a revealed password stays in the DOM before auto-clear.
-    /// `None` ⇒ [`DEFAULT_VIEW_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    /// Seconds a revealed password stays in the DOM before auto-clear (sealed
+    /// app.json). `None` ⇒ [`DEFAULT_VIEW_CLEAR_SECS`]; `Some(0)` ⇒ never
+    /// auto-clear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) view_clear_secs: Option<u64>,
-    /// Seconds the clipboard holds a copied password before auto-clear.
-    /// `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    /// Seconds the clipboard holds a copied password before auto-clear (sealed
+    /// app.json). `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never
+    /// auto-clear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) clipboard_clear_secs: Option<u64>,
     /// Whether each save wraps in a pull→write→push (gopass-style per-command
-    /// sync). Default `true`; omitted from serialization while `true`.
+    /// sync) (sealed app.json). Default `true`; omitted from serialization
+    /// while `true`.
     #[serde(
         default = "default_autosync_true",
         skip_serializing_if = "is_autosync_default"
     )]
     pub(crate) autosync: bool,
-    /// Persisted intent for the app-launch biometric gate. **Write-only** — the
-    /// Settings toggle and the runtime gate read the Keystore probe via
-    /// `get_app_lock_state`, not this flag; it exists only as a persisted record
-    /// mirroring the old `RepoConfig` field. Skipped when `false`.
+    /// Persisted intent for the app-launch biometric gate (sealed app.json).
+    /// **Write-only** — the Settings toggle and the runtime gate read the
+    /// Keystore probe via `get_app_lock_state`, not this flag; it exists only
+    /// as a persisted record mirroring the old `RepoConfig` field. Skipped when
+    /// `false`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) biometric_app_lock: bool,
-    /// Persisted-schema version for one-shot migrations. `1` is the pre-split
-    /// shape; the `migrations` registry bumps it as each step runs (target:
-    /// `migrations::APP_CONFIG_SCHEMA_VERSION`).
+    /// Persisted-schema version for one-shot migrations (pref.json). `1` is the
+    /// pre-split shape; the `migrations` registry bumps it as each step runs
+    /// (target: `migrations::APP_CONFIG_SCHEMA_VERSION`).
     #[serde(default = "default_schema_version")]
     pub(crate) schema_version: u32,
-    /// **Deprecated** persisted diagnostics level (`"error"` / `"warn"` / `"info"`
-    /// / `"debug"`), kept only so migration `0004_verbose_from_debug` can carry a
-    /// previously pinned `"debug"` into the new [`Self::verbose_until`] flag;
-    /// removed at v1.0.0 with the rest of the migration registry (mirrors the
-    /// `secure_screen` bool → `m0003` pattern). No runtime logic reads this —
-    /// [`AppConfigStore::effective_log_filter`] drives the level from
-    /// `verbose_until`. Omitted from `app.json` while `None`.
+    /// **Deprecated** persisted diagnostics level (pref.json) (`"error"` /
+    /// `"warn"` / `"info"` / `"debug"`), kept only so migration
+    /// `0004_verbose_from_debug` can carry a previously pinned `"debug"` into
+    /// the new [`Self::verbose_until`] flag; removed at v1.0.0 with the rest of
+    /// the migration registry (mirrors the `secure_screen` bool → `m0003`
+    /// pattern). No runtime logic reads this — [`AppConfigStore::effective_log_filter`]
+    /// drives the level from `verbose_until`. Omitted while `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) log_level: Option<String>,
-    /// Verbose-logging deadline as Unix seconds, or `None` (the Info default).
-    /// While set and not yet past, the runtime log gate is Debug; once past (or
-    /// `None`) it is Info. Persisted in plaintext (same rationale as `locale`:
-    /// readable before unlock, survives `reset_config`, non-confidential) so a
-    /// launch made with verbose on records startup at Debug. Stored as Unix
-    /// seconds via `std::time` — the crate has no `chrono` / `time` dependency,
-    /// matching the rest of the app. See RFC 0055. Omitted from `app.json` while
-    /// `None` so a default config stays byte-identical on round-trip.
+    /// Verbose-logging deadline as Unix seconds, or `None` (the Info default)
+    /// (pref.json). While set and not yet past, the runtime log gate is Debug;
+    /// once past (or `None`) it is Info. Persisted in plaintext (same rationale
+    /// as `locale`: readable before unlock, survives `reset_config`,
+    /// non-confidential) so a launch made with verbose on records startup at
+    /// Debug. See RFC 0055. Omitted while `None` so a default config stays
+    /// byte-identical on round-trip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) verbose_until: Option<u64>,
 }
@@ -222,38 +241,182 @@ impl Default for AppConfig {
     }
 }
 
-/// Serde default for [`AppConfig::secure_screen`] — `true` (secure by default).
+/// Plaintext display preferences — the `pref.json` half of the T2 split. Read
+/// pre-unlock (locale/theme/log must render before the identity is decrypted),
+/// so this file stays plaintext. The deprecated `secure_screen` bool rides
+/// along so `m0003` can recover it from a pre-split file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct PrefConfig {
+    /// **Deprecated** boolean master toggle, kept only so migration
+    /// `0003_secure_screen_mode` can recover the pre-three-state value; removed
+    /// at v1.0.0 with the rest of the migration registry. Default ON (`true`).
+    #[serde(default = "default_secure_screen")]
+    pub(crate) secure_screen: bool,
+    /// Display-language override. `None` (the default) means "track the system
+    /// language". `skip_serializing_if` keeps existing files byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) locale: Option<String>,
+    /// Color-scheme override. `None` (the default) means "track the system
+    /// preference". `skip_serializing_if` keeps existing files byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) theme_mode: Option<String>,
+    /// **Deprecated** persisted diagnostics log level (`None` ⇒ default `Info`).
+    /// Kept so `m0004_verbose_from_debug` can carry a pinned `"debug"` into
+    /// `verbose_until`; no runtime logic reads it. `skip_serializing_if` keeps
+    /// existing files byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) log_level: Option<String>,
+    /// Verbose-logging deadline as Unix seconds, or `None` (the Info default).
+    /// Drives the runtime log gate via [`AppConfigStore::effective_log_filter`].
+    /// `skip_serializing_if` keeps existing files byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) verbose_until: Option<u64>,
+    /// Persisted-schema version for one-shot migrations. `1` is the pre-split
+    /// shape; the `migrations` registry bumps it as each step runs. The serde
+    /// missing-key default stays at `1` so a pre-split `app.json` (lifted into
+    /// a `PrefConfig` on first read) still runs the registry; a brand-new
+    /// install is built via [`PrefConfig::default`], which starts at the
+    /// registry's target instead (skipping the legacy no-op steps) — the two
+    /// differ on purpose.
+    #[serde(default = "default_schema_version")]
+    pub(crate) schema_version: u32,
+}
+
+impl Default for PrefConfig {
+    fn default() -> Self {
+        Self {
+            secure_screen: default_secure_screen(),
+            locale: None,
+            theme_mode: None,
+            log_level: None,
+            verbose_until: None,
+            // A brand-new config starts at the current target so it skips the
+            // legacy no-op migrations. (The serde missing-key default below
+            // stays at 1 so a pre-split app.json still runs the registry.)
+            schema_version: crate::migrations::APP_CONFIG_SCHEMA_VERSION,
+        }
+    }
+}
+
+impl PrefConfig {
+    /// Lift the display half of an [`AppConfig`] (legacy single-file shape) into
+    /// a [`PrefConfig`]. Used by [`AppConfigStore::new`] for the legacy lift
+    /// and by `m0005` for the split.
+    pub(crate) fn from_legacy(cfg: &AppConfig) -> Self {
+        Self {
+            secure_screen: cfg.secure_screen,
+            locale: cfg.locale.clone(),
+            theme_mode: cfg.theme_mode.clone(),
+            log_level: cfg.log_level.clone(),
+            verbose_until: cfg.verbose_until,
+            schema_version: cfg.schema_version,
+        }
+    }
+}
+
+/// Behavior preferences — the sealed `app.json` half of the T2 split. Sealed
+/// because behavior is a confidential security choice (the user's lock timeout,
+/// autosync, biometric, screen-capture mode). On Android these are AEAD-sealed
+/// under the master key (unreadable until unlock); on desktop the seal is
+/// passthrough plaintext. Same serde attrs as the equivalent [`AppConfig`]
+/// fields so the post-split file shape mirrors the legacy single-file shape
+/// byte-for-byte (modulo the missing display keys).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct BehaviorConfig {
+    /// How the app auto-locks the identity cache. Skipped from serialization
+    /// when default (`Immediate`).
+    #[serde(default, skip_serializing_if = "LockMode::is_default")]
+    pub(crate) lock_mode: LockMode,
+    /// Seconds a revealed password stays in the DOM before auto-clear.
+    /// `None` ⇒ [`DEFAULT_VIEW_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) view_clear_secs: Option<u64>,
+    /// Seconds the clipboard holds a copied password before auto-clear.
+    /// `None` ⇒ [`DEFAULT_CLIPBOARD_CLEAR_SECS`]; `Some(0)` ⇒ never auto-clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) clipboard_clear_secs: Option<u64>,
+    /// Whether each save wraps in a pull→write→push (gopass-style per-command
+    /// sync). Default `true`; omitted from serialization while `true`.
+    #[serde(
+        default = "default_autosync_true",
+        skip_serializing_if = "is_autosync_default"
+    )]
+    pub(crate) autosync: bool,
+    /// Persisted intent for the app-launch biometric gate. **Write-only** —
+    /// the Settings toggle and the runtime gate read the Keystore probe, not
+    /// this flag. Skipped when `false`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) biometric_app_lock: bool,
+    /// Three-state screen-capture protection. `None` (the default) ⇒
+    /// `Sensitive`. `skip_serializing_if` keeps the field out while `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) secure_screen_mode: Option<SecureScreenMode>,
+}
+
+impl Default for BehaviorConfig {
+    fn default() -> Self {
+        Self {
+            lock_mode: LockMode::default(),
+            view_clear_secs: None,
+            clipboard_clear_secs: None,
+            autosync: default_autosync_true(),
+            biometric_app_lock: false,
+            secure_screen_mode: None,
+        }
+    }
+}
+
+impl BehaviorConfig {
+    /// Lift the behavior half of an [`AppConfig`] (legacy single-file shape)
+    /// into a [`BehaviorConfig`]. Used by `m0004` for the split and by
+    /// [`AppConfigStore::save_legacy_app_json`] to keep the behavior cache in
+    /// sync with a legacy write.
+    pub(crate) fn from_legacy(cfg: &AppConfig) -> Self {
+        Self {
+            lock_mode: cfg.lock_mode,
+            view_clear_secs: cfg.view_clear_secs,
+            clipboard_clear_secs: cfg.clipboard_clear_secs,
+            autosync: cfg.autosync,
+            biometric_app_lock: cfg.biometric_app_lock,
+            secure_screen_mode: cfg.secure_screen_mode,
+        }
+    }
+}
+
+/// Serde default for [`AppConfig::secure_screen`] / [`PrefConfig::secure_screen`]
+/// — `true` (secure by default).
 fn default_secure_screen() -> bool {
     true
 }
 
-/// Serde default for [`AppConfig::autosync`] — `true` (gopass-style per-save
-/// pull→write→push on by default).
+/// Serde default for [`AppConfig::autosync`] / [`BehaviorConfig::autosync`] —
+/// `true` (gopass-style per-save pull→write→push on by default).
 fn default_autosync_true() -> bool {
     true
 }
 
-/// `true` (the default) so `autosync` is omitted from `app.json` while on — a
+/// `true` (the default) so `autosync` is omitted from the file while on — a
 /// user who never toggles it sees no change to the file's shape.
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
 fn is_autosync_default(autosync: &bool) -> bool {
     *autosync
 }
 
-/// `false` (the default) so `biometric_app_lock` is omitted from `app.json`
-/// when off.
+/// `false` (the default) so `biometric_app_lock` is omitted from the file when
+/// off.
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
 fn is_false(b: &bool) -> bool {
     !*b
 }
 
-/// Serde default for [`AppConfig::schema_version`] when the key is missing —
-/// `1`, the version before the config-scope migration existed. A pre-split
-/// `app.json` that omits the key must still run the registry (otherwise it
-/// would skip straight to the target and silently lose the scope split + the
-/// bool→mode conversion), so this stays at `1`. A brand-new install is built
-/// via [`AppConfig::default`], which starts at `APP_CONFIG_SCHEMA_VERSION`
-/// instead (skipping the legacy no-op steps) — the two differ on purpose.
+/// Serde default for the schema-version field when the key is missing — `1`,
+/// the version before the config-scope migration existed. A pre-split file that
+/// omits the key must still run the registry (otherwise it would skip straight
+/// to the target and silently lose the scope split + the bool→mode conversion +
+/// the sealed-behavior split), so this stays at `1`. A brand-new install is
+/// built via [`AppConfig::default`] / [`PrefConfig::default`], which start at
+/// `APP_CONFIG_SCHEMA_VERSION` instead (skipping the legacy no-op steps) — the
+/// two differ on purpose.
 fn default_schema_version() -> u32 {
     1
 }
@@ -291,8 +454,7 @@ fn validate_locale(locale: Option<&str>) -> Result<(), Error> {
 /// always valid and is not listed here; an explicit `Some` must be one of these.
 /// Do NOT add `"system"` here: the frontend sends `null` for "track system"
 /// (never the string), and persisting `Some("system")` would break the
-/// byte-identical-on-default invariant `locale` / `log_level` / `verbose_until`
-/// rely on.
+/// byte-identical-on-default invariant `locale`/`log_level` rely on.
 const SUPPORTED_THEME_MODES: [&str; 2] = ["light", "dark"];
 
 /// Reject an unsupported explicit theme mode. `None` (track system) is always
@@ -324,13 +486,13 @@ fn normalize_system_locale(raw: Option<&str>) -> String {
 /// The locale to bake into the `WebView` initialization script.
 ///
 /// This runs at Tauri `Builder` time, before the `App` exists — so on Android
-/// the config directory (and thus `app.json`) is not yet readable (it is only
-/// resolvable through the running app's mobile-plugin IPC). The system locale
-/// is readable this early, though (`sys_locale` reads it via libc, no app
-/// required, on every platform), so the inject carries the "track system"
-/// resolution. This is exactly correct for users who haven't pinned a language
-/// (the default, and the first-launch case), and the boot `resolved_locale`
-/// IPC corrects it within one frame for users who have.
+/// the config directory (and thus `pref.json`/`app.json`) is not yet readable
+/// (it is only resolvable through the running app's mobile-plugin IPC). The
+/// system locale is readable this early, though (`sys_locale` reads it via
+/// libc, no app required, on every platform), so the inject carries the "track
+/// system" resolution. This is exactly correct for users who haven't pinned a
+/// language (the default, and the first-launch case), and the boot
+/// `resolved_locale` IPC corrects it within one frame for users who have.
 pub(crate) fn init_script_locale() -> String {
     normalize_system_locale(sys_locale::get_locale().as_deref())
 }
@@ -348,43 +510,93 @@ pub(crate) fn locale_init_script() -> String {
     )
 }
 
-/// Persistent app-shell config, owned by [`AppState`]. The on-disk file is read
-/// once synchronously at construction; the in-memory cache is authoritative
-/// thereafter. The [`Mutex`] guard is never held across an `.await`.
+/// Read `app.json` from `config_dir` and parse it as the legacy single-file
+/// [`AppConfig`] shape. Returns `None` if the file is missing or unparseable —
+/// used by [`AppConfigStore::new`] (the legacy lift) and `m0004` (the split).
+/// The byte-oriented sealed behavior slot (post-split) does NOT parse as
+/// `AppConfig` (different fields), so this also returns `None` there — callers
+/// dispatching on the file shape should check `rustpass::seal::is_envelope`
+/// first to tell a sealed slot apart from a plaintext legacy file.
+fn load_legacy_app_json(config_dir: &Path) -> Option<AppConfig> {
+    let path = config_dir.join(APP_CONFIG_FILE);
+    let s = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str::<AppConfig>(&s).ok()
+}
+
+/// Persistent app-shell config, owned by [`AppState`]. Two-phase: constructed
+/// without a `Store` (so the migration registry can run before the Store is
+/// built if needed), then [`set_store`](Self::set_store) binds the Store so
+/// sealed behavior writes/reads can flow. Plaintext `pref.json` is read once
+/// synchronously at construction (lifting the legacy `app.json` display fields
+/// when `pref.json` is absent); sealed `app.json` is loaded post-unlock via
+/// [`reload_behavior`](Self::reload_behavior). The in-memory caches are
+/// authoritative thereafter; the [`Mutex`] guards are never held across an
+/// `.await`.
 #[derive(Debug)]
 pub(crate) struct AppConfigStore {
-    path: PathBuf,
-    cache: Mutex<AppConfig>,
+    pref_path: PathBuf,
+    app_json_path: PathBuf,
+    pref: Mutex<PrefConfig>,
+    behavior: Mutex<BehaviorConfig>,
+    /// Late-bound Store ref so setter signatures stay stable (no `&Store`
+    /// parameter) and so callers in `config.rs`/`applock.rs` don't change. Set
+    /// once via [`set_store`](Self::set_store) right after the Store is built.
+    store: OnceLock<Arc<Store>>,
     /// Staged text for the verbose-revert OS notification (posted by the
     /// deadline timer). Memory-only; `None` until verbose is enabled.
     revert_notify: Mutex<Option<VerboseNotifyText>>,
 }
 
 impl AppConfigStore {
-    /// Load the app config from `config_dir/app.json`, falling back to the
-    /// default (secure ON) if the file is missing or corrupt.
+    /// Load the display prefs from `config_dir/pref.json`, falling back to the
+    /// legacy lift from `config_dir/app.json` when `pref.json` is absent (the
+    /// pre-split case), and finally to defaults. The behavior cache starts at
+    /// default — sealed behavior is loaded post-unlock via
+    /// [`reload_behavior`](Self::reload_behavior).
+    ///
+    /// Resilience: a missing file (fresh install) is normal — silent default.
+    /// A present-but-unreadable or corrupt file would silently revert
+    /// `secure_screen` / `locale` / `log_level` to defaults; warn so the revert
+    /// leaves a trace (the file is plaintext, so the warn carries no secret).
     #[must_use]
     pub(crate) fn new(config_dir: &Path) -> Self {
-        let path = config_dir.join(APP_CONFIG_FILE);
-        // A missing file (fresh install) is normal — fall back to defaults
-        // silently. A present-but-unreadable or corrupt file is a real problem:
-        // it would silently revert secure_screen / locale / autosync / lock mode
-        // / clear timers to defaults. Warn so that revert leaves a trace instead
-        // of vanishing (the file is plaintext, so the warn carries no secret).
-        let cache = match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str::<AppConfig>(&s).unwrap_or_else(|e| {
-                log::warn!("app-config: corrupt app.json, using defaults: {e}");
-                AppConfig::default()
-            }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppConfig::default(),
-            Err(e) => {
-                log::warn!("app-config: app.json unreadable, using defaults: {e}");
-                AppConfig::default()
-            }
+        let pref_path = config_dir.join(PREF_FILE);
+        let app_json_path = config_dir.join(APP_CONFIG_FILE);
+        // Prefer pref.json (post-split shape); fall back to the legacy lift from
+        // app.json so a pre-split file's prefs survive the upgrade; finally
+        // default. The legacy lift populates BOTH caches: display into pref, and
+        // behavior into the behavior cache — otherwise a pre-split writer
+        // (m0002/m0003) that does `get()`→`save_legacy_app_json` would overwrite
+        // the seeded behavior with defaults (the behavior cache starts empty
+        // post-split and is loaded post-unlock via `reload_behavior`, but the
+        // legacy file still carries behavior pre-split). schema_version is
+        // preserved (the registry bumps it as migrations run).
+        let (pref, behavior) = if pref_path.exists() {
+            let pref = match std::fs::read_to_string(&pref_path) {
+                Ok(s) => serde_json::from_str::<PrefConfig>(&s).unwrap_or_else(|e| {
+                    log::warn!("app-config: corrupt pref.json, using defaults: {e}");
+                    PrefConfig::default()
+                }),
+                Err(e) => {
+                    log::warn!("app-config: pref.json unreadable, using defaults: {e}");
+                    PrefConfig::default()
+                }
+            };
+            (pref, BehaviorConfig::default())
+        } else if let Some(legacy) = load_legacy_app_json(config_dir) {
+            (
+                PrefConfig::from_legacy(&legacy),
+                BehaviorConfig::from_legacy(&legacy),
+            )
+        } else {
+            (PrefConfig::default(), BehaviorConfig::default())
         };
         Self {
-            path,
-            cache: Mutex::new(cache),
+            pref_path,
+            app_json_path,
+            pref: Mutex::new(pref),
+            behavior: Mutex::new(behavior),
+            store: OnceLock::new(),
             revert_notify: Mutex::new(None),
         }
     }
@@ -408,9 +620,68 @@ impl AppConfigStore {
             .take()
     }
 
-    /// Snapshot the cached config.
+    /// Bind the Store ref so sealed behavior writes/reads can flow. Called once
+    /// from `init_state` after the Store is constructed. Idempotent: a second
+    /// call is silently dropped (the first Store wins, mirroring `OnceLock`
+    /// semantics) — tests that re-construct an `AppState` over a temp dir per
+    /// case never collide in practice.
+    pub(crate) fn set_store(&self, store: Arc<Store>) {
+        let _ = self.store.set(store);
+    }
+
+    /// Path to the legacy / sealed `app.json`. Used by `m0004` to dispatch on
+    /// the file shape (missing / envelope / plaintext-legacy).
+    pub(crate) fn app_json_path(&self) -> &Path {
+        &self.app_json_path
+    }
+
+    /// Whether `pref.json` exists on disk — i.e. the display half has already
+    /// been split off. `m0004` gates its display-half write on this so a re-entry
+    /// (a `Pending` resume, or a half-migrated crash recovery) never re-derives
+    /// display prefs from `app.json` and clobbers the user's locale/theme/log.
+    /// `save_atomic` (temp + rename) guarantees the file is either absent or
+    /// complete, so existence is a reliable split signal.
+    pub(crate) fn pref_json_exists(&self) -> bool {
+        self.pref_path.exists()
+    }
+
+    /// Snapshot the plaintext pref cache.
+    pub(crate) fn get_pref(&self) -> PrefConfig {
+        self.pref.lock().expect("pref lock poisoned").clone()
+    }
+
+    /// Snapshot the sealed behavior cache. The cache starts at default at
+    /// construction; populate it via
+    /// [`reload_behavior`](Self::reload_behavior) post-unlock.
+    pub(crate) fn get_behavior(&self) -> BehaviorConfig {
+        self.behavior
+            .lock()
+            .expect("behavior lock poisoned")
+            .clone()
+    }
+
+    /// Merge the pref + behavior caches into an [`AppConfig`] (the IPC view).
+    /// This is what `get_app_config`, `apply_security_caches`, and tests
+    /// consume — it stays the superset of every field that previously lived in
+    /// the single-file `app.json`, so callers that don't care about the split
+    /// see no change.
     pub(crate) fn get(&self) -> AppConfig {
-        self.cache.lock().expect("app config lock poisoned").clone()
+        let pref = self.pref.lock().expect("pref lock poisoned");
+        let behavior = self.behavior.lock().expect("behavior lock poisoned");
+        AppConfig {
+            secure_screen: pref.secure_screen,
+            secure_screen_mode: behavior.secure_screen_mode,
+            locale: pref.locale.clone(),
+            theme_mode: pref.theme_mode.clone(),
+            lock_mode: behavior.lock_mode,
+            view_clear_secs: behavior.view_clear_secs,
+            clipboard_clear_secs: behavior.clipboard_clear_secs,
+            autosync: behavior.autosync,
+            biometric_app_lock: behavior.biometric_app_lock,
+            schema_version: pref.schema_version,
+            log_level: pref.log_level.clone(),
+            verbose_until: pref.verbose_until,
+        }
     }
 
     /// Resolve the locale the app should render in: an explicit, supported
@@ -421,8 +692,8 @@ impl AppConfigStore {
     /// poisoning the result — the frontend therefore reads this, not the raw
     /// `locale` field, so an unsupported value never reaches the `WebView`.
     pub(crate) fn resolved_locale(&self) -> String {
-        let cfg = self.get();
-        match cfg.locale.as_deref() {
+        let pref = self.get_pref();
+        match pref.locale.as_deref() {
             Some(explicit) if is_supported_locale(explicit) => explicit.to_string(),
             _ => normalize_system_locale(sys_locale::get_locale().as_deref()),
         }
@@ -431,124 +702,205 @@ impl AppConfigStore {
     /// Effective runtime log filter: `Debug` while a verbose deadline is set and
     /// not yet past, else `Info`. Lazy — an expired deadline reads as Info here
     /// without being cleared; the startup path calls [`Self::clear_expired_verbose`]
-    /// to persist the revert. Mirrors `resolved_locale`'s degrade-don't-poison
-    /// resilience (a corrupt/future value can never raise the level past Debug,
-    /// which is the logger's ceiling anyway).
+    /// to persist the revert. Reads the plaintext pref cache (`verbose_until`
+    /// lives in `pref.json`), so this is safe to call pre-unlock.
     #[must_use]
     pub(crate) fn effective_log_filter(&self) -> log::LevelFilter {
-        match self.get().verbose_until {
+        match self.get_pref().verbose_until {
             Some(deadline) if deadline > now_unix() => log::LevelFilter::Debug,
             // None, expired, or a stale value all resolve to Info.
             _ => log::LevelFilter::Info,
         }
     }
 
-    /// Persist `cfg` atomically (temp + rename, mirroring
-    /// `rustpass::config::save_atomic`) and update the cache.
-    ///
-    /// The `Mutex` is held only for the final cache swap — never across the
-    /// `tokio::fs` `.await` points (the write/rename complete before the guard
-    /// is taken), so there is no await-held-lock deadlock risk.
-    pub(crate) async fn save(&self, cfg: &AppConfig) -> Result<(), Error> {
-        let json = serde_json::to_string_pretty(cfg)?;
-        let tmp = self.path.with_extension("tmp");
-        tokio::fs::write(&tmp, json).await?;
-        tokio::fs::rename(&tmp, &self.path).await?;
-        *self.cache.lock().expect("app config lock poisoned") = cfg.clone();
-        Ok(())
-    }
-
-    /// Get → mutate → save → return the updated config. Shared shape for the
-    /// app-scoped setters (atomic write + cache swap under the mutex, never
-    /// holding the mutex across an `.await`).
-    async fn update<F: FnOnce(&mut AppConfig)>(&self, f: F) -> Result<AppConfig, Error> {
-        let mut cfg = self.get();
-        f(&mut cfg);
-        self.save(&cfg).await?;
-        Ok(cfg)
-    }
-
-    /// Set the auto-lock mode. `Idle(n)` is clamped to the allowed range first.
-    pub(crate) async fn set_lock_mode(&self, mode: LockMode) -> Result<AppConfig, Error> {
-        self.update(|cfg| cfg.lock_mode = clamp_lock_mode(mode))
-            .await
-    }
-
-    /// Set the password-view auto-clear override (`None` ⇒ default, `Some(0)` ⇒
-    /// never, else clamped to the allowed range).
-    pub(crate) async fn set_view_clear_secs(&self, secs: Option<u64>) -> Result<AppConfig, Error> {
-        self.update(|cfg| cfg.view_clear_secs = normalize_clear_secs(secs))
-            .await
-    }
-
-    /// Set the clipboard auto-clear override (same rule as view-clear).
-    pub(crate) async fn set_clipboard_clear_secs(
-        &self,
-        secs: Option<u64>,
-    ) -> Result<AppConfig, Error> {
-        self.update(|cfg| cfg.clipboard_clear_secs = normalize_clear_secs(secs))
-            .await
-    }
-
-    /// Set the per-save autosync flag.
-    pub(crate) async fn set_autosync(&self, enabled: bool) -> Result<AppConfig, Error> {
-        self.update(|cfg| cfg.autosync = enabled).await
-    }
-
-    /// Set the persisted app-launch biometric-gate intent flag (write-only
-    /// mirror of the Keystore-probed runtime state).
-    pub(crate) async fn set_biometric_app_lock(&self, enabled: bool) -> Result<AppConfig, Error> {
-        self.update(|cfg| cfg.biometric_app_lock = enabled).await
-    }
-
-    /// Set the persisted color-scheme override (`None` ⇒ track system). `Some`
-    /// must be one of [`SUPPORTED_THEME_MODES`]; a bad value returns
-    /// `ConfigError`. The frontend applies the runtime effect (the `data-theme`
-    /// attribute) on receipt, so this stays a pure persistence step mirroring
-    /// `set_locale`.
-    pub(crate) async fn set_theme_mode(&self, mode: Option<String>) -> Result<AppConfig, Error> {
-        validate_theme_mode(mode.as_deref())?;
-        self.update(|cfg| cfg.theme_mode = mode).await
-    }
-
     /// Turn verbose (Debug) logging on for [`VERBOSE_WINDOW_SECS`], or off. `on`
     /// stamps a fresh deadline measured from now (the window restarts, never
     /// extends); `off` clears it immediately. Persists + returns the updated
-    /// config. The runtime gate is re-applied by the caller (the `set_verbose`
-    /// command) so the level changes within the current session, not just on the
-    /// next launch.
+    /// config. The runtime gate + timer are re-applied by the caller (the
+    /// `set_verbose` command) so the level changes within the current session.
     pub(crate) async fn set_verbose(&self, on: bool) -> Result<AppConfig, Error> {
-        self.update(|cfg| {
-            cfg.verbose_until = on.then(|| now_unix() + VERBOSE_WINDOW_SECS);
-        })
-        .await
+        self.update_pref(|p| p.verbose_until = on.then(|| now_unix() + VERBOSE_WINDOW_SECS))
+            .await
     }
 
-    /// Persist-clear an expired verbose deadline (keeps `app.json` tidy once the
+    /// Persist-clear an expired verbose deadline (keeps `pref.json` tidy once the
     /// window has passed). Best-effort at startup: the level is already lazy-Info
     /// via [`Self::effective_log_filter`], so a failure here is non-fatal — the
-    /// next launch retries.
+    /// next launch retries. Re-checks expiry INSIDE the closure so a `set_verbose`
+    /// landing between the read and the swap is not clobbered.
     pub(crate) async fn clear_expired_verbose(&self) -> Result<(), Error> {
-        // Fast path: no deadline set ⇒ nothing to do (the common case at startup).
-        if self.get().verbose_until.is_none() {
+        if self.get_pref().verbose_until.is_none() {
             return Ok(());
         }
-        // Re-check expiry INSIDE the closure so the read-modify-write is atomic
-        // with other `update` callers — a `set_verbose(true)` landing between the
-        // outer check and the swap must not be clobbered by an unconditional None.
-        self.update(|cfg| {
-            if cfg.verbose_until.is_some_and(|d| d <= now_unix()) {
-                cfg.verbose_until = None;
+        self.update_pref(|p| {
+            if p.verbose_until.is_some_and(|d| d <= now_unix()) {
+                p.verbose_until = None;
             }
         })
         .await?;
         Ok(())
     }
 
-    /// Set the persisted three-state screen-capture mode. Rejects
-    /// [`SecureScreenMode::Unknown`] (a deserialization sink, not a settable
-    /// value). The frontend re-applies the route's secure state on receipt, so
-    /// this stays a pure persistence step mirroring `set_theme_mode`.
+    /// Persist `cfg` to `pref.json` atomically (via `rustpass::config::save_atomic`
+    /// — temp + rename, DRY) and update the pref cache.
+    ///
+    /// The `Mutex` is held only for the final cache swap — never across the
+    /// `tokio::fs` `.await` points (the write/rename complete before the guard
+    /// is taken), so there is no await-held-lock deadlock risk.
+    pub(crate) async fn save_pref(&self, cfg: &PrefConfig) -> Result<(), Error> {
+        let json = serde_json::to_string_pretty(cfg)?;
+        save_atomic(&self.pref_path, json.as_bytes()).await?;
+        *self.pref.lock().expect("pref lock poisoned") = cfg.clone();
+        Ok(())
+    }
+
+    /// Serialize `cfg` to bytes and seal them into `app.json` via the bound
+    /// Store's `save_app_behavior`. The Seal itself gates: passthrough on
+    /// desktop (key `None`), `SealKeyUnavailable` if ever-keyed-then-wiped (the
+    /// app-launch lock cold-start path). No separate `app_locked` reject — it
+    /// would wrongly reject desktop.
+    ///
+    /// Updates the behavior cache so a subsequent [`get`](Self::get) reflects
+    /// the new value without a round-trip through disk.
+    pub(crate) async fn save_behavior(&self, cfg: &BehaviorConfig) -> Result<(), Error> {
+        let json = serde_json::to_string_pretty(cfg)?;
+        let bytes = json.into_bytes();
+        let store = self.store.get().ok_or_else(|| {
+            Error::new(
+                ErrorCode::ConfigError,
+                "AppConfigStore: Store not bound (call set_store first)",
+            )
+        })?;
+        store.save_app_behavior(&bytes).await?;
+        *self.behavior.lock().expect("behavior lock poisoned") = cfg.clone();
+        Ok(())
+    }
+
+    /// Read + unseal `app.json` and refresh the behavior cache. Soft-fails to
+    /// defaults on `NoIdentity` (missing slot, pre-unlock) and
+    /// `SealKeyUnavailable` (master key not yet injected) — both are normal
+    /// pre-unlock states, not errors. Mirrors `new()`'s resilience on
+    /// parse/IO errors (warn + leave the cache at the last-read value).
+    pub(crate) async fn reload_behavior(&self) -> Result<(), Error> {
+        let Some(store) = self.store.get() else {
+            // No Store bound — nothing to load. Leave the cache at defaults.
+            return Ok(());
+        };
+        match store.load_app_behavior().await {
+            Ok(bytes) => match serde_json::from_slice::<BehaviorConfig>(&bytes) {
+                Ok(cfg) => {
+                    *self.behavior.lock().expect("behavior lock poisoned") = cfg;
+                    Ok(())
+                }
+                Err(e) => {
+                    log::warn!("app-config: app.json behavior unparseable, leaving the cache: {e}");
+                    Ok(())
+                }
+            },
+            Err(e) if e.code == "NO_IDENTITY" => Ok(()),
+            Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => Ok(()),
+            Err(e) => {
+                log::warn!("app-config: app.json behavior load failed, leaving the cache: {e}");
+                Ok(())
+            }
+        }
+    }
+
+    /// Persist `cfg` as a plaintext legacy single-file `app.json` (all fields)
+    /// via `save_atomic` and update BOTH caches to mirror the write. The
+    /// PRE-SPLIT persistence path used by `m0002`/`m0003` and the legacy
+    /// round-trip tests. Post-split, `m0004` replaces this shape with the
+    /// `pref.json` + sealed `app.json` pair.
+    pub(crate) async fn save_legacy_app_json(&self, cfg: &AppConfig) -> Result<(), Error> {
+        let json = serde_json::to_string_pretty(cfg)?;
+        save_atomic(&self.app_json_path, json.as_bytes()).await?;
+        // Keep both caches in sync with the legacy write so a subsequent get()
+        // reflects the new value without a round-trip through disk.
+        *self.pref.lock().expect("pref lock poisoned") = PrefConfig::from_legacy(cfg);
+        *self.behavior.lock().expect("behavior lock poisoned") = BehaviorConfig::from_legacy(cfg);
+        Ok(())
+    }
+
+    /// Get → mutate → save → return the merged config. Shared shape for the
+    /// pref setters (atomic write + cache swap, never holding the mutex across
+    /// an `.await`).
+    async fn update_pref<F: FnOnce(&mut PrefConfig)>(&self, f: F) -> Result<AppConfig, Error> {
+        let mut pref = self.get_pref();
+        f(&mut pref);
+        self.save_pref(&pref).await?;
+        Ok(self.get())
+    }
+
+    /// Same shape as [`update_pref`](Self::update_pref), for the behavior
+    /// setters. Requires the Store to be bound (the sealed write flows through
+    /// it).
+    async fn update_behavior<F: FnOnce(&mut BehaviorConfig)>(
+        &self,
+        f: F,
+    ) -> Result<AppConfig, Error> {
+        let mut behavior = self.get_behavior();
+        f(&mut behavior);
+        self.save_behavior(&behavior).await?;
+        Ok(self.get())
+    }
+
+    /// Set the auto-lock mode (sealed behavior). `Idle(n)` is clamped first.
+    pub(crate) async fn set_lock_mode(&self, mode: LockMode) -> Result<AppConfig, Error> {
+        self.update_behavior(|b| b.lock_mode = clamp_lock_mode(mode))
+            .await
+    }
+
+    /// Set the password-view auto-clear override (sealed behavior). `None` ⇒
+    /// default, `Some(0)` ⇒ never, else clamped to the allowed range.
+    pub(crate) async fn set_view_clear_secs(&self, secs: Option<u64>) -> Result<AppConfig, Error> {
+        self.update_behavior(|b| b.view_clear_secs = normalize_clear_secs(secs))
+            .await
+    }
+
+    /// Set the clipboard auto-clear override (sealed behavior, same rule as
+    /// view-clear).
+    pub(crate) async fn set_clipboard_clear_secs(
+        &self,
+        secs: Option<u64>,
+    ) -> Result<AppConfig, Error> {
+        self.update_behavior(|b| b.clipboard_clear_secs = normalize_clear_secs(secs))
+            .await
+    }
+
+    /// Set the per-save autosync flag (sealed behavior).
+    pub(crate) async fn set_autosync(&self, enabled: bool) -> Result<AppConfig, Error> {
+        self.update_behavior(|b| b.autosync = enabled).await
+    }
+
+    /// Set the persisted app-launch biometric-gate intent flag (sealed
+    /// behavior; write-only mirror of the Keystore-probed runtime state).
+    pub(crate) async fn set_biometric_app_lock(&self, enabled: bool) -> Result<AppConfig, Error> {
+        self.update_behavior(|b| b.biometric_app_lock = enabled)
+            .await
+    }
+
+    /// Set the persisted color-scheme override (pref.json) (`None` ⇒ track
+    /// system). `Some` must be one of [`SUPPORTED_THEME_MODES`]; a bad value
+    /// returns `ConfigError`. The frontend applies the runtime effect (the
+    /// `data-theme` attribute) on receipt, so this stays a pure persistence
+    /// step mirroring `set_locale`.
+    pub(crate) async fn set_theme_mode(&self, mode: Option<String>) -> Result<AppConfig, Error> {
+        validate_theme_mode(mode.as_deref())?;
+        self.update_pref(|p| p.theme_mode = mode).await
+    }
+
+    /// Set the display-language preference (pref.json) (`null` clears the
+    /// override — track system; `"en"` / `"zh-CN"` pin it). Mirrors
+    /// `set_theme_mode`. The frontend re-applies the locale on receipt.
+    pub(crate) async fn set_locale(&self, locale: Option<String>) -> Result<AppConfig, Error> {
+        validate_locale(locale.as_deref())?;
+        self.update_pref(|p| p.locale = locale).await
+    }
+
+    /// Set the persisted three-state screen-capture mode (sealed behavior).
+    /// Rejects [`SecureScreenMode::Unknown`] (a deserialization sink, not a
+    /// settable value). The frontend re-applies the route's secure state on
+    /// receipt, so this stays a pure persistence step mirroring `set_theme_mode`.
     pub(crate) async fn set_secure_screen_mode(
         &self,
         mode: SecureScreenMode,
@@ -559,7 +911,8 @@ impl AppConfigStore {
                 "Unknown is not a settable screen-capture mode",
             ));
         }
-        self.update(|cfg| cfg.secure_screen_mode = Some(mode)).await
+        self.update_behavior(|b| b.secure_screen_mode = Some(mode))
+            .await
     }
 }
 
@@ -575,7 +928,7 @@ pub(crate) fn screen_secure_available() -> bool {
     cfg!(target_os = "android")
 }
 
-/// Read the app config (the master toggle).
+/// Read the merged app config (the IPC view).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn get_app_config(state: State<'_, AppState>) -> AppConfig {
@@ -604,11 +957,7 @@ pub(crate) async fn set_locale_pref(
     state: State<'_, AppState>,
     locale: Option<String>,
 ) -> Result<AppConfig, Error> {
-    validate_locale(locale.as_deref())?;
-    let mut cfg = state.app_config.get();
-    cfg.locale = locale;
-    state.app_config.save(&cfg).await?;
-    Ok(cfg)
+    state.app_config.set_locale(locale).await
 }
 
 /// Set the color-scheme preference and persist it. `mode: null` clears the
@@ -624,6 +973,16 @@ pub(crate) async fn set_theme_mode(
     state.app_config.set_theme_mode(mode).await
 }
 
+/// The authoritative locale the app should render in. The frontend uses this at
+/// boot to reconcile against the best-effort value baked into the `WebView` init
+/// script (which can only carry the system locale, not a pinned preference).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn resolved_locale(state: State<'_, AppState>) -> String {
+    state.app_config.resolved_locale()
+}
+
+/// The effective diagnostics log level (persisted value or `"info"` default).
 /// Turn verbose (Debug) logging on for a bounded window, or off. Returns the
 /// updated config and re-applies the runtime log gate so the level takes effect
 /// immediately. On enable, `revert_notify` stages the localized text the deadline
@@ -655,15 +1014,6 @@ pub(crate) async fn set_verbose(
     Ok(cfg)
 }
 
-/// The authoritative locale the app should render in. The frontend uses this at
-/// boot to reconcile against the best-effort value baked into the `WebView` init
-/// script (which can only carry the system locale, not a pinned preference).
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub(crate) fn resolved_locale(state: State<'_, AppState>) -> String {
-    state.app_config.resolved_locale()
-}
-
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -672,6 +1022,16 @@ mod tests {
 
     fn store_at(dir: &Path) -> AppConfigStore {
         AppConfigStore::new(dir)
+    }
+
+    /// Bind a desktop-passthrough Store (`master_key = None`) so the sealed
+    /// behavior setters/readers can flow. The seal is plaintext-passthrough in
+    /// this mode, so behavior round-trips through `app.json` as plaintext JSON.
+    async fn store_with_desktop_store(dir: &Path) -> AppConfigStore {
+        let s = AppConfigStore::new(dir);
+        s.set_store(Arc::new(Store::new(dir.to_path_buf(), None)));
+        s.reload_behavior().await.ok();
+        s
     }
 
     #[tokio::test]
@@ -695,7 +1055,7 @@ mod tests {
 
         // Flip OFF, persist, and reload from disk to confirm it landed.
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: false,
                 locale: None,
                 ..Default::default()
@@ -710,7 +1070,7 @@ mod tests {
 
         // Flip back ON and reload.
         store_at(dir.path())
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
                 locale: None,
                 ..Default::default()
@@ -730,7 +1090,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
                 locale: Some("zh-CN".to_string()),
                 ..Default::default()
@@ -743,12 +1103,12 @@ mod tests {
 
     #[tokio::test]
     async fn locale_omitted_on_disk_when_none() {
-        // skip_serializing_if keeps the field out of app.json when it is None,
+        // skip_serializing_if keeps the field out of the file when it is None,
         // so existing files stay byte-identical and don't carry a null.
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
                 locale: None,
                 ..Default::default()
@@ -802,7 +1162,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
                 theme_mode: Some("dark".to_string()),
                 ..Default::default()
@@ -820,7 +1180,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
                 theme_mode: None,
                 ..Default::default()
@@ -848,28 +1208,6 @@ mod tests {
         let cfg = store_at(dir.path()).get();
         assert!(cfg.secure_screen);
         assert!(cfg.theme_mode.is_none());
-    }
-
-    #[test]
-    fn validate_theme_mode_accepts_supported_and_none() {
-        assert!(validate_theme_mode(None).is_ok());
-        assert!(validate_theme_mode(Some("light")).is_ok());
-        assert!(validate_theme_mode(Some("dark")).is_ok());
-    }
-
-    #[test]
-    fn validate_theme_mode_rejects_unknown() {
-        // "system" is intentionally NOT a stored value — the frontend sends
-        // `null` for "track system", so a literal "system" is rejected.
-        for bad in ["system", "auto", "DARK", "", "blue"] {
-            let err = validate_theme_mode(Some(bad)).unwrap_err();
-            assert_eq!(err.code, "CONFIG_ERROR", "reject {bad:?}");
-            assert!(
-                err.message.contains(bad),
-                "message names {bad:?}: {}",
-                err.message
-            );
-        }
     }
 
     #[tokio::test]
@@ -933,34 +1271,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verbose_until_roundtrips_through_save() {
+    async fn log_level_roundtrips_through_save() {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
-                verbose_until: Some(1_700_000_000),
+                log_level: Some("debug".to_string()),
                 ..Default::default()
             })
             .await
             .unwrap();
         let reloaded = store_at(dir.path()).get();
-        assert_eq!(reloaded.verbose_until, Some(1_700_000_000));
+        assert_eq!(reloaded.log_level.as_deref(), Some("debug"));
     }
 
     #[tokio::test]
-    async fn verbose_until_omitted_on_disk_when_none() {
+    async fn log_level_omitted_on_disk_when_none() {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
-                verbose_until: None,
+                log_level: None,
                 ..Default::default()
             })
             .await
             .unwrap();
         let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        assert!(
+            !on_disk.contains("log_level"),
+            "log_level key must be absent when None; got: {on_disk}"
+        );
+    }
+
+    #[tokio::test]
+    async fn verbose_until_roundtrips_through_pref() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        let pinned = now_unix() + 42;
+        store
+            .save_pref(&PrefConfig {
+                verbose_until: Some(pinned),
+                ..PrefConfig::default()
+            })
+            .await
+            .unwrap();
+        let reloaded = store_at(dir.path()).get_pref();
+        assert_eq!(reloaded.verbose_until, Some(pinned));
+    }
+
+    #[tokio::test]
+    async fn verbose_until_omitted_on_disk_when_none() {
+        // skip_serializing_if keeps verbose_until out of pref.json while None,
+        // so a default config stays byte-identical.
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store.save_pref(&PrefConfig::default()).await.unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(PREF_FILE)).unwrap();
         assert!(
             !on_disk.contains("verbose_until"),
             "verbose_until key must be absent when None; got: {on_disk}"
@@ -970,80 +1338,53 @@ mod tests {
     #[tokio::test]
     async fn effective_log_filter_reflects_verbose_deadline() {
         let dir = tempdir().expect("tempdir");
-        // None ⇒ Info (a fresh dir loads the default, which has no deadline).
-        assert_eq!(
-            store_at(dir.path()).effective_log_filter(),
-            log::LevelFilter::Info
-        );
         let store = store_at(dir.path());
-        // A future deadline ⇒ Debug.
-        store
-            .save(&AppConfig {
-                secure_screen: true,
-                verbose_until: Some(now_unix() + VERBOSE_WINDOW_SECS),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
+        // No deadline ⇒ Info.
+        assert_eq!(store.effective_log_filter(), log::LevelFilter::Info);
+        // A fresh verbose window ⇒ Debug.
+        store.set_verbose(true).await.unwrap();
         assert_eq!(store.effective_log_filter(), log::LevelFilter::Debug);
-        // A past deadline ⇒ Info (lazy revert — not yet cleared on disk).
-        store
-            .save(&AppConfig {
-                secure_screen: true,
-                verbose_until: Some(now_unix().saturating_sub(1)),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
+        // Cleared ⇒ Info again.
+        store.set_verbose(false).await.unwrap();
         assert_eq!(store.effective_log_filter(), log::LevelFilter::Info);
     }
 
     #[tokio::test]
-    async fn set_verbose_stamps_and_clears_deadline() {
+    async fn clear_expired_verbose_reverts_a_past_deadline() {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
-        assert!(store.get().verbose_until.is_none());
-        // On ⇒ a deadline ~VERBOSE_WINDOW_SECS ahead.
-        let cfg = store.set_verbose(true).await.unwrap();
-        let deadline = cfg.verbose_until.expect("on stamps a deadline");
-        assert!(deadline > now_unix());
-        assert!(deadline <= now_unix() + VERBOSE_WINDOW_SECS);
-        assert_eq!(store.effective_log_filter(), log::LevelFilter::Debug);
-        // Off ⇒ cleared.
-        let cfg = store.set_verbose(false).await.unwrap();
-        assert!(cfg.verbose_until.is_none());
-        assert_eq!(store.effective_log_filter(), log::LevelFilter::Info);
-    }
-
-    #[tokio::test]
-    async fn clear_expired_verbose_persists_the_revert() {
-        let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
-        // An expired deadline is cleared on disk.
+        // Stamp a deadline already in the past.
         store
-            .save(&AppConfig {
-                secure_screen: true,
+            .save_pref(&PrefConfig {
                 verbose_until: Some(now_unix().saturating_sub(60)),
-                ..Default::default()
+                ..PrefConfig::default()
             })
             .await
             .unwrap();
+        assert_eq!(
+            store.effective_log_filter(),
+            log::LevelFilter::Info,
+            "an expired deadline reads as Info"
+        );
         store.clear_expired_verbose().await.unwrap();
         assert!(
-            store_at(dir.path()).get().verbose_until.is_none(),
-            "an expired deadline must be cleared on disk"
+            store.get_pref().verbose_until.is_none(),
+            "an expired deadline is cleared off disk"
         );
-        // An active deadline is left intact.
-        store
-            .save(&AppConfig {
-                secure_screen: true,
-                verbose_until: Some(now_unix() + VERBOSE_WINDOW_SECS),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn clear_expired_verbose_leaves_a_live_window_alone() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_at(dir.path());
+        store.set_verbose(true).await.unwrap();
+        let live = store.get_pref().verbose_until;
         store.clear_expired_verbose().await.unwrap();
-        assert!(store_at(dir.path()).get().verbose_until.is_some());
+        assert_eq!(
+            store.get_pref().verbose_until,
+            live,
+            "a live verbose window is not cleared"
+        );
     }
 
     #[test]
@@ -1064,7 +1405,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
                 locale: Some("zh-CN".to_string()),
                 ..Default::default()
@@ -1082,7 +1423,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen: true,
                 locale: Some("fr".to_string()),
                 ..Default::default()
@@ -1123,24 +1464,24 @@ mod tests {
     }
 
     /// `#[serde(other)]` sinks a value written by a newer build to `Unknown`
-    /// instead of failing `AppConfig` deserialization (which would wipe the
-    /// whole config). The frontend resolves `Unknown` to the sensitive default.
+    /// instead of failing deserialization (which would wipe the whole config).
+    /// The frontend resolves `Unknown` to the sensitive default. Tested at the
+    /// serde layer directly so the assertion survives the T2 split (which moves
+    /// `secure_screen_mode` into the sealed behavior file).
     #[test]
     fn secure_screen_mode_unknown_sinks_via_serde_other() {
-        let dir = tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path().join(APP_CONFIG_FILE),
-            r#"{"secure_screen_mode":"some-future-mode"}"#,
-        )
-        .unwrap();
-        let cfg = store_at(dir.path()).get();
+        let json = r#"{"secure_screen_mode":"some-future-mode"}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.secure_screen_mode, Some(SecureScreenMode::Unknown));
+        // The sealed-behavior half carries the same serde sink.
+        let behavior: BehaviorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(behavior.secure_screen_mode, Some(SecureScreenMode::Unknown));
     }
 
     #[tokio::test]
     async fn secure_screen_mode_roundtrips_through_save() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_with_desktop_store(dir.path()).await;
         for mode in [
             SecureScreenMode::Off,
             SecureScreenMode::Sensitive,
@@ -1151,7 +1492,10 @@ mod tests {
                 .await
                 .expect("set succeeds");
             assert_eq!(
-                store_at(dir.path()).get().secure_screen_mode,
+                store_with_desktop_store(dir.path())
+                    .await
+                    .get()
+                    .secure_screen_mode,
                 Some(mode),
                 "{mode:?} round-trips",
             );
@@ -1161,11 +1505,15 @@ mod tests {
     #[tokio::test]
     async fn secure_screen_mode_omitted_on_disk_when_none() {
         // skip_serializing_if keeps the field out of app.json while None, so a
-        // default config stays byte-identical.
+        // default config stays byte-identical. The legacy write path is used
+        // here because the post-split write goes through the sealed behavior
+        // slot (which on desktop is plaintext-passthrough JSON of the
+        // BehaviorConfig shape — also omits the field, but the assertion text
+        // would need to know the new shape).
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save(&AppConfig {
+            .save_legacy_app_json(&AppConfig {
                 secure_screen_mode: None,
                 ..Default::default()
             })
@@ -1181,7 +1529,7 @@ mod tests {
     #[tokio::test]
     async fn set_secure_screen_mode_persists_and_rejects_unknown() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_with_desktop_store(dir.path()).await;
         store
             .set_secure_screen_mode(SecureScreenMode::Always)
             .await
@@ -1208,8 +1556,8 @@ mod tests {
         // The serde missing-key default stays at 1: a pre-split app.json that
         // omits the key must still run the registry (otherwise it would skip
         // straight to the target and silently lose the scope split + the
-        // bool→mode conversion). A brand-new config uses AppConfig::default,
-        // tested below.
+        // bool→mode conversion + the sealed-behavior split). A brand-new config
+        // uses AppConfig::default / PrefConfig::default, tested below.
         assert_eq!(default_schema_version(), 1);
     }
 
@@ -1222,5 +1570,75 @@ mod tests {
             AppConfig::default().schema_version,
             crate::migrations::APP_CONFIG_SCHEMA_VERSION,
         );
+        assert_eq!(
+            PrefConfig::default().schema_version,
+            crate::migrations::APP_CONFIG_SCHEMA_VERSION,
+        );
+    }
+
+    /// The display half of an `AppConfig` lifts cleanly into a `PrefConfig`,
+    /// preserving all display fields + `schema_version`. Pins the `m0004`/legacy
+    /// round-trip.
+    #[test]
+    fn pref_config_from_legacy_preserves_display_fields() {
+        let app = AppConfig {
+            secure_screen: false,
+            secure_screen_mode: Some(SecureScreenMode::Off),
+            locale: Some("zh-CN".to_string()),
+            theme_mode: Some("dark".to_string()),
+            log_level: Some("debug".to_string()),
+            schema_version: 3,
+            ..Default::default()
+        };
+        let pref = PrefConfig::from_legacy(&app);
+        assert!(!pref.secure_screen);
+        assert_eq!(pref.locale.as_deref(), Some("zh-CN"));
+        assert_eq!(pref.theme_mode.as_deref(), Some("dark"));
+        assert_eq!(pref.log_level.as_deref(), Some("debug"));
+        assert_eq!(pref.schema_version, 3);
+    }
+
+    /// The behavior half of an `AppConfig` lifts cleanly into a
+    /// `BehaviorConfig`, preserving all six behavior fields. Pins the
+    /// `m0004`/legacy round-trip.
+    #[test]
+    fn behavior_config_from_legacy_preserves_behavior_fields() {
+        let app = AppConfig {
+            secure_screen_mode: Some(SecureScreenMode::Always),
+            lock_mode: LockMode::Idle(300),
+            view_clear_secs: Some(0),
+            clipboard_clear_secs: Some(180),
+            autosync: false,
+            biometric_app_lock: true,
+            ..Default::default()
+        };
+        let b = BehaviorConfig::from_legacy(&app);
+        assert_eq!(b.secure_screen_mode, Some(SecureScreenMode::Always));
+        assert_eq!(b.lock_mode, LockMode::Idle(300));
+        assert_eq!(b.view_clear_secs, Some(0));
+        assert_eq!(b.clipboard_clear_secs, Some(180));
+        assert!(!b.autosync);
+        assert!(b.biometric_app_lock);
+    }
+
+    /// A post-split `pref.json` is preferred over the legacy `app.json` lift.
+    #[tokio::test]
+    async fn pref_json_preferred_over_legacy_app_json_when_present() {
+        let dir = tempdir().expect("tempdir");
+        // Stale legacy file (would lift secure_screen=false if used).
+        std::fs::write(
+            dir.path().join(APP_CONFIG_FILE),
+            r#"{"secure_screen":false}"#,
+        )
+        .unwrap();
+        // pref.json wins.
+        std::fs::write(
+            dir.path().join(PREF_FILE),
+            r#"{"secure_screen":true,"schema_version":4}"#,
+        )
+        .unwrap();
+        let cfg = store_at(dir.path()).get();
+        assert!(cfg.secure_screen, "pref.json must win over the legacy lift");
+        assert_eq!(cfg.schema_version, 4);
     }
 }

@@ -51,6 +51,11 @@ export interface SecureScreenState {
   secureAvailable: Ref<boolean>;
   /** Load availability + the master mode once, then reconcile. Idempotent. */
   initSecureScreen: () => Promise<void>;
+  /** Reset the one-shot latch and re-init from the backend. Use after an
+   *  app-unlock: the cold-start `initSecureScreen` read the default "sensitive"
+   *  (the sealed `secure_screen_mode` isn't readable pre-unlock); this re-reads
+   *  the real mode and re-applies FLAG_SECURE. */
+  reload: () => Promise<void>;
   /** Pre-paint raise for a navigation transition (covers the departing page). */
   raiseSecureForRoute: (needsCover: boolean) => Promise<boolean>;
   /** Settle the flag to the arriving route's level (after paint). */
@@ -95,7 +100,12 @@ export function createSecureScreen(
   function desiredSecure(routeLevel: boolean): boolean {
     switch (secureScreenMode.value) {
       case "off":
-        return false;
+        // The credential overlays (app-lock + identity unlock) must NEVER be
+        // capturable, even when the user allowed capture elsewhere — so "off"
+        // still secures while an overlay is up. Driven by runtime overlay state,
+        // so a tampered stored "off" can't disable it, and the warm-relock
+        // AppLockOverlay (mounted on resume) is secured regardless of mode.
+        return overlayActive;
       case "always":
         return true;
       case "sensitive":
@@ -205,10 +215,17 @@ export function createSecureScreen(
     return true;
   }
 
+  /** Reset the one-shot latch and re-init from the backend. See interface doc. */
+  async function reload() {
+    initialized = false;
+    await initSecureScreen();
+  }
+
   return {
     secureScreenMode,
     secureAvailable,
     initSecureScreen,
+    reload,
     applySecureForRoute,
     raiseSecureForRoute,
     setSecureOverlay,

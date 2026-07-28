@@ -215,10 +215,12 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // upgrading `m0004` debug user gets Debug continuity on the first launch.
     log::set_max_level(app_config.effective_log_filter());
     let store = Arc::new(Store::new(config_dir, master_key));
-    // Seed the Store's injected `autosync` cache from the authoritative app
-    // config (autosync_write reads it). One of the three re-push points — the
-    // others are the set_autosync command and the config-scope migration.
-    store.set_autosync(app_config.get().autosync);
+    // Two-phase binding: the AppConfigStore setters/readers for the sealed
+    // behavior slot need the Store ref, but the Store can't be constructed
+    // until the config_dir is known. Bind it now (before the AppState move) so
+    // `run_app_migrations` and the post-migration reload below can flow through
+    // the Seal (sealed on Android, plaintext-passthrough on desktop).
+    app_config.set_store(Arc::clone(&store));
     // One-time migration of any pre-existing plaintext files into the seal
     // envelope (no-op on desktop / already-wrapped). Each file is wrapped
     // atomically with a roundtrip check, so a failure leaves plaintext intact —
@@ -268,17 +270,31 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // app.json (no-op once migrated; soft-skips under app-lock — retried on
     // app_unlock). Safe at startup when the master key is available (no app-lock).
     tauri::async_runtime::block_on(migrations::run_app_migrations(&app_state));
-    // Re-apply the log level after migrations: `m0004` may have just carried a
-    // pinned "debug" into `verbose_until` (so the upgrading user gets Debug on
-    // this launch, not Info), and an already-expired deadline is cleared off
-    // disk. Best-effort — the early apply above already lowered the gate for the
-    // common case; this corrects it post-migration.
+    // Re-apply the log level after migrations: `m0004_verbose_from_debug` may
+    // have just carried a pinned "debug" into `verbose_until` (so the upgrading
+    // user gets Debug on this launch, not Info), and an already-expired deadline
+    // is cleared off disk. Best-effort — the early apply above already lowered
+    // the gate for the common case; this corrects it post-migration.
     let _ = tauri::async_runtime::block_on(app_state.app_config.clear_expired_verbose())
         .map_err(|e| log::warn!("app-config: clear_expired_verbose failed: {e}"));
     log::set_max_level(app_state.app_config.effective_log_filter());
     // Arm the mid-session revert timer if a verbose window is still live (a
     // relaunch inside the window keeps capturing at Debug, then auto-reverts).
     verbose::arm_verbose_timer(&app_state, app.handle());
+    // Reload the sealed behavior cache + reseed the Store's injected `autosync`
+    // so a cold start (where the behavior cache started at defaults) sees the
+    // persisted values. Skipped under app-lock (the load soft-fails to defaults;
+    // the app_unlock path runs its own reload + reseed after biometric injects
+    // the key). Best-effort.
+    if !app_state
+        .app_lock_enabled
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        tauri::async_runtime::block_on(app_state.app_config.reload_behavior()).ok();
+        app_state
+            .store
+            .set_autosync(app_state.app_config.get_behavior().autosync);
+    }
     app_state
 }
 

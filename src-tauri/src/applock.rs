@@ -338,11 +338,11 @@ pub(crate) async fn app_unlock(
     // the defaults. The master key is now in memory, so the sealed read succeeds.
     run_app_migrations(state.inner()).await;
     // Re-apply the runtime log gate after migrations: under app-lock, the
-    // verbose carry-over (m0004) runs here, not in init_state. Without this an
-    // upgrading user previously pinned to "debug" would spend this first session
-    // at Info — the data lands on disk (verbose_until set), but the runtime gate
-    // was last set at cold start (Info) and nothing re-applied it. Mirrors the
-    // post-migration block in init_state.
+    // verbose carry-over (m0004_verbose_from_debug) runs here, not in init_state.
+    // Without this an upgrading user previously pinned to "debug" would spend
+    // this first session at Info — the data lands on disk (verbose_until set),
+    // but the runtime gate was last set at cold start (Info) and nothing
+    // re-applied it. Mirrors the post-migration block in init_state.
     let _ = state
         .app_config
         .clear_expired_verbose()
@@ -351,6 +351,16 @@ pub(crate) async fn app_unlock(
     log::set_max_level(state.app_config.effective_log_filter());
     // Re-arm the mid-session revert timer if a verbose window is still live.
     arm_verbose_timer(state.inner(), &app);
+    // Reload the sealed behavior cache + reseed the Store's injected `autosync`
+    // now that the master key is in memory. At cold start under app-lock the
+    // behavior cache was at defaults (the load soft-failed); a Pending m0005
+    // just populated it, but a no-op m0005 (already migrated) leaves it empty
+    // unless we reload here. Runs before `app_locked` is cleared so the frontend
+    // sees real values after the unlock emit.
+    state.app_config.reload_behavior().await.ok();
+    state
+        .store
+        .set_autosync(state.app_config.get_behavior().autosync);
     // One-shot legacy-envelope migrate, BEFORE the unlock emit so the app isn't
     // interactive while repo.json is re-wrapped (no race with a settings write).
     // Under App Lock the key is absent at cold start, so convert it now.

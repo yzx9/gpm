@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - On Android, tapping a control no longer leaves it stuck in a highlighted state until you tap somewhere else. The highlight that previews a press now only appears for a mouse or trackpad, the way it does on desktop; touch press feedback is unchanged.
 
+### Security
+
+- Lock mode, auto-sync, the screen-capture protection setting, and the other app behavior preferences are now encrypted at rest on Android, where they were previously stored in plain text. Nothing about how they work changes; this only affects what someone inspecting the device's stored data could see. Desktop is unaffected — it has no hardware key store to encrypt with, same as the rest of gpm's stored data there.
+
 ## [v0.14.2] - 2026-07-27
 
 ### Changed

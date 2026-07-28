@@ -30,6 +30,11 @@ export interface SecuritySettingsState {
   loadSecuritySettings: () => Promise<void>;
   /** Apply a freshly-fetched (or just-set) app config to the cache. */
   applySecurityConfig: (cfg: AppConfig) => void;
+  /** Re-fetch from the backend, bypassing the one-shot latch. Use after an
+   *  app-unlock: the cold-start `loadSecuritySettings` ran under the app-lock
+   *  overlay and read behavior-config defaults (the sealed behavior prefs aren't
+   *  readable pre-unlock); this pulls the real values once the backend has them. */
+  reload: () => Promise<void>;
 }
 
 /** Default password-view auto-clear seconds (used when the backend omits it). */
@@ -72,7 +77,19 @@ export function createSecuritySettings(): SecuritySettingsState {
     lockMode.value = cfg.lock_mode ?? "immediate";
   }
 
-  return { viewClearSecs, lockMode, loadSecuritySettings, applySecurityConfig };
+  /** Reset the one-shot latch and reload from the backend. See interface doc. */
+  async function reload() {
+    initialized = false;
+    await loadSecuritySettings();
+  }
+
+  return {
+    viewClearSecs,
+    lockMode,
+    loadSecuritySettings,
+    applySecurityConfig,
+    reload,
+  };
 }
 
 /**

@@ -43,7 +43,9 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     cfg.log_level = None;
     cfg.schema_version = version;
     // Propagate a save failure so the engine retries — never mark Done without
-    // persisting (a crash here would otherwise leave "debug" un-carried).
-    state.app_config.save(&cfg).await?;
+    // persisting (a crash here would otherwise leave "debug" un-carried). The
+    // legacy single-file shape is correct here: this step runs BEFORE
+    // `m0005_split_app_json` splits `app.json` into `pref.json` + sealed behavior.
+    state.app_config.save_legacy_app_json(&cfg).await?;
     Ok(MigrationOutcome::Done)
 }

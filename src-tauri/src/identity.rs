@@ -393,9 +393,11 @@ pub(crate) async fn unlock_and_arm<R: Runtime>(
 
 /// Snapshot the app config into the [`AppState`] security cache (`lock_mode`,
 /// `clipboard_clear_secs`), so the read/write hot paths branch on a cheap mutex
-/// read instead of re-reading config per operation. These prefs live in
-/// `app.json` (plaintext, always readable), so this never fails the way the old
-/// sealed-`repo.json` read could.
+/// read instead of re-reading config per operation. These prefs live in the
+/// sealed `app.json` behavior slot (post-split), so this is reachable only
+/// post-unlock (when the master key is in memory) or via m0002 (which seeds
+/// them from the legacy `repo.json`); a cold-start call under app-lock soft-fails
+/// to defaults until `app_unlock` reloads them.
 pub(crate) fn apply_security_caches(state: &AppState) {
     let cfg = state.app_config.get();
     if let Ok(mut mode) = state.lock_mode.lock() {

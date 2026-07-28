@@ -17,13 +17,18 @@ use std::sync::{Arc, Mutex};
 use rustpass::{LockMode, Store};
 
 use crate::AppState;
-use crate::app_config::{AppConfigStore, SecureScreenMode, VERBOSE_WINDOW_SECS, now_unix};
+use crate::app_config::{
+    AppConfig, AppConfigStore, SecureScreenMode, VERBOSE_WINDOW_SECS, now_unix,
+};
 use crate::migrations::{APP_CONFIG_SCHEMA_VERSION, run_app_migrations};
 
 /// Build an `AppState` over `store` + `app_config` with inert default caches.
 /// The migration only touches `app_config`, `store`, and the `lock_mode` /
 /// `clipboard_clear_secs` caches, so the rest are defaults.
 fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
+    // Bind the store so the behavior-slot writes/reads (m0004's sealed split,
+    // the behavior setters) work in tests — mirrors init_state's `set_store`.
+    app_config.set_store(Arc::clone(&store));
     AppState {
         store,
         app_config,
@@ -42,6 +47,19 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
         verbose_timer: Mutex::new(None),
         verbose_generation: Arc::new(AtomicU64::new(0)),
     }
+}
+
+/// Construct a fresh store over `dir`, bind `store` (so the sealed behavior slot
+/// is readable), reload behavior from disk, and return the merged view. Mirrors
+/// `init_state`/`app_unlock`: `AppConfigStore::new` alone loads only the
+/// plaintext display half; the sealed behavior half is loaded post-unlock via
+/// `reload_behavior`. Tests that assert behavior fields after a run must go
+/// through here to verify true on-disk persistence.
+async fn reload_at(dir: &std::path::Path, store: &Arc<Store>) -> AppConfig {
+    let ac = AppConfigStore::new(dir);
+    ac.set_store(Arc::clone(store));
+    ac.reload_behavior().await.ok();
+    ac.get()
 }
 
 /// A pre-split `repo.json` with the 5 behavior prefs at non-default values.
@@ -74,7 +92,7 @@ async fn migrate_copies_non_default_prefs_and_preserves_app_prefs() {
 
     run_app_migrations(&state).await;
 
-    let reloaded = AppConfigStore::new(dir.path()).get();
+    let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     // The 5 behavior prefs copied from the legacy repo.json.
     assert_eq!(reloaded.lock_mode, LockMode::Idle(300));
@@ -110,13 +128,13 @@ async fn migrate_is_idempotent() {
     );
 
     run_app_migrations(&state).await;
-    let after_first = AppConfigStore::new(dir.path()).get();
+    let after_first = reload_at(dir.path(), &state.store).await;
     assert_eq!(after_first.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(after_first.lock_mode, LockMode::Idle(300));
 
     // Second run is a no-op (schema_version already at target).
     run_app_migrations(&state).await;
-    let after_second = AppConfigStore::new(dir.path()).get();
+    let after_second = reload_at(dir.path(), &state.store).await;
     assert_eq!(after_second.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(after_second.lock_mode, LockMode::Idle(300));
 }
@@ -136,7 +154,7 @@ async fn migrate_noops_and_marks_done_when_no_repo_json() {
 
     run_app_migrations(&state).await;
 
-    let reloaded = AppConfigStore::new(dir.path()).get();
+    let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     // Defaults remain (nothing was copied).
     assert_eq!(reloaded.lock_mode, LockMode::Immediate);
@@ -161,7 +179,7 @@ async fn m0003_maps_default_true_to_none_and_stays_byte_identical() {
 
     run_app_migrations(&state).await;
 
-    let reloaded = AppConfigStore::new(dir.path()).get();
+    let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert!(
         reloaded.secure_screen_mode.is_none(),
@@ -199,7 +217,7 @@ async fn v2_file_does_not_roll_back_scope_prefs() {
 
     run_app_migrations(&state).await;
 
-    let reloaded = AppConfigStore::new(dir.path()).get();
+    let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(reloaded.secure_screen_mode, Some(SecureScreenMode::Off));
     // m0002 was skipped (schema already 2), so the real prefs survive untouched.
@@ -225,7 +243,7 @@ async fn m0003_preserves_an_already_pinned_mode() {
 
     run_app_migrations(&state).await;
 
-    let reloaded = AppConfigStore::new(dir.path()).get();
+    let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(
         reloaded.secure_screen_mode,
@@ -255,7 +273,7 @@ async fn m0002_save_failure_in_copy_branch_leaves_schema_and_retries() {
     std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
-        AppConfigStore::new(dir.path()).get().schema_version,
+        reload_at(dir.path(), &state.store).await.schema_version,
         1,
         "a failed save must not bump schema_version (read fresh off disk)"
     );
@@ -264,7 +282,7 @@ async fn m0002_save_failure_in_copy_branch_leaves_schema_and_retries() {
     // and completes both steps to the target.
     std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
-    let reloaded = AppConfigStore::new(dir.path()).get();
+    let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(reloaded.lock_mode, LockMode::Idle(300)); // copied from OLD_REPO_JSON
 }
@@ -286,7 +304,7 @@ async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
     std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
-        AppConfigStore::new(dir.path()).get().schema_version,
+        reload_at(dir.path(), &state.store).await.schema_version,
         1,
         "noop-branch save failure must not mark the migration done"
     );
@@ -294,7 +312,7 @@ async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
     std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
-        AppConfigStore::new(dir.path()).get().schema_version,
+        reload_at(dir.path(), &state.store).await.schema_version,
         APP_CONFIG_SCHEMA_VERSION,
     );
 }
@@ -393,4 +411,139 @@ async fn m0004_preserves_an_already_set_verbose_until() {
         reloaded.log_level.is_none(),
         "the deprecated log_level is cleared even when verbose_until was preserved"
     );
+}
+/// `m0005` defers (`Pending`) under the app-launch lock when the master key is
+/// not yet injected: app.json stays plaintext-legacy (NOT sealed — that would
+/// lock the user out of their own prefs under the wiped key), `pref.json` is
+/// written (the display half is plaintext, no key needed), and `schema_version`
+/// does NOT advance. Seeds schema-4 so `m0002`/`m0003`/`m0004_verbose_from_debug`
+/// are gated out and only `m0005` runs. The corrected guard is
+/// `app_lock_enabled && !has_master_key()`.
+#[tokio::test]
+async fn m0005_pending_under_app_lock_leaves_app_json_plaintext() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("app.json"),
+        r#"{"schema_version":4,"lock_mode":{"idle":120},"autosync":false}"#,
+    )
+    .unwrap();
+    let state = build_state(
+        Arc::new(Store::new(dir.path().to_path_buf(), None)), // keyless cold start
+        AppConfigStore::new(dir.path()),
+    );
+    state
+        .app_lock_enabled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    run_app_migrations(&state).await;
+
+    let on_disk = std::fs::read(dir.path().join("app.json")).unwrap();
+    assert!(
+        !rustpass::seal::is_envelope(&on_disk),
+        "app-lock cold start must NOT seal app.json (the key is withheld)"
+    );
+    assert_eq!(
+        state.app_config.get_pref().schema_version,
+        4,
+        "schema must not advance while the sealed write is deferred"
+    );
+    assert!(
+        dir.path().join("pref.json").exists(),
+        "pref.json is written (display half is plaintext, no key needed)"
+    );
+}
+
+/// REGRESSION for the corrected m0005 guard. `app_locked` is cleared in
+/// `app_unlock` AFTER `run_app_migrations` — so at the `app_unlock` migration
+/// call the key IS in memory (injected there) but `app_locked` is still `true`.
+/// Guarding on `app_locked` would defer forever. This test mirrors that
+/// ordering: `app_lock_enabled` stays `true` throughout (as it does on mobile),
+/// the first run defers (key withheld), then injecting the master key — with
+/// `app_lock_enabled` still `true` — lets the second run complete. Seeds
+/// schema-4 so only `m0005` runs. Pins that the guard keys off master-key
+/// presence, not the `app_locked` runtime flag.
+#[tokio::test]
+async fn m0005_completes_when_master_key_injected() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("app.json"),
+        r#"{"schema_version":4,"lock_mode":{"idle":120},"autosync":false,"secure_screen_mode":"always"}"#,
+    )
+    .unwrap();
+    let state = build_state(
+        Arc::new(Store::new(dir.path().to_path_buf(), None)), // keyless cold start
+        AppConfigStore::new(dir.path()),
+    );
+    state
+        .app_lock_enabled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    // First run: app-lock cold start, master key withheld → m0005 defers.
+    run_app_migrations(&state).await;
+    let after_first = std::fs::read(dir.path().join("app.json")).unwrap();
+    assert!(
+        !rustpass::seal::is_envelope(&after_first),
+        "deferred on first run"
+    );
+    assert_eq!(state.app_config.get_pref().schema_version, 4);
+
+    // Inject the master key (mirrors app_unlock's set_master_key). app_lock_enabled
+    // stays true — the corrected guard must still proceed.
+    let key = rustpass::seal::generate_master_key().unwrap();
+    state.store.set_master_key(Some(key));
+    run_app_migrations(&state).await;
+
+    // Completed: app.json is now a sealed envelope, schema advanced to target.
+    let after_second = std::fs::read(dir.path().join("app.json")).unwrap();
+    assert!(
+        rustpass::seal::is_envelope(&after_second),
+        "completed once the master key is present"
+    );
+    assert_eq!(
+        state.app_config.get_pref().schema_version,
+        APP_CONFIG_SCHEMA_VERSION,
+    );
+}
+
+/// REGRESSION (desktop half-migrated recovery). If a prior `m0005` run sealed
+/// the behavior half (step 7) but crashed before bumping the pref schema (step
+/// 8), the next run must NOT re-derive display prefs from `app.json`. On desktop
+/// the post-split `app.json` is a plaintext `BehaviorConfig` (passthrough seal)
+/// that parses as a degenerate `AppConfig` — display fields defaulted,
+/// `schema_version` defaulted to 1 — so an unconditional step-5 overwrite would
+/// silently clobber the user's `locale`/`theme_mode` held in `pref.json`.
+/// `pref.json` (already written) is authoritative for the display half; the
+/// `is_envelope` recovery signal does NOT catch this on desktop because the
+/// passthrough file is plaintext, not an envelope.
+#[tokio::test]
+async fn m0005_preserves_display_prefs_on_desktop_half_migrated_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    // Desktop store (master key None ⇒ passthrough-plaintext seal). Simulate a
+    // prior m0005 run that sealed behavior into app.json then crashed before the
+    // schema bump (pref.json still at schema 4, m0004_verbose's result).
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    store
+        .save_app_behavior(r#"{"lock_mode":{"idle":120},"autosync":false}"#.as_bytes())
+        .await
+        .unwrap();
+    // pref.json holds the user's REAL display prefs at the pre-bump schema 4.
+    std::fs::write(
+        dir.path().join("pref.json"),
+        r#"{"schema_version":4,"secure_screen":true,"locale":"zh-CN","theme_mode":"dark"}"#,
+    )
+    .unwrap();
+    let state = build_state(store, AppConfigStore::new(dir.path()));
+    // `new()` loaded pref.json's real display prefs (not the app.json defaults).
+    assert_eq!(state.app_config.get_pref().locale.as_deref(), Some("zh-CN"));
+
+    run_app_migrations(&state).await;
+
+    let reloaded = reload_at(dir.path(), &state.store).await;
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    // Display prefs survive the recovery — the load-bearing assertion.
+    assert_eq!(reloaded.locale.as_deref(), Some("zh-CN"));
+    assert_eq!(reloaded.theme_mode.as_deref(), Some("dark"));
+    // Behavior is still recovered from the sealed (plaintext-passthrough) slot.
+    assert_eq!(reloaded.lock_mode, LockMode::Idle(120));
+    assert!(!reloaded.autosync);
 }

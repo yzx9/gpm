@@ -77,8 +77,10 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
             cfg.biometric_app_lock = legacy.biometric_app_lock;
             cfg.schema_version = version;
             // Propagate a save failure as Err so the engine leaves schema below
-            // target and retries — never mark Done without persisting.
-            state.app_config.save(&cfg).await?;
+            // target and retries — never mark Done without persisting. The
+            // legacy single-file shape is correct here: this step runs BEFORE
+            // m0004 splits app.json into pref.json + sealed behavior.
+            state.app_config.save_legacy_app_json(&cfg).await?;
             // Re-seed every cache that reads these values.
             apply_security_caches(state);
             state.store.set_autosync(cfg.autosync);
@@ -98,7 +100,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
             log::warn!("0002_config_scope_split: nothing to copy ({e}); marking done");
             let mut cfg = state.app_config.get();
             cfg.schema_version = version;
-            state.app_config.save(&cfg).await?;
+            state.app_config.save_legacy_app_json(&cfg).await?;
             Ok(MigrationOutcome::Done)
         }
     }
