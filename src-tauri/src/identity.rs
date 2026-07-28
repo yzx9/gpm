@@ -28,7 +28,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use rustpass::ssh;
-use rustpass::{Error, ErrorCode, Store};
+use rustpass::{Error, ErrorCode, LockMode, Store};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_biometric_keystore::KeystoreExt;
@@ -398,14 +398,30 @@ pub(crate) async fn unlock_and_arm<R: Runtime>(
 /// post-unlock (when the master key is in memory) or via m0002 (which seeds
 /// them from the legacy `repo.json`); a cold-start call under app-lock soft-fails
 /// to defaults until `app_unlock` reloads them.
-pub(crate) fn apply_security_caches(state: &AppState) {
-    let cfg = state.app_config.get();
+/// Seed the [`AppState`] security caches (`lock_mode`, `clipboard_clear_secs`)
+/// from explicit values, so the read/write hot paths branch on a cheap mutex
+/// read instead of re-reading config per operation. Callers pass the values:
+/// the config-scope migration hands its just-written V2 snapshot directly (it
+/// writes raw, so the in-memory cache is not yet updated); everywhere else uses
+/// the cache-reading [`apply_security_caches`] wrapper.
+pub(crate) fn apply_security_caches_from(
+    state: &AppState,
+    lock_mode: LockMode,
+    clipboard_clear_secs: Option<u64>,
+) {
     if let Ok(mut mode) = state.lock_mode.lock() {
-        *mode = cfg.lock_mode;
+        *mode = lock_mode;
     }
     if let Ok(mut secs) = state.clipboard_clear_secs.lock() {
-        *secs = cfg.clipboard_clear_secs_effective();
+        *secs = clipboard_clear_secs.unwrap_or(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS);
     }
+}
+
+/// [`apply_security_caches_from`] reading the values off the cached app config.
+/// Called on unlock and on the `set_*` config commands.
+pub(crate) fn apply_security_caches(state: &AppState) {
+    let cfg = state.app_config.get();
+    apply_security_caches_from(state, cfg.lock_mode, cfg.clipboard_clear_secs);
 }
 
 /// [`apply_security_caches`] wrapped for the Tauri `State` view. Called on
@@ -423,15 +439,15 @@ pub(crate) async fn refresh_security_cache(state: &State<'_, AppState>) {
 /// default idle timer.
 pub(crate) fn reset_lock_timer<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
     let mode = state.lock_mode.lock().map_or_else(
-        |_| rustpass::LockMode::Idle(rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS),
+        |_| LockMode::Idle(rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS),
         |m| *m,
     );
     match mode {
-        rustpass::LockMode::Idle(secs) => arm_lock(state, app, secs),
+        LockMode::Idle(secs) => arm_lock(state, app, secs),
         // No idle timer: Never keeps the session, Immediate wipes per-op. Either
         // way, disarm any idle timer armed under a prior Idle setting so it can't
         // fire and surprise-lock right after the mode switch.
-        rustpass::LockMode::Never | rustpass::LockMode::Immediate => disarm_lock(state),
+        LockMode::Never | LockMode::Immediate => disarm_lock(state),
     }
 }
 
@@ -475,7 +491,7 @@ pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app
     let immediate = state
         .lock_mode
         .lock()
-        .is_ok_and(|m| matches!(*m, rustpass::LockMode::Immediate));
+        .is_ok_and(|m| matches!(*m, LockMode::Immediate));
     if immediate {
         soft_wipe(state, app).await;
     }

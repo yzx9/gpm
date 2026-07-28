@@ -22,8 +22,7 @@
 //!
 //! The single plaintext `app.json` is split into two files:
 //! - **`pref.json`** (plaintext, this module) — display prefs that must render
-//!   before unlock: `locale`, `theme_mode`, `log_level`, `schema_version`, and
-//!   the deprecated `secure_screen` bool (kept for `m0003` recovery).
+//!   before unlock: `locale`, `theme_mode`, `verbose_until`, and `schema_version`.
 //! - **`app.json`** (sealed via `Store::save_app_behavior`) — behavior prefs
 //!   that are confidential security choices: `lock_mode`, the view/clipboard
 //!   clear timers, `autosync`, `biometric_app_lock`, `secure_screen_mode`. On
@@ -31,17 +30,27 @@
 //!   unlock); on desktop the seal is passthrough plaintext.
 //!
 //! `pref.json` is plaintext on disk, and this is forced, not a shortcut: the
-//! `locale` must be readable before unlock (first-paint injection + the
-//! app-lock biometric screen), and sealing it would make it unreadable at setup
+//! `locale` must be readable before unlock (first-paint injection + the app-lock
+//! biometric screen), and sealing it would make it unreadable at setup
 //! when app-lock is on. None of these prefs are confidential, and the local
 //! write attacker is out of scope per the threat model, so plaintext is
 //! consistent. (The `WebView`'s `localStorage` is explicitly not a tier — it
 //! may be cleared by the system, so it is never authoritative for settings.)
 //!
-//! `m0004` owns the split: it reads the legacy plaintext `app.json`, writes the
+//! `m0005` owns the split: it reads the legacy plaintext single-file `app.json`
+//! as the schema-4 snapshot (`AppConfigV4`, defined in `m0004`), writes the
 //! display half to `pref.json`, then seals the behavior half via the Store. The
 //! schema version (tracked in `pref.json` post-split) advances only after the
 //! sealed write succeeds, so a Pending (app-lock) resume re-enters cleanly.
+//!
+//! # Versioned snapshots (V1–V4)
+//!
+//! Each pre-split migration (`m0002`–`m0004`) reads its own source-version
+//! snapshot type raw off disk and writes its target-version snapshot raw — see
+//! [`AppConfigStore::read_app_json_as`] / [`AppConfigStore::write_app_json_raw`].
+//! The deprecated `secure_screen: bool` lives only in V1/V2 (consumed by
+//! `m0003`); the deprecated `log_level` lives only in V1/V2/V3 (consumed by
+//! `m0004`). Neither reaches the runtime types ([`PrefConfig`]/[`BehaviorConfig`]).
 //!
 //! `pref.json` and the sealed `app.json` both intentionally survive
 //! `reset_config` (which wipes the repo dir, `identity`, `repo.json`, and the
@@ -53,7 +62,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rustpass::config::{DEFAULT_CLIPBOARD_CLEAR_SECS, save_atomic};
+use rustpass::config::save_atomic;
 use rustpass::{Error, ErrorCode, LockMode, Store, clamp_lock_mode, normalize_clear_secs};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -65,7 +74,7 @@ use crate::verbose::{arm_verbose_timer, disarm_verbose_timer};
 const PREF_FILE: &str = "pref.json";
 
 /// File name of the legacy single-shape app config (pre-split) AND the sealed
-/// behavior slot (post-split). The `m0004` migration repurposes it from
+/// behavior slot (post-split). The `m0005` migration repurposes it from
 /// plaintext-legacy to sealed-behavior.
 const APP_CONFIG_FILE: &str = "app.json";
 
@@ -123,19 +132,15 @@ pub(crate) enum SecureScreenMode {
 /// App-level (non-repo) preferences — the **merged IPC view** of the plaintext
 /// display prefs ([`PrefConfig`]) and the sealed behavior prefs
 /// ([`BehaviorConfig`]). Constructed on demand by [`AppConfigStore::get`];
-/// never persisted as a single shape post-split (the legacy single-file shape
-/// is preserved for `m0002`/`m0003` via [`AppConfigStore::save_legacy_app_json`]).
+/// never persisted as a single shape post-split. The legacy single-file shape
+/// (still carried by main's schema-1–4 `app.json` files) is preserved as
+/// [`LegacyAppConfig`] for the pre-split lift.
 ///
 /// Field docs intentionally describe semantics rather than storage location
 /// (which the split redistribute); see [`PrefConfig`] and [`BehaviorConfig`]
 /// for which side of the split each field lives on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AppConfig {
-    /// **Deprecated** boolean master toggle (pref.json), kept only so migration
-    /// `0003_secure_screen_mode` can recover the pre-three-state value; removed
-    /// at v1.0.0 with the rest of the migration registry. Default ON (`true`).
-    #[serde(default = "default_secure_screen")]
-    pub(crate) secure_screen: bool,
     /// Three-state screen-capture protection (sealed app.json). `None` (the
     /// default) ⇒ `Sensitive` (the frontend resolves `None`/`Unknown` to
     /// `Sensitive`): sensitive routes + nav transitions + the unlock overlay
@@ -199,15 +204,6 @@ pub(crate) struct AppConfig {
     /// (target: `migrations::APP_CONFIG_SCHEMA_VERSION`).
     #[serde(default = "default_schema_version")]
     pub(crate) schema_version: u32,
-    /// **Deprecated** persisted diagnostics level (pref.json) (`"error"` /
-    /// `"warn"` / `"info"` / `"debug"`), kept only so migration
-    /// `0004_verbose_from_debug` can carry a previously pinned `"debug"` into
-    /// the new [`Self::verbose_until`] flag; removed at v1.0.0 with the rest of
-    /// the migration registry (mirrors the `secure_screen` bool → `m0003`
-    /// pattern). No runtime logic reads this — [`AppConfigStore::effective_log_filter`]
-    /// drives the level from `verbose_until`. Omitted while `None`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) log_level: Option<String>,
     /// Verbose-logging deadline as Unix seconds, or `None` (the Info default)
     /// (pref.json). While set and not yet past, the runtime log gate is Debug;
     /// once past (or `None`) it is Info. Persisted in plaintext (same rationale
@@ -222,7 +218,6 @@ pub(crate) struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            secure_screen: default_secure_screen(),
             secure_screen_mode: None,
             locale: None,
             theme_mode: None,
@@ -235,23 +230,16 @@ impl Default for AppConfig {
             // legacy no-op migrations. (The serde missing-key default below
             // stays at 1 so a pre-split app.json still runs the registry.)
             schema_version: crate::migrations::APP_CONFIG_SCHEMA_VERSION,
-            log_level: None,
             verbose_until: None,
         }
     }
 }
 
-/// Plaintext display preferences — the `pref.json` half of the T2 split. Read
+/// Plaintext display preferences — the `pref.json` half of the split. Read
 /// pre-unlock (locale/theme/log must render before the identity is decrypted),
-/// so this file stays plaintext. The deprecated `secure_screen` bool rides
-/// along so `m0003` can recover it from a pre-split file.
+/// so this file stays plaintext.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PrefConfig {
-    /// **Deprecated** boolean master toggle, kept only so migration
-    /// `0003_secure_screen_mode` can recover the pre-three-state value; removed
-    /// at v1.0.0 with the rest of the migration registry. Default ON (`true`).
-    #[serde(default = "default_secure_screen")]
-    pub(crate) secure_screen: bool,
     /// Display-language override. `None` (the default) means "track the system
     /// language". `skip_serializing_if` keeps existing files byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,12 +248,6 @@ pub(crate) struct PrefConfig {
     /// preference". `skip_serializing_if` keeps existing files byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) theme_mode: Option<String>,
-    /// **Deprecated** persisted diagnostics log level (`None` ⇒ default `Info`).
-    /// Kept so `m0004_verbose_from_debug` can carry a pinned `"debug"` into
-    /// `verbose_until`; no runtime logic reads it. `skip_serializing_if` keeps
-    /// existing files byte-identical.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) log_level: Option<String>,
     /// Verbose-logging deadline as Unix seconds, or `None` (the Info default).
     /// Drives the runtime log gate via [`AppConfigStore::effective_log_filter`].
     /// `skip_serializing_if` keeps existing files byte-identical.
@@ -285,10 +267,8 @@ pub(crate) struct PrefConfig {
 impl Default for PrefConfig {
     fn default() -> Self {
         Self {
-            secure_screen: default_secure_screen(),
             locale: None,
             theme_mode: None,
-            log_level: None,
             verbose_until: None,
             // A brand-new config starts at the current target so it skips the
             // legacy no-op migrations. (The serde missing-key default below
@@ -299,22 +279,22 @@ impl Default for PrefConfig {
 }
 
 impl PrefConfig {
-    /// Lift the display half of an [`AppConfig`] (legacy single-file shape) into
-    /// a [`PrefConfig`]. Used by [`AppConfigStore::new`] for the legacy lift
-    /// and by `m0005` for the split.
-    pub(crate) fn from_legacy(cfg: &AppConfig) -> Self {
+    /// Lift the display half of a [`LegacyAppConfig`] (legacy single-file shape)
+    /// into a [`PrefConfig`]. Used by [`AppConfigStore::new`] for the legacy
+    /// lift and by the engine's end-of-chain [`AppConfigStore::reload`]. The
+    /// deprecated `secure_screen`/`log_level` fields live only in the version
+    /// snapshots (V1–V3) — neither survives into the runtime types.
+    pub(crate) fn from_legacy(cfg: &LegacyAppConfig) -> Self {
         Self {
-            secure_screen: cfg.secure_screen,
             locale: cfg.locale.clone(),
             theme_mode: cfg.theme_mode.clone(),
-            log_level: cfg.log_level.clone(),
             verbose_until: cfg.verbose_until,
             schema_version: cfg.schema_version,
         }
     }
 }
 
-/// Behavior preferences — the sealed `app.json` half of the T2 split. Sealed
+/// Behavior preferences — the sealed `app.json` half of the split. Sealed
 /// because behavior is a confidential security choice (the user's lock timeout,
 /// autosync, biometric, screen-capture mode). On Android these are AEAD-sealed
 /// under the master key (unreadable until unlock); on desktop the seal is
@@ -367,11 +347,12 @@ impl Default for BehaviorConfig {
 }
 
 impl BehaviorConfig {
-    /// Lift the behavior half of an [`AppConfig`] (legacy single-file shape)
-    /// into a [`BehaviorConfig`]. Used by `m0004` for the split and by
-    /// [`AppConfigStore::save_legacy_app_json`] to keep the behavior cache in
-    /// sync with a legacy write.
-    pub(crate) fn from_legacy(cfg: &AppConfig) -> Self {
+    /// Lift the behavior half of a [`LegacyAppConfig`] (legacy single-file
+    /// shape) into a [`BehaviorConfig`]. Used by [`AppConfigStore::new`] /
+    /// [`AppConfigStore::reload`] for the legacy lift (the half-migrated state
+    /// where `pref.json` exists at schema < 5 but `app.json` is still the
+    /// plaintext single-file shape).
+    pub(crate) fn from_legacy(cfg: &LegacyAppConfig) -> Self {
         Self {
             lock_mode: cfg.lock_mode,
             view_clear_secs: cfg.view_clear_secs,
@@ -383,29 +364,102 @@ impl BehaviorConfig {
     }
 }
 
-/// Serde default for [`AppConfig::secure_screen`] / [`PrefConfig::secure_screen`]
-/// — `true` (secure by default).
-fn default_secure_screen() -> bool {
+/// The legacy single-file `app.json` shape (schema 1–4). Deserialize-only in
+/// practice — used by [`AppConfigStore::new`] (the pre-split lift) and the
+/// engine's end-of-chain [`AppConfigStore::reload`] (the half-migrated behavior
+/// lift) to pull display and/or behavior fields back into the cache. The
+/// `Serialize` derive is only there so legacy round-trip tests can call
+/// [`AppConfigStore::save_legacy_app_json`] to seed a pre-split file shape —
+/// post-split writes go through [`AppConfigStore::save_pref`] / [`AppConfigStore::save_behavior`]
+/// instead. Permissive on read: accepts any historical shape (V1/V2/V3/V4)
+/// since the deprecated `secure_screen: bool` and `log_level` ride along as
+/// ordinary fields (no `deny_unknown_fields`). Not the runtime type — post-split
+/// display lives in [`PrefConfig`] and behavior in [`BehaviorConfig`].
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct LegacyAppConfig {
+    /// **Deprecated** boolean master toggle (consumed by `m0003`; lives only
+    /// in V1/V2). Default ON (`true`) — see [`default_secure_screen`].
+    #[serde(default = "default_secure_screen")]
+    pub(crate) secure_screen: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) secure_screen_mode: Option<SecureScreenMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) theme_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "LockMode::is_default")]
+    pub(crate) lock_mode: LockMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) view_clear_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) clipboard_clear_secs: Option<u64>,
+    #[serde(
+        default = "default_autosync_true",
+        skip_serializing_if = "is_autosync_default"
+    )]
+    pub(crate) autosync: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) biometric_app_lock: bool,
+    #[serde(default = "default_schema_version")]
+    pub(crate) schema_version: u32,
+    /// **Deprecated** persisted diagnostics level (consumed by `m0004`; lives
+    /// only in V1/V2/V3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) log_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) verbose_until: Option<u64>,
+}
+
+/// Manual `Default` for [`LegacyAppConfig`] so `secure_screen` matches its serde
+/// default (`true`), not the derived `bool` default (`false`). Callers fall
+/// back to `LegacyAppConfig::default()` for fields they don't explicitly set
+/// (e.g. `..Default::default()` in tests); a derived `false` for `secure_screen`
+/// would disagree with the serde default and produce a different lift than a
+/// missing key — pinning the agreement here is the safer choice.
+impl Default for LegacyAppConfig {
+    fn default() -> Self {
+        Self {
+            secure_screen: default_secure_screen(),
+            secure_screen_mode: None,
+            locale: None,
+            theme_mode: None,
+            lock_mode: LockMode::default(),
+            view_clear_secs: None,
+            clipboard_clear_secs: None,
+            autosync: default_autosync_true(),
+            biometric_app_lock: false,
+            schema_version: default_schema_version(),
+            log_level: None,
+            verbose_until: None,
+        }
+    }
+}
+
+/// Serde default for the deprecated `secure_screen: bool` carried by the
+/// pre-split snapshot types (V1/V2) and the legacy lift — `true` (secure by
+/// default). The latest runtime types no longer have this field.
+pub(crate) fn default_secure_screen() -> bool {
     true
 }
 
-/// Serde default for [`AppConfig::autosync`] / [`BehaviorConfig::autosync`] —
-/// `true` (gopass-style per-save pull→write→push on by default).
-fn default_autosync_true() -> bool {
+/// Serde default for `autosync` — `true` (gopass-style per-save pull→write→push
+/// on by default). Shared by [`AppConfig`], [`BehaviorConfig`], and the version
+/// snapshots that carry the field.
+pub(crate) fn default_autosync_true() -> bool {
     true
 }
 
 /// `true` (the default) so `autosync` is omitted from the file while on — a
 /// user who never toggles it sees no change to the file's shape.
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
-fn is_autosync_default(autosync: &bool) -> bool {
+pub(crate) fn is_autosync_default(autosync: &bool) -> bool {
     *autosync
 }
 
 /// `false` (the default) so `biometric_app_lock` is omitted from the file when
 /// off.
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
-fn is_false(b: &bool) -> bool {
+pub(crate) fn is_false(b: &bool) -> bool {
     !*b
 }
 
@@ -416,19 +470,10 @@ fn is_false(b: &bool) -> bool {
 /// the sealed-behavior split), so this stays at `1`. A brand-new install is
 /// built via [`AppConfig::default`] / [`PrefConfig::default`], which start at
 /// `APP_CONFIG_SCHEMA_VERSION` instead (skipping the legacy no-op steps) — the
-/// two differ on purpose.
-fn default_schema_version() -> u32 {
+/// two differ on purpose. The V2/V3/V4 snapshots define their own version-local
+/// defaults.
+pub(crate) fn default_schema_version() -> u32 {
     1
-}
-
-impl AppConfig {
-    /// Effective clipboard auto-clear seconds: `None` resolves to
-    /// [`DEFAULT_CLIPBOARD_CLEAR_SECS`], otherwise the configured value.
-    #[must_use]
-    pub(crate) fn clipboard_clear_secs_effective(&self) -> u64 {
-        self.clipboard_clear_secs
-            .unwrap_or(DEFAULT_CLIPBOARD_CLEAR_SECS)
-    }
 }
 
 /// True if `code` is one of [`SUPPORTED_LOCALES`].
@@ -454,7 +499,7 @@ fn validate_locale(locale: Option<&str>) -> Result<(), Error> {
 /// always valid and is not listed here; an explicit `Some` must be one of these.
 /// Do NOT add `"system"` here: the frontend sends `null` for "track system"
 /// (never the string), and persisting `Some("system")` would break the
-/// byte-identical-on-default invariant `locale`/`log_level` rely on.
+/// byte-identical-on-default invariant `locale`/`verbose_until` rely on.
 const SUPPORTED_THEME_MODES: [&str; 2] = ["light", "dark"];
 
 /// Reject an unsupported explicit theme mode. `None` (track system) is always
@@ -510,17 +555,26 @@ pub(crate) fn locale_init_script() -> String {
     )
 }
 
-/// Read `app.json` from `config_dir` and parse it as the legacy single-file
-/// [`AppConfig`] shape. Returns `None` if the file is missing or unparseable —
-/// used by [`AppConfigStore::new`] (the legacy lift) and `m0004` (the split).
-/// The byte-oriented sealed behavior slot (post-split) does NOT parse as
-/// `AppConfig` (different fields), so this also returns `None` there — callers
-/// dispatching on the file shape should check `rustpass::seal::is_envelope`
+/// Read `app.json` (the pre-split single-file shape) from `config_dir` and
+/// parse it as the [`LegacyAppConfig`] shape. Returns `None` if the file is
+/// missing or unparseable — used by [`AppConfigStore::new`] (the legacy lift),
+/// the engine's end-of-chain reload, and `m0005`'s half-migrated recovery. The
+/// byte-oriented sealed behavior slot (post-split) does NOT parse as
+/// [`LegacyAppConfig`] cleanly (carries only the behavior subset), so callers
+/// dispatching on the file shape should check [`rustpass::seal::is_envelope`]
 /// first to tell a sealed slot apart from a plaintext legacy file.
-fn load_legacy_app_json(config_dir: &Path) -> Option<AppConfig> {
-    let path = config_dir.join(APP_CONFIG_FILE);
-    let s = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str::<AppConfig>(&s).ok()
+fn load_legacy_app_json_at(path: &Path) -> Option<LegacyAppConfig> {
+    let s = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<LegacyAppConfig>(&s).ok()
+}
+
+/// Minimal projection of any `app.json`/`pref.json` shape for the migration
+/// engine's version gate — only `schema_version` is read. A missing key defaults
+/// to 1 (the pre-split shape), matching [`default_schema_version`].
+#[derive(Deserialize)]
+struct SchemaVersionPeek {
+    #[serde(default = "default_schema_version")]
+    schema_version: u32,
 }
 
 /// Persistent app-shell config, owned by [`AppState`]. Two-phase: constructed
@@ -556,7 +610,7 @@ impl AppConfigStore {
     ///
     /// Resilience: a missing file (fresh install) is normal — silent default.
     /// A present-but-unreadable or corrupt file would silently revert
-    /// `secure_screen` / `locale` / `log_level` to defaults; warn so the revert
+    /// `locale`/`theme_mode`/`verbose_until` to defaults; warn so the revert
     /// leaves a trace (the file is plaintext, so the warn carries no secret).
     #[must_use]
     pub(crate) fn new(config_dir: &Path) -> Self {
@@ -583,7 +637,7 @@ impl AppConfigStore {
                 }
             };
             (pref, BehaviorConfig::default())
-        } else if let Some(legacy) = load_legacy_app_json(config_dir) {
+        } else if let Some(legacy) = load_legacy_app_json_at(&app_json_path) {
             (
                 PrefConfig::from_legacy(&legacy),
                 BehaviorConfig::from_legacy(&legacy),
@@ -629,20 +683,94 @@ impl AppConfigStore {
         let _ = self.store.set(store);
     }
 
-    /// Path to the legacy / sealed `app.json`. Used by `m0004` to dispatch on
+    /// Path to the legacy / sealed `app.json`. Used by `m0005` to dispatch on
     /// the file shape (missing / envelope / plaintext-legacy).
     pub(crate) fn app_json_path(&self) -> &Path {
         &self.app_json_path
     }
 
     /// Whether `pref.json` exists on disk — i.e. the display half has already
-    /// been split off. `m0004` gates its display-half write on this so a re-entry
+    /// been split off. `m0005` gates its display-half write on this so a re-entry
     /// (a `Pending` resume, or a half-migrated crash recovery) never re-derives
-    /// display prefs from `app.json` and clobbers the user's locale/theme/log.
+    /// display prefs from `app.json` and clobbers the user's locale/theme.
     /// `save_atomic` (temp + rename) guarantees the file is either absent or
     /// complete, so existence is a reliable split signal.
     pub(crate) fn pref_json_exists(&self) -> bool {
         self.pref_path.exists()
+    }
+
+    /// Read `app.json` (the pre-split single-file shape) as raw text and
+    /// deserialize into `T`. Plaintext analog of
+    /// [`rustpass::Store::load_repo_config_as`] minus the unseal step. Used by
+    /// each migration to read its own source-version snapshot. Sync — the read
+    /// is tiny and [`AppConfigStore::new`] already reads synchronously.
+    pub(crate) fn read_app_json_as<T: serde::de::DeserializeOwned>(&self) -> Result<T, Error> {
+        let s = std::fs::read_to_string(&self.app_json_path)?;
+        Ok(serde_json::from_str(&s)?)
+    }
+
+    /// Minimal raw read of the persisted schema version, for the migration
+    /// engine's gate. Dual-file: post-split the schema lives in `pref.json`,
+    /// pre-split it lives in `app.json`. Returns `None` when both are missing or
+    /// unparseable; the engine treats `None` as "skip all migrations" (a
+    /// missing/corrupt state is a fresh install or post-reset, not a schema to
+    /// migrate).
+    pub(crate) fn peek_schema_version(&self) -> Option<u32> {
+        // Post-split (pref.json exists) — schema_version lives there.
+        if self.pref_path.exists()
+            && let Ok(s) = std::fs::read_to_string(&self.pref_path)
+            && let Ok(p) = serde_json::from_str::<SchemaVersionPeek>(&s)
+        {
+            return Some(p.schema_version);
+        }
+        // Pre-split OR pref.json corrupt/missing — fall back to app.json.
+        let s = std::fs::read_to_string(&self.app_json_path).ok()?;
+        serde_json::from_str::<SchemaVersionPeek>(&s)
+            .ok()
+            .map(|p| p.schema_version)
+    }
+
+    /// Atomic temp+rename write of any serializable snapshot shape, mirroring
+    /// [`AppConfigStore::save_pref`] WITHOUT the in-memory cache swap. Used by
+    /// the migrations to write their target-version snapshot; the cache is
+    /// re-read from disk once the whole chain finishes (see
+    /// [`crate::migrations::run_app_migrations`]).
+    pub(crate) async fn write_app_json_raw<T: Serialize>(&self, cfg: &T) -> Result<(), Error> {
+        let json = serde_json::to_string_pretty(cfg)?;
+        save_atomic(&self.app_json_path, json.as_bytes()).await
+    }
+
+    /// Re-read `pref.json` into the pref cache and re-seal-load the behavior
+    /// slot, after the migration chain has written fresh files. Called only by
+    /// the engine at the end of a COMPLETED chain (`run_app_migrations`), where
+    /// `pref.json` always exists at the target schema (m0005 wrote it and
+    /// bumped it to 5 on its `Done` path). [`reload_behavior`](Self::reload_behavior)
+    /// is the load-bearing piece for m0005's envelope-recovery case, where
+    /// `new()` left behavior at default because `pref.json` already existed.
+    ///
+    /// The half-migrated behavior load (m0005 wrote `pref.json` at schema 4 but
+    /// deferred `Pending` before sealing) does NOT route through here — the
+    /// engine returns on `Pending` before calling this. That case is carried by
+    /// [`AppConfigStore::new`]'s legacy lift (pref.json absent at construction)
+    /// plus `init_state`'s standalone `reload_behavior()`, which parses the
+    /// still-plaintext single-file `app.json` as `BehaviorConfig` via field
+    /// overlap. See `reload_behavior_loads_half_migrated_plaintext_app_json`.
+    ///
+    /// Errors are propagated (the chain wrote a valid file; a reload failure is
+    /// worth surfacing). The engine log+warns on a reload error rather than
+    /// propagating further.
+    pub(crate) async fn reload(&self) -> Result<(), Error> {
+        // Pref refresh (defensive — m0005's save_pref + schema bump already
+        // swapped the cache; re-reading keeps this robust if a future migration
+        // path ever skips that swap). pref.json is always present here.
+        if self.pref_path.exists() {
+            let s = std::fs::read_to_string(&self.pref_path)?;
+            let pref: PrefConfig = serde_json::from_str(&s)?;
+            *self.pref.lock().expect("pref lock poisoned") = pref;
+        }
+        // Behavior slot — reload_behavior soft-fails to the cache on
+        // NoIdentity/SealKeyUnavailable/parse errors (mirrors `new()`).
+        self.reload_behavior().await
     }
 
     /// Snapshot the plaintext pref cache.
@@ -669,7 +797,6 @@ impl AppConfigStore {
         let pref = self.pref.lock().expect("pref lock poisoned");
         let behavior = self.behavior.lock().expect("behavior lock poisoned");
         AppConfig {
-            secure_screen: pref.secure_screen,
             secure_screen_mode: behavior.secure_screen_mode,
             locale: pref.locale.clone(),
             theme_mode: pref.theme_mode.clone(),
@@ -679,7 +806,6 @@ impl AppConfigStore {
             autosync: behavior.autosync,
             biometric_app_lock: behavior.biometric_app_lock,
             schema_version: pref.schema_version,
-            log_level: pref.log_level.clone(),
             verbose_until: pref.verbose_until,
         }
     }
@@ -807,11 +933,15 @@ impl AppConfigStore {
     }
 
     /// Persist `cfg` as a plaintext legacy single-file `app.json` (all fields)
-    /// via `save_atomic` and update BOTH caches to mirror the write. The
-    /// PRE-SPLIT persistence path used by `m0002`/`m0003` and the legacy
-    /// round-trip tests. Post-split, `m0004` replaces this shape with the
-    /// `pref.json` + sealed `app.json` pair.
-    pub(crate) async fn save_legacy_app_json(&self, cfg: &AppConfig) -> Result<(), Error> {
+    /// via `save_atomic` and update BOTH caches to mirror the write. Test-only —
+    /// the PRE-SPLIT persistence path, used by legacy round-trip tests to seed
+    /// a pre-split file shape. Production writes go through
+    /// [`save_pref`](Self::save_pref) / [`save_behavior`](Self::save_behavior)
+    /// (post-split) or [`write_app_json_raw`](Self::write_app_json_raw) (the
+    /// migration chain itself, which writes raw with no cache swap so the
+    /// end-of-chain reload is the single source of truth).
+    #[cfg(test)]
+    pub(crate) async fn save_legacy_app_json(&self, cfg: &LegacyAppConfig) -> Result<(), Error> {
         let json = serde_json::to_string_pretty(cfg)?;
         save_atomic(&self.app_json_path, json.as_bytes()).await?;
         // Keep both caches in sync with the legacy write so a subsequent get()
@@ -1035,49 +1165,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_file_defaults_secure_on() {
+    async fn missing_file_defaults_sensitive_mode() {
+        // A missing app.json (fresh install) loads defaults — secure_screen_mode
+        // is None, which the frontend resolves to the Sensitive default.
         let dir = tempdir().expect("tempdir");
-        assert!(store_at(dir.path()).get().secure_screen);
+        assert!(
+            store_at(dir.path()).get().secure_screen_mode.is_none(),
+            "missing app.json must fall back to the default, not panic"
+        );
     }
 
     #[tokio::test]
-    async fn corrupt_file_defaults_secure_on() {
+    async fn corrupt_file_defaults_sensitive_mode() {
         let dir = tempdir().expect("tempdir");
         std::fs::write(dir.path().join(APP_CONFIG_FILE), "{not json").unwrap();
-        assert!(store_at(dir.path()).get().secure_screen);
-    }
-
-    #[tokio::test]
-    async fn roundtrip_persists_toggle() {
-        let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
-        assert!(store.get().secure_screen, "default must be ON");
-
-        // Flip OFF, persist, and reload from disk to confirm it landed.
-        store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: false,
-                locale: None,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        assert!(!store.get().secure_screen);
         assert!(
-            !store_at(dir.path()).get().secure_screen,
-            "reload must see the persisted OFF"
+            store_at(dir.path()).get().secure_screen_mode.is_none(),
+            "corrupt app.json must fall back to the default, not panic"
         );
-
-        // Flip back ON and reload.
-        store_at(dir.path())
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
-                locale: None,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        assert!(store_at(dir.path()).get().secure_screen);
     }
 
     #[test]
@@ -1090,8 +1195,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
+            .save_legacy_app_json(&LegacyAppConfig {
                 locale: Some("zh-CN".to_string()),
                 ..Default::default()
             })
@@ -1108,8 +1212,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
+            .save_legacy_app_json(&LegacyAppConfig {
                 locale: None,
                 ..Default::default()
             })
@@ -1127,14 +1230,8 @@ mod tests {
         // An app.json written before the locale field existed must still parse,
         // with locale defaulting to None (backward compatibility).
         let dir = tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path().join(APP_CONFIG_FILE),
-            r#"{"secure_screen":true}"#,
-        )
-        .unwrap();
-        let cfg = store_at(dir.path()).get();
-        assert!(cfg.secure_screen);
-        assert!(cfg.locale.is_none());
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
+        assert!(store_at(dir.path()).get().locale.is_none());
     }
 
     #[test]
@@ -1162,8 +1259,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
+            .save_legacy_app_json(&LegacyAppConfig {
                 theme_mode: Some("dark".to_string()),
                 ..Default::default()
             })
@@ -1180,8 +1276,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
+            .save_legacy_app_json(&LegacyAppConfig {
                 theme_mode: None,
                 ..Default::default()
             })
@@ -1200,14 +1295,8 @@ mod tests {
         // theme_mode defaulting to None (backward compatibility — adding the
         // optional field is non-breaking, like locale).
         let dir = tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path().join(APP_CONFIG_FILE),
-            r#"{"secure_screen":true}"#,
-        )
-        .unwrap();
-        let cfg = store_at(dir.path()).get();
-        assert!(cfg.secure_screen);
-        assert!(cfg.theme_mode.is_none());
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
+        assert!(store_at(dir.path()).get().theme_mode.is_none());
     }
 
     #[tokio::test]
@@ -1236,9 +1325,9 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = AppConfigStore::new(dir.path());
         assert_eq!(
-            store.get().secure_screen,
-            AppConfig::default().secure_screen,
-            "missing app.json must fall back to the secure default"
+            store.get().schema_version,
+            AppConfig::default().schema_version,
+            "missing app.json must fall back to the default (current schema target)"
         );
     }
 
@@ -1248,60 +1337,27 @@ mod tests {
         std::fs::write(dir.path().join(APP_CONFIG_FILE), "{not valid json").unwrap();
         let store = AppConfigStore::new(dir.path());
         assert_eq!(
-            store.get().secure_screen,
-            AppConfig::default().secure_screen,
-            "corrupt app.json must fall back to the secure default, not panic"
+            store.get().schema_version,
+            AppConfig::default().schema_version,
+            "corrupt app.json must fall back to the default, not panic"
         );
     }
 
     #[test]
     fn app_config_store_new_valid_file_loads_value() {
         let dir = tempdir().expect("tempdir");
-        // A non-default value round-trips: secure_screen=false (default is true).
+        // A non-default value round-trips: secure_screen_mode "off" (default is
+        // None / Sensitive).
         std::fs::write(
             dir.path().join(APP_CONFIG_FILE),
-            serde_json::json!({ "secure_screen": false }).to_string(),
+            serde_json::json!({ "secure_screen_mode": "off" }).to_string(),
         )
         .unwrap();
         let store = AppConfigStore::new(dir.path());
-        assert!(
-            !store.get().secure_screen,
-            "a valid file's secure_screen=false must load (not revert to default)"
-        );
-    }
-
-    #[tokio::test]
-    async fn log_level_roundtrips_through_save() {
-        let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
-        store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
-                log_level: Some("debug".to_string()),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        let reloaded = store_at(dir.path()).get();
-        assert_eq!(reloaded.log_level.as_deref(), Some("debug"));
-    }
-
-    #[tokio::test]
-    async fn log_level_omitted_on_disk_when_none() {
-        let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
-        store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
-                log_level: None,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
-        assert!(
-            !on_disk.contains("log_level"),
-            "log_level key must be absent when None; got: {on_disk}"
+        assert_eq!(
+            store.get().secure_screen_mode,
+            Some(SecureScreenMode::Off),
+            "a valid file's secure_screen_mode must load (not revert to default)"
         );
     }
 
@@ -1405,8 +1461,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
+            .save_legacy_app_json(&LegacyAppConfig {
                 locale: Some("zh-CN".to_string()),
                 ..Default::default()
             })
@@ -1423,8 +1478,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save_legacy_app_json(&AppConfig {
-                secure_screen: true,
+            .save_legacy_app_json(&LegacyAppConfig {
                 locale: Some("fr".to_string()),
                 ..Default::default()
             })
@@ -1466,7 +1520,7 @@ mod tests {
     /// `#[serde(other)]` sinks a value written by a newer build to `Unknown`
     /// instead of failing deserialization (which would wipe the whole config).
     /// The frontend resolves `Unknown` to the sensitive default. Tested at the
-    /// serde layer directly so the assertion survives the T2 split (which moves
+    /// serde layer directly so the assertion survives the split (which moves
     /// `secure_screen_mode` into the sealed behavior file).
     #[test]
     fn secure_screen_mode_unknown_sinks_via_serde_other() {
@@ -1513,7 +1567,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store
-            .save_legacy_app_json(&AppConfig {
+            .save_legacy_app_json(&LegacyAppConfig {
                 secure_screen_mode: None,
                 ..Default::default()
             })
@@ -1576,12 +1630,13 @@ mod tests {
         );
     }
 
-    /// The display half of an `AppConfig` lifts cleanly into a `PrefConfig`,
-    /// preserving all display fields + `schema_version`. Pins the `m0004`/legacy
-    /// round-trip.
+    /// The display half of a `LegacyAppConfig` lifts cleanly into a `PrefConfig`,
+    /// preserving all display fields + `schema_version`. The deprecated
+    /// `secure_screen`/`log_level` fields don't survive into `PrefConfig`
+    /// (they live only in the V1–V3 snapshots, consumed by `m0003`/`m0004`).
     #[test]
     fn pref_config_from_legacy_preserves_display_fields() {
-        let app = AppConfig {
+        let app = LegacyAppConfig {
             secure_screen: false,
             secure_screen_mode: Some(SecureScreenMode::Off),
             locale: Some("zh-CN".to_string()),
@@ -1591,19 +1646,17 @@ mod tests {
             ..Default::default()
         };
         let pref = PrefConfig::from_legacy(&app);
-        assert!(!pref.secure_screen);
         assert_eq!(pref.locale.as_deref(), Some("zh-CN"));
         assert_eq!(pref.theme_mode.as_deref(), Some("dark"));
-        assert_eq!(pref.log_level.as_deref(), Some("debug"));
         assert_eq!(pref.schema_version, 3);
     }
 
-    /// The behavior half of an `AppConfig` lifts cleanly into a
-    /// `BehaviorConfig`, preserving all six behavior fields. Pins the
-    /// `m0004`/legacy round-trip.
+    /// The behavior half of a `LegacyAppConfig` lifts cleanly into a
+    /// `BehaviorConfig`, preserving all six behavior fields. Pins the legacy
+    /// lift round-trip.
     #[test]
     fn behavior_config_from_legacy_preserves_behavior_fields() {
-        let app = AppConfig {
+        let app = LegacyAppConfig {
             secure_screen_mode: Some(SecureScreenMode::Always),
             lock_mode: LockMode::Idle(300),
             view_clear_secs: Some(0),
@@ -1621,24 +1674,36 @@ mod tests {
         assert!(b.biometric_app_lock);
     }
 
+    /// `LegacyAppConfig::default` agrees with the serde defaults — `secure_screen`
+    /// defaults ON (not the derived `bool` false), matching what a missing key
+    /// would deserialize to. Without this, the legacy lift of a partially-
+    /// populated file would silently downgrade screen-capture protection.
+    #[test]
+    fn legacy_app_config_default_secure_screen_is_true() {
+        assert!(
+            LegacyAppConfig::default().secure_screen,
+            "LegacyAppConfig::default must agree with the serde default (true)"
+        );
+    }
+
     /// A post-split `pref.json` is preferred over the legacy `app.json` lift.
     #[tokio::test]
     async fn pref_json_preferred_over_legacy_app_json_when_present() {
         let dir = tempdir().expect("tempdir");
-        // Stale legacy file (would lift secure_screen=false if used).
-        std::fs::write(
-            dir.path().join(APP_CONFIG_FILE),
-            r#"{"secure_screen":false}"#,
-        )
-        .unwrap();
+        // Stale legacy file (would lift different values if used).
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), r#"{"locale":"en"}"#).unwrap();
         // pref.json wins.
         std::fs::write(
             dir.path().join(PREF_FILE),
-            r#"{"secure_screen":true,"schema_version":4}"#,
+            r#"{"locale":"zh-CN","schema_version":4}"#,
         )
         .unwrap();
         let cfg = store_at(dir.path()).get();
-        assert!(cfg.secure_screen, "pref.json must win over the legacy lift");
+        assert_eq!(
+            cfg.locale.as_deref(),
+            Some("zh-CN"),
+            "pref.json must win over the legacy lift"
+        );
         assert_eq!(cfg.schema_version, 4);
     }
 }

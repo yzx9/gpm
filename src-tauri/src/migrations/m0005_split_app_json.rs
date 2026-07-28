@@ -4,12 +4,12 @@
 
 //! Migration `0005_split_app_json`.
 //!
-//! Splits the single plaintext `app.json` (the legacy [`AppConfig`] single-file
-//! shape that `m0002`/`m0003`/`m0004_verbose_from_debug` last wrote) into the
-//! post-split pair:
+//! Splits the single plaintext `app.json` (the schema-4 single-file shape that
+//! `m0002`/`m0003`/`m0004_verbose_from_debug` last wrote — read as
+//! [`AppConfigV4`]) into the post-split pair:
 //! - **`pref.json`** (plaintext) — display prefs (`locale`, `theme_mode`,
-//!   `log_level`, `verbose_until`, the deprecated `secure_screen` bool, and
-//!   `schema_version`).
+//!   `verbose_until`, `schema_version`). No deprecated `secure_screen`/`log_level`
+//!   — those were consumed by `m0003`/`m0004` before reaching V4.
 //! - **`app.json`** (sealed via `Store::save_app_behavior`) — behavior prefs
 //!   (`lock_mode`, the view/clipboard clear timers, `autosync`,
 //!   `biometric_app_lock`, `secure_screen_mode`).
@@ -44,22 +44,25 @@ use rustpass::Error;
 use crate::AppState;
 use crate::app_config::{BehaviorConfig, PrefConfig};
 use crate::migrations::MigrationOutcome;
+use crate::migrations::m0004_verbose_from_debug::AppConfigV4;
 
 // NOTE: this migration carries the v1.0.0 removal TODO for the whole registry —
 // see `migrations/mod.rs`.
 
-/// Split the legacy plaintext `app.json` into `pref.json` + sealed `app.json`,
-/// bumping `schema_version` to 5. See the module docs for the app-lock resume
-/// semantics.
+/// Split the schema-4 plaintext single-file `app.json` (read as [`AppConfigV4`])
+/// into `pref.json` + sealed `app.json`, bumping `schema_version` to 5. See the
+/// module docs for the app-lock resume semantics.
 ///
 /// Outcomes:
-/// - `schema_version >= 5` on entry → `Done` (idempotent re-entry; the registry
-///   also gates on this, but double-check).
 /// - missing `app.json` (fresh install / post-reset) → write `pref.json` with
 ///   `schema_version` bumped to 5, return `Done` (no behavior to seal).
 /// - `app.json` already an envelope (half-migrated recovery: a prior run sealed
 ///   the behavior half but crashed before bumping the schema) → bump `pref.json`
 ///   schema to 5, return `Done`.
+/// - unparseable as V4 (unknown shape; main-shipped schema-4 files carrying
+///   deprecated keys still parse via no-`deny_unknown_fields`) → warn + mark
+///   done (mirrors `new()` resilience — the user can recover via a hand edit,
+///   and we must not brick the startup loop).
 /// - `app_lock_enabled && !has_master_key()` → `Pending` (the master key is
 ///   wiped at cold start under the app-launch gate; the next `app_unlock`
 ///   retries from the top).
@@ -71,10 +74,12 @@ use crate::migrations::MigrationOutcome;
 ///   stays at the preserved value; the sealed behavior write is idempotent
 ///   because it overwrites).
 pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOutcome, Error> {
-    // 1. Idempotent re-entry (the registry gates on this too).
-    if state.app_config.get_pref().schema_version >= version {
-        return Ok(MigrationOutcome::Done);
-    }
+    // 1. The engine gates on `peek_schema_version` (raw disk read), so an
+    //    idempotent re-entry guard here would be redundant. NOTE: do NOT gate
+    //    on `state.app_config.get_pref().schema_version` — the pref cache
+    //    starts at `PrefConfig::default()` (target schema) when
+    //    `AppConfigStore::new` could not legacy-lift a corrupt app.json, which
+    //    would short-circuit m0005 and strand app.json below target.
 
     // 2. Read raw app.json bytes from disk.
     let app_json_path = state.app_config.app_json_path();
@@ -91,7 +96,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
             // Unreadable: warn + mark done (mirrors `new()` resilience — the
             // user can recover via a hand edit, and we must not brick the
             // startup loop).
-            log::warn!("0004_split_app_json: app.json unreadable ({e}); marking done");
+            log::warn!("0005_split_app_json: app.json unreadable ({e}); marking done");
             return bump_pref_schema_to(state, version)
                 .await
                 .map(|()| MigrationOutcome::Done);
@@ -106,15 +111,17 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
             .map(|()| MigrationOutcome::Done);
     }
 
-    // 5. Plaintext legacy: parse as the AppConfig single-file shape, then split.
-    let legacy: crate::app_config::AppConfig = match serde_json::from_slice(&bytes) {
+    // 5. Plaintext V4: parse via the read_app_json_as path (which goes through
+    //    std::fs::read_to_string — bytes were only needed for is_envelope
+    //    above; re-reading is cheap). V4 has no `deny_unknown_fields`, so a
+    //    main-shipped schema-4 file carrying the deprecated `secure_screen`
+    //    and/or `log_level` keys parses cleanly (the unknown keys are ignored).
+    let v4: AppConfigV4 = match state.app_config.read_app_json_as() {
         Ok(c) => c,
         Err(e) => {
-            // Unparseable as legacy: warn + mark done. The file is in an
-            // unknown shape; rather than brick startup, treat it as migrated.
-            log::warn!(
-                "0004_split_app_json: app.json unparseable as legacy AppConfig ({e}); marking done"
-            );
+            // Unparseable as V4: warn + mark done. The file is in an unknown
+            // shape; rather than brick startup, treat it as migrated.
+            log::warn!("0005_split_app_json: app.json unparseable as V4 ({e}); marking done");
             return bump_pref_schema_to(state, version)
                 .await
                 .map(|()| MigrationOutcome::Done);
@@ -124,16 +131,21 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     // Write the display half to pref.json FIRST, but ONLY on the first run
     // (pref.json absent). Once pref.json exists the display half is already
     // split and pref.json is authoritative for it — re-deriving display prefs
-    // from app.json would clobber the user's locale/theme/log on desktop,
-    // where a half-migrated app.json (step 7 landed, step 8 below crashed) is
-    // a plaintext `BehaviorConfig` that parses as a degenerate `AppConfig`
-    // with defaulted display fields + `schema_version: 1`. PRESERVE
+    // from app.json would clobber the user's locale/theme on desktop, where a
+    // half-migrated app.json (the sealed write landed but the schema-bump
+    // crashed) is a plaintext `BehaviorConfig` that parses as a degenerate V4
+    // with defaulted display fields + `schema_version: 4`. PRESERVE
     // schema_version (do NOT bump yet) — the schema advances only after the
     // sealed write succeeds, so a Pending resume re-enters cleanly.
     if !state.app_config.pref_json_exists() {
         state
             .app_config
-            .save_pref(&PrefConfig::from_legacy(&legacy))
+            .save_pref(&PrefConfig {
+                locale: v4.locale.clone(),
+                theme_mode: v4.theme_mode.clone(),
+                verbose_until: v4.verbose_until,
+                schema_version: v4.schema_version,
+            })
             .await?;
     }
 
@@ -143,8 +155,15 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
         return Ok(MigrationOutcome::Pending);
     }
 
-    // 7. Build behavior from the legacy fields and seal it into app.json.
-    let behavior = BehaviorConfig::from_legacy(&legacy);
+    // 7. Build behavior from V4 and seal it into app.json.
+    let behavior = BehaviorConfig {
+        lock_mode: v4.lock_mode,
+        view_clear_secs: v4.view_clear_secs,
+        clipboard_clear_secs: v4.clipboard_clear_secs,
+        autosync: v4.autosync,
+        biometric_app_lock: v4.biometric_app_lock,
+        secure_screen_mode: v4.secure_screen_mode,
+    };
     if let Err(e) = state.app_config.save_behavior(&behavior).await {
         if e.code == "SEAL_KEY_UNAVAILABLE" {
             // Defensive: the guard should have caught this, but a race with
@@ -179,16 +198,16 @@ async fn bump_pref_schema_to(state: &AppState, version: u32) -> Result<(), Error
 mod tests {
     use super::*;
 
-    /// `BehaviorConfig::from_legacy` is the load-bearing extraction for the
-    /// split — it must pull all six behavior fields off the parsed legacy
-    /// `AppConfig`. The cross-module `behavior_config_from_legacy_preserves_behavior_fields`
-    /// test in `app_config::tests` already pins this; this test exists as a
-    /// local mirror so a refactor that breaks the extraction fails inside the
-    /// migration's own tests (closer to the bug).
+    /// `BehaviorConfig` extraction from a V4 must pull all six behavior fields
+    /// off the parsed V4. The cross-module
+    /// `behavior_config_from_legacy_preserves_behavior_fields` test in
+    /// `app_config::tests` already pins the `LegacyAppConfig` equivalent; this
+    /// test exists as a local mirror so a refactor that breaks the V4 → behavior
+    /// extraction fails inside the migration's own tests (closer to the bug).
     #[test]
-    fn from_legacy_pulls_all_six_behavior_fields() {
-        use crate::app_config::{AppConfig, SecureScreenMode};
-        let app = AppConfig {
+    fn v4_to_behavior_pulls_all_six_behavior_fields() {
+        use crate::app_config::SecureScreenMode;
+        let v4 = AppConfigV4 {
             secure_screen_mode: Some(SecureScreenMode::Always),
             lock_mode: rustpass::LockMode::Idle(120),
             view_clear_secs: Some(0),
@@ -197,7 +216,14 @@ mod tests {
             biometric_app_lock: true,
             ..Default::default()
         };
-        let b = BehaviorConfig::from_legacy(&app);
+        let b = BehaviorConfig {
+            lock_mode: v4.lock_mode,
+            view_clear_secs: v4.view_clear_secs,
+            clipboard_clear_secs: v4.clipboard_clear_secs,
+            autosync: v4.autosync,
+            biometric_app_lock: v4.biometric_app_lock,
+            secure_screen_mode: v4.secure_screen_mode,
+        };
         assert_eq!(b.secure_screen_mode, Some(SecureScreenMode::Always));
         assert_eq!(b.lock_mode, rustpass::LockMode::Idle(120));
         assert_eq!(b.view_clear_secs, Some(0));

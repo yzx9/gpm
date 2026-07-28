@@ -66,11 +66,6 @@ export interface AppConfig {
    *  Settings toggle + runtime gate read `getAppLockState` (Keystore truth),
    *  not this flag; it exists only as a persisted record. */
   biometric_app_lock?: boolean;
-  /** **Deprecated** persisted diagnostics level (`"error"|"warn"|"info"|"debug"`).
-   *  Backend-only: no runtime logic reads it; kept so migration `m0004` can carry
-   *  a pinned `"debug"` into `verbose_until`, then removed at v1.0.0. Ignore on
-   *  the frontend — use {@link isVerboseActive} / {@link verbose_until}. */
-  log_level?: string;
   /** Verbose-logging deadline as Unix seconds. Set + unexpired ⇒ the app logs at
    *  Debug this session (and on any relaunch within the window); absent/expired ⇒
    *  Info. Apply via {@link setVerbose}; check liveness via
