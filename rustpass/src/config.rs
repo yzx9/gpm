@@ -64,8 +64,13 @@ impl LockMode {
 /// Atomic write: write data to a temp file then rename over the target.
 ///
 /// Prevents file corruption if the write fails mid-operation. Used for both
-/// the identity file and `signing.json`.
-async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
+/// the identity file and `signing.json`, and (via the app shell) for `pref.json`.
+///
+/// # Errors
+///
+/// Returns an error if the temp write or the rename fails (e.g. disk full,
+/// permission denied, or a collision at the `.tmp` path).
+pub async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
     let temp_path = path.with_extension("tmp");
     fs::write(&temp_path, data).await?;
     fs::rename(&temp_path, path).await?;
@@ -113,6 +118,17 @@ impl Config {
     /// until the next unlock. On desktop the key stays `None` (passthrough).
     pub fn set_master_key(&self, master_key: Option<[u8; 32]>) {
         self.seal.set_key(master_key);
+    }
+
+    /// Whether a master key is currently in memory (i.e. a real envelope can be
+    /// produced right now). Delegates to [`Seal::has_key`]: `false` on desktop
+    /// (passthrough) and while the app-launch lock holds the key wiped. The
+    /// `m0004` app-config split gates its sealed write on this (combined with the
+    /// app-lock feature flag) so it never writes plaintext where an envelope is
+    /// expected, and never defers on desktop.
+    #[must_use]
+    pub fn has_master_key(&self) -> bool {
+        self.seal.has_key()
     }
 
     /// Get the config directory used by this instance.
@@ -265,6 +281,53 @@ impl Config {
             fs::remove_file(path).await?;
         }
         Ok(())
+    }
+
+    /// Path of the sealed app-behavior config slot — the post-split home of the
+    /// behavior prefs (`lock_mode`, clear timers, `autosync`,
+    /// `biometric_app_lock`, `secure_screen_mode`). Same file name as the legacy
+    /// plaintext `app.json`; the slot is distinguished by AAD (`"app_behavior"`),
+    /// not by path. The app shell's `m0004` migration repurposes this file from
+    /// plaintext-legacy to sealed-behavior. Deliberately NOT cleared by
+    /// `clear_all` — behavior prefs survive `reset_config`.
+    fn app_behavior_path(&self) -> PathBuf {
+        self.config_dir.join("app.json")
+    }
+
+    /// Seal `bytes` (a serialized behavior config) under the master key into the
+    /// app-behavior slot. Passthrough-plaintext on desktop (key `None`), matching
+    /// the other sealed slots. The app shell serializes its `BehaviorConfig` and
+    /// passes the bytes here; rustpass stays independent of that type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory cannot be created, the AEAD seal
+    /// fails (`SealKeyUnavailable` if the key was wiped mid-session), or the file
+    /// cannot be written.
+    pub async fn save_app_behavior(&self, bytes: &[u8]) -> Result<(), Error> {
+        fs::create_dir_all(&self.config_dir).await?;
+        let sealed = self.seal.seal("app_behavior", bytes)?;
+        save_atomic(&self.app_behavior_path(), &sealed).await
+    }
+
+    /// Read + unseal the app-behavior slot. Returns [`ErrorCode::NoIdentity`] if
+    /// the slot is absent (fresh install, or pre-split before `m0004` runs).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or the AEAD unseal fails
+    /// (e.g. `SealKeyUnavailable` while the master key is wiped, or
+    /// `SealTampered` on a corrupted/tampered file).
+    pub async fn load_app_behavior(&self) -> Result<Vec<u8>, Error> {
+        let path = self.app_behavior_path();
+        if !path.exists() {
+            return Err(Error::new(
+                ErrorCode::NoIdentity,
+                "No app behavior config stored",
+            ));
+        }
+        let raw = fs::read(&path).await?;
+        self.seal.unseal("app_behavior", &raw)
     }
 
     /// Save repository configuration (URL + local path).

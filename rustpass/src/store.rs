@@ -1978,6 +1978,35 @@ impl Store {
         self.config.clear_app_identity_pass().await
     }
 
+    /// Whether a master key is currently in memory (a real envelope can be
+    /// produced right now). See [`Config::has_master_key`]. The `m0004` app-config
+    /// split and the behavior setters gate on this.
+    #[must_use]
+    pub fn has_master_key(&self) -> bool {
+        self.config.has_master_key()
+    }
+
+    /// Seal a serialized behavior config into the app-behavior slot. See
+    /// [`Config::save_app_behavior`]. The app shell serializes `BehaviorConfig`
+    /// to bytes and passes them here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the AEAD seal or the write fails.
+    pub async fn save_app_behavior(&self, bytes: &[u8]) -> Result<(), Error> {
+        self.config.save_app_behavior(bytes).await
+    }
+
+    /// Read + unseal the app-behavior slot. See [`Config::load_app_behavior`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::NoIdentity`] if the slot is absent, or an error if
+    /// the AEAD unseal fails.
+    pub async fn load_app_behavior(&self) -> Result<Vec<u8>, Error> {
+        self.config.load_app_behavior().await
+    }
+
     /// The default commit author identity, for UI display. Reads the shipped
     /// default so the frontend never hardcodes it.
     #[must_use]

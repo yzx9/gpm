@@ -171,6 +171,17 @@ impl Seal {
         }
     }
 
+    /// Whether a master key is currently in memory (`Some`). This is the
+    /// *current* key state, distinct from the [`ever_keyed`](Self::new) latch: it
+    /// returns `false` both on desktop/tests (never keyed) and while the
+    /// app-launch lock has wiped the key mid-session. Callers that can only
+    /// proceed when a real envelope can be produced (the `m0004` app-config
+    /// split, the behavior setters) gate on this rather than on `ever_keyed`,
+    /// which can't tell desktop-passthrough apart from mobile-app-lock-cold-start.
+    pub(crate) fn has_key(&self) -> bool {
+        self.key.read().is_ok_and(|guard| guard.is_some())
+    }
+
     /// Seal `plaintext` for the named slot into an seal envelope.
     ///
     /// In passthrough mode (`None` key, and no key was ever injected —
