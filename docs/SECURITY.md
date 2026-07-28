@@ -62,6 +62,38 @@ These are fundamental to the WebView/runtime, not bugs, and apply wherever a sec
 - **Android accessibility services** can read displayed text. Inherent to showing text
   in a WebView; no reliable way to display text while hiding it from accessibility.
 
+## Diagnostics logging
+
+gpm writes a structured diagnostics log — a rotated file under the app log
+directory, mirrored to Android logcat — covering operational outcomes: git
+clone/pull/push/sync, decrypt/copy/show, create/edit/delete, setup, identity
+and app-lock transitions, biometric, and authenticity verification. The
+governing rule is **never log a secret**: only entry names and operation
+outcomes (plus the already-sanitized error codes) are ever recorded. Decrypted
+content, passphrases, identity material, and the at-rest master key never reach
+the logger, and credential-bearing configuration types redact their secret
+fields before any debug formatting.
+
+**Logs are unencrypted by construction, not by encryption.** Given that rule,
+nothing worth protecting reaches a log line. And an attacker who can read the
+on-device log file already has filesystem access to the repository, so the
+entry-name metadata a log carries (which entries were copied, and when) gives
+them nothing they did not already have. Encrypting logs would add a key
+lifecycle — necessarily tied to the same master key that protects the real
+secrets — for no meaningful gain, and would couple diagnostics to the unlock
+lifecycle, breaking the very use case it serves (reading logs to diagnose an
+unlock or setup failure).
+
+**Caveat — the logcat channel.** That argument holds for the log _file_ at
+rest. It does _not_ hold for the Android logcat channel the logger mirrors to,
+which an attacker with pre-authorized USB debugging can read without repository
+filesystem access; entry-name metadata is therefore visible to that narrower
+attacker class. The exposure is metadata only (never secret content), requires
+prior debugging authorization, and matches how any logging app behaves — so it
+is accepted as-is rather than treated as a reason to encrypt. (A diagnostics
+bundle pushed off-device on demand is a separate, more-sensitive artifact and
+would carry its own user gate.)
+
 ## Approaches not adopted
 
 | Approach                        | Why not                                                                                                                                                                                    |

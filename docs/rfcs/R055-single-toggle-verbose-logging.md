@@ -6,7 +6,7 @@
 
 ## What
 
-Collapse the four-level diagnostics log-level selector (Errors / Warnings / Info / Debug) on the Settings → Logs screen into a single **verbose** toggle. The app runs at **Info** by default; the toggle turns on **Debug** for a bounded window, after which it reverts to Info automatically. The verbose flag is persisted, so a launch made with verbose on runs the entire session — including startup — at Debug. This revises the runtime level-control portion of 0052; the Logs viewer, file rotation, and plaintext-log threat model from 0052 stand unchanged.
+Collapse the four-level diagnostics log-level selector (Errors / Warnings / Info / Debug) on the Settings → Logs screen into a single **verbose** toggle. The app runs at **Info** by default; the toggle turns on **Debug** for a bounded window, after which it reverts to Info automatically. The verbose flag is persisted, so a launch made with verbose on runs the entire session — including startup — at Debug. This revises the runtime level-control portion of the in-app diagnostics logging work; the Logs viewer, file rotation, and plaintext-log threat model (now in SECURITY.md) stand unchanged.
 
 ## Why
 
@@ -22,7 +22,7 @@ A second motivation surfaced while investigating a separate diagnostics leak: th
 
 **Time-boxed auto-revert.** Verbose turns itself off after a bounded window. The expiry is persisted alongside the flag (a deadline, not a session timer) so the window survives restart — letting a user relaunch several times within it to reproduce a flaky startup issue, while guaranteeing verbose cannot be left on indefinitely (which would grow the log and expand the metadata surface for no ongoing reason). The deadline is evaluated when the config is read at launch and on in-app activity, so an expired verbose reverts to Info without a restart. The exact window length is an implementation detail; on the order of ten-to-fifteen minutes fits the rotation budget and the "capture one repro" use case.
 
-**What stays.** The Logs viewer, its mtime-ordered tail-truncated read, the rotated file under the app log directory, the clear action, and the frontend error bridge are all unchanged (0052 phases 1–2). Only the level-control mechanism and its UI change.
+**What stays.** The Logs viewer, its mtime-ordered tail-truncated read, the rotated file under the app log directory, the clear action, and the frontend error bridge are all unchanged (the shipped pipeline and viewer). Only the level-control mechanism and its UI change.
 
 **Migration.** A user who previously pinned the level to Debug has that preference carried into the new verbose flag (one-time, via the existing app-config schema migration) so the upgrade is non-surprising; it then expires under the same time-box as any other verbose session. All other prior levels collapse to the Info default.
 
@@ -42,4 +42,4 @@ A second motivation surfaced while investigating a separate diagnostics leak: th
 
 ## Depends on / Supersedes
 
-Revises the runtime level-control portion of **0052** (In-app Diagnostics Logging). The viewer, rotation, plaintext-log threat model, and frontend error bridge from 0052 are unchanged. Builds on the recent Debug logger ceiling (no trace-level diagnostics exist in gpm).
+Revises the runtime level-control portion of the in-app diagnostics logging work. The viewer, rotation, plaintext-log threat model (SECURITY.md § Diagnostics logging), and frontend error bridge are unchanged. Builds on the recent Debug logger ceiling (no trace-level diagnostics exist in gpm).
