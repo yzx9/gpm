@@ -38,6 +38,11 @@ runs:
       if: inputs.rust_cache == 'true'
       uses: Swatinem/rust-cache@v2
       with:
+        # The default key (rustc version + Cargo.lock) doesn't track the nix
+        # glibc store path, so a nixpkgs bump silently restores build-script
+        # binaries whose ELF interpreter is gone -> exec ENOENT (tauri/gtk).
+        # Folding flake.lock into the prefix busts the whole chain on any nix change.
+        prefix-key: v0-rust-${{ hashFiles('flake.lock') }}
         # rustc/cargo only exist inside the Nix devShell, so rust-cache must run
         # them through `nix develop` or its `rustc -vV` key probe fails and the
         # cache is never read/written. `.#ci-lite` shares rustc's version with `.#ci-full`.
