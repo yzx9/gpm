@@ -122,6 +122,16 @@ JavaScript.
 The clipboard is automatically cleared after 30 seconds via a Tokio background
 task.
 
+While a secret is on the clipboard, gpm also posts a sticky Android notification
+(tappable to clear early). **This notification is a UX affordance, not a security
+control** — the auto-clear timer above is the control and runs independently of
+it. The notification needs Android's `POST_NOTIFICATIONS` permission; after the
+user dismisses or denies that prompt twice, Android stops re-asking, so the
+**Settings → Permissions & data** screen deep-links back to the system's per-app
+notification settings so it can be re-enabled. The page closes a discoverability
+gap, not a safety one: a copy always proceeds and the timer always clears whether
+or not the notification posts.
+
 ### `show_password` — secondary operation (intentional IPC exposure)
 
 The password is decrypted in Rust and returned to the WebView as

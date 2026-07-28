@@ -1,0 +1,37 @@
+{
+  "title": "Permissions & data",
+  "intro": "What gpm accesses on your device, why it's needed, and where to change it.",
+  "groups": {
+    "adjustable": "Permissions you can change",
+    "informational": "Data access notes"
+  },
+  "loading": "Checking…",
+  "notifications": {
+    "title": "Notifications",
+    "body": "Shows a sticky notification while a password is on the clipboard so you can clear it early.",
+    "granted": "Enabled",
+    "blocked": "Off — tap to re-enable",
+    "failed": "Couldn't open notification settings"
+  },
+  "biometric": {
+    "title": "Biometric unlock",
+    "body": "Unlock gpm with your fingerprint or face instead of your passphrase.",
+    "available": "Ready",
+    "noEnrollment": "Not enrolled — tap to set up",
+    "weakEnrolled": "Class 3 needed — tap to set up",
+    "unavailable": "Not available on this device",
+    "failed": "Couldn't open security settings"
+  },
+  "clipboard": {
+    "title": "Clipboard",
+    "body": "Copies a password to the clipboard so you can paste it elsewhere; auto-clears after the timeout. Android provides no separate permission for this."
+  },
+  "network": {
+    "title": "Network",
+    "body": "Connects only to the git remotes you configure for sync — never to gpm's servers."
+  },
+  "files": {
+    "title": "Files",
+    "body": "Reads a file only when you choose one (e.g. importing an identity); it never scans your storage."
+  }
+}

@@ -61,12 +61,25 @@ impl std::fmt::Display for BiometricError {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Whether biometric-gated storage is usable on this device (API 30+ with a
-/// STRONG biometric enrolled). `false` on desktop and Android <11.
+/// Biometric availability as a quad-state [`BiometricState`] (`available` /
+/// `no_enrollment` / `weak_enrolled` / `unavailable`), serialized to the
+/// frontend as the matching `snake_case` string. `unavailable` on desktop and
+/// Android <11. Frontend derives `=== "available"` where it needs a boolean.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn is_biometric_available(app: AppHandle) -> Result<bool, BiometricError> {
+pub(crate) async fn is_biometric_available(
+    app: AppHandle,
+) -> Result<tauri_plugin_biometric_keystore::BiometricState, BiometricError> {
     Ok(app.keystore().is_available().await?)
+}
+
+/// Open the system Security settings (the biometric-enrollment surface) — the
+/// recovery target when [`is_biometric_available`] reports `no_enrollment`.
+/// Returns whether a handler activity was found. Always `true` on desktop.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn open_security_settings(app: AppHandle) -> Result<bool, BiometricError> {
+    Ok(app.keystore().open_security_settings().await)
 }
 
 /// Whether a passphrase is sealed in the Keystore — the single source of

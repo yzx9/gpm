@@ -4,6 +4,7 @@
 
 package xyz.yzx9.gpm.biometrickeystore
 
+import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -90,5 +91,74 @@ class KeystorePluginTest {
         // An anonymous throwable subclass has an empty simple name.
         val anon = object : Throwable() {}
         assertEquals("error", safeName(anon))
+    }
+
+    // mapBiometricState — exhaustive over the canAuthenticate() returns the page
+    // distinguishes. The BIOMETRIC_* constants are compile-time
+    // inlined, so these are plain value assertions.
+    @Test
+    fun mapBiometricState_success_returns_available() {
+        assertEquals(
+            "available",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_SUCCESS,
+                BiometricManager.BIOMETRIC_SUCCESS,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_noneEnrolledWithWeakPrint_returns_weakEnrolled() {
+        // A weak (Class 2) print is enrolled but no STRONG one; gpm needs Class 3.
+        assertEquals(
+            "weak_enrolled",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+                BiometricManager.BIOMETRIC_SUCCESS,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_noneEnrolledNothingEnrolled_returns_noEnrollment() {
+        assertEquals(
+            "no_enrollment",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_noHardware_returns_unavailable() {
+        assertEquals(
+            "unavailable",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE,
+                BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_hwUnavailable_returns_unavailable() {
+        assertEquals(
+            "unavailable",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
+                BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
+            ),
+        )
+    }
+
+    @Test
+    fun securitySettingsIntent_carriesAction() {
+        // Pins the biometric-enrollment deep-link target: the system Security
+        // settings action (the clipboard-notify sibling pins its own intent).
+        assertEquals(
+            android.provider.Settings.ACTION_SECURITY_SETTINGS,
+            securitySettingsIntent().action,
+        )
     }
 }

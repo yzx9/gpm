@@ -10,6 +10,7 @@ import {
   enableBiometricUnlock,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
+  openSecuritySettings,
 } from "./biometric";
 
 vi.mock("@tauri-apps/api/core");
@@ -19,17 +20,30 @@ describe("biometric wrappers", () => {
     vi.clearAllMocks();
   });
 
-  it("isBiometricAvailable calls the is_biometric_available command", async () => {
-    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-    expect(await isBiometricAvailable()).toBe(true);
+  it("isBiometricAvailable returns the quad-state from is_biometric_available", async () => {
+    for (const state of [
+      "available",
+      "no_enrollment",
+      "weak_enrolled",
+      "unavailable",
+    ] as const) {
+      (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(state);
+      expect(await isBiometricAvailable()).toBe(state);
+    }
     expect(invoke).toHaveBeenCalledWith("is_biometric_available");
   });
 
-  it("isBiometricAvailable swallows errors and returns false (desktop / <API30)", async () => {
+  it("isBiometricAvailable swallows errors and returns 'unavailable' (desktop / <API30)", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("plugin not found"),
     );
-    expect(await isBiometricAvailable()).toBe(false);
+    expect(await isBiometricAvailable()).toBe("unavailable");
+  });
+
+  it("openSecuritySettings calls the open_security_settings command", async () => {
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    expect(await openSecuritySettings()).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("open_security_settings");
   });
 
   it("isBiometricUnlockEnabled calls the is_biometric_unlock_enabled command", async () => {

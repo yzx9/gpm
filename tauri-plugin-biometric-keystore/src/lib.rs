@@ -75,6 +75,30 @@ fn map_invoke_err(err: PluginInvokeError) -> KeystoreError {
 }
 
 // ---------------------------------------------------------------------------
+// Availability state (quad-state: STRONG + WEAK canAuthenticate mapping)
+// ---------------------------------------------------------------------------
+
+/// Biometric availability state reported by the Kotlin plugin. Mirrors the
+/// strings emitted by `mapBiometricState` (KeystorePlugin.kt) via
+/// `#[serde(rename_all = "snake_case")]`; the cross-layer string contract
+/// (Kotlin emitter ↔ Rust deserializer ↔ TS union) is pinned by tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BiometricState {
+    /// API 30+ with a STRONG (Class 3) biometric enrolled — biometric unlock usable.
+    Available,
+    /// STRONG biometric absent AND nothing enrolled — the actionable "go enroll" case.
+    NoEnrollment,
+    /// STRONG absent but a weak (Class 2) print is enrolled — gpm needs Class 3.
+    /// Enrolling a Class-3 print helps on Class-3-capable hardware, so the UI
+    /// offers the Security-settings deep-link here too.
+    WeakEnrolled,
+    /// No usable hardware / hw unavailable / security update required / unsupported /
+    /// pre-API-30 — nothing the user can fix from settings.
+    Unavailable,
+}
+
+// ---------------------------------------------------------------------------
 // Prompt text
 // ---------------------------------------------------------------------------
 
@@ -110,18 +134,41 @@ pub struct Keystore<R: Runtime>(std::marker::PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> Keystore<R> {
-    /// Whether biometric-gated storage is usable on this device
-    /// (API 30+ with a STRONG biometric enrolled). Fast / non-prompting.
-    pub async fn is_available(&self) -> Result<bool, KeystoreError> {
+    /// Whether biometric-gated storage is usable on this device, as a quad-state
+    /// ([`BiometricState`]). Fast / non-prompting. Pre-API-30 → `Unavailable`.
+    pub async fn is_available(&self) -> Result<BiometricState, KeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
-            available: bool,
+            state: BiometricState,
         }
         self.0
             .run_mobile_plugin_async::<Resp>("isAvailable", ())
             .await
-            .map(|r| r.available)
+            .map(|r| r.state)
             .map_err(map_invoke_err)
+    }
+
+    /// Open the system Security settings (the biometric-enrollment surface) — the
+    /// recovery target when [`is_available`](Self::is_available) reports
+    /// `NoEnrollment`. Returns whether a handler activity was found (`false` on
+    /// the rare OEM ROM lacking the target) so the caller can toast instead of
+    /// failing silently.
+    pub async fn open_security_settings(&self) -> bool {
+        #[derive(Deserialize)]
+        struct Resp {
+            opened: bool,
+        }
+        self.0
+            .run_mobile_plugin_async::<Resp>("openSecuritySettings", ())
+            .await
+            .map(|r| r.opened)
+            .unwrap_or_else(|e| {
+                // `opened: false` from the Kotlin catch (no handler activity) is
+                // expected; a plugin-invoke failure here is not, so log it before
+                // collapsing to false — otherwise the recovery tap fails silently.
+                log::warn!("open_security_settings: plugin invoke failed: {e:?}");
+                false
+            })
     }
 
     /// Whether a stored passphrase exists (non-prompting read of the
@@ -210,8 +257,14 @@ impl<R: Runtime> Keystore<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> Keystore<R> {
     /// Inert: biometric is never available on non-Android targets.
-    pub async fn is_available(&self) -> Result<bool, KeystoreError> {
-        Ok(false)
+    pub async fn is_available(&self) -> Result<BiometricState, KeystoreError> {
+        Ok(BiometricState::Unavailable)
+    }
+
+    /// Inert: nothing to open on desktop; reports `true` so a (never-shown on
+    /// desktop) row never toasts a spurious failure.
+    pub async fn open_security_settings(&self) -> bool {
+        true
     }
 
     /// Inert: nothing is ever stored.
@@ -281,4 +334,47 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             Ok(())
         })
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BiometricState;
+
+    /// Pins the cross-layer contract: these exact snake_case strings are emitted
+    /// by Kotlin's `mapBiometricState` and deserialized here.
+    #[test]
+    fn biometric_state_serializes_to_the_four_contract_strings() {
+        assert_eq!(
+            serde_json::to_string(&BiometricState::Available).unwrap(),
+            "\"available\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BiometricState::NoEnrollment).unwrap(),
+            "\"no_enrollment\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BiometricState::WeakEnrolled).unwrap(),
+            "\"weak_enrolled\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BiometricState::Unavailable).unwrap(),
+            "\"unavailable\""
+        );
+    }
+
+    #[test]
+    fn biometric_state_roundtrips_through_json() {
+        for expected in [
+            BiometricState::Available,
+            BiometricState::NoEnrollment,
+            BiometricState::WeakEnrolled,
+            BiometricState::Unavailable,
+        ] {
+            let json = serde_json::to_string(&expected).unwrap();
+            assert_eq!(
+                serde_json::from_str::<BiometricState>(&json).unwrap(),
+                expected
+            );
+        }
+    }
 }

@@ -212,7 +212,7 @@ describe("SettingsIdentityPage", () => {
         unlocked: true,
         identity_type: "x25519",
       });
-      when("is_biometric_available", true);
+      when("is_biometric_available", "available");
       const wrapper = mountPage();
       await flushPromises();
       const openBtn = wrapper
@@ -297,7 +297,7 @@ describe("SettingsIdentityPage", () => {
     };
 
     it("is hidden when the identity is not encrypted", async () => {
-      when("is_biometric_available", true);
+      when("is_biometric_available", "available");
       when("is_biometric_unlock_enabled", true);
       const wrapper = mountPage();
       await flushPromises();
@@ -316,7 +316,7 @@ describe("SettingsIdentityPage", () => {
 
     it("calls enable_biometric_unlock with the passphrase when enabling", async () => {
       when("get_auth_state", encryptedAuth);
-      when("is_biometric_available", true);
+      when("is_biometric_available", "available");
       when("is_biometric_unlock_enabled", false);
       when("enable_biometric_unlock", undefined);
       const { wrapper, toast } = mountWithApp(SettingsIdentityPage);
@@ -350,7 +350,7 @@ describe("SettingsIdentityPage", () => {
 
     it("shows an error on a wrong passphrase when enabling", async () => {
       when("get_auth_state", encryptedAuth);
-      when("is_biometric_available", true);
+      when("is_biometric_available", "available");
       when("is_biometric_unlock_enabled", false);
       reject("enable_biometric_unlock", {
         code: "WRONG_PASSPHRASE",
@@ -381,7 +381,7 @@ describe("SettingsIdentityPage", () => {
 
     it("calls disable_biometric_unlock when disabling", async () => {
       when("get_auth_state", encryptedAuth);
-      when("is_biometric_available", true);
+      when("is_biometric_available", "available");
       when("is_biometric_unlock_enabled", true);
       when("disable_biometric_unlock", undefined);
       const wrapper = mountPage();

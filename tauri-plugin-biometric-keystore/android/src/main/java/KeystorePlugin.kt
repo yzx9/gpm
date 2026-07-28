@@ -18,8 +18,10 @@ package xyz.yzx9.gpm.biometrickeystore
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -91,6 +93,32 @@ internal fun mapErrorCode(code: Int): String = when (code) {
 
 /** Class name only — never leak crypto internals or secret data. */
 internal fun safeName(e: Throwable): String = e.javaClass.simpleName.ifEmpty { "error" }
+
+/** Map the STRONG + WEAK `BiometricManager.canAuthenticate` results to a stable
+ *  availability-state string (consumed by Rust as `BiometricState`). Pure: the
+ *  `BIOMETRIC_*` constants are compile-time-inlined `static final int`, so this
+ *  carries no runtime dependency on `androidx.biometric` and is a plain JVM unit
+ *  test — exhaustive over every return.
+ *
+ *  - `SUCCESS` → "available"
+ *  - `NONE_ENROLLED` + a weak print enrolled (`WEAK` SUCCESS) → "weak_enrolled"
+ *    (enrolled but not strong enough for gpm's Class-3 key)
+ *  - `NONE_ENROLLED` + nothing enrolled → "no_enrollment"
+ *  - anything else (no hardware, hw unavailable, security update required,
+ *    unsupported) → "unavailable". The pre-API-30 guard lives in [isAvailable]
+ *    (STRONG keystore keys need R); it folds to "unavailable" before this runs. */
+internal fun mapBiometricState(strongCode: Int, weakCode: Int): String = when {
+    strongCode == BiometricManager.BIOMETRIC_SUCCESS -> "available"
+    strongCode == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED &&
+        weakCode == BiometricManager.BIOMETRIC_SUCCESS -> "weak_enrolled"
+    strongCode == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "no_enrollment"
+    else -> "unavailable"
+}
+
+/** System Security-settings intent — the fingerprint/biometric enrollment
+ *  surface, reached when [mapBiometricState] reports "no_enrollment".
+ *  Robolectric-tested (Intent construction needs the Android runtime). */
+internal fun securitySettingsIntent(): Intent = Intent(Settings.ACTION_SECURITY_SETTINGS)
 
 @InvokeArg
 class StoreArgs {
@@ -218,14 +246,43 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     // ── @Command surface ─────────────────────────────────────────────────
 
-    /** `true` on API 30+ with a STRONG biometric enrolled. Non-prompting. */
+    /** Availability state for biometric-gated storage — one of "available",
+     *  "no_enrollment", "weak_enrolled", "unavailable". Non-prompting. Pre-API-30
+     *  → "unavailable" (the STRONG keystore key requires R). See
+     *  [mapBiometricState] for the mapping. */
     @Command
     fun isAvailable(invoke: Invoke) {
-        val available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            BiometricManager.from(activity)
-                .canAuthenticate(strongAuthenticator) == BiometricManager.BIOMETRIC_SUCCESS
+        val state = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            "unavailable"
+        } else {
+            val bm = BiometricManager.from(activity)
+            mapBiometricState(
+                bm.canAuthenticate(strongAuthenticator),
+                bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK),
+            )
+        }
         val ret = JSObject()
-        ret.put("available", available)
+        ret.put("state", state)
+        invoke.resolve(ret)
+    }
+
+    /**
+     * Open the system Security settings (the biometric-enrollment surface) — the
+     * recovery target when [isAvailable] reports "no_enrollment". Fire-and-forget:
+     * resolves `{ opened: true }`, or `{ opened: false }` when no activity can
+     * handle the intent (exotic OEM ROM) so the caller can toast instead of
+     * failing silently. Any other throw rejects the invoke.
+     */
+    @Command
+    fun openSecuritySettings(invoke: Invoke) {
+        val opened = try {
+            activity.startActivity(securitySettingsIntent())
+            true
+        } catch (_: android.content.ActivityNotFoundException) {
+            false
+        }
+        val ret = JSObject()
+        ret.put("opened", opened)
         invoke.resolve(ret)
     }
 

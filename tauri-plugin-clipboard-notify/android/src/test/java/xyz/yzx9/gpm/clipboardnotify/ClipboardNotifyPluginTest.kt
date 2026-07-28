@@ -95,4 +95,19 @@ class ClipboardNotifyPluginTest {
     fun shouldRequestNotificationPermission_tiramisuAndEnabledReturnsFalse() {
         assertFalse(shouldRequestNotificationPermission(Build.VERSION_CODES.TIRAMISU, true))
     }
+
+    @Test
+    fun appNotificationSettingsIntent_carriesActionAndPackage() {
+        // Pins the recovery deep-link target: the per-app notification settings
+        // action + the app's own package as the extra.
+        val intent = appNotificationSettingsIntent("xyz.yzx9.gpm")
+        assertEquals(
+            android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+            intent.action,
+        )
+        assertEquals(
+            "xyz.yzx9.gpm",
+            intent.getStringExtra(android.provider.Settings.EXTRA_APP_PACKAGE),
+        )
+    }
 }

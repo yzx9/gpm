@@ -5507,7 +5507,9 @@ dependencies = [
 name = "tauri-plugin-biometric-keystore"
 version = "0.14.2"
 dependencies = [
+ "log",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-plugin",
 ]
@@ -5531,6 +5533,7 @@ dependencies = [
 name = "tauri-plugin-clipboard-notify"
 version = "0.14.2"
 dependencies = [
+ "log",
  "serde",
  "tauri",
  "tauri-plugin",
@@ -5673,6 +5676,7 @@ name = "tauri-plugin-secure-keystore"
 version = "0.14.2"
 dependencies = [
  "serde",
+ "serde_json",
  "tauri",
  "tauri-plugin",
 ]

@@ -113,6 +113,29 @@ impl<R: Runtime> ClipboardNotify<R> {
             .unwrap_or(false)
     }
 
+    /// Open the system's per-app notification-settings screen — the recovery
+    /// surface when the runtime `POST_NOTIFICATIONS` dialog is suppressed after
+    /// two denials. Returns whether a handler activity was found and started
+    /// (`false` on the rare OEM ROM lacking the target), so the caller can toast
+    /// instead of failing silently.
+    pub async fn open_notification_settings(&self) -> bool {
+        #[derive(Deserialize)]
+        struct Resp {
+            opened: bool,
+        }
+        self.0
+            .run_mobile_plugin_async::<Resp>("openAppNotificationSettings", ())
+            .await
+            .map(|r| r.opened)
+            .unwrap_or_else(|e| {
+                // `opened: false` from the Kotlin catch (no handler activity) is
+                // expected; a plugin-invoke failure here is not, so log it before
+                // collapsing to false — otherwise the recovery tap fails silently.
+                log::warn!("open_notification_settings: plugin invoke failed: {e:?}");
+                false
+            })
+    }
+
     /// Post (or update, by fixed ID) the sticky clipboard-clear notification
     /// armed to fire `secs` as the displayed auto-clear window. `text` supplies
     /// the localized title/body/channel; the body template's `{secs}`
@@ -178,6 +201,11 @@ impl<R: Runtime> ClipboardNotify<R> {
     }
     /// Inert: always reports granted on desktop.
     pub async fn request_permission(&self) -> bool {
+        true
+    }
+    /// Inert: nothing to open on desktop; reports `true` so a (never-shown on
+    /// desktop) row never toasts a spurious failure.
+    pub async fn open_notification_settings(&self) -> bool {
         true
     }
     /// Inert no-op.

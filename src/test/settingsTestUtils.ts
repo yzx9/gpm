@@ -52,7 +52,7 @@ export const baseDefaults: Record<string, unknown> = {
     unlocked: false,
     identity_type: "x25519",
   },
-  is_biometric_available: false,
+  is_biometric_available: "unavailable",
   is_biometric_unlock_enabled: false,
   get_authenticity_config: {
     mode: "off",

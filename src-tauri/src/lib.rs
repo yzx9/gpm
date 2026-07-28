@@ -386,6 +386,7 @@ pub fn run() {
             clipboard::copy_generated_password,
             clipboard::are_clipboard_notifications_enabled,
             clipboard::request_clipboard_notifications_permission,
+            clipboard::open_clipboard_notification_settings,
             // generator
             generator::generate_password,
             generator::generate_password_batch,
@@ -428,6 +429,7 @@ pub fn run() {
             logging::write_log,
             // biometric
             biometric::is_biometric_available,
+            biometric::open_security_settings,
             biometric::is_biometric_unlock_enabled,
             biometric::enable_biometric_unlock,
             biometric::biometric_unlock,

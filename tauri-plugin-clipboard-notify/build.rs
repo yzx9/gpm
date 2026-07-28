@@ -5,6 +5,7 @@
 const COMMANDS: &[&str] = &[
     "are_notifications_enabled",
     "request_notifications_permission",
+    "open_app_notification_settings",
     "post_clipboard_notification",
     "dismiss_clipboard_notification",
     "consume_manual_clear_flag",

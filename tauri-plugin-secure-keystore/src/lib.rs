@@ -42,6 +42,29 @@ use tauri::{Manager, Runtime};
 const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.securekeystore";
 
 // ---------------------------------------------------------------------------
+// Availability state (quad-state: STRONG + WEAK canAuthenticate mapping)
+// ---------------------------------------------------------------------------
+
+/// Biometric availability state reported by the Kotlin plugin. Mirrors the
+/// strings emitted by `mapBiometricState` (SecureKeystorePlugin.kt) and is
+/// byte-identical to `tauri_plugin_biometric_keystore::BiometricState` — the two
+/// plugins are separate crates so the type is duplicated; the cross-layer string
+/// contract is pinned by tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BiometricState {
+    /// API 30+ with a STRONG (Class 3) biometric enrolled.
+    Available,
+    /// STRONG absent, nothing enrolled.
+    NoEnrollment,
+    /// STRONG absent but a weak (Class 2) print is enrolled.
+    WeakEnrolled,
+    /// No usable hardware / hw unavailable / security update required / unsupported /
+    /// pre-API-30 — nothing the user can fix from settings.
+    Unavailable,
+}
+
+// ---------------------------------------------------------------------------
 // Error type (unified across mobile/desktop)
 // ---------------------------------------------------------------------------
 
@@ -174,18 +197,18 @@ impl<R: Runtime> SecureKeystore<R> {
             .map_err(map_invoke_err)
     }
 
-    /// Whether STRONG biometric auth is usable on this device (API 30+ with a
-    /// fingerprint/face enrolled). Fast / non-prompting. Gates the app-lock:
-    /// the toggle is only offered when this is `true`.
-    pub async fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
+    /// Quad-state biometric availability ([`BiometricState`]). Fast / non-
+    /// prompting. Pre-API-30 → `Unavailable`. The app-lock toggle is offered only
+    /// on `Available`; callers derive `== Available` where they need a bool.
+    pub async fn is_biometric_available(&self) -> Result<BiometricState, SecureKeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
-            available: bool,
+            state: BiometricState,
         }
         self.0
             .run_mobile_plugin_async::<Resp>("isBiometricAvailable", ())
             .await
-            .map(|r| r.available)
+            .map(|r| r.state)
             .map_err(map_invoke_err)
     }
 
@@ -305,8 +328,8 @@ impl<R: Runtime> SecureKeystore<R> {
     }
 
     /// Inert: biometric is never available on non-Android targets.
-    pub async fn is_biometric_available(&self) -> Result<bool, SecureKeystoreError> {
-        Ok(false)
+    pub async fn is_biometric_available(&self) -> Result<BiometricState, SecureKeystoreError> {
+        Ok(BiometricState::Unavailable)
     }
 
     /// Inert: no biometric-gated key is ever stored.
@@ -380,4 +403,49 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             Ok(())
         })
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BiometricState;
+
+    /// Pins the cross-layer contract: byte-identical strings to
+    /// `tauri_plugin_biometric_keystore::BiometricState` and to Kotlin's
+    /// `mapBiometricState` (the type is duplicated across the two plugin
+    /// crates; this test catches drift).
+    #[test]
+    fn biometric_state_serializes_to_the_four_contract_strings() {
+        assert_eq!(
+            serde_json::to_string(&BiometricState::Available).unwrap(),
+            "\"available\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BiometricState::NoEnrollment).unwrap(),
+            "\"no_enrollment\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BiometricState::WeakEnrolled).unwrap(),
+            "\"weak_enrolled\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BiometricState::Unavailable).unwrap(),
+            "\"unavailable\""
+        );
+    }
+
+    #[test]
+    fn biometric_state_roundtrips_through_json() {
+        for expected in [
+            BiometricState::Available,
+            BiometricState::NoEnrollment,
+            BiometricState::WeakEnrolled,
+            BiometricState::Unavailable,
+        ] {
+            let json = serde_json::to_string(&expected).unwrap();
+            assert_eq!(
+                serde_json::from_str::<BiometricState>(&json).unwrap(),
+                expected
+            );
+        }
+    }
 }

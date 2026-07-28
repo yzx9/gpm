@@ -105,6 +105,26 @@ internal fun mapErrorCode(code: Int): String = when (code) {
 /** Class name only — never leak crypto internals or secret data. */
 internal fun safeName(e: Throwable): String = e.javaClass.simpleName.ifEmpty { "error" }
 
+/** Map the STRONG + WEAK `BiometricManager.canAuthenticate` results to a stable
+ *  availability-state string (consumed by Rust as `BiometricState`). Pure: the
+ *  `BIOMETRIC_*` constants are compile-time-inlined `static final int`, so this
+ *  is a plain JVM unit test — exhaustive over every return.
+ *  Duplicated from KeystorePlugin.kt (biometric-keystore) because the plugins are
+ *  separate Gradle modules; the cross-layer string contract is pinned by tests.
+ *
+ *  - `SUCCESS` → "available"
+ *  - `NONE_ENROLLED` + a weak print enrolled → "weak_enrolled"
+ *  - `NONE_ENROLLED` + nothing enrolled → "no_enrollment"
+ *  - anything else → "unavailable"; pre-API-30 folds to "unavailable" in
+ *    [isBiometricAvailable] before this runs. */
+internal fun mapBiometricState(strongCode: Int, weakCode: Int): String = when {
+    strongCode == BiometricManager.BIOMETRIC_SUCCESS -> "available"
+    strongCode == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED &&
+        weakCode == BiometricManager.BIOMETRIC_SUCCESS -> "weak_enrolled"
+    strongCode == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "no_enrollment"
+    else -> "unavailable"
+}
+
 /** Base64-encode the iv + ciphertext for SharedPreferences storage. Pure. */
 internal fun encodeBlob(iv: ByteArray, ciphertext: ByteArray): Pair<String, String> =
     Pair(Base64.encodeToString(iv, Base64.NO_WRAP), Base64.encodeToString(ciphertext, Base64.NO_WRAP))
@@ -377,14 +397,23 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     // ── @Command surface: biometric-gated master key (app-lock) ──────────
 
-    /** `true` on API 30+ with a STRONG biometric enrolled. Non-prompting. */
+    /** Availability state for the biometric-gated master key — one of
+     *  "available", "no_enrollment", "weak_enrolled", "unavailable". Non-
+     *  prompting. Pre-API-30 → "unavailable" (the STRONG keystore key requires
+     *  R). See [mapBiometricState] for the mapping. */
     @Command
     fun isBiometricAvailable(invoke: Invoke) {
-        val available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            BiometricManager.from(activity)
-                .canAuthenticate(strongAuthenticator) == BiometricManager.BIOMETRIC_SUCCESS
+        val state = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            "unavailable"
+        } else {
+            val bm = BiometricManager.from(activity)
+            mapBiometricState(
+                bm.canAuthenticate(strongAuthenticator),
+                bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK),
+            )
+        }
         val ret = JSObject()
-        ret.put("available", available)
+        ret.put("state", state)
         invoke.resolve(ret)
     }
 

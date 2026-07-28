@@ -30,6 +30,17 @@ export async function requestClipboardNotificationsPermission(): Promise<boolean
 }
 
 /**
+ * Open the system's per-app notification-settings screen — the recovery surface
+ * when Android has suppressed the runtime `POST_NOTIFICATIONS` dialog after two
+ * denials (the only way back to re-enabling the clipboard-clear notification).
+ * Returns whether a handler activity was found and started; `false` (or a throw)
+ * means the page should toast, not fail silently. Always `true` on desktop.
+ */
+export async function openClipboardNotificationSettings(): Promise<boolean> {
+  return invoke<boolean>("open_clipboard_notification_settings");
+}
+
+/**
  * Before a copy, request the clipboard-clear notification permission via the
  * system `POST_NOTIFICATIONS` dialog whenever the enabled-probe reports false
  * (so every copy that finds notifications disabled fires it, until Android's

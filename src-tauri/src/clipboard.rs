@@ -101,3 +101,14 @@ pub(crate) async fn request_clipboard_notifications_permission(
 ) -> Result<bool, Error> {
     Ok(app.clipboard_notify().request_permission().await)
 }
+
+/// Open the system's per-app notification-settings screen — the recovery
+/// surface when Android has suppressed the runtime `POST_NOTIFICATIONS` dialog
+/// after two denials. Returns whether a handler activity was found (`false` on
+/// the rare OEM ROM lacking the target). Always `true` on desktop (no-op; the
+/// row that calls this is never shown there).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn open_clipboard_notification_settings(app: AppHandle) -> Result<bool, Error> {
+    Ok(app.clipboard_notify().open_notification_settings().await)
+}

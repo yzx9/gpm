@@ -218,6 +218,25 @@ onMounted(() => {
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>
 
+        <!-- Permissions & data: what gpm accesses, why, and a deep-link to the
+             system toggle for permissions Android suppresses after two denials.
+             Carries no secret, so (like Security) sits below the category pages.
+             Its summary value is a short hint, not state. -->
+        <div
+          class="hub-row"
+          tabindex="0"
+          role="button"
+          :aria-label="`${t('settings.hub.permissions')} — ${t('settings.hub.permissionsHint')}`"
+          @click="router.push({ name: 'settingsPermissions' })"
+          @keydown.enter="router.push({ name: 'settingsPermissions' })"
+          @keydown.space.prevent="router.push({ name: 'settingsPermissions' })"
+        >
+          <BaseIcon :icon="ShieldCheck" :size="20" class="text-muted" />
+          <span class="hub-title">{{ t("settings.hub.permissions") }}</span>
+          <span class="hub-value">{{ t("settings.hub.permissionsHint") }}</span>
+          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
+        </div>
+
         <!-- About: overview, acknowledgements, and the open-source license
              tree. Carries no secret content (not a settings category), so it
              sits below the four category pages. Its summary value is the

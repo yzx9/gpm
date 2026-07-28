@@ -34,6 +34,7 @@ import android.content.SharedPreferences
 import android.Manifest
 import android.os.Build
 import android.os.Build.VERSION.SDK_INT
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import app.tauri.annotation.Command
@@ -81,6 +82,15 @@ internal fun takeManualClearFlag(prefs: SharedPreferences): Boolean {
  *  (TIRAMISU) and only when not already granted. Pre-13 has no such permission. */
 internal fun shouldRequestNotificationPermission(sdkInt: Int, notificationsEnabled: Boolean): Boolean =
     sdkInt >= Build.VERSION_CODES.TIRAMISU && !notificationsEnabled
+
+/** Per-app notification-settings intent — the recovery surface when Android has
+ *  suppressed the `POST_NOTIFICATIONS` runtime prompt after two denials (the only
+ *  way back to re-enabling the clipboard-clear notification). Robolectric-testable
+ *  so the action + `EXTRA_APP_PACKAGE` are pinned (the constants are compile-time
+ *  inlined, but `Intent` itself needs the Android runtime, hence Robolectric). */
+internal fun appNotificationSettingsIntent(packageName: String): Intent =
+    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
 
 @InvokeArg
 class PostClipboardNotificationArgs {
@@ -144,6 +154,27 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
     @PermissionCallback
     private fun permissionsCallback(invoke: Invoke) {
         resolveGranted(invoke, NotificationManagerCompat.from(activity).areNotificationsEnabled())
+    }
+
+    /**
+     * Open the system's per-app notification-settings screen — the recovery
+     * surface when the runtime `POST_NOTIFICATIONS` dialog is suppressed after
+     * two denials (Android then stops re-prompting, so this is the only way back).
+     * Fire-and-forget: resolves `{ opened: true }`, or `{ opened: false }` when no
+     * activity can handle the intent (exotic OEM ROM) so the caller can toast
+     * instead of failing silently. Any other throw rejects the invoke.
+     */
+    @Command
+    fun openAppNotificationSettings(invoke: Invoke) {
+        val opened = try {
+            activity.startActivity(appNotificationSettingsIntent(activity.packageName))
+            true
+        } catch (_: android.content.ActivityNotFoundException) {
+            false
+        }
+        val ret = JSObject()
+        ret.put("opened", opened)
+        invoke.resolve(ret)
     }
 
     /** Post (or update, by fixed ID) the sticky clipboard-clear notification. */

@@ -105,12 +105,15 @@ fn emit_app_lock_state<R: Runtime>(app: &AppHandle<R>, enabled: bool, locked: bo
 // ---------------------------------------------------------------------------
 
 /// Whether the app-launch biometric gate is usable on this device (API 30+ with
-/// a STRONG biometric). `false` on desktop / Android <11. Gates the Settings
-/// toggle.
+/// a STRONG biometric). `false` on desktop / Android <11 / no/too-weak biometric.
+/// Gates the Settings toggle. The probe itself is quad-state
+/// ([`tauri_plugin_secure_keystore::BiometricState`]); this command keeps a bool
+/// boundary so the app-lock frontend is unchanged.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn is_app_lock_available(app: AppHandle) -> Result<bool, AppLockError> {
-    Ok(app.secure_keystore().is_biometric_available().await?)
+    Ok(app.secure_keystore().is_biometric_available().await?
+        == tauri_plugin_secure_keystore::BiometricState::Available)
 }
 
 /// Current app-lock state, for the frontend's initial render.
@@ -137,7 +140,8 @@ pub(crate) async fn enable_biometric_app_lock(
 ) -> Result<(), AppLockError> {
     log::info!("app-lock: enable");
     let ks = app.secure_keystore();
-    if !ks.is_biometric_available().await? {
+    if ks.is_biometric_available().await? != tauri_plugin_secure_keystore::BiometricState::Available
+    {
         return Err(AppLockError::from(
             tauri_plugin_secure_keystore::SecureKeystoreError::unavailable(),
         ));

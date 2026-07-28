@@ -4,6 +4,7 @@
 
 package xyz.yzx9.gpm.securekeystore
 
+import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -117,5 +118,63 @@ class SecureKeystorePluginTest {
         val decoded = decodeBlob("", "")!!
         assertEquals(0, decoded.first.size)
         assertEquals(0, decoded.second.size)
+    }
+
+    // mapBiometricState — byte-identical to biometric-keystore's copy (the type
+    // is duplicated across the two plugin crates; this catches drift). The
+    // BIOMETRIC_* constants are compile-time inlined.
+    @Test
+    fun mapBiometricState_success_returns_available() {
+        assertEquals(
+            "available",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_SUCCESS,
+                BiometricManager.BIOMETRIC_SUCCESS,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_noneEnrolledWithWeakPrint_returns_weakEnrolled() {
+        assertEquals(
+            "weak_enrolled",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+                BiometricManager.BIOMETRIC_SUCCESS,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_noneEnrolledNothingEnrolled_returns_noEnrollment() {
+        assertEquals(
+            "no_enrollment",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_noHardware_returns_unavailable() {
+        assertEquals(
+            "unavailable",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE,
+                BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE,
+            ),
+        )
+    }
+
+    @Test
+    fun mapBiometricState_hwUnavailable_returns_unavailable() {
+        assertEquals(
+            "unavailable",
+            mapBiometricState(
+                BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
+                BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
+            ),
+        )
     }
 }

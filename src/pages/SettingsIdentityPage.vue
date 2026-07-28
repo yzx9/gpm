@@ -158,7 +158,7 @@ async function loadConfig() {
     const auth = await getAuthState();
     isIdentityEncrypted.value = auth.encrypted;
     identityType.value = auth.identity_type;
-    biometricAvailable.value = await isBiometricAvailable();
+    biometricAvailable.value = (await isBiometricAvailable()) === "available";
     biometricEnabled.value = await isBiometricUnlockEnabled();
     appLockAvailable.value = await isAppLockAvailable();
     // The app-lock toggle reads Keystore truth (Path B), not the persisted

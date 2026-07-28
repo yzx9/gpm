@@ -66,7 +66,7 @@ describe("SettingsPage (hub)", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll(".hub-row")).toHaveLength(7);
+    expect(wrapper.findAll(".hub-row")).toHaveLength(8);
     // The hub loads the summary sources.
     expect(invoke).toHaveBeenCalledWith("get_app_config");
     expect(invoke).toHaveBeenCalledWith("get_config");
@@ -87,12 +87,16 @@ describe("SettingsPage (hub)", () => {
     await wrapper.findAll(".hub-row")[4]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "security" });
 
-    // The 6th row is About (overview/licenses; no secret content).
+    // The 6th row is Permissions & data.
     await wrapper.findAll(".hub-row")[5]!.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({ name: "settingsPermissions" });
+
+    // The 7th row is About (overview/licenses; no secret content).
+    await wrapper.findAll(".hub-row")[6]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "about" });
 
-    // The 7th row is the diagnostics log viewer.
-    await wrapper.findAll(".hub-row")[6]!.trigger("click");
+    // The 8th row is the diagnostics log viewer.
+    await wrapper.findAll(".hub-row")[7]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "log" });
   });
 

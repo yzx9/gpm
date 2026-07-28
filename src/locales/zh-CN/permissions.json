@@ -1,0 +1,37 @@
+{
+  "title": "权限与数据",
+  "intro": "gpm 在你的设备上访问了什么、为什么需要，以及在哪里修改。",
+  "groups": {
+    "adjustable": "可调整的权限",
+    "informational": "数据访问说明"
+  },
+  "loading": "检查中…",
+  "notifications": {
+    "title": "通知",
+    "body": "复制密码到剪贴板时显示一条常驻通知，便于你提前清除。",
+    "granted": "已启用",
+    "blocked": "已关闭 · 点按重新开启",
+    "failed": "无法打开通知设置"
+  },
+  "biometric": {
+    "title": "生物识别解锁",
+    "body": "用指纹或面容解锁 gpm，免输主口令。",
+    "available": "已就绪",
+    "noEnrollment": "未录入 · 点按去录入",
+    "weakEnrolled": "需要 Class 3 · 点按去录入",
+    "unavailable": "此设备不可用",
+    "failed": "无法打开安全设置"
+  },
+  "clipboard": {
+    "title": "剪贴板",
+    "body": "复制密码到剪贴板以便粘贴到其他应用；到期后自动清除。Android 不为此提供单独的权限开关。"
+  },
+  "network": {
+    "title": "网络",
+    "body": "仅连接你配置的 git 远程仓库进行同步，绝不连接 gpm 的服务器。"
+  },
+  "files": {
+    "title": "文件",
+    "body": "仅在你主动选择文件时读取（如导入身份），不会扫描你的存储。"
+  }
+}

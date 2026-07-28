@@ -29,26 +29,50 @@ export interface BiometricError {
   message: string;
 }
 
+/** Quad-state biometric availability — mirrors the Rust `BiometricState` enum /
+ *  Kotlin `mapBiometricState` strings; the cross-layer contract is pinned by
+ *  tests. Serialized from the backend as the snake_case string. */
+export type BiometricState =
+  /** API 30+ with a STRONG (Class 3) biometric enrolled — biometric unlock usable. */
+  | "available"
+  /** STRONG absent, nothing enrolled — the actionable "go enroll" case. */
+  | "no_enrollment"
+  /** STRONG absent but a weak (Class 2) print is enrolled — gpm needs Class 3. */
+  | "weak_enrolled"
+  /** No usable hardware / pre-API-30 / probe failure — nothing the user can fix. */
+  | "unavailable";
+
 /**
- * Thin wrappers over the five biometric app commands in `src-tauri/src/lib.rs`.
+ * Thin wrappers over the biometric app commands in `src-tauri/src/lib.rs`.
  *
  * The frontend never talks to `plugin:biometric-keystore|*` directly — all secret-
  * returning operations stay backend-side so passphrases never reach the
- * WebView. `isBiometricAvailable` / `isBiometricUnlockEnabled` swallow errors
- * and return `false` on desktop / below API 30 / when the plugin is absent,
- * so callers can treat biometric as simply "off" there.
+ * WebView. `isBiometricAvailable` swallows errors and returns `"unavailable"`,
+ * and `isBiometricUnlockEnabled` returns `false`, on desktop / below API 30 /
+ * when the plugin is absent — so callers can treat biometric as simply "off" there.
  */
 
 /**
- * Whether biometric-gated storage is usable on this device (API 30+ with a
- * STRONG biometric enrolled). `false` on desktop and Android <11.
+ * Quad-state biometric availability (mirrors Rust `BiometricState`). Resolves
+ * `"unavailable"` on desktop, Android <11, no/too-weak biometric, or probe
+ * failure. Callers that need a boolean derive `=== "available"`.
  */
-export async function isBiometricAvailable(): Promise<boolean> {
+export async function isBiometricAvailable(): Promise<BiometricState> {
   try {
-    return await invoke<boolean>("is_biometric_available");
+    return await invoke<BiometricState>("is_biometric_available");
   } catch {
-    return false;
+    return "unavailable";
   }
+}
+
+/**
+ * Open the system Security settings (the biometric-enrollment surface) — the
+ * recovery target when {@link isBiometricAvailable} reports `"no_enrollment"`.
+ * Returns whether a handler activity was found; `false` (or a throw) means the
+ * caller should toast, not fail silently. Always `true` on desktop.
+ */
+export async function openSecuritySettings(): Promise<boolean> {
+  return invoke<boolean>("open_security_settings");
 }
 
 /**

@@ -176,6 +176,17 @@ const routes = [
     name: "security",
     component: () => import("./pages/SecurityPage.vue"),
   },
+  // Permissions & data: what gpm accesses (notifications, biometrics, clipboard,
+  // network, files), why, and a deep-link to system settings for the ones Android
+  // suppresses after two denials. Carries no secret, so NOT marked secure
+  // (capturable, like Security). The `permissions` locale namespace auto-loads
+  // via meta.bundle.
+  {
+    path: "/settings/permissions",
+    name: "settingsPermissions",
+    component: () => import("./pages/SettingsPermissionsPage.vue"),
+    meta: { bundle: "permissions" },
+  },
 ];
 
 const router = createRouter({

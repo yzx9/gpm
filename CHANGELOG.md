@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A new **Settings → Permissions & data** screen lists what gpm accesses on your device — notifications, biometrics, clipboard, network, and files — explains why each is needed, and, when Android has stopped re-asking about notifications or biometrics after you dismissed the prompt twice, links you straight to the relevant system settings to turn them back on. The clipboard, network, and files rows are explainers only; Android offers no separate permission for the clipboard.
+
 ### Changed
 
 - The Settings → Logs screen replaces its four-level log selector (Errors / Warnings / Info / Debug) with a single **Verbose** toggle. Turn it on to capture everything — Debug level — for about ten minutes, handy for attaching to a bug report; it turns itself off after the window so logging stays focused the rest of the time. A verbose session survives a restart, so relaunching to reproduce an issue keeps capturing (including startup), and gpm lets you know when you relaunch with verbose still on. Outside that window the app records at the Info level as before.

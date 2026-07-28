@@ -181,7 +181,7 @@ async function onUnlock() {
 
 onMounted(async () => {
   console.info("[gpm:ui] unlock modal shown");
-  biometricAvailable.value = await isBiometricAvailable();
+  biometricAvailable.value = (await isBiometricAvailable()) === "available";
   biometricEnabled.value = await isBiometricUnlockEnabled();
   // Pick the mode before un-gating so the first paint is correct (no flash of
   // the passphrase form on the biometric path), then auto-prompt if usable AND
