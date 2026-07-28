@@ -92,8 +92,9 @@
           "^\\.agents/skills/"
         ];
 
-        # git pre-commit hooks, auto-installed into the devShell (direnv sets
-        # core.hooksPath via pre-commit-checks.shellHook). Unlike the old
+        # git pre-commit hooks, auto-installed into the local-dev shells (direnv
+        # loads `default`, whose shellHook runs pre-commit-checks.shellHook to set
+        # core.hooksPath). CI shells opt out via addLocalDevExtras. Unlike the old
         # smart_format.sh PostToolUse hook, this fires for *every* write path
         # (shell / heredoc / git), closing the formatter-bypass gap.
         pre-commit-checks = git-hooks.lib.${system}.run {
@@ -147,19 +148,26 @@
         '';
 
         # mkShell derivations have no `.override`, so the local-dev shells extend the
-        # CI shells by transforming the shared *argument* attrset.
-        addSccache =
+        # CI shells by transforming the shared *argument* attrset. Both extras are
+        # local-dev only:
+        #   - sccache: machine-global compile cache. Its cache isn't restored in CI and
+        #     rust-cache makes target/ reuse redundant there, so the wrapper is pure
+        #     overhead in `nix develop .#ci-*`.
+        #   - pre-commit hook install: CI never commits, so the hooks would never fire
+        #     — the shellHook install dance is pure overhead in CI too.
+        addLocalDevExtras =
           args:
           args
           // {
             packages = args.packages ++ [ pkgs.sccache ];
             RUSTC_WRAPPER = "sccache";
+            shellHook = pre-commit-checks.shellHook + args.shellHook;
           };
 
-        # `full`-shell args (no sccache): every toolchain the repo touches — the
-        # four Android Rust targets, the Android SDK/NDK, JDK, and the desktop
-        # runtime. CI uses `ci-full` (= mkShell fullShellArgs) directly; local dev
-        # uses `full` (= mkShell (addSccache fullShellArgs)).
+        # `full`-shell args (no sccache, no pre-commit hook): every toolchain the
+        # repo touches — the four Android Rust targets, the Android SDK/NDK, JDK,
+        # and the desktop runtime. CI uses `ci-full` (= mkShell fullShellArgs)
+        # directly; local dev uses `full` (= mkShell (addLocalDevExtras fullShellArgs)).
         fullShellArgs = {
           packages =
             with pkgs;
@@ -225,23 +233,22 @@
           # regardless of which fallback it checks.
           # macOS-only: rust-lang/rust#131407 — macOS ar creates BSD-format archives
           # that rustc cannot handle when cross-compiling to Linux/Android targets.
-          shellHook =
-            pre-commit-checks.shellHook
-            + ''
-              export PATH="${ndkBin}:$PATH"
-            ''
-            + linuxDesktopLdHook
-            + lib.optionalString pkgs.stdenv.isDarwin ''
-              export AR="${ndkBin}/llvm-ar"
-              export TARGET_AR="${ndkBin}/llvm-ar"
-              export RANLIB="${ndkBin}/llvm-ranlib"
-            '';
+          shellHook = ''
+            export PATH="${ndkBin}:$PATH"
+          ''
+          + linuxDesktopLdHook
+          + lib.optionalString pkgs.stdenv.isDarwin ''
+            export AR="${ndkBin}/llvm-ar"
+            export TARGET_AR="${ndkBin}/llvm-ar"
+            export RANLIB="${ndkBin}/llvm-ranlib"
+          '';
         };
 
-        # `lite`-shell args (no sccache): host Rust + Tauri desktop runtime +
-        # frontend/tools, but NO Android SDK/NDK/JDK/android targets. For CI lint,
-        # test (be/fe) and format-fe: everything that compiles/links Tauri for the
-        # host or runs the frontend, but never cross-compiles to Android.
+        # `lite`-shell args (no sccache, no pre-commit hook): host Rust + Tauri
+        # desktop runtime + frontend/tools, but NO Android SDK/NDK/JDK/android
+        # targets. For CI lint, test (be/fe) and format-fe: everything that
+        # compiles/links Tauri for the host or runs the frontend, but never
+        # cross-compiles to Android.
         liteShellArgs = {
           packages =
             with pkgs;
@@ -261,32 +268,33 @@
               ++ linuxDesktopRuntime
             );
 
-          # CI-only shell (local dev uses `default`/`full`): skip the pre-commit
-          # hook install, just expose the desktop runtime for linking Tauri.
+          # Base (CI) shell hook: just the desktop runtime for linking Tauri.
+          # Local dev layers the pre-commit hook install on top (addLocalDevExtras).
           shellHook = linuxDesktopLdHook;
         };
       in
       {
         devShells = {
-          # CI shells — no sccache (its cache isn't restored in CI and target/ reuse
-          # via rust-cache makes it redundant, so the wrapper only adds overhead).
+          # CI shells — no sccache and no pre-commit hook install (both are local-dev
+          # only; see addLocalDevExtras for why).
           ci-full = pkgs.mkShell fullShellArgs;
           ci-lite = pkgs.mkShell liteShellArgs;
 
           # Local-dev shells: the CI shell + sccache (machine-global compile cache,
           # so a fresh worktree reuses compiles from others instead of rebuilding
-          # target/ from scratch). `default` (bare `nix develop`) resolves to `full`.
-          full = pkgs.mkShell (addSccache fullShellArgs);
-          lite = pkgs.mkShell (addSccache liteShellArgs);
+          # target/ from scratch) + the pre-commit hook install. `default` (bare
+          # `nix develop`) resolves to `full`.
+          full = pkgs.mkShell (addLocalDevExtras fullShellArgs);
+          lite = pkgs.mkShell (addLocalDevExtras liteShellArgs);
 
           default = self.devShells.${system}.full;
         };
       }
     )
     // {
-      # fenix (Rust toolchain) and git-hooks.nix publish prebuilt artifacts to
-      # the nix-community binary cache, not cache.nixos.org. Without this
-      # substituter, devShells cold-build the Rust toolchain from source.
+      # fenix (the Rust toolchain input) publishes its prebuilt artifacts to its
+      # own cachix cache (fenix.cachix.org), not cache.nixos.org. Without this
+      # substituter, devShells cold-build the entire Rust toolchain from source.
       nixConfig = {
         extra-substituters = [ "https://fenix.cachix.org" ];
         extra-trusted-public-keys = [
