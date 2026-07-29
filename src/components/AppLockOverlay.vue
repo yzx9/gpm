@@ -16,7 +16,7 @@ import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
-const { setUnlockInFlight } = useAppLockState();
+const { setUnlockInFlight, shouldAutoPrompt } = useAppLockState();
 
 const { t } = useI18n();
 
@@ -71,7 +71,12 @@ async function tryUnlock() {
 
 onMounted(() => {
   console.info("[gpm:ui] app-lock overlay shown");
-  void tryUnlock();
+  // Auto-fire the biometric prompt only for a cold start / resume re-lock. An
+  // idle re-lock suppresses it (the user is present but idle) — they tap the
+  // button below. R057.
+  if (shouldAutoPrompt.value) {
+    void tryUnlock();
+  }
 });
 
 onUnmounted(() => {
@@ -83,6 +88,8 @@ onUnmounted(() => {
   <BaseModalShell
     variant="center"
     :z="70"
+    :dismiss-on-backdrop="false"
+    :dismiss-on-back="false"
     :aria-label="t('common.appLock.title')"
   >
     <h1

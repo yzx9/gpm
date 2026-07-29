@@ -87,6 +87,27 @@ describe("useAppLockState", () => {
     expect(s.appLocked.value).toBe(true);
   });
 
+  it("records the lock reason and gates the auto-prompt (idle suppresses)", async () => {
+    vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: true });
+    await s.init();
+    const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
+      payload: { enabled: boolean; locked: boolean; reason?: string | null };
+    }) => void;
+
+    // Cold start (reason null) → auto-prompt (today's behavior).
+    handler({ payload: { enabled: true, locked: true, reason: null } });
+    expect(s.shouldAutoPrompt.value).toBe(true);
+
+    // A resume re-lock (reason "return") → auto-prompt.
+    handler({ payload: { enabled: true, locked: true, reason: "return" } });
+    expect(s.shouldAutoPrompt.value).toBe(true);
+
+    // An idle re-lock (reason "idle") → suppress the auto-prompt (R057: the user
+    // is present but idle, so the mask shows and they tap).
+    handler({ payload: { enabled: true, locked: true, reason: "idle" } });
+    expect(s.shouldAutoPrompt.value).toBe(false);
+  });
+
   it("resume (visibilitychange→visible) re-locks when enabled+unlocked", async () => {
     vi.mocked(invoke).mockImplementation((cmd) => {
       if (cmd === "get_app_lock_state")

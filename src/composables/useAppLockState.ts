@@ -6,10 +6,18 @@ import {
   appLock,
   getAppLockState,
   subscribeAppLockState,
+  type AppLockReason,
   type AppLockState,
   type UnlistenFn,
 } from "@/api";
-import { inject, ref, type InjectionKey, type Ref } from "vue";
+import {
+  computed,
+  inject,
+  ref,
+  type ComputedRef,
+  type InjectionKey,
+  type Ref,
+} from "vue";
 
 /**
  * Global app-launch biometric gate state — mirrors the backend `app-lock-state`
@@ -35,6 +43,10 @@ import { inject, ref, type InjectionKey, type Ref } from "vue";
 export interface AppLockStore {
   readonly appLockEnabled: Readonly<Ref<boolean>>;
   readonly appLocked: Readonly<Ref<boolean>>;
+  /** Whether the overlay should auto-fire the biometric prompt on mount. An idle
+   *  re-lock suppresses it (the user is present but idle); cold start / resume
+   *  keep it. Mirrors the identity `shouldAutoPromptBiometric`. */
+  readonly shouldAutoPrompt: ComputedRef<boolean>;
   /** False until `init()` has reconciled with the backend. */
   readonly appReady: Readonly<Ref<boolean>>;
   /** Reflect backend gate state, arm the listener, watch for resume. Idempotent. */
@@ -76,6 +88,11 @@ export function createAppLockStore(
   // False until `init()` has reconciled with the backend, so `App.vue` can avoid
   // rendering the overlay during the brief boot window before the state is known.
   const appReady = ref(el);
+  /// Why the gate most recently locked (an AppLockReason) or null — recorded on
+  /// a locked transition so the overlay can decide whether to auto-prompt.
+  const gateLastReason = ref<AppLockReason | null>(null);
+  /** Idle re-lock → suppress the auto-prompt; cold start (null) / return → keep. */
+  const shouldAutoPrompt = computed(() => gateLastReason.value !== "idle");
 
   /// True while the overlay is driving an `app_unlock` biometric prompt. Suspends
   /// the resume re-lock so the prompt can't re-lock itself.
@@ -107,7 +124,7 @@ export function createAppLockStore(
       onAppLockEvent(await getAppLockState());
     } catch {
       // Couldn't read the gate state (pre-setup / desktop) — stay disabled.
-      onAppLockEvent({ enabled: false, locked: false });
+      onAppLockEvent({ enabled: false, locked: false, reason: null });
     }
     appReady.value = true;
 
@@ -117,10 +134,15 @@ export function createAppLockStore(
   }
 
   /** Backend gate-state event → the refs. */
-  function onAppLockEvent({ enabled, locked }: AppLockState) {
+  function onAppLockEvent({ enabled, locked, reason }: AppLockState) {
     const wasLocked = appLocked.value;
     appLockEnabled.value = enabled;
     appLocked.value = locked;
+    // Record why the gate locked (on a locked state) so the overlay can decide
+    // whether to auto-fire the biometric prompt. `idle` suppresses it.
+    if (locked) {
+      gateLastReason.value = reason ?? null;
+    }
     // A locked→unlocked transition arms the post-unlock debounce (loop guard).
     if (wasLocked && !locked) {
       lastUnlockAt = Date.now();
@@ -155,6 +177,7 @@ export function createAppLockStore(
   return {
     appLockEnabled,
     appLocked,
+    shouldAutoPrompt,
     appReady,
     init,
     setUnlockInFlight,

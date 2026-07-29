@@ -15,13 +15,23 @@ import type { BiometricPromptText } from "@/i18n/native";
  * a safe "off" shape on desktop / below API 30 / when the plugin is absent.
  */
 
+/** Why the gate most recently locked — drives the overlay's auto-prompt rule
+ * (the gate mirror of the identity `IdentityLockReason`). `idle` = the in-app
+ * idle timer fired; the user is present but idle, so the frontend suppresses the
+ * auto-biometric-prompt and lets them tap. `return` = a foreground-return
+ * re-lock (today's behavior) → keep the auto-prompt. */
+export type AppLockReason = "return" | "idle";
+
 /** App-launch biometric gate state from get_app_lock_state / the
  * `app-lock-state` event. `enabled` = the gate is on (master key is
  * biometric-gated); `locked` = the master key is not in memory (cold start or
- * after a background re-lock), so the app-lock overlay should be shown. */
+ * after a background re-lock), so the app-lock overlay should be shown.
+ * `reason` = why the gate most recently locked (null at cold start) — see
+ * {@link AppLockReason}. */
 export interface AppLockState {
   enabled: boolean;
   locked: boolean;
+  reason?: AppLockReason | null;
 }
 
 /** Error from the app-launch gate commands (`APP_LOCK_FAILED`, `BIOMETRIC_*`,
@@ -51,7 +61,7 @@ export async function getAppLockState(): Promise<AppLockState> {
   try {
     return await invoke<AppLockState>("get_app_lock_state");
   } catch {
-    return { enabled: false, locked: false };
+    return { enabled: false, locked: false, reason: null };
   }
 }
 
