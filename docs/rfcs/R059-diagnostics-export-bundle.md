@@ -56,4 +56,4 @@ Medium (~2 human-days / ~45 min CC) — bundle assembler + zip, the new backend-
 
 ## Depends on / Supersedes
 
-Closes out the in-app diagnostics logging work: its shipped phases (pipeline, viewer, instrumentation) live in code, and the plaintext-logs threat model in SECURITY.md (§ Diagnostics logging). Builds on **R055** (the verbose toggle), whose persisted-deadline and notification work the export's "capture one repro" flow assumes. Aligns with the at-rest encryption and sanitized-error threat model, extending the "exported log leaves the device" consideration to the wider bundle.
+Closes out the in-app diagnostics logging work: its shipped phases (pipeline, viewer, instrumentation) live in code, and the plaintext-logs threat model in SECURITY.md (§ Diagnostics logging). Builds on the shipped verbose-logging toggle (Settings → Logs **Verbose** — Debug for a bounded, persisted window), whose persisted-deadline and notification work the export's "capture one repro" flow assumes. Aligns with the at-rest encryption and sanitized-error threat model, extending the "exported log leaves the device" consideration to the wider bundle.
