@@ -18,6 +18,7 @@ function dispatch(type: string): void {
 describe("createLockActivity", () => {
   let lockMode: Ref<LockMode>;
   let identityCached: Ref<boolean>;
+  let gateArmed: Ref<boolean>;
   let s: LockActivity;
 
   beforeEach(() => {
@@ -25,7 +26,10 @@ describe("createLockActivity", () => {
     vi.useFakeTimers();
     lockMode = ref<LockMode>("immediate");
     identityCached = ref(true);
-    s = createLockActivity(lockMode, identityCached, { throttleMs: 1000 });
+    gateArmed = ref(false);
+    s = createLockActivity(lockMode, identityCached, gateArmed, {
+      throttleMs: 1000,
+    });
     s.init();
   });
 
@@ -45,6 +49,15 @@ describe("createLockActivity", () => {
     lockMode.value = "immediate";
     dispatch("pointerdown");
     expect(invoke).not.toHaveBeenCalledWith("bump_idle_timer");
+  });
+
+  it("gate armed (identity not idle) ⇒ bump (R057: gate timer reset by activity)", () => {
+    // Identity is Immediate but the gate idle timer is armed — activity must
+    // still reset it so the gate doesn't fire mid-browse.
+    lockMode.value = "immediate";
+    gateArmed.value = true;
+    dispatch("pointerdown");
+    expect(invoke).toHaveBeenCalledWith("bump_idle_timer");
   });
 
   it("Never ⇒ no bump", () => {
@@ -116,7 +129,7 @@ describe("createLockActivity", () => {
 
   it("default throttleMs (no opts) spaces bumps ~5000ms", () => {
     s.dispose(); // avoid the beforeEach instance double-counting dispatches
-    const def = createLockActivity(lockMode, identityCached); // no opts ⇒ 5000
+    const def = createLockActivity(lockMode, identityCached, gateArmed); // no opts ⇒ 5000
     def.init();
     lockMode.value = { idle: 300 };
     dispatch("pointerdown"); // first bump (last starts at -Infinity)
@@ -132,7 +145,9 @@ describe("createLockActivity", () => {
 
   it("every EVENT_TYPE triggers a bump (guards the registered event list)", () => {
     s.dispose();
-    const all = createLockActivity(lockMode, identityCached, { throttleMs: 0 });
+    const all = createLockActivity(lockMode, identityCached, gateArmed, {
+      throttleMs: 0,
+    });
     all.init();
     lockMode.value = { idle: 300 };
     for (const t of ["pointerdown", "keydown", "wheel", "touchmove", "input"]) {

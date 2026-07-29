@@ -42,7 +42,12 @@ export interface SafeAreaInsets {
  *  - `theme_mode`: color-scheme override. Absent (not `null`) ⇒ track system
  *    (the CSS `prefers-color-scheme` media query); `"light"` / `"dark"` ⇒ pinned.
  *  - `lock_mode` / `view_clear_secs` / `clipboard_clear_secs` / `autosync` /
- *    `biometric_app_lock`: behavior prefs (absent ⇒ default). */
+ *    `biometric_app_lock` / `gate_idle`: behavior prefs (absent ⇒ default). */
+/** App-launch-gate in-app idle timeout. Mirrors Rust `GateIdle`: `"off"` = no
+ * idle timer; `{ after: secs }` = lock after `secs` of foreground idle. Absent
+ * on a fresh config ⇒ the default (After 300s). */
+export type GateIdle = "off" | { after: number };
+
 export interface AppConfig {
   /** Persisted-schema version (one-shot migration gate). Absent ⇒ 1. */
   schema_version?: number;
@@ -66,6 +71,8 @@ export interface AppConfig {
    *  Settings toggle + runtime gate read `getAppLockState` (Keystore truth),
    *  not this flag; it exists only as a persisted record. */
   biometric_app_lock?: boolean;
+  /** App-launch-gate in-app idle timeout. Absent ⇒ the default (After 300s). */
+  gate_idle?: GateIdle;
   /** Verbose-logging deadline as Unix seconds. Set + unexpired ⇒ the app logs at
    *  Debug this session (and on any relaunch within the window); absent/expired ⇒
    *  Info. Apply via {@link setVerbose}; check liveness via

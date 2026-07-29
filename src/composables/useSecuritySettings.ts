@@ -2,7 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { getAppConfig, type AppConfig, type LockMode } from "@/api";
+import {
+  DEFAULT_GATE_IDLE,
+  getAppConfig,
+  type AppConfig,
+  type GateIdle,
+  type LockMode,
+} from "@/api";
 import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
@@ -26,6 +32,9 @@ export interface SecuritySettingsState {
   readonly viewClearSecs: Readonly<Ref<number>>;
   /** Cached auto-lock mode (Immediate default) — read by the activity bumper. */
   readonly lockMode: Readonly<Ref<LockMode>>;
+  /** Cached app-launch-gate idle timeout (After 300s default) — read by the
+   *  activity bumper so it bumps when the gate idle timer is armed. */
+  readonly gateIdle: Readonly<Ref<GateIdle>>;
   /** Load the cache from the backend once. Idempotent. */
   loadSecuritySettings: () => Promise<void>;
   /** Apply a freshly-fetched (or just-set) app config to the cache. */
@@ -52,6 +61,9 @@ export function createSecuritySettings(): SecuritySettingsState {
   const viewClearSecs = ref(DEFAULT_VIEW_CLEAR_SECS);
   // Cached auto-lock mode so the activity bumper can filter bumps reactively.
   const lockMode = ref<LockMode>("immediate");
+  // Cached gate idle timeout (default After 300s) — the activity bumper reads
+  // it to know whether the gate idle timer is armed.
+  const gateIdle = ref<GateIdle>(DEFAULT_GATE_IDLE);
   let initialized = false;
 
   /**
@@ -75,6 +87,8 @@ export function createSecuritySettings(): SecuritySettingsState {
     viewClearSecs.value = cfg.view_clear_secs ?? DEFAULT_VIEW_CLEAR_SECS;
     // lock_mode absent ⇒ Immediate (matches LockMode's serde default).
     lockMode.value = cfg.lock_mode ?? "immediate";
+    // gate_idle absent ⇒ the unified default (After 300s).
+    gateIdle.value = cfg.gate_idle ?? DEFAULT_GATE_IDLE;
   }
 
   /** Reset the one-shot latch and reload from the backend. See interface doc. */
@@ -86,6 +100,7 @@ export function createSecuritySettings(): SecuritySettingsState {
   return {
     viewClearSecs,
     lockMode,
+    gateIdle,
     loadSecuritySettings,
     applySecurityConfig,
     reload,

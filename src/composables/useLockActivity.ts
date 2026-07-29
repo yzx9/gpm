@@ -7,8 +7,10 @@
  * and fires a throttled `bumpIdleTimer` so the backend's identity idle-lock
  * restarts on in-app use, not just on secret operations.
  *
- * Two filters short-circuit before any IPC (so Immediate/Never send zero bumps):
- * 1. `lockMode` must be `{ idle: n }`; 2. `identityCached` must be true.
+ * A bump fires when EITHER idle timer is armed (zero IPC when neither is): the
+ * identity Idle timer (`lockMode == { idle }` AND `identityCached`) OR the gate
+ * idle timer (caller-computed `gateArmed`: gate on + unlocked + gate-idle != Off).
+ * So Immediate/Never + gate-idle Off/locked send zero bumps.
  *
  * Leading-edge throttle (not a coalescing interval): the event itself fires the
  * bump, so a tap right before the timeout is caught immediately rather than
@@ -68,6 +70,7 @@ const isIdleMode = (m: LockMode): m is { idle: number } =>
 export function createLockActivity(
   lockMode: Readonly<Ref<LockMode>>,
   identityCached: Readonly<Ref<boolean>>,
+  gateArmed: Readonly<Ref<boolean>>,
   opts: LockActivityOptions = {},
 ): LockActivity {
   const throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
@@ -79,11 +82,13 @@ export function createLockActivity(
   const bump = throttle(() => void bumpIdleTimer(), throttleMs);
 
   function onActivity() {
-    // Filter 1: only Idle arms a backend timer worth bumping.
-    if (!isIdleMode(lockMode.value)) return;
-    // Filter 2: nothing to keep alive if the identity isn't cached (locked, or
-    // mid-Immediate soft-wipe).
-    if (!identityCached.value) return;
+    // Bump if EITHER idle timer is armed: the identity Idle timer (armed under
+    // Idle + cached) or the gate idle timer (caller-computed `gateArmed`: gate
+    // on + unlocked + gate-idle != Off). One bump resets both backend timers
+    // (bump_idle_timer). Zero IPC when neither is armed (Immediate/Never +
+    // gate-idle Off / locked).
+    const identityArmed = isIdleMode(lockMode.value) && identityCached.value;
+    if (!identityArmed && !gateArmed.value) return;
     bump();
   }
 

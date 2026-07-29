@@ -9,7 +9,7 @@ import {
   notifyOs,
   verboseRemainingSecs,
 } from "@/api";
-import { onMounted, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
@@ -34,15 +34,30 @@ const {
   identityCached,
   shouldAutoPromptBiometric,
 } = useLockState();
-const { appLocked, appReady, init: initAppLock } = useAppLockState();
 const {
+  appLockEnabled,
+  appLocked,
+  appReady,
+  init: initAppLock,
+} = useAppLockState();
+const {
+  gateIdle,
   loadSecuritySettings,
   lockMode,
   reload: reloadSecurity,
 } = useSecuritySettings();
-// Activity bumper: any in-app tap/scroll/key extends the identity idle-lock
-// timer (no-op under Immediate/Never; throttled; backend timer authoritative).
-const lockActivity = createLockActivity(lockMode, identityCached);
+// True when the gate idle timer is armed (gate on + unlocked + gate-idle != Off)
+// so the activity bumper resets it on in-app use, not just on secret ops.
+const gateIdleArmed = computed(
+  () => appLockEnabled.value && !appLocked.value && gateIdle.value !== "off",
+);
+// Activity bumper: any in-app tap/scroll/key extends BOTH idle timers (identity
+// + gate); no-op when neither is armed (Immediate/Never + gate-idle Off/locked).
+const lockActivity = createLockActivity(
+  lockMode,
+  identityCached,
+  gateIdleArmed,
+);
 // Best-effort foreground sync (RFC R060 Tier 1): pull + push on cold-start/resume
 // when AutoSync is on; surfaces divergence / Enforce-block as a passive status
 // badge, never a modal; silent on success and failure.
