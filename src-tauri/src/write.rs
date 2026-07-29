@@ -46,7 +46,7 @@ use rustpass::{
 use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::AppState;
-use crate::identity::{maybe_soft_wipe, reset_lock_timer};
+use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 
 /// Hard deadline (seconds) for a best-effort background sync. A companion task
 /// flips the background sync's private cancel token at this point so a stalled or
@@ -99,6 +99,7 @@ where
     // it).
     let outcome = autosync_write_command(state, app, local_write).await;
     reset_lock_timer(state, app);
+    reset_gate_idle_timer(state, app);
     // D3: a NeedsDivergenceResolve still needs the cached identity for a keep-mine
     // resolve, so defer the wipe to resolve_sync_divergence. Every other outcome
     // (Written / AuthenticityBlocked / Err) is terminal — wipe now.
@@ -220,6 +221,7 @@ pub(crate) async fn delete_secret(
     // cache the identity, so no maybe_soft_wipe coupling here — a keep-mine
     // resolve after a delete-triggered divergence re-auths via runWithAuth.
     reset_lock_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app);
     outcome
 }
 
@@ -395,6 +397,7 @@ pub(crate) async fn resolve_sync_divergence(
         .await
         .inspect_err(|e| log::warn!("resolve failed: {e}"));
     reset_lock_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app);
     // D3: terminal step for a deferred save-divergence — do the wipe the save
     // path skipped (no-op under Idle/Never; under Immediate it clears the
     // identity kept alive across the modal for keep-mine).

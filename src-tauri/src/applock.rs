@@ -21,7 +21,7 @@
 //! layers on top: the identity passphrase is sealed under the master key, so
 //! `app_unlock` decrypts it with no second prompt when the opt-in is on.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rustpass::Error;
 use rustpass::error::ErrorCode;
@@ -199,6 +199,9 @@ pub(crate) async fn enable_biometric_app_lock(
     ks.delete().await?;
     state.app_config.set_biometric_app_lock(true).await?;
     state.app_lock_enabled.store(true, Ordering::SeqCst);
+    // The gate is now on with the master key resident and the app unlocked —
+    // arm the in-app idle timer (R057). No-op when gate-idle is Off.
+    identity::reset_gate_idle_timer(&state, &app);
     Ok(())
 }
 
@@ -214,6 +217,12 @@ pub(crate) async fn disable_biometric_app_lock(
     prompt_text: Option<tauri_plugin_secure_keystore::PromptText>,
 ) -> Result<(), AppLockError> {
     log::info!("app-lock: disable");
+    // Disarm the gate idle timer FIRST, before any await (the retrieve_biometric
+    // prompt below awaits user input). A gate-idle fire during the disable
+    // sequence would wipe the master key mid-disable → lockout with no biometric
+    // key to recover (R057). The generation bump also self-disarms any task that
+    // hasn't passed its stale-check yet.
+    identity::disarm_gate_idle(&state);
     let ks = app.secure_keystore();
     // Retrieve the master key from the biometric store (prompt DECRYPT).
     let b64 = Zeroizing::new(
@@ -425,6 +434,9 @@ pub(crate) async fn app_unlock(
     state.app_locked.store(false, Ordering::SeqCst);
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
     emit_app_lock_state(&app, enabled, false, None);
+    // The app is unlocked with the master key resident — arm the in-app idle
+    // timer (R057). No-op when gate-idle is Off.
+    identity::reset_gate_idle_timer(&state, &app);
     // Auto-unlock was off / no sealed passphrase / failed: for a passphrase-
     // encrypted identity, a SOFT identity event tells the frontend to use per-op
     // auth (no overlay over the just-unlocked app). A plaintext identity is
@@ -510,16 +522,17 @@ async fn try_identity_auto_unlock<R: Runtime>(
 /// and any seal read/write racing this wipe surfaces a clean `SealKeyUnavailable`
 /// (never a silent plaintext downgrade — the `ever_keyed` latch guards `seal`).
 /// Do not add a mutex here to "fix" that — it would deadlock the write path.
-pub(crate) async fn do_app_lock<R: Runtime>(
-    state: &State<'_, AppState>,
+pub(crate) fn do_app_lock<R: Runtime>(
+    store: &rustpass::Store,
     app: &AppHandle<R>,
+    app_locked: &AtomicBool,
+    enabled: bool,
     reason: AppLockReason,
 ) {
     log::info!("app-lock: lock ({reason:?})");
-    state.store.set_master_key(None);
-    state.store.lock();
-    state.app_locked.store(true, Ordering::SeqCst);
-    let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
+    store.set_master_key(None);
+    store.lock();
+    app_locked.store(true, Ordering::SeqCst);
     emit_app_lock_state(app, enabled, true, Some(reason));
 }
 
@@ -531,7 +544,15 @@ pub(crate) async fn app_lock(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), AppLockError> {
-    do_app_lock(&state, &app, AppLockReason::Return).await;
+    // Cancel the gate idle timer (the app is locking; the timer is moot).
+    identity::disarm_gate_idle(&state);
+    do_app_lock(
+        &state.store,
+        &app,
+        &state.app_locked,
+        state.app_lock_enabled.load(Ordering::SeqCst),
+        AppLockReason::Return,
+    );
     Ok(())
 }
 
@@ -545,6 +566,7 @@ pub(crate) async fn app_lock(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn enable_identity_auto_unlock(
     state: State<'_, AppState>,
+    app: AppHandle,
     passphrase: String,
 ) -> Result<(), AppLockError> {
     log::info!("identity-auto-unlock: enable");
@@ -567,6 +589,11 @@ pub(crate) async fn enable_identity_auto_unlock(
         .save_app_identity_pass(passphrase.as_str())
         .await?;
     state.store.set_unlock_identity_with_app(true).await?;
+    // Refresh the coupling flag (now true) BEFORE re-applying the identity timer
+    // — the flag-before-timer ordering rule (R057). Coupled → the identity timer
+    // disarms; its lifecycle now follows the gate.
+    identity::refresh_security_cache(&state).await;
+    identity::reset_lock_timer(&state, &app);
     Ok(())
 }
 
@@ -576,10 +603,16 @@ pub(crate) async fn enable_identity_auto_unlock(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn disable_identity_auto_unlock(
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<(), AppLockError> {
     log::info!("identity-auto-unlock: disable");
     state.store.clear_app_identity_pass().await?;
     state.store.set_unlock_identity_with_app(false).await?;
+    // Refresh the coupling flag (now false) BEFORE re-applying the identity
+    // timer — the flag-before-timer ordering rule (R057). Uncoupled → the
+    // identity timer re-arms per LockMode.
+    identity::refresh_security_cache(&state).await;
+    identity::reset_lock_timer(&state, &app);
     Ok(())
 }
 

@@ -13,7 +13,7 @@ use tauri::{AppHandle, Runtime, State};
 use zeroize::Zeroizing;
 
 use crate::AppState;
-use crate::identity::{maybe_soft_wipe, reset_lock_timer};
+use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 use crate::page::clamp_limit;
 
 // ---------------------------------------------------------------------------
@@ -160,6 +160,7 @@ pub(crate) async fn copy_password(
     // leave the identity cached with no idle timer to eventually clear it).
     let secret = state.store.get(&entry_path).await;
     reset_lock_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
 
@@ -195,6 +196,7 @@ pub(crate) async fn show_password_core<R: Runtime>(
     log::info!("show: {}", entry_path.trim_end_matches(".age"));
     let secret = state.store.get(entry_path).await;
     reset_lock_timer(state, app);
+    reset_gate_idle_timer(state, app);
     maybe_soft_wipe(state, app).await;
     let secret = secret.inspect_err(|e| {
         log::warn!("show failed: {}: {e}", entry_path.trim_end_matches(".age"));
@@ -237,6 +239,7 @@ pub(crate) async fn copy_totp(
     // Decrypt first so a FAILED read still counts as a secret access (Immediate).
     let secret = state.store.get(&entry_path).await;
     reset_lock_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
 
@@ -290,6 +293,7 @@ pub(crate) async fn has_totp(
         s => s,
     };
     reset_lock_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("has-totp failed: {entry_path}: {e}"))?;
     Ok(Some(rustpass::totp::has_totp(secret.body())))

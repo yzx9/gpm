@@ -251,7 +251,10 @@ pub(crate) async fn bump_idle_timer(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), Error> {
+    // One activity bump resets BOTH idle timers (identity + gate) — the
+    // consolidation that avoids a second document-listener set + IPC.
     reset_lock_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app);
     Ok(())
 }
 
@@ -429,8 +432,20 @@ pub(crate) fn apply_security_caches(state: &AppState) {
 
 /// [`apply_security_caches`] wrapped for the Tauri `State` view. Called on
 /// unlock, on the `set_*` config commands, and after the config-scope migration.
+///
+/// Also caches the identity-coupling flag (`unlock_identity_with_app`) from the
+/// sealed `RepoConfig`, so `reset_lock_timer` / `maybe_soft_wipe` stay sync on
+/// the hot path. This runs BEFORE those callers read the flag in every call
+/// graph (`unlock_and_arm`, the set_* commands) — the flag-before-timer ordering
+/// rule.
 pub(crate) async fn refresh_security_cache(state: &State<'_, AppState>) {
     apply_security_caches(state.inner());
+    let coupled = state
+        .store
+        .config()
+        .await
+        .is_ok_and(|rc| rc.unlock_identity_with_app);
+    state.identity_coupled.store(coupled, Ordering::SeqCst);
 }
 
 /// A cancel-and-respawn idle timer: holds one in-flight sleep task plus a
@@ -511,6 +526,14 @@ impl IdleTimer {
 /// per-op config decrypt). On a cache miss (poisoned) it fails safe to the
 /// default idle timer.
 pub(crate) fn reset_lock_timer<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+    // R057 coupling: while identity-auto-unlock is on, the identity session has
+    // no independent auto-lock — its lifecycle follows the gate (restored on
+    // gate unlock, wiped on gate lock). Disarm and let the gate own it,
+    // regardless of LockMode.
+    if state.identity_coupled.load(Ordering::SeqCst) {
+        disarm_lock(state);
+        return;
+    }
     let mode = state.lock_mode.lock().map_or_else(
         |_| LockMode::Idle(rustpass::store::DEFAULT_LOCK_TIMEOUT_SECS),
         |m| *m,
@@ -530,6 +553,61 @@ pub(crate) fn reset_lock_timer<R: Runtime>(state: &State<'_, AppState>, app: &Ap
 /// `Never`/`Immediate`, and as the timer-cancel half of [`soft_wipe`].
 pub(crate) fn disarm_lock(state: &State<'_, AppState>) {
     state.lock_timer.disarm();
+}
+
+// ── Gate in-app idle timer (R057) ────────────────────────────────────────
+// A second IdleTimer that, on fire, runs applock::do_app_lock(Idle) — wiping
+// the master key + identity cache and raising the mask WITHOUT auto-prompting
+// (the user is present but idle; they tap). Fed by the same activity signal as
+// the identity timer (bump_idle_timer resets both).
+
+/// Disarm the gate idle timer. Called on gate lock/disable so a stale timer
+/// can't fire into an already-locked/disabled gate.
+pub(crate) fn disarm_gate_idle(state: &State<'_, AppState>) {
+    state.gate_idle_timer.disarm();
+}
+
+/// (Re)arm the gate idle timer to fire after `secs`. The fire-task captures
+/// owned clones (the master key is wiped via the Store; `app_locked` is `Arc` so
+/// it can flip from the `'static` task) and calls `do_app_lock(Idle)`.
+pub(crate) fn arm_gate_idle<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    secs: u64,
+) {
+    let store = state.store.clone();
+    let app_handle = app.clone();
+    let app_locked = state.app_locked.clone();
+    let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
+    state.gate_idle_timer.arm(secs, move || async move {
+        crate::applock::do_app_lock(
+            &store,
+            &app_handle,
+            &app_locked,
+            enabled,
+            crate::applock::AppLockReason::Idle,
+        );
+    });
+}
+
+/// Reset the gate idle timer per the cached effective `GateIdle` setting:
+/// `After(secs)` arms; `Off` disarms. Reads the `AppConfigStore` cache (sync), so
+/// this stays sync like [`reset_lock_timer`].
+pub(crate) fn reset_gate_idle_timer<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+    // The gate idle timer only makes sense with the gate ENABLED and the app
+    // UNLOCKED. Arming it otherwise fires `do_app_lock` on a session with no
+    // biometric master key stored — a soft-brick: the non-dismissable overlay
+    // mounts and `app_unlock` has nothing to retrieve. The default new-install
+    // config is gate-OFF + gate_idle=After(300), so without this guard every
+    // fresh user would lock themselves out after 5 min of idle.
+    if !state.app_lock_enabled.load(Ordering::SeqCst) || state.app_locked.load(Ordering::SeqCst) {
+        disarm_gate_idle(state);
+        return;
+    }
+    match state.app_config.get().gate_idle {
+        crate::app_config::GateIdle::After(secs) => arm_gate_idle(state, app, secs),
+        crate::app_config::GateIdle::Off => disarm_gate_idle(state),
+    }
 }
 
 /// Soft wipe — the no-cache mode's post-operation step. Wipes the cached
@@ -556,6 +634,11 @@ pub(crate) async fn soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &App
 /// needs the identity for a keep-mine resolve) and `resolve_sync_divergence`
 /// does the wipe after it settles.
 pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+    // R057 coupling: when identity-auto-unlock is on, Immediate's per-op wipe is
+    // suppressed too — the identity persists until the gate locks.
+    if state.identity_coupled.load(Ordering::SeqCst) {
+        return;
+    }
     let immediate = state
         .lock_mode
         .lock()

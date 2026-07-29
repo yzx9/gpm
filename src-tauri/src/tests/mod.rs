@@ -17,6 +17,7 @@
 
 mod background_sync;
 mod clipboard_clear;
+mod gate_idle;
 mod git_commands;
 mod lock_state;
 mod migrations;
@@ -165,12 +166,17 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         .await
         .expect("unlock should succeed");
 
+    // Bind the AppConfigStore to the store (mirrors init_state) so gate-idle and
+    // other behavior-config reads/writes flow through the seal in tests.
+    let app_config = crate::app_config::AppConfigStore::new(config_dir.path());
+    app_config.set_store(Arc::clone(&store));
+
     // Keep bare_dir alive (returned in TestStore) so the store's `origin` remote
     // stays valid for tests that drive real sync/push; `configure` already cloned
     // it into the config dir's repo.
     let state = AppState {
         store,
-        app_config: crate::app_config::AppConfigStore::new(config_dir.path()),
+        app_config,
         lock_timer: crate::identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(rustpass::LockMode::default()),
@@ -178,7 +184,9 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         clipboard_clear_handle: Mutex::new(None),
         clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(false),
-        app_locked: AtomicBool::new(false),
+        app_locked: Arc::new(AtomicBool::new(false)),
+        gate_idle_timer: crate::identity::IdleTimer::new(),
+        identity_coupled: AtomicBool::new(false),
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),
         active_cancel_slot: Arc::new(Mutex::new(None)),

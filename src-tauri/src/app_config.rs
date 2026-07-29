@@ -1081,8 +1081,9 @@ impl AppConfigStore {
     }
 
     /// Set the app-launch-gate in-app idle timeout (sealed behavior). `After(n)`
-    /// is clamped to the preset range first. No `AppState` cache update — the
-    /// idle timer is frontend-owned.
+    /// is clamped to the preset range first. The Tauri `set_gate_idle` command
+    /// applies the new value to the live backend timer (R057); this store method
+    /// only persists + returns the updated config.
     pub(crate) async fn set_gate_idle(&self, mode: GateIdle) -> Result<AppConfig, Error> {
         self.update_behavior(|b| b.gate_idle = clamp_gate_idle(mode))
             .await

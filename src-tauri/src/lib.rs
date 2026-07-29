@@ -89,7 +89,19 @@ pub(crate) struct AppState {
     /// cold start with the gate on, or after a background wipe. Cleared by
     /// `applock::app_unlock`. Drives the frontend app-lock overlay (which
     /// suppresses the identity overlay while up, so the two never compete).
-    pub(crate) app_locked: AtomicBool,
+    /// `Arc` so the gate idle timer's spawned fire-task can flip it (a plain
+    /// `AtomicBool` can't cross into a `'static` task).
+    pub(crate) app_locked: Arc<AtomicBool>,
+    /// Gate in-app idle timer (R057) — a second [`identity::IdleTimer`] that
+    /// fires `applock::do_app_lock(Idle)` after the configured foreground-idle
+    /// window. Armed on unlock/enable, disarmed on lock/disable; reset on
+    /// activity (the same signal the identity timer consumes).
+    pub(crate) gate_idle_timer: identity::IdleTimer,
+    /// Cached `RepoConfig.unlock_identity_with_app`: when true the identity
+    /// session has no independent auto-lock — its lifecycle follows the gate
+    /// (R057 coupling). Refreshed in `refresh_security_cache` BEFORE
+    /// `reset_lock_timer` reads it (the flag-before-timer ordering rule).
+    pub(crate) identity_coupled: AtomicBool,
     /// One-shot state for the post-unlock legacy-envelope migrate
     /// (`0` = Pending, `1` = `InFlight`, `2` = Done). App Lock defers the master
     /// key until `app_unlock`, so the startup migrate soft-skips; the first
@@ -254,7 +266,10 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(app_lock_enabled),
         // Locked at startup iff the gate is on (master key not yet injected).
-        app_locked: AtomicBool::new(app_lock_enabled),
+        app_locked: Arc::new(AtomicBool::new(app_lock_enabled)),
+        gate_idle_timer: identity::IdleTimer::new(),
+        // Refreshed on the first unlock/set_* (the gate is off / no identity here).
+        identity_coupled: AtomicBool::new(false),
         // Legacy-envelope migrate pending; only consumed on the App-Lock path
         // (first app_unlock). Stays Pending on non-app-lock/desktop (no unlock).
         seal_migrate_state: AtomicU8::new(0),

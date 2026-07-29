@@ -11,7 +11,10 @@ use tauri::{AppHandle, State};
 
 use crate::AppState;
 use crate::app_config::{AppConfig, GateIdle};
-use crate::identity::{LockEventReason, emit_lock_state, refresh_security_cache, reset_lock_timer};
+use crate::identity::{
+    LockEventReason, emit_lock_state, refresh_security_cache, reset_gate_idle_timer,
+    reset_lock_timer,
+};
 
 /// Get the current repo config (for display in settings).
 #[tauri::command]
@@ -67,17 +70,21 @@ pub(crate) async fn set_lock_mode(
 }
 
 /// Set the app-launch-gate in-app idle timeout (`"off"` / `{ "after": secs }`).
-/// Returns the updated app config; the frontend re-arms its idle timer on
-/// receipt. No `refresh_security_cache` — `gate_idle` isn't cached in `AppState`
-/// (the idle timer is frontend-owned).
+/// Returns the updated app config. Applies the new setting to the live gate
+/// idle timer (reads the just-updated `AppConfigStore` cache), so a mid-session
+/// change takes effect immediately — no unlock cycle needed.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn set_gate_idle(
     state: State<'_, AppState>,
+    app: AppHandle,
     mode: GateIdle,
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-gate-idle: {mode:?}");
-    state.app_config.set_gate_idle(mode).await
+    let cfg = state.app_config.set_gate_idle(mode).await?;
+    // Apply to the live timer (reads the just-updated app_config cache).
+    reset_gate_idle_timer(&state, &app);
+    Ok(cfg)
 }
 
 /// Set the password-view auto-clear override (`null` = default, `0` = never).
