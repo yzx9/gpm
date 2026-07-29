@@ -84,6 +84,19 @@ impl std::fmt::Display for AppLockError {
     }
 }
 
+/// Why the gate locked — drives the frontend's auto-prompt rule (the gate
+/// mirror of identity's `LockEventReason`). `Idle` (the in-app idle timer
+/// fired; the user is present but idle) suppresses the auto-prompt so the mask
+/// shows and they tap; `Return` (a foreground-return re-lock) keeps it. `None`
+/// (cold start, no transition yet) → the frontend treats null as "prompt."
+/// Extensible: R058's return-past-timeout adds a variant here.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum AppLockReason {
+    Return,
+    Idle,
+}
+
 /// Snapshot of the app-lock state, emitted as `app-lock-state` on every
 /// transition and returned by `get_app_lock_state`.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -93,11 +106,27 @@ pub(crate) struct AppLockState {
     enabled: bool,
     /// Whether the app is currently locked (master key not in memory).
     locked: bool,
+    /// Why the gate most recently locked (`None` until a lock transition, incl.
+    /// cold start). See [`AppLockReason`].
+    reason: Option<AppLockReason>,
 }
 
-/// Emit the current app-lock state so the frontend mirrors it.
-fn emit_app_lock_state<R: Runtime>(app: &AppHandle<R>, enabled: bool, locked: bool) {
-    let _ = app.emit("app-lock-state", AppLockState { enabled, locked });
+/// Emit the current app-lock state so the frontend mirrors it. `reason` is the
+/// lock transition cause (`None` for an unlock emit or the cold-start snapshot).
+fn emit_app_lock_state<R: Runtime>(
+    app: &AppHandle<R>,
+    enabled: bool,
+    locked: bool,
+    reason: Option<AppLockReason>,
+) {
+    let _ = app.emit(
+        "app-lock-state",
+        AppLockState {
+            enabled,
+            locked,
+            reason,
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +152,9 @@ pub(crate) fn get_app_lock_state(state: State<'_, AppState>) -> AppLockState {
     AppLockState {
         enabled: state.app_lock_enabled.load(Ordering::SeqCst),
         locked: state.app_locked.load(Ordering::SeqCst),
+        // Cold start: no lock transition yet — the frontend treats null as
+        // "prompt," matching today's cold-start auto-prompt.
+        reason: None,
     }
 }
 
@@ -216,7 +248,7 @@ pub(crate) async fn disable_biometric_app_lock(
 
     state.app_lock_enabled.store(false, Ordering::SeqCst);
     state.app_locked.store(false, Ordering::SeqCst);
-    emit_app_lock_state(&app, false, false);
+    emit_app_lock_state(&app, false, false, None);
     Ok(())
 }
 
@@ -392,7 +424,7 @@ pub(crate) async fn app_unlock(
     );
     state.app_locked.store(false, Ordering::SeqCst);
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
-    emit_app_lock_state(&app, enabled, false);
+    emit_app_lock_state(&app, enabled, false, None);
     // Auto-unlock was off / no sealed passphrase / failed: for a passphrase-
     // encrypted identity, a SOFT identity event tells the frontend to use per-op
     // auth (no overlay over the just-unlocked app). A plaintext identity is
@@ -468,28 +500,38 @@ async fn try_identity_auto_unlock<R: Runtime>(
     }
 }
 
-/// Lock the app: wipe the master key (the store becomes unreadable) and the
-/// identity cache. Emitted as a hard app-lock transition so the frontend raises
-/// the app-lock overlay (which suppresses the identity overlay).
+/// Core gate-lock logic shared by the [`app_lock`] command (foreground-return
+/// re-lock) and the gate idle timer's fire path. Wipes the master key (the store
+/// becomes unreadable) and the identity cache, marks the gate locked, and emits
+/// the transition with `reason` so the frontend decides whether to auto-prompt.
+///
+/// In-flight writes are intentionally allowed to finish: they hold only the
+/// already-captured identity bytes (git ops never touch the seal master key),
+/// and any seal read/write racing this wipe surfaces a clean `SealKeyUnavailable`
+/// (never a silent plaintext downgrade — the `ever_keyed` latch guards `seal`).
+/// Do not add a mutex here to "fix" that — it would deadlock the write path.
+pub(crate) async fn do_app_lock<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    reason: AppLockReason,
+) {
+    log::info!("app-lock: lock ({reason:?})");
+    state.store.set_master_key(None);
+    state.store.lock();
+    state.app_locked.store(true, Ordering::SeqCst);
+    let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
+    emit_app_lock_state(app, enabled, true, Some(reason));
+}
+
+/// Lock the app from the frontend (the foreground-return re-lock path). The gate
+/// idle timer calls [`do_app_lock`] directly with [`AppLockReason::Idle`].
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn app_lock(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), AppLockError> {
-    log::info!("app-lock: lock");
-    // Wipe the master key (the store becomes unreadable) and the identity cache.
-    // In-flight writes are intentionally allowed to finish: they hold only the
-    // already-captured identity bytes (git ops never touch the seal master
-    // key), and any seal read/write racing this wipe surfaces a clean
-    // `SealKeyUnavailable` (never a silent plaintext downgrade — the
-    // `ever_keyed` latch guards `seal`). Do not add a mutex here to "fix" that —
-    // it would deadlock the write path.
-    state.store.set_master_key(None);
-    state.store.lock();
-    state.app_locked.store(true, Ordering::SeqCst);
-    let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
-    emit_app_lock_state(&app, enabled, true);
+    do_app_lock(&state, &app, AppLockReason::Return).await;
     Ok(())
 }
 
@@ -550,10 +592,12 @@ mod tests {
         let s = AppLockState {
             enabled: true,
             locked: false,
+            reason: Some(AppLockReason::Idle),
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"enabled\":true"));
         assert!(json.contains("\"locked\":false"));
+        assert!(json.contains("\"reason\":\"idle\""));
     }
 
     #[test]
