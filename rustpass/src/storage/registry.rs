@@ -115,7 +115,7 @@ impl StorageRegistry {
 /// `master_key`) are [`build`](Self::build) parameters, not builder fields, so
 /// one builder can produce many stores (tests; a future multi-store).
 ///
-/// A future `register_crypto` (RFC 0050, blocked) is the namespaced sibling —
+/// A future `register_crypto` would be the namespaced sibling —
 /// hence [`register_storage`](Self::register_storage), not `register_ext`.
 ///
 /// ```no_run

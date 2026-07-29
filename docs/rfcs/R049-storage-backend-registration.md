@@ -78,7 +78,7 @@ selected and constructed.
 **Why crypto is not done this way.** The crypto backends are all pure-Rust
 implementations inside rustpass; there is no external crypto backend driving a
 registry. So crypto resolves its backend internally and does not need this
-mechanism now. That parallel — and why it is deferred there — is its own RFC.
+mechanism now.
 
 ## Alternatives considered
 
@@ -107,6 +107,4 @@ out of scope (they belong to the pluggable-backend RFC).
 
 ## Depends on / Supersedes
 
-Specifies the injection seam in `0046-pluggable-fs-storage-backend.md`. The
-parallel crypto-side mechanism, and why it is deferred, is
-`0050-crypto-backend-registration.md`.
+Specifies the injection seam in `0046-pluggable-fs-storage-backend.md`.

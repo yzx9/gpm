@@ -934,7 +934,7 @@ mod tests {
     /// A default `RepoConfig` (crypto = None) must NOT serialize a `crypto` key,
     /// so existing age stores stay byte-identical after the field is added; and
     /// an explicit `"gpg"` round-trips. Guards the backward-compat claim of the
-    /// crypto-backend field (RFC 0050).
+    /// crypto-backend field.
     #[test]
     fn repo_config_crypto_field_backward_compatible() {
         let default_json = serde_json::to_string(&RepoConfig::default()).unwrap();
