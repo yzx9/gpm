@@ -56,13 +56,9 @@ mod tests;
 /// Application state shared across all Tauri commands.
 pub(crate) struct AppState {
     pub(crate) store: Arc<Store>,
-    /// Auto-lock timer handle (cancel-and-respawn pattern).
-    pub(crate) lock_timer: Mutex<Option<JoinHandle<()>>>,
-    /// Monotonic generation tag for the auto-lock timer. Bumped on every (re)arm; the spawned
-    /// task captures its generation and self-disarms if a newer arm happened while it slept.
-    /// Kills the spurious re-lock race where a stale timer wakes right after a fresh unlock
-    /// — the modal auto-prompts, so such a re-lock would visibly re-show the overlay.
-    pub(crate) lock_generation: Arc<AtomicU64>,
+    /// Identity auto-lock idle timer — cancel-and-respawn with a generation-tagged
+    /// self-disarm (see [`identity::IdleTimer`]). Drives the `Idle` auto-lock mode.
+    pub(crate) lock_timer: identity::IdleTimer,
     /// Identity picked via the file picker, awaiting its passphrase before
     /// `complete_setup_from_file` saves it. Held only in memory (`Zeroizing` on
     /// drop); never persisted.
@@ -248,8 +244,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     let app_state = AppState {
         store,
         app_config,
-        lock_timer: Mutex::new(None),
-        lock_generation: Arc::new(AtomicU64::new(0)),
+        lock_timer: identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         // Defaults until the first unlock/set refreshes them from config;
         // pre-setup no op reads them.

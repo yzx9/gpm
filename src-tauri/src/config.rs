@@ -26,11 +26,7 @@ pub(crate) async fn get_config(state: State<'_, AppState>) -> Result<RepoConfig,
 pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> Result<(), Error> {
     log::info!("config: reset");
     // Cancel timer
-    if let Ok(mut timer) = state.lock_timer.lock()
-        && let Some(handle) = timer.take()
-    {
-        handle.abort();
-    }
+    state.lock_timer.disarm();
     state.store.reset().await?;
     // After a reset there is no identity, so the app is no longer locked — emit
     // the real state so any open unlock overlay closes.

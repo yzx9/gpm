@@ -34,8 +34,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
     AppState {
         store,
         app_config,
-        lock_timer: Mutex::new(None),
-        lock_generation: Arc::new(AtomicU64::new(0)),
+        lock_timer: crate::identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),

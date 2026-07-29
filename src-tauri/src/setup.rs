@@ -711,8 +711,7 @@ mod tests {
         let state = AppState {
             store: Arc::new(Store::new(dir.path().to_path_buf(), None)),
             app_config: crate::app_config::AppConfigStore::new(dir.path()),
-            lock_timer: Mutex::new(None),
-            lock_generation: Arc::new(AtomicU64::new(0)),
+            lock_timer: crate::identity::IdleTimer::new(),
             pending_identity: Mutex::new(None),
             lock_mode: Mutex::new(rustpass::LockMode::default()),
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),

@@ -24,7 +24,9 @@
 //!   read/write commands call after each op.
 
 use std::fmt;
-use std::sync::atomic::Ordering;
+use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rustpass::ssh;
@@ -34,6 +36,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_biometric_keystore::KeystoreExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
+use tokio::task::JoinHandle;
 
 use crate::AppState;
 
@@ -430,6 +433,76 @@ pub(crate) async fn refresh_security_cache(state: &State<'_, AppState>) {
     apply_security_caches(state.inner());
 }
 
+/// A cancel-and-respawn idle timer: holds one in-flight sleep task plus a
+/// monotonic generation tag. `arm(secs, on_fire)` aborts any prior task, bumps
+/// the generation, and spawns a new task that — unless a newer `arm`/`disarm`
+/// superseded it while it slept — runs `on_fire`. `disarm` cancels the task and
+/// supersedes it. The per-timer wipe behavior lives in the `on_fire` closure
+/// each caller passes, so the same primitive backs both the identity auto-lock
+/// timer and (R057) the gate idle timer.
+///
+/// `generation` is `pub(crate)` so tests can simulate a superseding arm by
+/// bumping it directly (mirrors the pre-refactor `AppState.lock_generation`).
+pub(crate) struct IdleTimer {
+    handle: Mutex<Option<JoinHandle<()>>>,
+    pub(crate) generation: Arc<AtomicU64>,
+}
+
+impl IdleTimer {
+    pub(crate) fn new() -> Self {
+        Self {
+            handle: Mutex::new(None),
+            generation: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Whether a timer task is currently armed (in flight). Test-inspection only.
+    #[cfg(test)]
+    pub(crate) fn is_armed(&self) -> bool {
+        self.handle.lock().is_ok_and(|t| t.is_some())
+    }
+
+    /// Cancel any armed task + bump the generation so an in-flight task
+    /// self-disarms on wake. Does NOT run `on_fire` — only the armed task does.
+    pub(crate) fn disarm(&self) {
+        if let Ok(mut t) = self.handle.lock()
+            && let Some(h) = t.take()
+        {
+            h.abort();
+        }
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// (Re)arm: abort the prior task, bump the generation, and spawn a new one
+    /// that sleeps `secs` then runs `on_fire()` unless a newer `arm`/`disarm`
+    /// superseded it. Runtime-generic + duration-injected so tests drive it with
+    /// the mock runtime and a sub-second timeout.
+    pub(crate) fn arm<F, Fut>(&self, secs: u64, on_fire: F)
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send,
+    {
+        let Ok(mut timer) = self.handle.lock() else {
+            return;
+        };
+        // Cancel the existing timer.
+        if let Some(h) = timer.take() {
+            h.abort();
+        }
+        // Bump the generation so any still-in-flight older task self-disarms on wake.
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation_cell = self.generation.clone();
+        *timer = Some(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+            // Stale-task guard: a newer (re)arm/disarm happened while we slept.
+            if generation_cell.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            on_fire().await;
+        }));
+    }
+}
+
 /// Reset the auto-lock timer per the cached effective [`LockMode`]:
 /// `Idle(n)` arms an idle timer for `n`; `Never` and `Immediate` arm no idle
 /// timer at all (the no-cache mode wipes per operation instead; `Never` keeps
@@ -456,12 +529,7 @@ pub(crate) fn reset_lock_timer<R: Runtime>(state: &State<'_, AppState>, app: &Ap
 /// path and the hard lock do their own wipe. Used by [`reset_lock_timer`] for
 /// `Never`/`Immediate`, and as the timer-cancel half of [`soft_wipe`].
 pub(crate) fn disarm_lock(state: &State<'_, AppState>) {
-    if let Ok(mut timer) = state.lock_timer.lock()
-        && let Some(handle) = timer.take()
-    {
-        handle.abort();
-    }
-    state.lock_generation.fetch_add(1, Ordering::SeqCst);
+    state.lock_timer.disarm();
 }
 
 /// Soft wipe — the no-cache mode's post-operation step. Wipes the cached
@@ -505,43 +573,16 @@ pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app
 /// happened while it slept — `abort` alone is not a generation check, so without
 /// this a task already past its sleep could fire right after a fresh unlock.
 pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>, secs: u64) {
-    let Ok(mut timer) = state.lock_timer.lock() else {
-        return;
-    };
-
-    // Cancel existing timer
-    if let Some(handle) = timer.take() {
-        handle.abort();
-    }
-
-    // Bump the generation so any still-in-flight older task self-disarms on wake.
-    let generation = state.lock_generation.fetch_add(1, Ordering::SeqCst) + 1;
-
-    // Spawn new timer
     let app_handle = app.clone();
     let store = state.store.clone();
-    let generation_cell = state.lock_generation.clone();
-
-    let handle = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(secs)).await;
-
-        // Stale-task guard: if a newer (re)arm happened while we slept, a fresher
-        // unlock is in effect — do not lock/emit. `abort` is not a generation check,
-        // so without this a task already past its sleep can fire right after an unlock.
-        if generation_cell.load(Ordering::SeqCst) != generation {
-            return;
-        }
-
+    state.lock_timer.arm(secs, move || async move {
         log::info!("identity: locked (idle)");
         // Lock the real store (clears cached identity + passphrase)
         store.lock();
-
         // Emit the current lock state so the frontend shows the unlock overlay
         // + clears revealed secrets (a hard lock, not a soft wipe).
         emit_lock_state(&app_handle, &store, false, LockEventReason::Idle).await;
     });
-
-    *timer = Some(handle);
 }
 
 /// The post-sleep clipboard-clear decision + action. Extracted from

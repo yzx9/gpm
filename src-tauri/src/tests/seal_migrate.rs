@@ -27,8 +27,7 @@ fn keyed_state(dir: &std::path::Path) -> AppState {
     AppState {
         store,
         app_config: crate::app_config::AppConfigStore::new(dir),
-        lock_timer: Mutex::new(None),
-        lock_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        lock_timer: crate::identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(rustpass::LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),

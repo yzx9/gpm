@@ -89,7 +89,10 @@ async fn stale_timer_self_disarms_after_rearm() {
     // Task A captures generation G; the current-thread runtime parks it.
     identity::arm_lock(&app_state, app.handle(), 0);
     // Simulate a newer arm racing ahead (bumps generation past A's captured G).
-    app_state.lock_generation.fetch_add(1, Ordering::SeqCst);
+    app_state
+        .lock_timer
+        .generation
+        .fetch_add(1, Ordering::SeqCst);
     // Let A wake — it must self-disarm.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -167,7 +170,7 @@ async fn reset_lock_timer_branches_on_mode() {
         set_lock_mode(&app, mode);
         identity::reset_lock_timer(&app_state, app.handle());
         assert!(
-            app_state.lock_timer.lock().unwrap().is_none(),
+            !app_state.lock_timer.is_armed(),
             "{mode:?} must not arm an idle timer"
         );
     }
@@ -175,7 +178,7 @@ async fn reset_lock_timer_branches_on_mode() {
     set_lock_mode(&app, LockMode::Idle(60));
     identity::reset_lock_timer(&app_state, app.handle());
     assert!(
-        app_state.lock_timer.lock().unwrap().is_some(),
+        app_state.lock_timer.is_armed(),
         "Idle must arm an idle timer"
     );
 }
