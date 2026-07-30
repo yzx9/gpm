@@ -4,16 +4,13 @@
 
 /**
  * Shared fixtures for the settings sub-page tests (`SettingsPage` hub +
- * `SettingsGeneralPage` / `SettingsLockingPage` / `SettingsIdentityPage` /
- * `SettingsRepositoryPage`). Each test file owns its own `vi.mock` boilerplate
- * (vitest hoists `vi.mock` above imports, so the mock factories cannot reference
- * imported helpers); this module supplies only the data those per-file mocks
- * layer on top of, plus the per-command override/install helpers.
- *
- * The invoke-mock posture mirrors the original monolithic `SettingsPage.test.ts`:
- * `defaults` is the order-independent success return per command, `overrides`
- * holds per-test `{ value }` or `{ reject }` entries, and `installInvokeMock`
- * wires the layered resolver onto the auto-mocked `invoke`.
+ * `SettingsGeneralPage` / `SettingsIdentityPage` / `SettingsRepositoryPage`).
+ * Each test file owns its own `vi.mock` boilerplate (vitest hoists `vi.mock`
+ * above imports, so the mock factories cannot reference imported helpers); this
+ * module supplies only the data those per-file mocks layer on top of —
+ * `baseDefaults` plus the per-command `when` / `reject` / `resetOverrides`
+ * helpers. Each test file defines its own local `installMock` that wires the
+ * layered resolver onto the auto-mocked `invoke`.
  */
 
 /** SSH-auth repo config (the URL + auth-type display tests key off this). */

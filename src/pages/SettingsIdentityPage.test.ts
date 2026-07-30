@@ -397,4 +397,42 @@ describe("SettingsIdentityPage", () => {
       expect(invoke).toHaveBeenCalledWith("disable_biometric_unlock");
     });
   });
+
+  describe("auto-lock & auto-clear card", () => {
+    it("renders the three controls", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("Auto-Lock & Auto-Clear");
+      expect(wrapper.findAll('input[name="lock-mode"]')).toHaveLength(6);
+      expect(wrapper.findAll('input[name="view-clear"]')).toHaveLength(4);
+      expect(wrapper.findAll('input[name="clipboard-clear"]')).toHaveLength(3);
+    });
+
+    it("switching the auto-lock mode invokes set_lock_mode", async () => {
+      when("set_lock_mode", { lock_mode: { idle: 60 } });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // radios[1] is the "1 min" preset ({ idle: 60 }).
+      await wrapper.findAll('input[name="lock-mode"]')[1]!.trigger("change");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
+        mode: { idle: 60 },
+      });
+    });
+
+    it("switching the view auto-clear invokes set_view_clear_secs", async () => {
+      when("set_view_clear_secs", { view_clear_secs: 10 });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // radios[0] is the "10s" preset (value 10).
+      await wrapper.findAll('input[name="view-clear"]')[0]!.trigger("change");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", { secs: 10 });
+    });
+  });
 });

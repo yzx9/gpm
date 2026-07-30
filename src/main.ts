@@ -111,12 +111,6 @@ const routes = [
     meta: { bundle: "settings" },
   },
   {
-    path: "/settings/locking",
-    name: "settingsLocking",
-    component: () => import("./pages/SettingsLockingPage.vue"),
-    meta: { bundle: "settings" },
-  },
-  {
     path: "/settings/identity",
     name: "settingsIdentity",
     component: () => import("./pages/SettingsIdentityPage.vue"),

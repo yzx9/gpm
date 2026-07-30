@@ -2,8 +2,7 @@
   "title": "Settings",
   "hub": {
     "general": "General",
-    "locking": "Locking & auto-clear",
-    "identity": "Identity & unlock",
+    "lockAndIdentity": "Lock & Identity",
     "repository": "Repository",
     "security": "Security",
     "securityHint": "How gpm protects you",

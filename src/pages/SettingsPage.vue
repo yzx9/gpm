@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import type { AppConfig, AppError, LockMode, RepoConfig } from "@/api";
+import type { AppConfig, AppError, RepoConfig } from "@/api";
 import { getAppConfig, getAuthState, getConfig } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
@@ -13,7 +13,6 @@ import {
   ChevronRight,
   Database,
   Info,
-  KeyRound,
   Lock,
   ScrollText,
   Settings,
@@ -47,13 +46,6 @@ const error = ref("");
 // answer to "what version am I on?" without drilling into About.
 const version = pkg.version;
 
-function lockModeLabel(mode: LockMode | undefined): string {
-  if (!mode) return t("settings.lock.immediate");
-  if (mode === "immediate") return t("settings.lock.immediate");
-  if (mode === "never") return t("settings.lock.never");
-  return t("settings.lock.minutes", { count: Math.round(mode.idle / 60) });
-}
-
 /** Strip scheme and trailing `.git` from a remote URL for a compact host/path
  *  summary (e.g. `git@github.com:user/repo.git` → `github.com:user/repo`). */
 function repoHost(url: string): string {
@@ -70,7 +62,6 @@ const generalValue = computed(() => {
   if (loc === "zh-CN") return t("settings.language.chinese");
   return t("settings.language.system");
 });
-const lockingValue = computed(() => lockModeLabel(appConfig.value?.lock_mode));
 const identityValue = computed(() => {
   if (
     identityType.value === "ssh_ed25519" ||
@@ -159,28 +150,13 @@ onMounted(() => {
           class="hub-row"
           tabindex="0"
           role="button"
-          :aria-label="`${t('settings.hub.locking')} — ${lockingValue}`"
-          @click="router.push({ name: 'settingsLocking' })"
-          @keydown.enter="router.push({ name: 'settingsLocking' })"
-          @keydown.space.prevent="router.push({ name: 'settingsLocking' })"
-        >
-          <BaseIcon :icon="Lock" :size="20" class="text-muted" />
-          <span class="hub-title">{{ t("settings.hub.locking") }}</span>
-          <span class="hub-value">{{ lockingValue }}</span>
-          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
-        </div>
-
-        <div
-          class="hub-row"
-          tabindex="0"
-          role="button"
-          :aria-label="`${t('settings.hub.identity')} — ${identityValue}`"
+          :aria-label="`${t('settings.hub.lockAndIdentity')} — ${identityValue}`"
           @click="router.push({ name: 'settingsIdentity' })"
           @keydown.enter="router.push({ name: 'settingsIdentity' })"
           @keydown.space.prevent="router.push({ name: 'settingsIdentity' })"
         >
-          <BaseIcon :icon="KeyRound" :size="20" class="text-muted" />
-          <span class="hub-title">{{ t("settings.hub.identity") }}</span>
+          <BaseIcon :icon="Lock" :size="20" class="text-muted" />
+          <span class="hub-title">{{ t("settings.hub.lockAndIdentity") }}</span>
           <span class="hub-value">{{ identityValue }}</span>
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>

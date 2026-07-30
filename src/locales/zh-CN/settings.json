@@ -2,8 +2,7 @@
   "title": "设置",
   "hub": {
     "general": "通用",
-    "locking": "锁定与自动清除",
-    "identity": "身份与解锁",
+    "lockAndIdentity": "锁定与身份",
     "repository": "仓库",
     "security": "安全",
     "securityHint": "gpm 如何保护你",

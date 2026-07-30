@@ -3,7 +3,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import type { AppError, AppLockError, BiometricError } from "@/api";
+import type {
+  AppConfig,
+  AppError,
+  AppLockError,
+  BiometricError,
+  LockMode,
+} from "@/api";
 import {
   asAppLockError,
   changePassphrase,
@@ -13,13 +19,17 @@ import {
   enableBiometricAppLock,
   enableBiometricUnlock,
   enableIdentityAutoUnlock,
+  getAppConfig,
   getAppLockState,
   getAuthState,
   getConfig,
   isAppLockAvailable,
   isBiometricAvailable,
   isBiometricUnlockEnabled,
+  setClipboardClearSecs,
+  setLockMode,
   setPassphrase,
+  setViewClearSecs,
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -28,9 +38,15 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
+import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
-import { useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
+import {
+  useSecureClaim,
+  useSecuritySettings,
+  useToast,
+  useWipeOnLeave,
+} from "@/composables";
 import {
   appLockEnrollPrompt,
   appLockUnlockPrompt,
@@ -42,9 +58,15 @@ import { useI18n } from "vue-i18n";
 
 const { toast } = useToast();
 const { t } = useI18n();
+const { applySecurityConfig } = useSecuritySettings();
 
 const loading = ref(false);
 const error = ref("");
+
+// Behavior prefs (auto-lock mode + view/clipboard auto-clear) for the merged
+// Auto-Lock card; each control writes back here + syncs the shared
+// security-settings cache the activity bumper reads.
+const appConfig = ref<AppConfig | null>(null);
 
 // ── Passphrase management state ──────────────────────────────────────────
 const isIdentityEncrypted = ref(false);
@@ -172,6 +194,10 @@ async function loadConfig() {
     appLockEnabled.value = (await getAppLockState()).enabled;
     const cfg = await getConfig();
     identityAutoUnlockEnabled.value = cfg.unlock_identity_with_app ?? false;
+    // Behavior prefs for the merged Auto-Lock card. Push them into the shared
+    // security-settings cache too so the activity bumper reflects them.
+    appConfig.value = await getAppConfig();
+    applySecurityConfig(appConfig.value);
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("settings.passphrase.setFailed");
@@ -338,6 +364,101 @@ async function onDisableIdentityAutoUnlock() {
   toast.success(t("settings.appLock.autoUnlock.disabledToast"));
 }
 
+// ── Auto-Lock & Auto-Clear (merged from the former Locking page) ─────────
+// The identity's own auto-lock timing + the secret auto-clear windows. Each
+// control writes the behavior pref and syncs the shared security-settings cache
+// (clipboard-clear is the exception — it has no bumper dependency).
+const lockLoading = ref(false);
+
+const LOCK_PRESETS = computed<{ label: string; value: LockMode }[]>(() => [
+  { label: t("settings.lock.immediate"), value: "immediate" },
+  { label: t("settings.lock.minutes", { count: 1 }), value: { idle: 60 } },
+  { label: t("settings.lock.minutes", { count: 5 }), value: { idle: 300 } },
+  { label: t("settings.lock.minutes", { count: 15 }), value: { idle: 900 } },
+  { label: t("settings.lock.minutes", { count: 30 }), value: { idle: 1800 } },
+  { label: t("settings.lock.never"), value: "never" },
+]);
+const VIEW_CLEAR_PRESETS = computed<{ label: string; value: number | null }[]>(
+  () => [
+    { label: t("settings.clear.seconds", { count: 10 }), value: 10 },
+    { label: t("settings.clear.default", { count: 45 }), value: null },
+    { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
+    { label: t("settings.lock.never"), value: 0 },
+  ],
+);
+const CLIPBOARD_CLEAR_PRESETS = computed<
+  { label: string; value: number | null }[]
+>(() => [
+  { label: t("settings.clear.default", { count: 45 }), value: null },
+  { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
+  { label: t("settings.lock.never"), value: 0 },
+]);
+
+const rawLockMode = computed<LockMode>(
+  () => appConfig.value?.lock_mode ?? "immediate",
+);
+const rawViewClear = computed<number | null>(
+  () => appConfig.value?.view_clear_secs ?? null,
+);
+const rawClipboardClear = computed<number | null>(
+  () => appConfig.value?.clipboard_clear_secs ?? null,
+);
+
+// Two-arg equality for LockMode (handles the `{ idle }` object presets); passed
+// to BaseSegmentedControl's `by` prop. `lockModeActive` wraps it for hint checks.
+function lockModeEq(a: LockMode, b: LockMode): boolean {
+  if (a === b) return true;
+  if (typeof a === "object" && typeof b === "object") return a.idle === b.idle;
+  return false;
+}
+function lockModeActive(p: LockMode): boolean {
+  return lockModeEq(rawLockMode.value, p);
+}
+
+async function onLockModeChange(mode: LockMode) {
+  if (!appConfig.value) return;
+  lockLoading.value = true;
+  error.value = "";
+  try {
+    appConfig.value = await setLockMode(mode);
+    applySecurityConfig(appConfig.value);
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || t("settings.lock.setModeFailed");
+  } finally {
+    lockLoading.value = false;
+  }
+}
+
+async function onViewClearChange(secs: number | null) {
+  if (!appConfig.value) return;
+  lockLoading.value = true;
+  error.value = "";
+  try {
+    appConfig.value = await setViewClearSecs(secs);
+    applySecurityConfig(appConfig.value);
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || t("settings.clear.setViewFailed");
+  } finally {
+    lockLoading.value = false;
+  }
+}
+
+async function onClipboardClearChange(secs: number | null) {
+  if (!appConfig.value) return;
+  lockLoading.value = true;
+  error.value = "";
+  try {
+    appConfig.value = await setClipboardClearSecs(secs);
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || t("settings.clear.setClipboardFailed");
+  } finally {
+    lockLoading.value = false;
+  }
+}
+
 onMounted(() => {
   loadConfig();
 });
@@ -347,8 +468,8 @@ onMounted(() => {
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
-      :title="t('settings.hub.identity')"
-      :title-icon="KeyRound"
+      :title="t('settings.hub.lockAndIdentity')"
+      :title-icon="Lock"
     />
 
     <div v-if="loading" class="text-center text-muted py-8">
@@ -502,6 +623,65 @@ onMounted(() => {
             </template>
           </div>
         </template>
+      </BaseCard>
+
+      <!-- Auto-lock & auto-clear (merged from the former Locking page): the
+           identity's own auto-lock timing + the secret auto-clear windows. -->
+      <BaseCard as="section">
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.lock.title") }}
+        </h2>
+        <p class="text-xs text-muted mb-3">
+          {{ t("settings.lock.description") }}
+        </p>
+
+        <!-- Identity auto-lock mode -->
+        <BaseSegmentedControl
+          class="mb-3"
+          name="lock-mode"
+          :legend="t('settings.lock.autoLockLegend')"
+          wrap
+          :model-value="rawLockMode"
+          :by="lockModeEq"
+          :options="LOCK_PRESETS"
+          :disabled="lockLoading"
+          @change="onLockModeChange"
+        >
+          <template #hint>
+            <p class="text-xs text-muted mt-1">
+              <template v-if="lockModeActive('immediate')">{{
+                t("settings.lock.immediateHint")
+              }}</template>
+              <template v-else-if="lockModeActive('never')">{{
+                t("settings.lock.neverHint")
+              }}</template>
+              <template v-else>{{ t("settings.lock.idleHint") }}</template>
+            </p>
+          </template>
+        </BaseSegmentedControl>
+
+        <!-- Password view auto-clear -->
+        <BaseSegmentedControl
+          class="mb-3"
+          name="view-clear"
+          :legend="t('settings.lock.viewClearLegend')"
+          wrap
+          :model-value="rawViewClear"
+          :options="VIEW_CLEAR_PRESETS"
+          :disabled="lockLoading"
+          @change="onViewClearChange"
+        />
+
+        <!-- Clipboard auto-clear -->
+        <BaseSegmentedControl
+          name="clipboard-clear"
+          :legend="t('settings.lock.clipboardClearLegend')"
+          wrap
+          :model-value="rawClipboardClear"
+          :options="CLIPBOARD_CLEAR_PRESETS"
+          :disabled="lockLoading"
+          @change="onClipboardClearChange"
+        />
       </BaseCard>
     </div>
 
