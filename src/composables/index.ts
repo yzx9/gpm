@@ -13,6 +13,7 @@ export * from "./useOverlayBackHandler";
 export * from "./usePullToRefresh";
 export * from "./useScrollLock";
 export * from "./useSecretReveal";
+export * from "./useSecureClaim";
 export * from "./useSecureScreen";
 export * from "./useSecuritySettings";
 export * from "./useToast";

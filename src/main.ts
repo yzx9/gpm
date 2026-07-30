@@ -42,10 +42,10 @@ const secureScreenState = createSecureScreen();
 const securitySettingsState = createSecuritySettings();
 const toastState = createToast();
 
-// `meta.secure` marks routes that render decrypted/generated secrets or
-// credentials — the router guard sets Android FLAG_SECURE on these (when the
-// user's master toggle is on). The entry list (names only) and history
-// (commit signatures) carry no secret content and stay capturable.
+// Screen-capture protection (FLAG_SECURE) is component-level (R031): each
+// secret-bearing component acquires a claim while its secret is on screen (see
+// `useSecureClaim`), so routes carry no `secure` flag and every navigation can
+// animate — the secure↔capturable boundary no longer freezes the transition.
 //
 // Route components are lazy so each page's JS chunk (and its message bundle,
 // loaded by the `beforeEach` guard) loads on demand — keeping the initial
@@ -56,7 +56,6 @@ const routes = [
     path: "/setup",
     name: "setup",
     component: () => import("./pages/SetupPage.vue"),
-    meta: { secure: true },
   },
   {
     path: "/entries",
@@ -67,39 +66,33 @@ const routes = [
     path: "/create",
     name: "create",
     component: () => import("./pages/CreatePage.vue"),
-    meta: { secure: true },
   },
   {
     path: "/create/preset/:presetId",
     name: "createPreset",
     component: () => import("./pages/CreatePresetPage.vue"),
-    meta: { secure: true },
   },
   {
     path: "/create/custom",
     name: "createCustom",
     component: () => import("./pages/CreateCustomPage.vue"),
-    meta: { secure: true },
   },
   {
     path: "/generate",
     name: "generate",
     component: () => import("./pages/GeneratePasswordPage.vue"),
-    meta: { secure: true },
   },
   {
     path: "/entry/:pathMatch(.*)",
     name: "entry",
     component: () => import("./pages/EntryDetailPage.vue"),
     props: true,
-    meta: { secure: true },
   },
   {
     path: "/edit/:pathMatch(.*)",
     name: "entryEdit",
     component: () => import("./pages/EntryEditPage.vue"),
     props: true,
-    meta: { secure: true },
   },
   {
     path: "/settings",
@@ -127,19 +120,18 @@ const routes = [
     path: "/settings/identity",
     name: "settingsIdentity",
     component: () => import("./pages/SettingsIdentityPage.vue"),
-    meta: { secure: true, bundle: "settings" },
+    meta: { bundle: "settings" },
   },
   {
     path: "/settings/repository",
     name: "settingsRepository",
     component: () => import("./pages/SettingsRepositoryPage.vue"),
-    meta: { secure: true, bundle: "settings" },
+    meta: { bundle: "settings" },
   },
   {
     path: "/settings/ssh-key",
     name: "sshKey",
     component: () => import("./pages/SshKeyPage.vue"),
-    meta: { secure: true },
   },
   {
     path: "/settings/add-key",
@@ -194,11 +186,10 @@ const router = createRouter({
   routes,
 });
 
-// Per-route screen-capture protection + configured-only access. The guards
-// live in `router-guards.ts` (extracted so the raise-before-paint invariant is
-// testable). Registered before the nav-direction afterEach (installed in the
-// bootstrap below) so the secure settle runs first.
-installRouteGuards(router, secureScreenState, toastState);
+// Configured-only access guard + per-route i18n bundle load. Screen-capture
+// protection is component-level (R031), so the guard no longer touches
+// FLAG_SECURE. Lives in `router-guards.ts` for testability.
+installRouteGuards(router);
 
 // Bootstrap. Wrapped async so the boot locale's `common` bundle can load before
 // the first paint when the boot locale isn't the default (whose `common` is
@@ -214,11 +205,9 @@ void (async () => {
   // with a recursion guard — it must never break rendering.
   installFrontendLogger(app);
   // Direction tracker for the <router-view> slide transition. Registered after
-  // the secure-screen guards so its afterEach runs alongside them. The
-  // secure-boundary gate inside it keeps FLAG_SECURE safe (see useNavDirection),
-  // reading the live protection state so slides animate everywhere when the
-  // screen-capture toggle is off.
-  const navDirection = createNavDirection(router, secureScreenState);
+  // the auth guard. Screen-capture protection is component-level (R031), so
+  // every navigation animates by direction — no secure-boundary freeze.
+  const navDirection = createNavDirection(router);
   app.provide(LOCK_KEY, lockState);
   app.provide(APP_LOCK_KEY, appLockStore);
   app.provide(NAV_DIRECTION_KEY, navDirection);

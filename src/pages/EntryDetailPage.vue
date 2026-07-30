@@ -27,6 +27,7 @@ import {
   useSecretReveal,
   useSecuritySettings,
   useToast,
+  useWipeOnLeave,
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
@@ -49,10 +50,17 @@ const entryName = entryPath.replace(/\.age$/, "");
 
 // Sensitive state lives in the shared secure-reveal composable: configurable
 // auto-clear, wipe on unmount, wipe on browser back. `copyPassword` calls
-// `clear()` itself.
-const { password, notes, revealed, clearsInSecs, reveal, clear } =
+// `clear()` itself. `withClaim` raises FLAG_SECURE before the decrypted secret
+// arrives and brands it so `reveal()` can type-check (R031).
+const { password, notes, revealed, clearsInSecs, reveal, clear, withClaim } =
   useSecretReveal();
 const { viewClearSecs } = useSecuritySettings();
+// Invalidation token (R031): a decrypt resolving after we left (Back/lock) must
+// not write the secret into a leaving/dead component. Bumped on every leave.
+let revealToken = 0;
+useWipeOnLeave(() => {
+  revealToken++;
+});
 const loading = ref(false);
 const error = ref("");
 // True only while the alert shows a reveal decrypt failure, so the
@@ -130,10 +138,22 @@ async function showPassword() {
   loading.value = true;
   error.value = "";
   decryptError.value = false;
+  const myToken = ++revealToken;
   try {
-    const result = await runWithAuth(() => showPasswordCmd(entryPath));
-    showTotp.value = result.has_totp;
-    reveal(result);
+    // withClaim raises FLAG_SECURE before the secret arrives and brands it; if
+    // we left mid-decrypt (token bumped), discard rather than render into a
+    // leaving/dead component. A failed acquire returns null → abort with a toast
+    // (the per-op replacement for the old route-guard abort).
+    const claimed = await withClaim(() =>
+      runWithAuth(() => showPasswordCmd(entryPath)),
+    );
+    if (myToken !== revealToken) return;
+    if (!claimed) {
+      error.value = t("common.toast.secureScreenFailed");
+      return;
+    }
+    reveal(claimed);
+    showTotp.value = claimed.has_totp;
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;

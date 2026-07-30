@@ -5,13 +5,11 @@
 import type { InjectionKey, Ref } from "vue";
 import { inject, ref } from "vue";
 import { START_LOCATION, type Router } from "vue-router";
-import type { SecureScreenState } from "./useSecureScreen";
 
 /**
  * The `<Transition :name>` for the `<router-view>` swap.
- * `""` means no animation (instant) — used on secure↔non-secure boundaries
- * (only while screen-capture protection is active) and on `router.replace`
- * (terminal/reset flows), where position is unchanged.
+ * `""` means no animation (instant) — used on the initial paint and on
+ * `router.replace` (terminal/reset flows), where position is unchanged.
  */
 export type NavTransitionName = "" | "slide-forward" | "slide-back";
 
@@ -29,8 +27,8 @@ function historyPosition(): number {
 }
 
 /**
- * Track navigation direction and the secure-screen boundary, exposing a
- * reactive transition name for the `<router-view>` swap.
+ * Track navigation direction, exposing a reactive transition name for the
+ * `<router-view>` swap.
  *
  * Direction is read by comparing the just-settled `history.state.position` to
  * the previously-settled one inside `afterEach`. This is deliberately NOT a
@@ -38,24 +36,16 @@ function historyPosition(): number {
  * entry by the time router guards run, so a before-capture cannot tell back
  * from forward. Comparing two settled positions dodges that entirely.
  *
- * Secure↔non-secure transitions are forced to `""` (no animation) ONLY in
- * `"sensitive"` mode (when `secureAvailable`): a simultaneous slide there would
- * leave the departing secure page visible while the secure-screen guard (in
- * `main.ts`) clears `FLAG_SECURE` for the arriving non-secure route — a capture
- * window. Under `"off"` / `"always"` (or on desktop, where `FLAG_SECURE` is
- * never set, or is constant) the window flag does not toggle across routes, so
- * there is no boundary to freeze on and every navigation animates for a
- * consistent feel. Like-to-like swaps carry no secure-screen concern and
- * animate freely.
+ * R031: screen-capture protection is component-level now, so there is no
+ * secure↔capturable boundary to freeze on — every navigation animates by
+ * direction. (Previously a `"sensitive"`-mode boundary forced `""` because the
+ * route guard dropped FLAG_SECURE mid-slide; that guard is gone.)
  */
-export function createNavDirection(
-  router: Router,
-  secureState: SecureScreenState,
-): NavDirectionState {
+export function createNavDirection(router: Router): NavDirectionState {
   let lastPosition = historyPosition();
   const transitionName = ref<NavTransitionName>("");
 
-  router.afterEach((to, from) => {
+  router.afterEach((_to, from) => {
     const pos = historyPosition();
     // The initial navigation has no real "from" route (START_LOCATION) and no
     // meaningful direction — never animate the first paint.
@@ -64,22 +54,7 @@ export function createNavDirection(
       lastPosition = pos;
       return;
     }
-    // Only the realistic capture window (protection active) freezes the slide.
-    // FLAG_SECURE only toggles between routes in `"sensitive"` mode (a secret
-    // route vs. the capturable list); under `"off"` / `"always"` it is constant,
-    // so there's no boundary — animate every navigation for consistency. On
-    // desktop `secureAvailable` is false, so the same holds. Pre-`initSecureScreen`
-    // `secureAvailable` is briefly false on Android; the initial nav never
-    // animates, and the `MainActivity.onCreate` secure-boot default holds
-    // FLAG_SECURE on until then — so no window opens early.
-    const protectionActive =
-      secureState.secureAvailable.value &&
-      secureState.secureScreenMode.value === "sensitive";
-    const crossesSecure =
-      protectionActive && !!from.meta?.secure !== !!to.meta?.secure;
-    if (crossesSecure) {
-      transitionName.value = "";
-    } else if (pos > lastPosition) {
+    if (pos > lastPosition) {
       transitionName.value = "slide-forward";
     } else if (pos < lastPosition) {
       transitionName.value = "slide-back";

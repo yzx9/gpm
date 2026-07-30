@@ -30,7 +30,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
-import { useToast, useWipeOnLeave } from "@/composables";
+import { useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
 import {
   appLockEnrollPrompt,
   appLockUnlockPrompt,
@@ -57,6 +57,9 @@ const identityType = ref("");
 type PassphraseMode =
   "set" | "change" | "enable-biometric" | "enable-auto-unlock";
 const passphraseModal = ref<PassphraseMode | null>(null);
+// R031: the passphrase modal collects a credential, so hold a screen-capture
+// claim only while it's open (the rest of this page carries no secret).
+const { acquire: acquireSecure, release: releaseSecure } = useSecureClaim();
 const ppCurrent = ref("");
 const ppNew = ref("");
 const passphraseLoading = ref(false);
@@ -138,13 +141,16 @@ const isSshIdentity = computed(
 );
 
 /** Wipe every in-DOM secret: the typed passphrase-modal inputs and their
- *  confirm echo. Idempotent — fires on a hard lock, browser back, and unmount. */
+ *  confirm echo. Idempotent — fires on a hard lock, browser back, and unmount.
+ *  Also releases the modal's screen-capture claim (closePassphraseModal is the
+ *  other dismiss path; this covers a hard lock while the modal is open). */
 function wipeSecrets() {
   ppCurrent.value = "";
   ppNew.value = "";
   ppAck.value = false;
   passphraseModal.value = null;
   ppField.value?.reset();
+  releaseSecure();
 }
 
 // The unlock modal keeps this page mounted on auto-lock, so unmount alone can't
@@ -174,11 +180,18 @@ async function loadConfig() {
   }
 }
 
-function openPassphraseModal(mode: PassphraseMode) {
+async function openPassphraseModal(mode: PassphraseMode) {
   ppCurrent.value = "";
   ppNew.value = "";
   ppAck.value = false;
   error.value = "";
+  // Raise FLAG_SECURE BEFORE the credential inputs render, so an autofilled
+  // current-passphrase is never on screen in the unprotected window. Fail-closed:
+  // if the acquire IPC fails, don't open the modal.
+  if (!(await acquireSecure())) {
+    error.value = t("common.toast.secureScreenFailed");
+    return;
+  }
   passphraseModal.value = mode;
 }
 
@@ -187,6 +200,7 @@ function closePassphraseModal() {
   ppNew.value = "";
   ppAck.value = false;
   passphraseModal.value = null;
+  releaseSecure();
 }
 
 // One commit boundary for every passphrase operation. Submit dispatches to

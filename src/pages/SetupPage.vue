@@ -6,8 +6,9 @@
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import CloneFlow from "@/components/setup/CloneFlow.vue";
 import CreateFlow from "@/components/setup/CreateFlow.vue";
+import { useSecureClaim } from "@/composables";
 import { LockKeyhole } from "@lucide/vue";
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -20,6 +21,14 @@ const { t } = useI18n();
 // Rendered as a <select> (not buttons) so it does not pollute
 // `findAll("button[type='button'])` — see the back-button ordering test.
 const mode = ref<"clone" | "create">("clone");
+
+// R031: setup collects git credentials + an identity (CloneFlow/CreateFlow
+// children), so hold a screen-capture claim for the route's lifetime. FLAG_SECURE
+// is window-level, so this one claim covers every hosted input across both flows.
+const { acquire: acquireSecure } = useSecureClaim();
+onMounted(() => {
+  void acquireSecure();
+});
 
 function onDone() {
   // Setup is terminal — replace so Back can't return to the setup flow.

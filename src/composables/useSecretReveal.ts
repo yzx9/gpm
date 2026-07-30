@@ -4,6 +4,7 @@
 
 import type { SensitiveContent } from "@/api";
 import { ref, watch } from "vue";
+import { type Claimed, useSecureClaim } from "./useSecureClaim";
 import { useSecuritySettings } from "./useSecuritySettings";
 import { useWipeOnLeave } from "./useWipeOnLeave";
 
@@ -11,8 +12,14 @@ import { useWipeOnLeave } from "./useWipeOnLeave";
  * Reveal sensitive content (a decrypted secret) under the app's secure-reveal
  * contract: auto-clear after the configured view-clear seconds (Never ⇒ stays
  * until manual hide / lock / unmount), plus the shared `useWipeOnLeave`
- * lifecycle (wipe on browser back, unmount, and a _hard_ identity lock). Shared
- * by the entry detail view and the create-conflict "View existing" path.
+ * lifecycle (wipe on browser back, unmount, and a _hard_ identity lock).
+ *
+ * R031 — this composable owns the screen-capture-protection claim for the
+ * revealed secret. `reveal()` accepts a {@link Claimed} value — which only
+ * `withClaim` can produce (it raises `FLAG_SECURE` before the secret arrives) —
+ * so a caller cannot render a secret without first acquiring the claim.
+ * `clear()` releases the claim, and `useWipeOnLeave(clear)` ensures it releases
+ * on back/lock/unmount too. Used by the entry detail view.
  *
  * The auto-clear duration comes from the shared security-settings cache, so a
  * settings change reschedules an in-flight reveal live. `onLock` fires only on a
@@ -23,6 +30,7 @@ import { useWipeOnLeave } from "./useWipeOnLeave";
  */
 export function useSecretReveal() {
   const { viewClearSecs } = useSecuritySettings();
+  const { withClaim, release } = useSecureClaim();
 
   const password = ref<string | null>(null);
   const notes = ref<string | null>(null);
@@ -37,7 +45,8 @@ export function useSecretReveal() {
    *  a throttled/skipped interval can't make the label drift. */
   let wipeDeadline = 0;
 
-  /** Wipe any revealed content and cancel the auto-clear timer. */
+  /** Wipe any revealed content, cancel the auto-clear timer, and release the
+   *  screen-capture claim. Idempotent — safe for the back/unmount/lock double-fire. */
   function clear() {
     password.value = null;
     notes.value = null;
@@ -51,6 +60,7 @@ export function useSecretReveal() {
       clearInterval(countdownTimer);
       countdownTimer = null;
     }
+    release();
   }
 
   /** (Re)arm the auto-clear timer from the current setting. `0` (Never) arms no
@@ -88,8 +98,13 @@ export function useSecretReveal() {
     }
   }
 
-  /** Reveal `content`, replacing any prior reveal and (re)starting the timer. */
-  function reveal(content: Pick<SensitiveContent, "password" | "notes">) {
+  /** Reveal `content` (already produced under a live claim via `withClaim`),
+   *  replacing any prior reveal and (re)starting the auto-clear timer. The
+   *  `Claimed` type is the compile-time guarantee the caller acquired
+   *  FLAG_SECURE first. */
+  function reveal(
+    content: Claimed<Pick<SensitiveContent, "password" | "notes">>,
+  ) {
     password.value = content.password;
     notes.value = content.notes;
     revealed.value = true;
@@ -101,7 +116,7 @@ export function useSecretReveal() {
   // the overlay on auto-lock, so unmount alone can't guarantee a wipe — the
   // explicit back + lock triggers close the gap. Soft wipes are excluded by
   // useLockState's onLock contract, so a revealed secret survives a post-op soft
-  // wipe.
+  // wipe. `clear()` also releases the claim, so FLAG_SECURE drops with the secret.
   useWipeOnLeave(clear);
 
   // Reschedule an in-flight reveal if the view-clear setting changes under it.
@@ -111,5 +126,5 @@ export function useSecretReveal() {
     }
   });
 
-  return { password, notes, revealed, clearsInSecs, reveal, clear };
+  return { password, notes, revealed, clearsInSecs, reveal, clear, withClaim };
 }

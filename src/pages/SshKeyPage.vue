@@ -9,13 +9,12 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import { useLockState, useToast } from "@/composables";
+import { useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
 import { Copy, KeyRound, LockOpen, TriangleAlert } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
-const { onLock } = useLockState();
 const { toast } = useToast();
 
 const publicKey = ref("");
@@ -24,6 +23,10 @@ const showPrivate = ref(false);
 const loading = ref(false);
 const exporting = ref(false);
 const error = ref("");
+// R031: hold a screen-capture claim while the private key is on screen.
+// `withClaim` raises FLAG_SECURE before it arrives; `release` drops it on hide /
+// lock / unmount (onScopeDispose backs up the unmount path).
+const { withClaim, release: releaseSecure } = useSecureClaim();
 
 onMounted(loadPublicKey);
 
@@ -46,8 +49,14 @@ async function exportPrivateKey() {
   exporting.value = true;
   error.value = "";
   try {
-    const result = await exportSshPrivateKey();
-    privateKey.value = result.private_key;
+    // withClaim raises FLAG_SECURE before the private key arrives; a failed
+    // acquire returns null → abort (the per-op replacement for the route abort).
+    const claimed = await withClaim(() => exportSshPrivateKey());
+    if (!claimed) {
+      error.value = t("common.toast.secureScreenFailed");
+      return;
+    }
+    privateKey.value = claimed.private_key;
     showPrivate.value = true;
   } catch (e) {
     const appError = e as AppError;
@@ -55,6 +64,13 @@ async function exportPrivateKey() {
   } finally {
     exporting.value = false;
   }
+}
+
+/** Hide the private key and drop the screen-capture claim. */
+function hidePrivate() {
+  privateKey.value = "";
+  showPrivate.value = false;
+  releaseSecure();
 }
 
 async function copyText(text: string) {
@@ -66,12 +82,11 @@ async function copyText(text: string) {
   }
 }
 
-// The unlock modal keeps this page mounted on auto-lock, so wipe any revealed
-// private key the moment the identity locks (mirrors SettingsPage's onLock wipe).
-onLock(() => {
-  privateKey.value = "";
-  showPrivate.value = false;
-});
+// Wipe any revealed private key on a hard identity lock, on browser back, and on
+// unmount — matching the other secret pages (useWipeOnLeave covers all three,
+// including the lock the old onLock wired). The unlock modal can keep this page
+// mounted on auto-lock, so unmount alone can't guarantee a wipe.
+useWipeOnLeave(hidePrivate);
 </script>
 
 <template>
@@ -131,14 +146,7 @@ onLock(() => {
           </button>
         </div>
         <pre class="key-display private-key-display">{{ privateKey }}</pre>
-        <BaseButton
-          variant="action"
-          class="mt-1"
-          @click="
-            showPrivate = false;
-            privateKey = '';
-          "
-        >
+        <BaseButton variant="action" class="mt-1" @click="hidePrivate">
           {{ t("sshKey.hidePrivate") }}
         </BaseButton>
       </div>

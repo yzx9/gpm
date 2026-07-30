@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createNavDirection } from "@/composables/useNavDirection";
-import { createSecureScreen } from "@/composables/useSecureScreen";
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
@@ -16,26 +15,17 @@ vi.mock("vue-router", async () => await vi.importActual("vue-router"));
 const Plain = { render: () => h("div") };
 
 /**
- * Build a router with one non-secure route (`/`) and two secure routes, so the
- * boundary the gate cares about (secure↔non-secure) is reachable in one step.
+ * Build a router with a non-secret route (`/`) and two formerly-secure routes.
+ * R031 removed the route-level secure flag, so the transition no longer freezes
+ * on the secure↔capturable boundary — every navigation animates by direction.
  */
 function buildRouter() {
   return createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: "/", name: "home", component: Plain }, // NOT secure
-      {
-        path: "/secret",
-        name: "secret",
-        meta: { secure: true },
-        component: Plain,
-      },
-      {
-        path: "/other",
-        name: "other",
-        meta: { secure: true },
-        component: Plain,
-      },
+      { path: "/", name: "home", component: Plain },
+      { path: "/secret", name: "secret", component: Plain },
+      { path: "/other", name: "other", component: Plain },
     ],
   });
 }
@@ -67,74 +57,33 @@ describe("createNavDirection", () => {
   });
 
   it("does not animate the initial paint", async () => {
-    const secureState = createSecureScreen({ available: true });
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router, secureState);
+    const { transitionName } = createNavDirection(router);
 
     // The first navigation has no real "from" (START_LOCATION) ⇒ never animates.
     await goto(router, "/secret", 1);
     expect(transitionName.value).toBe("");
   });
 
-  it("freezes the transition on a secure boundary while protection is on", async () => {
-    const secureState = createSecureScreen({ available: true }); // sensitive (default)
+  it("slides across the former secure↔capturable boundary", async () => {
+    // R031: the boundary freeze is gone — a push from a secret page to a
+    // non-secret page animates forward, where it previously froze to "".
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router, secureState);
+    const { transitionName } = createNavDirection(router);
 
     await goto(router, "/secret", 1); // initial paint ⇒ ""
-    // secret (secure) → home (non-secure): boundary crossed ⇒ no animation,
-    // even though the push advanced the history cursor.
-    await goto(router, "/", 2);
-    expect(transitionName.value).toBe("");
-  });
-
-  it("slides across a secure boundary under off mode", async () => {
-    const secureState = createSecureScreen({ available: true, mode: "off" });
-    const router = buildRouter();
-    const { transitionName } = createNavDirection(router, secureState);
-
-    await goto(router, "/secret", 1); // initial paint ⇒ ""
-    // Same secure→non-secure boundary as above, but under off mode
-    // FLAG_SECURE never toggles between routes — the slide animates normally.
-    await goto(router, "/", 2);
+    await goto(router, "/", 2); // secret → home: animates now
     expect(transitionName.value).toBe("slide-forward");
   });
 
-  it("slides across a secure boundary under always mode", async () => {
-    // Under always, FLAG_SECURE is constant across routes (always on), so the
-    // boundary freeze (a sensitive-only behavior) does not apply either.
-    const secureState = createSecureScreen({ available: true, mode: "always" });
+  it("animates push/pop between like routes", async () => {
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router, secureState);
-
-    await goto(router, "/secret", 1); // initial paint ⇒ ""
-    await goto(router, "/", 2); // secure→non-secure boundary, always ⇒ slide
-    expect(transitionName.value).toBe("slide-forward");
-  });
-
-  it("slides across a secure boundary on desktop (protection unavailable)", async () => {
-    // Desktop: the screen-secure plugin is absent, so FLAG_SECURE is never set
-    // on any route — the boundary freeze must not apply even with the toggle on.
-    const secureState = createSecureScreen(); // available defaults false (desktop)
-    const router = buildRouter();
-    const { transitionName } = createNavDirection(router, secureState);
-
-    await goto(router, "/secret", 1); // initial paint ⇒ ""
-    await goto(router, "/", 2); // secure→non-secure boundary, no plugin ⇒ slide
-    expect(transitionName.value).toBe("slide-forward");
-  });
-
-  it("animates push/pop between like-protection routes", async () => {
-    const secureState = createSecureScreen({ available: true });
-    const router = buildRouter();
-    const { transitionName } = createNavDirection(router, secureState);
+    const { transitionName } = createNavDirection(router);
 
     await goto(router, "/secret", 1); // initial paint ⇒ "", current = /secret
-    // secret → other (both secure): forward push animates.
-    await goto(router, "/other", 2);
+    await goto(router, "/other", 2); // forward push animates
     expect(transitionName.value).toBe("slide-forward");
 
-    // pop back to secret: backward navigation animates.
     position = 1;
     router.back();
     await flushPromises();
@@ -142,13 +91,10 @@ describe("createNavDirection", () => {
   });
 
   it("does not animate a replace (position unchanged)", async () => {
-    const secureState = createSecureScreen({ available: true });
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router, secureState);
+    const { transitionName } = createNavDirection(router);
 
     await goto(router, "/secret", 1); // initial paint ⇒ "", current = /secret
-    // replace preserves history position ⇒ no animation, even though secret →
-    // other would otherwise be a like-protection forward push.
     position = 1; // unchanged from the previous nav
     await router.replace("/other");
     await flushPromises();

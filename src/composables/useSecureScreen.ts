@@ -12,7 +12,8 @@ import type { SecureScreenMode } from "@/api/common";
 import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
- * Per-page screen-capture protection (Android `FLAG_SECURE`) state.
+ * Screen-capture protection (Android `FLAG_SECURE`) state — component-level
+ * (R031).
  *
  * `secureScreenMode` is the three-state master setting — `"off"` / `"sensitive"`
  * (default) / `"always"` — persisted in the backend `app.json`.
@@ -21,26 +22,29 @@ import { inject, ref, type InjectionKey, type Ref } from "vue";
  * Android plugin is never mistaken for desktop (which would fail open).
  *
  * Effective `FLAG_SECURE` per mode:
- *  - `off` — never secure (the user explicitly allowed capture, including the
- *    unlock overlay);
+ *  - `off` — component claims are ignored (the user explicitly allowed capture,
+ *    including of a revealed secret); only the credential overlay forces the
+ *    flag (see below);
  *  - `always` — every screen secure at all times;
- *  - `sensitive` — a route is secure when it bears the secret flag, OR the
- *    global unlock overlay is up.
+ *  - `sensitive` — the window is secure while ANY component holds a claim
+ *    (a secret is on screen), OR the global unlock overlay is up.
  *
- * The overlay collects the identity passphrase — a credential that must never be
- * capturable — so under `"sensitive"` it forces `FLAG_SECURE` on even on an
- * otherwise-capturable route like `/entries`.
+ * Claims are component-scoped (see `useSecureClaim`); this singleton only ORs
+ * the live claim count into the single window-level bit. The credential
+ * overlays (UnlockModal/AppLockOverlay) collect a passphrase / gate the master
+ * key, so under every mode `overlayActive` forces `FLAG_SECURE` on — even under
+ * `"off"` and on an otherwise-capturable route like `/entries`.
  *
  * `App.vue` calls `initSecureScreen` on mount to load availability + the mode
- * and reconcile the current route. The boot default in `MainActivity.onCreate`
- * keeps every screen secure until that runs.
+ * and reconcile. The boot default in `MainActivity.onCreate` keeps every screen
+ * secure until that runs.
  *
- * Provided app-wide via `SECURE_SCREEN_KEY` (see `main.ts`); the router guards
- * hold the instance directly (they run outside setup). Tests construct their
- * own via `createSecureScreen()`.
+ * Provided app-wide via `SECURE_SCREEN_KEY` (see `main.ts`); `useSecureClaim`
+ * holds the instance via `useSecureScreen()` (it runs in component setup).
+ * Tests construct their own via `createSecureScreen()`.
  */
 
-/** Reactive screen-capture-protection state + the route/overlay drivers. */
+/** Reactive screen-capture-protection state + the claim/overlay drivers. */
 export interface SecureScreenState {
   /** Three-state master mode (default `"sensitive"`, persisted via
    *  `setSecureScreenMode`). Mutable so tests can drive it without invoking the
@@ -52,18 +56,19 @@ export interface SecureScreenState {
   /** Load availability + the master mode once, then reconcile. Idempotent. */
   initSecureScreen: () => Promise<void>;
   /** Reset the one-shot latch and re-init from the backend. Use after an
-   *  app-unlock: the cold-start `initSecureScreen` read the default "sensitive"
-   *  (the sealed `secure_screen_mode` isn't readable pre-unlock); this re-reads
-   *  the real mode and re-applies FLAG_SECURE. */
+   * app-unlock: the cold-start `initSecureScreen` read the default "sensitive"
+   * (the sealed `secure_screen_mode` isn't readable pre-unlock); this re-reads
+   * the real mode and re-applies FLAG_SECURE. */
   reload: () => Promise<void>;
-  /** Pre-paint raise for a navigation transition (covers the departing page). */
-  raiseSecureForRoute: (needsCover: boolean) => Promise<boolean>;
-  /** Settle the flag to the arriving route's level (after paint). */
-  applySecureForRoute: (routeSecure: boolean) => Promise<boolean>;
   /** Reflect whether the global unlock overlay is up; re-applies immediately. */
   setSecureOverlay: (active: boolean) => Promise<boolean>;
   /** Persist the master mode, then re-apply. Reverts on failure. */
   setSecureScreenMode: (mode: SecureScreenMode) => Promise<boolean>;
+  /** Acquire one component-level claim (raises FLAG_SECURE). Returns false if the
+   *  plugin call failed — the caller must not render the secret. */
+  acquireClaim: () => Promise<boolean>;
+  /** Release one component-level claim (idempotent, floored at 0). */
+  releaseClaim: () => Promise<boolean>;
 }
 
 /** Seed options for `createSecureScreen` (test/seed only; production passes none). */
@@ -87,17 +92,23 @@ export function createSecureScreen(
 ): SecureScreenState {
   const secureScreenMode = ref<SecureScreenMode>(opts.mode ?? "sensitive");
   const secureAvailable = ref(opts.available === true);
-  let currentRouteSecure = false;
   let overlayActive = false;
   let initialized = false;
+  // Component-level claims: each secret-bearing component acquires before it
+  // renders a secret and releases once the secret is gone (see `useSecureClaim`).
+  // FLAG_SECURE is a single window bit, so this is an OR over all live claims —
+  // a count, not a boolean. Under `"sensitive"` any claim > 0 secures the window.
+  let claimCount = 0;
 
   /**
-   * Effective `FLAG_SECURE` level for a given route-level secret flag. `off`
-   * never secures; `always` always secures; `sensitive` secures when the route
-   * bears the secret flag or the unlock overlay is up. Exhaustive over the
-   * `SecureScreenMode` union so a future mode forces an update here.
+   * Effective `FLAG_SECURE` level. Exhaustive over `SecureScreenMode` so a
+   * future mode forces an update here.
+   *  - `off` — only the credential overlay secures (claims ignored; the user
+   *    opted into capture);
+   *  - `always` — always secure;
+   *  - `sensitive` — secure while any claim is held OR the overlay is up.
    */
-  function desiredSecure(routeLevel: boolean): boolean {
+  function desiredSecure(): boolean {
     switch (secureScreenMode.value) {
       case "off":
         // The credential overlays (app-lock + identity unlock) must NEVER be
@@ -109,31 +120,52 @@ export function createSecureScreen(
       case "always":
         return true;
       case "sensitive":
-        return routeLevel || overlayActive;
+        return claimCount > 0 || overlayActive;
     }
   }
 
-  /** Push `FLAG_SECURE` for a route level. Desktop / absent plugin: no-op (`true`). */
-  async function pushFlag(routeLevel: boolean): Promise<boolean> {
+  /** Push `FLAG_SECURE` for the current desired level. Desktop / absent plugin:
+   *  no-op (`true`). Returns whether the IPC succeeded. */
+  async function pushFlag(): Promise<boolean> {
     if (!secureAvailable.value) return true; // desktop / plugin absent: no-op
     try {
-      await setSecure(desiredSecure(routeLevel));
+      await setSecure(desiredSecure());
       return true;
     } catch {
       return false;
     }
   }
 
-  /** Re-apply `FLAG_SECURE` for the last settled route (plus the overlay state). */
-  async function applyCurrentRoute(): Promise<boolean> {
-    return pushFlag(currentRouteSecure);
+  /** Re-apply `FLAG_SECURE` for the current claim + overlay state. */
+  async function applyCurrent(): Promise<boolean> {
+    return pushFlag();
   }
 
   /**
-   * Load availability + the master mode once, then reconcile the current route.
-   * Idempotent. Call from `App.vue` on mount. An absent or unrecognized backend
-   * value (e.g. `"unknown"`, a forward-compat sink from a newer build) resolves
-   * to `"sensitive"`.
+   * Acquire one component-level claim — raises FLAG_SECURE under `"sensitive"`
+   * (and is a no-op `true` under `"always"`; ignored under `"off"`, where the
+   * user opted into capture). Called by `useSecureClaim` (`withClaim`/`acquire`)
+   * before a secret renders. Returns whether the plugin call succeeded; `false`
+   * means the caller MUST NOT render the secret — the per-op equivalent of the
+   * old route-guard abort.
+   */
+  async function acquireClaim(): Promise<boolean> {
+    claimCount++;
+    return applyCurrent();
+  }
+
+  /** Release one claim (idempotent, floored at 0). Called by `useSecureClaim`
+   *  when a secret is cleared or its component unmounts. */
+  async function releaseClaim(): Promise<boolean> {
+    if (claimCount > 0) claimCount--;
+    return applyCurrent();
+  }
+
+  /**
+   * Load availability + the master mode once, then reconcile. Idempotent. Call
+   * from `App.vue` on mount. An absent or unrecognized backend value (e.g.
+   * `"unknown"`, a forward-compat sink from a newer build) resolves to
+   * `"sensitive"`.
    */
   async function initSecureScreen() {
     if (initialized) return;
@@ -143,8 +175,8 @@ export function createSecureScreen(
     } catch {
       // Couldn't confirm availability. On Android this command always returns
       // `true`, so a rejection means the bridge is flaky — NOT "desktop". Assume
-      // available so subsequent calls are ATTEMPTED and fail-closed (the guard
-      // aborts secret routes) rather than silently no-op'd (fail-open).
+      // available so subsequent calls are ATTEMPTED and fail-closed (an acquire
+      // that fails aborts the reveal) rather than silently no-op'd (fail-open).
       secureAvailable.value = true;
     }
     try {
@@ -155,48 +187,25 @@ export function createSecureScreen(
     } catch {
       // Backend unavailable (e.g. pre-setup) — keep the default "sensitive".
     }
-    await applyCurrentRoute();
-  }
-
-  /**
-   * Pre-paint raise for a navigation: cover BOTH the departing and arriving page
-   * so a secret page being navigated away from is never shown unprotected during
-   * the swap. Does NOT commit `currentRouteSecure`; the guard settles that in
-   * `afterEach` via `applySecureForRoute`. Returns whether the plugin call
-   * succeeded; desktop (not available) returns `true` as a no-op. On Android,
-   * `false` for a secret-bearing transition is a real failure the guard aborts on.
-   */
-  async function raiseSecureForRoute(needsCover: boolean): Promise<boolean> {
-    return pushFlag(needsCover);
-  }
-
-  /**
-   * Settle the flag to the arriving route's level, after its component has
-   * mounted/painted (call from `router.afterEach` + `nextTick`). Also used
-   * directly outside transitions (`initSecureScreen`, `setSecureScreenMode`).
-   * Returns whether the plugin call succeeded.
-   */
-  async function applySecureForRoute(routeSecure: boolean): Promise<boolean> {
-    currentRouteSecure = routeSecure;
-    return applyCurrentRoute();
+    await applyCurrent();
   }
 
   /**
    * Reflect whether the global unlock overlay is up. Under `"sensitive"` the
    * overlay collects the identity passphrase, so raising it forces `FLAG_SECURE`
-   * on (see `desiredSecure`) even on a capturable route. Re-applies immediately;
-   * returns the plugin result (the `App.vue` watcher ignores it).
+   * on (see `desiredSecure`) even with no claim. Re-applies immediately; returns
+   * the plugin result (the `App.vue` watcher ignores it).
    */
   function setSecureOverlay(active: boolean): Promise<boolean> {
     overlayActive = active;
-    return applyCurrentRoute();
+    return applyCurrent();
   }
 
   /**
-   * Persist the master mode, then re-apply the current route's secure state.
-   * Returns `false` (reverting the in-memory ref and re-applying the route) if
-   * persistence failed, so the UI never shows a mode that didn't actually save —
-   * UI/disk/window stay in sync instead of desyncing on a failed write.
+   * Persist the master mode, then re-apply. Returns `false` (reverting the
+   * in-memory ref and re-applying) if persistence failed, so the UI never shows
+   * a mode that didn't actually save — UI/disk/window stay in sync instead of
+   * desyncing on a failed write.
    */
   async function setSecureScreenMode(mode: SecureScreenMode): Promise<boolean> {
     const prev = secureScreenMode.value;
@@ -208,10 +217,10 @@ export function createSecureScreen(
       // re-push FLAG_SECURE for it, so the window never keeps the optimistic
       // value (a navigation mid-IPC could otherwise leave a secret capturable).
       secureScreenMode.value = prev;
-      await applyCurrentRoute();
+      await applyCurrent();
       return false;
     }
-    await applyCurrentRoute();
+    await applyCurrent();
     return true;
   }
 
@@ -226,18 +235,17 @@ export function createSecureScreen(
     secureAvailable,
     initSecureScreen,
     reload,
-    applySecureForRoute,
-    raiseSecureForRoute,
     setSecureOverlay,
     setSecureScreenMode,
+    acquireClaim,
+    releaseClaim,
   };
 }
 
 /**
  * Inject the app-wide screen-capture-protection state. Must be called within a
  * component `setup()` under a tree that provided `SECURE_SCREEN_KEY`. Throws if
- * missing so a forgotten `provide` fails loudly. (Router guards in `main.ts`
- * use the held instance directly — they run outside setup.)
+ * missing so a forgotten `provide` fails loudly.
  */
 export function useSecureScreen(): SecureScreenState {
   const s = inject(SECURE_SCREEN_KEY);

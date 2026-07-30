@@ -15,7 +15,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
-import { useToast, useWipeOnLeave } from "@/composables";
+import { useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { Copy, Dices } from "@lucide/vue";
 import { computed, ref } from "vue";
@@ -36,6 +36,10 @@ const error = ref("");
 // Bumped on every generate and on lock; an in-flight generate whose token no
 // longer matches is stale and must not write its result into the list.
 let generateToken = 0;
+// R031: the generated list is secret, so hold a screen-capture claim from the
+// first result until unmount (onScopeDispose releases). Re-generate keeps it.
+const { acquire: acquireSecure, release: releaseSecure } = useSecureClaim();
+let secured = false;
 
 // Length only applies to random (exact) and memorable (a minimum). xkcd is a
 // fixed 4-word passphrase — word-count is a different unit, so hide the field.
@@ -74,6 +78,22 @@ async function onGenerate() {
     });
     // A lock or a newer generate superseded this call — drop the result.
     if (myToken !== generateToken) return;
+    // Raise FLAG_SECURE before the secrets paint (first result only; a failed
+    // acquire aborts with a toast — the per-op replacement for the route abort).
+    if (!secured) {
+      const ok = await acquireSecure();
+      if (myToken !== generateToken) {
+        // A lock/newer generate superseded this call mid-acquire — drop the
+        // claim we just took so it isn't stranded until unmount.
+        releaseSecure();
+        return;
+      }
+      if (!ok) {
+        error.value = t("common.toast.secureScreenFailed");
+        return;
+      }
+      secured = true;
+    }
     generated.value = passwords;
   } catch (e) {
     if (myToken !== generateToken) return;
@@ -104,6 +124,12 @@ useWipeOnLeave(() => {
   generateToken++;
   generating.value = false;
   generated.value = [];
+  // Drop the claim with the batch so a re-generate after a lock re-acquires
+  // (and FLAG_SECURE doesn't stay up on an empty result list).
+  if (secured) {
+    releaseSecure();
+    secured = false;
+  }
 });
 </script>
 

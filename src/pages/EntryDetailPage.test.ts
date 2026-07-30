@@ -188,9 +188,10 @@ describe("EntryDetailPage", () => {
     });
 
     it("shows error on failure", async () => {
-      vi.mocked(invoke).mockRejectedValue({
-        code: "DecryptFailed",
-        message: "Decryption failed",
+      // Let the screen-secure claim acquire succeed, but reject the decrypt.
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin:screen-secure|set_secure") return undefined;
+        throw { code: "DecryptFailed", message: "Decryption failed" };
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -202,9 +203,10 @@ describe("EntryDetailPage", () => {
     });
 
     it("shows hint for errors containing 'ecrypt'", async () => {
-      vi.mocked(invoke).mockRejectedValue({
-        code: "DecryptFailed",
-        message: "Decryption error",
+      // Let the screen-secure claim acquire succeed, but reject the decrypt.
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin:screen-secure|set_secure") return undefined;
+        throw { code: "DecryptFailed", message: "Decryption error" };
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -227,6 +229,38 @@ describe("EntryDetailPage", () => {
 
       // No error UI — the catch swallowed AUTH_CANCELLED; the op never ran.
       expect(wrapper.find("[role='alert']").exists()).toBe(false);
+    });
+
+    it("discards a decrypt that resolves after Back (invalidation token)", async () => {
+      // R031: a slow decrypt resolving after the user left must not write the
+      // secret into the leaving/dead component. The invalidation token (bumped
+      // on the wipe) drops the stale result.
+      let resolveShow!: (v: {
+        password: string;
+        notes: string;
+        has_totp: boolean;
+      }) => void;
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "plugin:screen-secure|set_secure") return Promise.resolve();
+        if (cmd === "show_password")
+          return new Promise((r) => {
+            resolveShow = r;
+          });
+        return Promise.resolve(undefined);
+      });
+      const wrapper = mountPage();
+      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await flushPromises(); // withClaim acquires; show_password is pending
+
+      // Simulate Back: popstate fires the wipe, bumping the invalidation token.
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      await flushPromises();
+
+      // The decrypt resolves late — must NOT render into the leaving page.
+      resolveShow({ password: "late-secret", notes: "", has_totp: false });
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("late-secret");
     });
   });
 

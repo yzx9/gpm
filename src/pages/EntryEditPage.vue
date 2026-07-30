@@ -21,6 +21,7 @@ import {
   isAuthCancelled,
   useDivergence,
   useLockState,
+  useSecureClaim,
   useToast,
   useWipeOnLeave,
 } from "@/composables";
@@ -62,6 +63,15 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const decryptError = ref(false);
+
+// R031: the edit form shows decrypted plaintext, so hold a screen-capture claim
+// for the page's lifetime. `withClaim` raises FLAG_SECURE before loadBody fills
+// the fields. `loadToken` discards a late load resolving after we left.
+const { withClaim } = useSecureClaim();
+let loadToken = 0;
+useWipeOnLeave(() => {
+  loadToken++;
+});
 
 const {
   divergence,
@@ -116,10 +126,21 @@ async function loadBody() {
   loading.value = true;
   error.value = "";
   decryptError.value = false;
+  const myToken = ++loadToken;
   try {
-    const result = await runWithAuth(() => showPasswordCmd(entryPath));
-    editPassword.value = result.password ?? "";
-    editNotes.value = result.notes ?? "";
+    // withClaim raises FLAG_SECURE before the decrypted body arrives; a late
+    // load resolving after we left is discarded by the token; a failed acquire
+    // returns null → abort (the per-op replacement for the old route-guard abort).
+    const claimed = await withClaim(() =>
+      runWithAuth(() => showPasswordCmd(entryPath)),
+    );
+    if (myToken !== loadToken) return;
+    if (!claimed) {
+      error.value = t("common.toast.secureScreenFailed");
+      return;
+    }
+    editPassword.value = claimed.password ?? "";
+    editNotes.value = claimed.notes ?? "";
     loadedBody.value = reassemble(editPassword.value, editNotes.value);
   } catch (e) {
     if (isAuthCancelled(e)) return;

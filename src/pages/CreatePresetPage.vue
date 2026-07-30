@@ -25,6 +25,7 @@ import {
   isAuthCancelled,
   useDivergence,
   useLockState,
+  useSecureClaim,
   useToast,
   useWipeOnLeave,
 } from "@/composables";
@@ -84,6 +85,13 @@ const {
 });
 
 onMounted(loadPreset);
+
+// R031: this form authors/generates secrets, so hold a screen-capture claim for
+// the page's lifetime (released at unmount via onScopeDispose).
+const { acquire: acquireSecure } = useSecureClaim();
+onMounted(() => {
+  void acquireSecure();
+});
 
 async function loadPreset() {
   presetsLoading.value = true;

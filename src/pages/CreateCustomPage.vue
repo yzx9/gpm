@@ -21,12 +21,13 @@ import {
   isAuthCancelled,
   useDivergence,
   useLockState,
+  useSecureClaim,
   useToast,
   useWipeOnLeave,
 } from "@/composables";
 import { currentLocale, loadBundle } from "@/i18n";
 import { navBack } from "@/utils/nav";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -136,6 +137,13 @@ function wipeCustom() {
   customContent.value = "";
 }
 useWipeOnLeave(wipeCustom);
+
+// R031: this form authors a secret, so hold a screen-capture claim for the
+// page's lifetime (released at unmount via onScopeDispose).
+const { acquire: acquireSecure } = useSecureClaim();
+onMounted(() => {
+  void acquireSecure();
+});
 
 onBeforeUnmount(() => {
   if (previewTimer) clearTimeout(previewTimer);

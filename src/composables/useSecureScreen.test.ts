@@ -15,69 +15,104 @@ describe("useSecureScreen", () => {
     vi.clearAllMocks();
   });
 
-  it("applySecureForRoute is a no-op (returns true, no invoke) when the plugin is unavailable (desktop)", async () => {
-    const { applySecureForRoute } = createSecureScreen();
-    const ok = await applySecureForRoute(true);
+  it("acquireClaim is a no-op (returns true, no invoke) when the plugin is unavailable (desktop)", async () => {
+    const { acquireClaim } = createSecureScreen();
+    const ok = await acquireClaim();
     expect(ok).toBe(true);
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("applySecureForRoute sets secure=true on Android for a sensitive route under the default (sensitive) mode", async () => {
+  it("acquireClaim sets secure=true on Android under the default (sensitive) mode", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, applySecureForRoute } = createSecureScreen();
+    const { secureAvailable, acquireClaim } = createSecureScreen();
     secureAvailable.value = true;
-    const ok = await applySecureForRoute(true);
+    const ok = await acquireClaim();
     expect(ok).toBe(true);
     expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
       secure: true,
     });
   });
 
-  it("applySecureForRoute sets secure=false for a non-sensitive route under sensitive mode", async () => {
+  it("releaseClaim sets secure=false once the last claim drops (sensitive mode)", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, secureScreenMode, applySecureForRoute } =
+    const { secureAvailable, acquireClaim, releaseClaim } =
       createSecureScreen();
     secureAvailable.value = true;
-    secureScreenMode.value = "sensitive";
-    await applySecureForRoute(false);
-    expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
+    await acquireClaim();
+    await releaseClaim();
+    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });
   });
 
-  it("applySecureForRoute forces secure=false on every route under off mode (master override)", async () => {
+  it("a second claim keeps the flag up; it only drops when both release", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, secureScreenMode, applySecureForRoute } =
+    const { secureAvailable, acquireClaim, releaseClaim } =
+      createSecureScreen();
+    secureAvailable.value = true;
+    await acquireClaim();
+    await acquireClaim();
+    await releaseClaim(); // one released, one still held ⇒ still secure
+    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
+      secure: true,
+    });
+    await releaseClaim(); // last one ⇒ flag drops
+    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
+      secure: false,
+    });
+  });
+
+  it("releaseClaim is idempotent (floored at 0 — never drives the count negative)", async () => {
+    fn().mockResolvedValue(undefined);
+    const { secureAvailable, releaseClaim } = createSecureScreen();
+    secureAvailable.value = true;
+    // Release with no prior acquire — must not push secure=false repeatedly
+    // or corrupt the count for a later acquire.
+    await releaseClaim();
+    await releaseClaim();
+    const secureFalseCalls = fn().mock.calls.filter(
+      (c) =>
+        c[0] === "plugin:screen-secure|set_secure" &&
+        (c[1] as { secure: boolean }).secure === false,
+    );
+    // count was already 0, so desiredSecure was already false; the first release
+    // re-pushed false, subsequent ones are no-ops on the count (still 0).
+    expect(secureFalseCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("acquireClaim is ignored under off mode (claims do not secure; user opted into capture)", async () => {
+    fn().mockResolvedValue(undefined);
+    const { secureAvailable, secureScreenMode, acquireClaim } =
       createSecureScreen();
     secureAvailable.value = true;
     secureScreenMode.value = "off";
-    await applySecureForRoute(true); // even a sensitive route
-    expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
+    await acquireClaim();
+    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });
   });
 
-  it("applySecureForRoute forces secure=true on every route under always mode", async () => {
+  it("acquireClaim forces secure=true on every screen under always mode", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, secureScreenMode, applySecureForRoute } =
+    const { secureAvailable, secureScreenMode, acquireClaim } =
       createSecureScreen();
     secureAvailable.value = true;
     secureScreenMode.value = "always";
-    await applySecureForRoute(false); // even a non-sensitive route
-    expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
+    await acquireClaim();
+    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
       secure: true,
     });
   });
 
-  it("applySecureForRoute returns false when the plugin call rejects on Android (guard aborts)", async () => {
+  it("acquireClaim returns false when the plugin call rejects on Android (caller must not render)", async () => {
     fn().mockRejectedValue(new Error("bridge"));
-    const { secureAvailable, applySecureForRoute } = createSecureScreen();
+    const { secureAvailable, acquireClaim } = createSecureScreen();
     secureAvailable.value = true;
-    const ok = await applySecureForRoute(true);
+    const ok = await acquireClaim();
     expect(ok).toBe(false);
   });
 
-  it("initSecureScreen loads availability + mode and reconciles the current route", async () => {
+  it("initSecureScreen loads availability + mode and reconciles (no claims ⇒ secure=false)", async () => {
     fn().mockImplementation((cmd: string) => {
       if (cmd === "screen_secure_available") return Promise.resolve(true);
       if (cmd === "get_app_config")
@@ -89,7 +124,6 @@ describe("useSecureScreen", () => {
     await initSecureScreen();
     expect(secureAvailable.value).toBe(true);
     expect(secureScreenMode.value).toBe("off");
-    // Reconcile ran for the default route (non-sensitive) under off → secure=false.
     expect(invoke).toHaveBeenCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });
@@ -118,22 +152,22 @@ describe("useSecureScreen", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("setSecureScreenMode persists the mode and re-applies the current route", async () => {
+  it("setSecureScreenMode persists the mode and re-applies (a held claim is ignored under off)", async () => {
     fn().mockResolvedValue(undefined);
     const {
       secureAvailable,
       secureScreenMode,
-      applySecureForRoute,
+      acquireClaim,
       setSecureScreenMode,
     } = createSecureScreen();
     secureAvailable.value = true;
-    await applySecureForRoute(true); // current route = sensitive (default mode)
+    await acquireClaim(); // a secret is on screen ⇒ secure=true (sensitive default)
     await setSecureScreenMode("off");
     expect(secureScreenMode.value).toBe("off");
     expect(invoke).toHaveBeenCalledWith("set_secure_screen_mode", {
       mode: "off",
     });
-    // Re-applied under off: secure=false.
+    // Re-applied under off: the claim is ignored ⇒ secure=false.
     expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });
@@ -168,52 +202,26 @@ describe("useSecureScreen", () => {
     const {
       secureAvailable,
       secureScreenMode,
-      applySecureForRoute,
+      acquireClaim,
       setSecureScreenMode,
     } = createSecureScreen();
     secureAvailable.value = true;
-    await applySecureForRoute(true); // settle a sensitive route (default mode)
+    await acquireClaim(); // a held claim under the default sensitive mode
     const ok = await setSecureScreenMode("off");
     expect(ok).toBe(false);
     // Reverted to the prior persisted value, so UI/disk/window never desync.
     expect(secureScreenMode.value).toBe("sensitive");
   });
 
-  it("raiseSecureForRoute covers a departing secret page during the transition without committing the route level", async () => {
+  it("setSecureOverlay forces FLAG_SECURE on under sensitive mode while the overlay is up (even with no claim)", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, applySecureForRoute, raiseSecureForRoute } =
-      createSecureScreen();
+    const { secureAvailable, setSecureOverlay } = createSecureScreen();
     secureAvailable.value = true;
-    await applySecureForRoute(true); // arrived on a sensitive route
-    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
-      secure: true,
-    });
-    // Leaving sensitive → non-sensitive: raise covers BOTH (still true)…
-    await raiseSecureForRoute(true);
-    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
-      secure: true,
-    });
-    // …then settle to the arriving non-sensitive level.
-    await applySecureForRoute(false);
-    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
-      secure: false,
-    });
-  });
-
-  it("setSecureOverlay forces FLAG_SECURE on for a non-sensitive route under sensitive mode while the overlay is up", async () => {
-    fn().mockResolvedValue(undefined);
-    const { secureAvailable, applySecureForRoute, setSecureOverlay } =
-      createSecureScreen();
-    secureAvailable.value = true;
-    await applySecureForRoute(false); // on /entries: not secured
-    expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
-      secure: false,
-    });
     await setSecureOverlay(true); // unlock overlay appears (collects passphrase)
     expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
       secure: true,
     });
-    await setSecureOverlay(false); // overlay dismissed → back to route level
+    await setSecureOverlay(false); // overlay dismissed ⇒ back to no-claim level
     expect(invoke).toHaveBeenLastCalledWith("plugin:screen-secure|set_secure", {
       secure: false,
     });

@@ -2,7 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { createToast, TOAST_KEY } from "@/composables";
+import {
+  createSecureScreen,
+  createToast,
+  SECURE_SCREEN_KEY,
+  TOAST_KEY,
+} from "@/composables";
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,9 +50,18 @@ describe("SetupPage", () => {
 
   // RepoCloneForm uses the toast queue (main.ts provides TOAST_KEY app-wide);
   // mount through this so every test has it without repeating the provider.
+  // SetupPage also holds a screen-capture claim (R031); provide a DESKTOP
+  // secure-screen (available:false) so the claim is a no-op here and its
+  // set_secure IPC doesn't disturb these tests' invoke mock queues. The claim's
+  // real IPC behavior is covered in useSecureScreen / useSecureClaim tests.
   function mountPage() {
     return mount(SetupPage, {
-      global: { provide: { [TOAST_KEY]: createToast() } },
+      global: {
+        provide: {
+          [TOAST_KEY]: createToast(),
+          [SECURE_SCREEN_KEY]: createSecureScreen({ available: false }),
+        },
+      },
     });
   }
 

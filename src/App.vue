@@ -47,8 +47,9 @@ const {
   reload: reloadSecureScreen,
 } = useSecureScreen();
 // Drives the <router-view> slide transition: "slide-forward" on a push,
-// "slide-back" on a pop, "" (instant) on secure↔non-secure boundaries and
-// replace navigations. See useNavDirection for the secure-boundary gate.
+// "slide-back" on a pop, "" (instant) on the initial paint and on replace
+// navigations. Screen-capture protection is component-level (R031), so there
+// is no secure↔capturable boundary to freeze on — every navigation animates.
 const { transitionName } = useNavDirection();
 const { t } = useI18n();
 
@@ -129,9 +130,10 @@ onMounted(() => {
       Stack-style slide between pages. No `mode="out-in"`: push/pop animate the
       departing and arriving pages simultaneously (iOS NavigationController
       feel). `:key="route.fullPath"` makes Vue treat each route as a distinct
-      element so the transition fires on every nav. `transitionName` is "" on
-      secure↔non-secure boundaries so FLAG_SECURE is never down while a secure
-      page is still mid-leave (see useNavDirection + main.ts secure guard).
+      element so the transition fires on every nav. `transitionName` is "" only
+      on the initial paint and on replace navigations — screen-capture
+      protection is component-level (R031), so there is no secure↔capturable
+      boundary to freeze the slide on (see useNavDirection).
     -->
     <router-view v-slot="{ Component, route }">
       <Transition :name="transitionName">
