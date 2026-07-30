@@ -612,6 +612,46 @@ impl fmt::Debug for RepoConfig {
     }
 }
 
+/// A safe-to-export redacted projection of [`RepoConfig`] for the diagnostics
+/// bundle. Credentials are reduced to their *presence* (`"[REDACTED]"`); the URL
+/// is stripped of userinfo via [`redact_url`]; everything else (commit identity,
+/// authenticity config, backend choices, local path) ships verbatim — public key
+/// material is public, and the user is exporting their own config. Serialized as
+/// JSON (cleaner for support than the `Debug` impl, which stays for logging).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RedactedRepoConfig {
+    /// Remote URL with any `user:pass@` userinfo stripped ([`redact_url`]).
+    pub url: String,
+    /// `"[REDACTED]"` when a PAT is configured, omitted when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pat: Option<&'static str>,
+    /// `"[REDACTED]"` when an SSH key is configured, omitted when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_key: Option<&'static str>,
+    /// `"[REDACTED]"` when an SSH passphrase is configured, omitted when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_passphrase: Option<&'static str>,
+    /// Local filesystem path of the cloned repo.
+    pub local_path: String,
+    /// Optional git commit author name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_user_name: Option<String>,
+    /// Optional git commit author email.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_user_email: Option<String>,
+    /// Whether app-unlock also unlocks the identity session.
+    pub unlock_identity_with_app: bool,
+    /// Authenticity config (mode + trusted public keys). Public key material;
+    /// shipped verbatim.
+    pub authenticity: AuthenticityConfig,
+    /// Storage backend selection (`None` = built-in git).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    /// Crypto backend selection (`None` = built-in age).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crypto: Option<String>,
+}
+
 /// Strip any `user:pass@` userinfo from a URL so a credentialed remote cannot
 /// leak through `Debug`. Keeps scheme + host + port + path/query for diagnostics.
 /// A non-URL string (no `://`) is returned unchanged.
@@ -653,6 +693,26 @@ impl RepoConfig {
             GitAuth::Pat(token.clone())
         } else {
             GitAuth::None
+        }
+    }
+
+    /// Build a [`RedactedRepoConfig`] safe to ship in a diagnostics export:
+    /// credentials reduced to presence (`"[REDACTED]"`), URL userinfo stripped via
+    /// [`redact_url`], non-secret fields verbatim. See [`RedactedRepoConfig`].
+    #[must_use]
+    pub fn redacted(&self) -> RedactedRepoConfig {
+        RedactedRepoConfig {
+            url: redact_url(&self.url),
+            pat: self.pat.as_ref().map(|_| "[REDACTED]"),
+            ssh_key: self.ssh_key.as_ref().map(|_| "[REDACTED]"),
+            ssh_passphrase: self.ssh_passphrase.as_ref().map(|_| "[REDACTED]"),
+            local_path: self.local_path.clone(),
+            commit_user_name: self.commit_user_name.clone(),
+            commit_user_email: self.commit_user_email.clone(),
+            unlock_identity_with_app: self.unlock_identity_with_app,
+            authenticity: self.authenticity.clone(),
+            backend: self.backend.clone(),
+            crypto: self.crypto.clone(),
         }
     }
 }
@@ -703,6 +763,72 @@ mod tests {
         assert!(
             json.contains("alice:hunter2"),
             "Serialize must carry the credentialed URL verbatim: {json}"
+        );
+    }
+
+    #[test]
+    fn redacted_json_redacts_credentials_and_url() {
+        let cfg = RepoConfig {
+            url: "https://alice:hunter2@git.example.com/org/repo.git".to_string(),
+            pat: Some("ghp_TOKEN".to_string()),
+            ssh_key: Some("-----BEGIN OPENSSH PRIVATE KEY-----".to_string()),
+            ssh_passphrase: Some("ssh-pass".to_string()),
+            local_path: "/tmp/repo".to_string(),
+            commit_user_email: Some("dev@example.com".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&cfg.redacted()).expect("redacted serializes");
+        // Credentials are reduced to presence, never the value.
+        assert!(
+            json.contains("[REDACTED]"),
+            "presence marker missing: {json}"
+        );
+        assert!(
+            !json.contains("ghp_TOKEN"),
+            "PAT leaked into redacted JSON: {json}"
+        );
+        assert!(
+            !json.contains("BEGIN OPENSSH PRIVATE KEY"),
+            "ssh key leaked into redacted JSON: {json}"
+        );
+        assert!(
+            !json.contains("ssh-pass"),
+            "ssh passphrase leaked into redacted JSON: {json}"
+        );
+        // URL userinfo stripped; host/path kept.
+        assert!(!json.contains("alice"), "url userinfo leaked: {json}");
+        assert!(!json.contains("hunter2"), "url password leaked: {json}");
+        assert!(
+            json.contains("git.example.com/org/repo.git"),
+            "url host/path should remain: {json}"
+        );
+        // Non-secret fields DO ship (this is the user's own, deliberately exported).
+        assert!(
+            json.contains("dev@example.com"),
+            "commit email should ship (non-secret): {json}"
+        );
+    }
+
+    #[test]
+    fn redacted_json_omits_absent_credentials() {
+        // No credentials configured: the credential keys are absent from the JSON.
+        let cfg = RepoConfig {
+            url: "https://git.example.com/org/repo.git".to_string(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&cfg.redacted()).expect("redacted serializes");
+        // Quote the key names: a bare "pat" substring would match "local_path".
+        assert!(
+            !json.contains("\"pat\""),
+            "absent PAT key should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("\"ssh_key\""),
+            "absent ssh_key should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("[REDACTED]"),
+            "no credential present => no redaction marker: {json}"
         );
     }
 

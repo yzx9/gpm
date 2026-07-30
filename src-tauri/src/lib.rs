@@ -34,6 +34,7 @@ mod authenticity;
 mod biometric;
 mod clipboard;
 mod config;
+mod diagnostics_export;
 mod generator;
 mod git;
 mod identity;
@@ -337,6 +338,8 @@ pub fn run() {
         .plugin(tauri_plugin_biometric_keystore::init())
         .plugin(tauri_plugin_secure_keystore::init())
         .plugin(tauri_plugin_file_picker::init())
+        .plugin(tauri_plugin_device_info::init())
+        .plugin(tauri_plugin_file_save::init())
         .plugin(tauri_plugin_screen_secure::init())
         .plugin(tauri_plugin_clipboard_notify::init())
         .plugin(tauri_plugin_opener::init())
@@ -430,6 +433,8 @@ pub fn run() {
             logging::read_log,
             logging::clear_log,
             logging::write_log,
+            // diagnostics export bundle (full log + redacted config + device info).
+            diagnostics_export::export_diagnostics,
             // biometric
             biometric::is_biometric_available,
             biometric::open_security_settings,

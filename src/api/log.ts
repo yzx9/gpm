@@ -26,25 +26,36 @@ export async function clearLog(): Promise<void> {
   await invoke("clear_log");
 }
 
+/** Export a diagnostics bundle (zip) to a user-chosen location via SAF. */
+export async function exportDiagnostics(): Promise<void> {
+  await invoke("export_diagnostics");
+}
+
 /** Write a frontend-emitted record into the backend log. */
 export async function writeLog(level: string, message: string): Promise<void> {
   await invoke("write_log", { level, message });
 }
 
-/** Stringify an unknown caught value for the log (no secret reaches here). */
+/** Stringify an unknown caught value for the log. Never serializes an arbitrary
+ *  object's fields: the full diagnostics log now leaves the device via Export,
+ *  so a rejected promise or Vue error carrying a secret field must not be dumped.
+ *  Error messages still log; non-Error, non-string values log a type tag only. */
 function formatErr(e: unknown): string {
   if (e instanceof Error) return `${e.name}: ${e.message}`;
   if (typeof e === "string") return e;
+  const tag = tryCtorName(e);
+  return tag ? `[${tag}]` : "[unrepresentable]";
+}
+
+/** Best-effort constructor-name tag for a caught value, never throwing — a broken
+ *  `toString()`/`Symbol.toPrimitive` must not take down the error reporter. */
+function tryCtorName(e: unknown): string | null {
   try {
-    return JSON.stringify(e);
+    const name = (e as { constructor?: { name?: unknown } } | null)?.constructor
+      ?.name;
+    return typeof name === "string" && name.length > 0 ? name : null;
   } catch {
-    // `String()` can itself throw on a broken `toString()`/`Symbol.toPrimitive`.
-    // Never let the error reporter throw — it would silently drop the log entry.
-    try {
-      return String(e);
-    } catch {
-      return "[unrepresentable]";
-    }
+    return null;
   }
 }
 

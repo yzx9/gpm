@@ -4,7 +4,13 @@
 
 <script setup lang="ts">
 import type { AppConfig, AppError } from "@/api";
-import { clearLog, getAppConfig, readLog, setVerbose } from "@/api";
+import {
+  clearLog,
+  exportDiagnostics,
+  getAppConfig,
+  readLog,
+  setVerbose,
+} from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
@@ -13,7 +19,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { useToast } from "@/composables";
-import { RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
+import { Download, RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
 import { listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -24,6 +30,7 @@ const { toast } = useToast();
 const logText = ref("");
 const loading = ref(false);
 const clearing = ref(false);
+const exporting = ref(false);
 const error = ref("");
 
 // Verbose (Debug) toggle state. `verbose_until` is a Unix-seconds deadline set
@@ -178,6 +185,22 @@ async function onClear() {
     clearing.value = false;
   }
 }
+
+async function onExport() {
+  if (!confirm(t("log.exportConfirm"))) return;
+  exporting.value = true;
+  try {
+    await exportDiagnostics();
+    toast.success(t("log.exported"));
+  } catch (e) {
+    const appError = e as AppError;
+    // A dismissed save dialog is a silent cancel, not an error.
+    if (appError?.code === "CANCELLED") return;
+    toast.danger(appError?.message || t("log.exportFailed"));
+  } finally {
+    exporting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -191,6 +214,10 @@ async function onClear() {
         <BaseButton variant="ghost" :loading="loading" @click="load">
           <BaseIcon :icon="RefreshCw" :size="16" />
           {{ t("log.refresh") }}
+        </BaseButton>
+        <BaseButton variant="ghost" :loading="exporting" @click="onExport">
+          <BaseIcon :icon="Download" :size="16" />
+          {{ t("log.export") }}
         </BaseButton>
         <BaseButton
           variant="ghost"

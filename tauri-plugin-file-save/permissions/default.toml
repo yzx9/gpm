@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Backend-only file-save (Android Storage Access Framework ACTION_CREATE_DOCUMENT + openOutputStream, desktop dialog save) that streams a staged file to a user-chosen destination. No frontend capability is granted."
+permissions = []

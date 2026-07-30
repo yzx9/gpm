@@ -90,9 +90,12 @@ which an attacker with pre-authorized USB debugging can read without repository
 filesystem access; entry-name metadata is therefore visible to that narrower
 attacker class. The exposure is metadata only (never secret content), requires
 prior debugging authorization, and matches how any logging app behaves — so it
-is accepted as-is rather than treated as a reason to encrypt. (A diagnostics
-bundle pushed off-device on demand is a separate, more-sensitive artifact and
-would carry its own user gate.)
+is accepted as-is rather than treated as a reason to encrypt. (The diagnostics
+export bundle — full log plus a redacted view of the repository config and
+device info, written off-device on demand to a location the user picks — is that
+separate, more-sensitive artifact: it is gated by an explicit pre-export
+confirmation and assembled only from already-redacted sources, so no secret is
+read into the bundling path; see `src-tauri/src/diagnostics_export.rs`.)
 
 ## Approaches not adopted
 

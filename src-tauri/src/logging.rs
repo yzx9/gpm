@@ -29,7 +29,7 @@ const MAX_LOG_BYTES: usize = 256 * 1024;
 
 /// Resolve the log directory (`app_log_dir()`), mapping a path error to
 /// `StoreError` so the command returns a sanitized `rustpass::Error`.
-fn log_dir(app: &AppHandle) -> Result<std::path::PathBuf, Error> {
+pub(crate) fn log_dir(app: &AppHandle) -> Result<std::path::PathBuf, Error> {
     app.path()
         .app_log_dir()
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("log dir unavailable: {e}")))
@@ -38,23 +38,24 @@ fn log_dir(app: &AppHandle) -> Result<std::path::PathBuf, Error> {
 /// The active log file's base name — mirrors the plugin
 /// (`app_handle.package_info().name`; tauri-plugin-log lib.rs:719), so the active
 /// `{base}.log` we truncate matches the file the plugin is appending to.
-fn log_base(app: &AppHandle) -> String {
+pub(crate) fn log_base(app: &AppHandle) -> String {
     app.package_info().name.clone()
 }
 
-/// Read the diagnostics log for the in-app viewer.
-///
-/// Reads every `{base}*.log` and `{base}*.log.bak` under `dir`, ordered by
+/// Discover every `{base}*.log` and `{base}*.log.bak` under `dir`, ordered by
 /// modification time **ascending** (oldest first → the active file last, since it
 /// is being appended to). Filename ordering is intentionally NOT used: the active
 /// `gpm.log` sorts *before* a rotated `gpm_2026-…log` because `.` < `_`, which
-/// would show the newest segment first. The concatenated output is tail-truncated
-/// to [`MAX_LOG_BYTES`] at a newline boundary so the payload stays small. An
-/// empty or missing log directory returns an empty string (not an error) — the
-/// viewer shows its "empty" state.
-async fn read_log_from(dir: &Path, base: &str) -> String {
+/// would put the newest segment first. Shared by the viewer reader
+/// ([`read_log_from`]) and the export reader ([`read_log_bytes`]) so the two
+/// cannot drift on what counts as a log segment or in what order it ships.
+///
+/// Best-effort: a missing/unreadable directory yields an empty set (not an error).
+async fn discover_log_files(
+    dir: &Path,
+    base: &str,
+) -> Vec<(std::path::PathBuf, std::time::SystemTime)> {
     let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = Vec::new();
-    // Best-effort: a missing/unreadable dir yields an empty log, not an error.
     if let Ok(mut rd) = tokio::fs::read_dir(dir).await {
         while let Ok(Some(entry)) = rd.next_entry().await {
             let name = entry.file_name();
@@ -72,13 +73,29 @@ async fn read_log_from(dir: &Path, base: &str) -> String {
         }
     }
     files.sort_by_key(|(_, mtime)| *mtime);
+    files
+}
 
+/// Concatenate the discovered log files (mtime-ordered) into a single buffer.
+async fn concat_log_files(files: &[(std::path::PathBuf, std::time::SystemTime)]) -> Vec<u8> {
     let mut buf = Vec::new();
-    for (path, _) in &files {
+    for (path, _) in files {
         if let Ok(bytes) = tokio::fs::read(path).await {
             buf.extend_from_slice(&bytes);
         }
     }
+    buf
+}
+
+/// Read the diagnostics log for the in-app viewer.
+///
+/// The concatenated output is tail-truncated to [`MAX_LOG_BYTES`] at a newline
+/// boundary so the IPC payload and the `<pre>` render stay cheap on mobile. An
+/// empty or missing log directory returns an empty string (not an error) — the
+/// viewer shows its "empty" state.
+async fn read_log_from(dir: &Path, base: &str) -> String {
+    let files = discover_log_files(dir, base).await;
+    let mut buf = concat_log_files(&files).await;
     if buf.len() > MAX_LOG_BYTES {
         let start = buf.len() - MAX_LOG_BYTES;
         // Snap forward to the next newline so the output doesn't begin mid-line.
@@ -91,6 +108,17 @@ async fn read_log_from(dir: &Path, base: &str) -> String {
         buf.drain(..start);
     }
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Read the **full** diagnostics log as raw bytes for the export bundle — the
+/// untruncated sibling of [`read_log_from`]. Same discovery + mtime ordering, but
+/// no tail-truncation and no lossy UTF-8 conversion: the bundle ships the
+/// complete rotated set as-is. A missing/empty log directory yields an empty
+/// `Vec` (not an error), so the bundle still ships with whatever log history
+/// exists.
+pub(crate) async fn read_log_bytes(dir: &Path, base: &str) -> Vec<u8> {
+    let files = discover_log_files(dir, base).await;
+    concat_log_files(&files).await
 }
 
 /// Clear the diagnostics log.
@@ -244,6 +272,32 @@ mod tests {
         for l in out.lines() {
             assert!(l.starts_with('L'), "no partial first line: {l}");
         }
+    }
+
+    #[tokio::test]
+    async fn read_log_bytes_returns_full_untruncated() {
+        let dir = tempfile::tempdir().unwrap();
+        // ~375 KiB > the viewer's 256 KiB cap: the export reader must NOT truncate.
+        let line: String = "L".repeat(63) + "\n";
+        let big: Vec<u8> = line.repeat(6000).into();
+        write_with_mtime(dir.path(), "gpm.log", &big, 0);
+
+        let out = read_log_bytes(dir.path(), "gpm").await;
+        assert!(
+            out.len() > MAX_LOG_BYTES,
+            "export reader must NOT truncate, got {} bytes",
+            out.len()
+        );
+        assert_eq!(
+            out, big,
+            "full log bytes returned verbatim, no lossy conversion"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_log_bytes_missing_dir_returns_empty() {
+        let out = read_log_bytes(Path::new("/nonexistent/gpm-log-dir"), "gpm").await;
+        assert!(out.is_empty(), "missing dir => empty Vec, not error");
     }
 
     #[tokio::test]

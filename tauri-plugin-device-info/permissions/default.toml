@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Backend-only device-info probe (Android Build fields, WebView user-agent, display metrics; desktop OS/arch/version fallback) for the diagnostics export. No frontend capability is granted."
+permissions = []

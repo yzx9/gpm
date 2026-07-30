@@ -9,6 +9,8 @@ members = [
   "tauri-plugin-file-picker",
   "tauri-plugin-screen-secure",
   "tauri-plugin-clipboard-notify",
+  "tauri-plugin-device-info",
+  "tauri-plugin-file-save",
 ]
 
 [workspace.package]
