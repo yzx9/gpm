@@ -123,12 +123,20 @@
     "disableFailed": "Failed to disable app lock",
     "autoUnlock": {
       "title": "Identity Auto-Unlock",
-      "description": "Also unlock your passwords when you unlock the app — one biometric prompt does both. Optional and off by default.",
+      "description": "Also unlock your passwords when you unlock the app — one biometric prompt does both. Optional and off by default. While this is on, Auto-lock is ignored — App Lock controls when the identity locks.",
       "enable": "Enable Auto-Unlock",
       "enabledHint": "✓ Identity unlocks together with the app.",
       "disable": "Disable Auto-Unlock",
       "disabledToast": "Identity auto-unlock disabled",
       "enabledToast": "✓ Identity auto-unlock enabled"
+    },
+    "gateIdle": {
+      "legend": "Re-lock when inactive",
+      "description": "Re-lock the app while it stays open, after a period of inactivity.",
+      "off": "Off",
+      "offHint": "Re-locks only when you leave and return to gpm.",
+      "idleHint": "Re-locks after the selected period while gpm stays open — this also clears any unlocked passwords. The screen stays in place; tap to unlock.",
+      "setFailed": "Failed to set idle re-lock"
     }
   },
   "secureScreen": {
@@ -166,7 +174,8 @@
     "never": "Never",
     "immediateHint": "Per-operation: re-authenticate each copy/show/create. Strongest default.",
     "neverHint": "Never auto-lock; the identity stays cached until you lock manually.",
-    "idleHint": "Session: stay unlocked, lock after the idle period.",
+    "idleHint": "Identity stays unlocked, then locks after the idle period.",
+    "managedByAppLock": "Ignored while Identity Auto-Unlock is on — gpm follows App Lock timing instead. Turn off Auto-Unlock to set a separate time.",
     "setModeFailed": "Failed to set auto-lock mode"
   },
   "clear": {

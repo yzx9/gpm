@@ -8,9 +8,11 @@ import type {
   AppError,
   AppLockError,
   BiometricError,
+  GateIdle,
   LockMode,
 } from "@/api";
 import {
+  DEFAULT_GATE_IDLE,
   asAppLockError,
   changePassphrase,
   disableBiometricAppLock,
@@ -27,6 +29,7 @@ import {
   isBiometricAvailable,
   isBiometricUnlockEnabled,
   setClipboardClearSecs,
+  setGateIdle,
   setLockMode,
   setPassphrase,
   setViewClearSecs,
@@ -67,6 +70,12 @@ const error = ref("");
 // Auto-Lock card; each control writes back here + syncs the shared
 // security-settings cache the activity bumper reads.
 const appConfig = ref<AppConfig | null>(null);
+// App-launch-gate in-app idle timeout ("Re-lock when inactive"). A computed view
+// over appConfig (mirrors rawLockMode etc.) so it stays in sync automatically;
+// the shared security-settings cache also holds it for the activity bumper.
+const gateIdle = computed<GateIdle>(
+  () => appConfig.value?.gate_idle ?? DEFAULT_GATE_IDLE,
+);
 
 // ── Passphrase management state ──────────────────────────────────────────
 const isIdentityEncrypted = ref(false);
@@ -160,6 +169,16 @@ const appLockLoading = ref(false);
 const isSshIdentity = computed(
   () =>
     identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
+);
+
+// Identity Auto-Unlock is on with the gate enabled and an encryptable identity:
+// the identity then follows the gate's lifecycle, so its own auto-lock timing is
+// ignored (the backend disarms reset_lock_timer + skips the Immediate wipe).
+const identityCoupled = computed(
+  () =>
+    appLockEnabled.value &&
+    identityAutoUnlockEnabled.value &&
+    isIdentityEncrypted.value,
 );
 
 /** Wipe every in-DOM secret: the typed passphrase-modal inputs and their
@@ -265,12 +284,17 @@ async function onPassphraseSubmit() {
     if (mode === "set") {
       await setPassphrase(ppNew.value);
       isIdentityEncrypted.value = true;
-      // Setting a passphrase can invalidate a previously-sealed biometric unlock.
+      // Re-encryption can invalidate a previously-sealed biometric unlock and
+      // auto-unlock slot — re-read both from the backend.
       biometricEnabled.value = await isBiometricUnlockEnabled();
+      identityAutoUnlockEnabled.value =
+        (await getConfig()).unlock_identity_with_app ?? false;
       toast.success(t("settings.passphrase.setToast"));
     } else if (mode === "change") {
       await changePassphrase(ppCurrent.value, ppNew.value);
       biometricEnabled.value = await isBiometricUnlockEnabled();
+      identityAutoUnlockEnabled.value =
+        (await getConfig()).unlock_identity_with_app ?? false;
       toast.success(t("settings.passphrase.changedToast"));
     } else if (mode === "enable-biometric") {
       await enableBiometricUnlock(ppCurrent.value, identityEnrollPrompt());
@@ -364,7 +388,7 @@ async function onDisableIdentityAutoUnlock() {
   toast.success(t("settings.appLock.autoUnlock.disabledToast"));
 }
 
-// ── Auto-Lock & Auto-Clear (merged from the former Locking page) ─────────
+// ── Auto-Lock & Auto-Clear ───────────────────────────────────────────────
 // The identity's own auto-lock timing + the secret auto-clear windows. Each
 // control writes the behavior pref and syncs the shared security-settings cache
 // (clipboard-clear is the exception — it has no bumper dependency).
@@ -456,6 +480,41 @@ async function onClipboardClearChange(secs: number | null) {
     error.value = appError?.message || t("settings.clear.setClipboardFailed");
   } finally {
     lockLoading.value = false;
+  }
+}
+
+// ── Re-lock when inactive (app-launch-gate idle timer, R057) ─────────────
+// Only meaningful with the gate on (the control lives in the App Lock card).
+// The gate wipe is a superset of the identity auto-lock (it clears the master
+// key too), so when both run the gate dominates — surfaced via copy, not by
+// suppressing either control.
+const GATE_IDLE_PRESETS = computed<{ label: string; value: GateIdle }[]>(() => [
+  { label: t("settings.appLock.gateIdle.off"), value: "off" },
+  { label: t("settings.lock.minutes", { count: 5 }), value: { after: 300 } },
+  { label: t("settings.lock.minutes", { count: 15 }), value: { after: 900 } },
+  { label: t("settings.lock.minutes", { count: 30 }), value: { after: 1800 } },
+]);
+
+// Object-valued (the { after } presets) → === never matches; use a comparator.
+function gateIdleEq(a: GateIdle, b: GateIdle): boolean {
+  if (a === b) return true;
+  if (typeof a === "object" && typeof b === "object")
+    return a.after === b.after;
+  return false;
+}
+
+async function onGateIdleChange(mode: GateIdle) {
+  if (!appConfig.value) return;
+  appLockLoading.value = true;
+  error.value = "";
+  try {
+    appConfig.value = await setGateIdle(mode);
+    applySecurityConfig(appConfig.value);
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || t("settings.appLock.gateIdle.setFailed");
+  } finally {
+    appLockLoading.value = false;
   }
 }
 
@@ -587,9 +646,42 @@ onMounted(() => {
             {{ t("settings.appLock.disable") }}
           </BaseButton>
 
-          <!-- Identity auto-unlock opt-in (req3): separate from the auto-lock
-               timing presets on the Locking page; only meaningful with the gate
-               on and an encrypted identity. -->
+          <!-- Re-lock when inactive (R057): the gate's own idle timer. Only
+               meaningful with the gate on, so it lives here. The gate wipe also
+               clears any unlocked passwords and dominates the identity auto-lock
+               when both run. -->
+          <div class="mt-4 pt-4 border-t border-edge">
+            <h3 class="text-sm font-medium mb-1">
+              {{ t("settings.appLock.gateIdle.legend") }}
+            </h3>
+            <p class="text-xs text-muted mb-3">
+              {{ t("settings.appLock.gateIdle.description") }}
+            </p>
+            <BaseSegmentedControl
+              name="gate-idle"
+              wrap
+              :model-value="gateIdle"
+              :by="gateIdleEq"
+              :options="GATE_IDLE_PRESETS"
+              :disabled="appLockLoading"
+              @change="onGateIdleChange"
+            >
+              <template #hint>
+                <p class="text-xs text-muted mt-1">
+                  <template v-if="gateIdle === 'off'">{{
+                    t("settings.appLock.gateIdle.offHint")
+                  }}</template>
+                  <template v-else>{{
+                    t("settings.appLock.gateIdle.idleHint")
+                  }}</template>
+                </p>
+              </template>
+            </BaseSegmentedControl>
+          </div>
+
+          <!-- Identity auto-unlock opt-in (req3): when on, the identity follows
+               the gate's lifecycle and the Auto-Lock timing below is ignored.
+               Only meaningful with the gate on and an encrypted identity. -->
           <div
             v-if="isIdentityEncrypted"
             class="mt-4 pt-4 border-t border-edge"
@@ -625,7 +717,7 @@ onMounted(() => {
         </template>
       </BaseCard>
 
-      <!-- Auto-lock & auto-clear (merged from the former Locking page): the
+      <!-- Auto-lock & auto-clear: the identity's own auto-lock timing + the
            identity's own auto-lock timing + the secret auto-clear windows. -->
       <BaseCard as="section">
         <h2 class="text-sm font-medium mb-3">
@@ -635,7 +727,8 @@ onMounted(() => {
           {{ t("settings.lock.description") }}
         </p>
 
-        <!-- Identity auto-lock mode -->
+        <!-- Identity auto-lock mode (disabled while the identity is coupled to
+             App Lock — the gate then owns its lifecycle; see the note below). -->
         <BaseSegmentedControl
           class="mb-3"
           name="lock-mode"
@@ -644,11 +737,19 @@ onMounted(() => {
           :model-value="rawLockMode"
           :by="lockModeEq"
           :options="LOCK_PRESETS"
-          :disabled="lockLoading"
+          :disabled="identityCoupled || lockLoading"
+          :aria-describedby="identityCoupled ? 'lock-mode-managed' : undefined"
           @change="onLockModeChange"
         >
           <template #hint>
-            <p class="text-xs text-muted mt-1">
+            <p
+              v-if="identityCoupled"
+              id="lock-mode-managed"
+              class="text-xs text-muted mt-1"
+            >
+              {{ t("settings.lock.managedByAppLock") }}
+            </p>
+            <p v-else class="text-xs text-muted mt-1">
               <template v-if="lockModeActive('immediate')">{{
                 t("settings.lock.immediateHint")
               }}</template>

@@ -48,6 +48,9 @@ export interface SafeAreaInsets {
  * on a fresh config ⇒ the default (After 300s). */
 export type GateIdle = "off" | { after: number };
 
+/** The canonical gate-idle default (mirrors the backend: absent ⇒ After 300s). */
+export const DEFAULT_GATE_IDLE: GateIdle = { after: 300 };
+
 export interface AppConfig {
   /** Persisted-schema version (one-shot migration gate). Absent ⇒ 1. */
   schema_version?: number;
@@ -184,6 +187,15 @@ export async function notifyOs(title: string, body?: string): Promise<void> {
  */
 export async function setLockMode(mode: LockMode): Promise<AppConfig> {
   return invoke<AppConfig>("set_lock_mode", { mode });
+}
+
+/**
+ * Set the app-launch-gate in-app idle timeout (`"off"` = re-lock only on
+ * background→foreground; `{ after: secs }` = re-lock after `secs` of foreground
+ * idle). Returns the updated config.
+ */
+export async function setGateIdle(mode: GateIdle): Promise<AppConfig> {
+  return invoke<AppConfig>("set_gate_idle", { mode });
 }
 
 /**

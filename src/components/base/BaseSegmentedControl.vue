@@ -98,4 +98,12 @@ function select(v: T) {
     inset 0 0 0 1px var(--color-accent),
     0 0 0 2px var(--color-accent-ring);
 }
+/* `disabled` only sets <fieldset disabled> (blocks interaction) — add the
+   visual dim here so a disabled control reads as inactive instead of "looks
+   the same but doesn't tap." Also covers the :disabled="*Loading" save states. */
+fieldset:disabled .mode-pill {
+  opacity: 0.55;
+  pointer-events: none;
+  cursor: default;
+}
 </style>

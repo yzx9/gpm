@@ -435,4 +435,119 @@ describe("SettingsIdentityPage", () => {
       expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", { secs: 10 });
     });
   });
+
+  describe("app lock: re-lock when inactive & coupling", () => {
+    it("renders the gate-idle control and invokes set_gate_idle", async () => {
+      when("is_app_lock_available", true);
+      when("get_app_lock_state", { enabled: true, locked: false });
+      when("set_gate_idle", { gate_idle: { after: 900 } });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // App Lock on → the "Re-lock when inactive" control shows 4 presets.
+      expect(wrapper.findAll('input[name="gate-idle"]')).toHaveLength(4);
+      // radios[2] is the "15 min" preset ({ after: 900 }).
+      await wrapper.findAll('input[name="gate-idle"]')[2]!.trigger("change");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_gate_idle", {
+        mode: { after: 900 },
+      });
+    });
+
+    it("disables the identity auto-lock while the identity is coupled to App Lock", async () => {
+      when("is_app_lock_available", true);
+      when("get_app_lock_state", { enabled: true, locked: false });
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: false,
+        identity_type: "x25519",
+      });
+      when("get_config", { unlock_identity_with_app: true });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // identityCoupled (gate on + auto-unlock on + encrypted) → the managed
+      // note shows and the lock-mode fieldset is disabled (the radios rely on
+      // the fieldset's disabled state, so check the fieldset, not each radio).
+      expect(wrapper.text()).toContain(
+        "Ignored while Identity Auto-Unlock is on",
+      );
+      const lockModeField = wrapper
+        .find('input[name="lock-mode"]')
+        .element.closest("fieldset") as HTMLFieldSetElement | null;
+      expect(lockModeField?.disabled).toBe(true);
+    });
+
+    it("keeps the identity auto-lock enabled when the gate is off (not coupled)", async () => {
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: false,
+        identity_type: "x25519",
+      });
+      when("get_config", { unlock_identity_with_app: true });
+      // gate stays off (default get_app_lock_state.enabled = false) → not coupled
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain(
+        "Ignored while Identity Auto-Unlock is on",
+      );
+      const fs = wrapper
+        .find('input[name="lock-mode"]')
+        .element.closest("fieldset") as HTMLFieldSetElement | null;
+      expect(fs?.disabled).toBe(false);
+    });
+
+    it("hides the auto-unlock section when the gate is on but the identity is not encrypted", async () => {
+      when("is_app_lock_available", true);
+      when("get_app_lock_state", { enabled: true, locked: false });
+      // default get_auth_state → encrypted: false
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // gate-idle control still shows; the auto-unlock opt-in does not
+      expect(wrapper.findAll('input[name="gate-idle"]')).toHaveLength(4);
+      expect(
+        wrapper.findAll("button").some((b) => b.text().includes("Auto-Unlock")),
+      ).toBe(false);
+    });
+  });
+
+  describe("passphrase change re-fetches auto-unlock state", () => {
+    it("calls get_config after change_passphrase (re-encryption can revoke the sealed slot)", async () => {
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: true,
+        identity_type: "x25519",
+      });
+      when("change_passphrase", { ok: true });
+      when("get_config", { unlock_identity_with_app: false });
+      const wrapper = mountPage();
+      await flushPromises();
+      // Clear loadConfig's calls so only the submit's invokes are asserted.
+      vi.mocked(invoke).mockClear();
+
+      const openBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Change Passphrase"))!;
+      await openBtn.trigger("click");
+      await flushPromises();
+      const modal = wrapper.find('[role="dialog"]');
+      await modal.find('input[id="pp-current"]').setValue("old");
+      await modal.find('input[id="pp-new"]').setValue("newpass");
+      await modal.find('input[id="pp-new-confirm"]').setValue("newpass");
+      await modal.find('input[type="checkbox"]').setValue(true);
+      await modal
+        .findAll("button")
+        .find((b) => b.text().includes("Change Passphrase"))!
+        .trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("get_config");
+    });
+  });
 });
