@@ -38,7 +38,7 @@ fn keyed_state(dir: &std::path::Path) -> AppState {
         app_locked: AtomicBool::new(false),
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),
-        active_cancel_token: Mutex::new(None),
+        active_cancel_slot: Arc::new(Mutex::new(None)),
         verbose_timer: Mutex::new(None),
         verbose_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     }

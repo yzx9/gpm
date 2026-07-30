@@ -8,8 +8,9 @@
 //! `delete` encrypt → write → local commit, no network). This module wraps each
 //! save in the per-device autosync policy via [`Store::autosync_write`]: a
 //! pull → write → push when `autosync` is on (the default), or a plain local
-//! commit when it's off. The pull phase is cancellable through the global cancel
-//! slot (mirroring `pull_repo`); the push is not yet cancellable.
+//! commit when it's off. Both the pull and push phases are cancellable through
+//! the shared cancel slot (armed under `write_mu`); a cancelled save surfaces as
+//! `WriteOutcome::Cancelled { committed }`.
 //!
 //! ## Outcome shape
 //!
@@ -70,9 +71,9 @@ where
     Fut: Future<Output = Result<WriteResult, Error>> + Send + 'static,
 {
     let store = state.store.clone();
-    crate::git::run_cancellable(state, app.clone(), move |cancel, _tx| {
+    crate::git::run_cancellable(state, app.clone(), move |cancel, _tx, slot| {
         let store = store.clone();
-        async move { store.autosync_write(Some(cancel), local_write).await }
+        async move { store.autosync_write(&slot, Some(cancel), local_write).await }
     })
     .await
 }
@@ -258,8 +259,8 @@ pub(crate) async fn pull_repo(
 ) -> Result<SyncOutcome, Error> {
     log::info!("pull: start");
     let store = state.store.clone();
-    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
-        store.sync_with(Some(cancel), Some(tx)).await
+    crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
+        store.sync_with(&slot, Some(cancel), Some(tx)).await
     })
     .await
     .inspect(|o| log::info!("pull: done: {o:?}"))
@@ -279,8 +280,8 @@ pub(crate) async fn sync_repo(
 ) -> Result<SyncOutcome, Error> {
     log::info!("sync: start");
     let store = state.store.clone();
-    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
-        store.sync_repo(Some(cancel), Some(tx)).await
+    crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
+        store.sync_repo(&slot, Some(cancel), Some(tx)).await
     })
     .await
     .inspect(|o| log::info!("sync: done: {o:?}"))
@@ -376,9 +377,14 @@ pub(crate) async fn resolve_sync_divergence(
     choice: DivergenceChoice,
 ) -> Result<SyncResult, Error> {
     log::info!("resolve: {expected_remote_oid} {choice:?}");
-    let result = state
-        .store
-        .resolve_sync_divergence(&expected_remote_oid, choice)
+    let store = state.store.clone();
+    let expected = expected_remote_oid;
+    let result =
+        crate::git::run_cancellable(&state, app.clone(), move |cancel, _tx, slot| async move {
+            store
+                .resolve_sync_divergence(&slot, &expected, choice, Some(cancel))
+                .await
+        })
         .await
         .inspect_err(|e| log::warn!("resolve failed: {e}"));
     reset_lock_timer(&state, &app);

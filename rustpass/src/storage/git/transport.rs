@@ -323,7 +323,12 @@ pub(super) fn classify_push_error(msg: &str) -> Error {
     // libgit2 reports divergence variously: "non-fast-forward",
     // "cannot push non-fastforwardable reference", code "NotFastForward", plus
     // the server-side "rejected" / "fetch first". Match case-insensitively.
+    // `msg` is the raw libgit2 text, which can embed the remote URL (including
+    // any embedded credential, e.g. `https://user:token@host`). Redact before it
+    // lands in `Error::message` (shown in the WebView / written to logs). Keyword
+    // matching below uses `lower`, computed from the pre-redaction text.
     let lower = msg.to_ascii_lowercase();
+    let msg = crate::config::redact_url(msg);
     let rejected = lower.contains("non-fast-forward")
         || lower.contains("non-fastforward")
         || lower.contains("fastforwardable")
@@ -450,6 +455,25 @@ mod tests {
     fn classify_git_error_generic() {
         let err = classify_git_error("some unknown error");
         assert_eq!(err.code, "CLONE_FAILED");
+    }
+
+    #[test]
+    fn classify_push_error_redacts_embedded_credential() {
+        // libgit2 can echo the remote URL (with an embedded PAT) into a push
+        // error; classify_push_error must scrub it so the credential never
+        // reaches the WebView or the logs.
+        let msg = "push to https://user:secret-token@host.example/repo.git failed";
+        let err = classify_push_error(msg);
+        assert!(
+            !err.message.contains("secret-token"),
+            "credential leaked into push error: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains("user:secret-token@"),
+            "userinfo leaked into push error: {}",
+            err.message
+        );
     }
 
     // ── cancel token + progress ──────────────────────────────────────────

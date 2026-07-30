@@ -30,8 +30,8 @@ use crate::signing::{
 };
 use crate::storage::git::passfile_rel;
 use crate::storage::{
-    CancelToken, CommitKind, GitAuth, KeepLocalOutcome, KeepLocalPlan, ProgressSender, RepoFiles,
-    StorageBackend, StorageCtx, StorageRegistry,
+    CancelSlot, CancelToken, CommitKind, GitAuth, KeepLocalOutcome, KeepLocalPlan, ProgressSender,
+    RepoFiles, StorageBackend, StorageCtx, StorageRegistry,
 };
 use crate::template;
 
@@ -169,6 +169,28 @@ impl RcsCtx {
             commit_name: self.commit_name.as_deref(),
             commit_email: self.commit_email.as_deref(),
         }
+    }
+}
+
+/// RAII guard that arms a [`CancelSlot`] with a token on construction and clears
+/// it on drop. Constructed INSIDE a `write_mu` critical section so the running
+/// op's token — not a queued op's — is what `cancel_git` targets (RFC 0032 bug
+/// #1). The guard outlives the network phases and disarms before the `write_mu`
+/// guard drops.
+struct ArmedSlot {
+    slot: CancelSlot,
+}
+
+impl ArmedSlot {
+    fn arm(slot: CancelSlot, token: CancelToken) -> Self {
+        *slot.lock().expect("cancel slot poisoned") = Some(token);
+        Self { slot }
+    }
+}
+
+impl Drop for ArmedSlot {
+    fn drop(&mut self) {
+        *self.slot.lock().expect("cancel slot poisoned") = None;
     }
 }
 
@@ -1216,6 +1238,7 @@ impl Store {
     /// returns. [`WriteOutcome::Written`] is the normal success.
     pub async fn autosync_write<F, Fut>(
         &self,
+        slot: &CancelSlot,
         cancel: Option<CancelToken>,
         local_write: F,
     ) -> Result<WriteOutcome, Error>
@@ -1232,24 +1255,37 @@ impl Store {
             return local_write().await.map(WriteOutcome::Written);
         }
 
+        // Arm the cancel slot UNDER the lock so `cancel_git` targets THIS op, not
+        // one queued behind `write_mu` (RFC 0032 bug #1). Covers the pull + push
+        // network phases; the guard disarms (clears the slot) when it drops.
+        let _armed = cancel
+            .as_ref()
+            .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
+
         // Pull (cancellable). Divergence is benign — proceed and let the push
         // decide. Only an Enforce block aborts, before the write touches anything.
-        match self.sync_with_locked(cancel, None).await? {
-            SyncOutcome::FastForwarded(result) if result.authenticity.blocked => {
+        // A cancel here aborts before the local write, so nothing is committed.
+        match self.sync_with_locked(cancel.clone(), None).await {
+            Ok(SyncOutcome::FastForwarded(result)) if result.authenticity.blocked => {
                 return Ok(WriteOutcome::AuthenticityBlocked(result.authenticity));
             }
-            _ => {}
+            Ok(_) => {}
+            Err(e) if e.code == "CANCELLED" => {
+                return Ok(WriteOutcome::Cancelled { committed: false });
+            }
+            Err(e) => return Err(e),
         }
 
         // Local write (encrypt + commit), inside the critical section.
         let result = local_write().await?;
 
-        // Push. Not cancellable today (RFC 0032). A PUSH_REJECTED is a real
-        // divergence — surface it as NeedsDivergenceResolve with a fresh preview
-        // so the UI can show the resolve modal without a second round-trip. A
-        // network error leaves the local commit to sync later.
-        match self.push_locked().await {
+        // Push (cancellable). A cancel here leaves the already-made local commit
+        // on disk to publish on the next sync (`committed: true`). A PUSH_REJECTED
+        // is a real divergence — surface it with a fresh preview. A network error
+        // also leaves the local commit to sync later.
+        match self.push_locked(cancel.clone(), None).await {
             Ok(()) => Ok(WriteOutcome::Written(result)),
+            Err(e) if e.code == "CANCELLED" => Ok(WriteOutcome::Cancelled { committed: true }),
             Err(e) if e.code == "PUSH_REJECTED" => {
                 log::warn!("autosync: push rejected, surfacing divergence");
                 Ok(WriteOutcome::NeedsDivergenceResolve(
@@ -1307,11 +1343,18 @@ impl Store {
     /// `Ok` with [`SyncResult::authenticity`] `.blocked = true` (HEAD unchanged).
     pub async fn resolve_sync_divergence(
         &self,
+        slot: &CancelSlot,
         expected_remote_oid: &str,
         choice: DivergenceChoice,
+        cancel: Option<CancelToken>,
     ) -> Result<SyncResult, Error> {
         let _guard = self.write_mu.lock().await;
-        self.resolve_sync_divergence_locked(expected_remote_oid, choice)
+        // Arm under the lock so a cancel during the keep-mine push (the
+        // DivergenceModal "Cancel push" affordance) targets this resolve — RFC 0032.
+        let _armed = cancel
+            .as_ref()
+            .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
+        self.resolve_sync_divergence_locked(expected_remote_oid, choice, cancel)
             .await
     }
 
@@ -1320,6 +1363,7 @@ impl Store {
         &self,
         expected_remote_oid: &str,
         choice: DivergenceChoice,
+        cancel: Option<CancelToken>,
     ) -> Result<SyncResult, Error> {
         match choice {
             DivergenceChoice::AdoptRemote => {
@@ -1327,7 +1371,7 @@ impl Store {
                 let expected = expected_remote_oid.to_string();
                 self.storage()?.adopt_remote(&rcs.ctx(), &expected).await
             }
-            DivergenceChoice::KeepMine => self.resolve_keep_mine(expected_remote_oid).await,
+            DivergenceChoice::KeepMine => self.resolve_keep_mine(expected_remote_oid, cancel).await,
         }
     }
 
@@ -1340,7 +1384,11 @@ impl Store {
     /// fetch + stale-guard + authenticity-verify + replay/conflict computation)
     /// → decrypt local blobs → advance to the reviewed tip (no second fetch)
     /// → re-encrypt to current recipients → write + commit + push.
-    async fn resolve_keep_mine(&self, expected_remote_oid: &str) -> Result<SyncResult, Error> {
+    async fn resolve_keep_mine(
+        &self,
+        expected_remote_oid: &str,
+        cancel: Option<CancelToken>,
+    ) -> Result<SyncResult, Error> {
         let rcs = self.rcs_ctx().await?;
         let expected = expected_remote_oid.to_string();
 
@@ -1407,7 +1455,7 @@ impl Store {
         let deletes = deletes.clone();
         let head = self
             .storage()?
-            .keep_local_finalize(&rcs.ctx(), &ciphertexts, &deletes)
+            .keep_local_finalize(&rcs.ctx(), &ciphertexts, &deletes, cancel, None)
             .await?;
 
         Ok(SyncResult {
@@ -1700,7 +1748,10 @@ impl Store {
     /// unreachable, the branches have diverged, or Enforce mode refuses the
     /// pull.
     pub async fn sync(&self) -> Result<SyncOutcome, Error> {
-        self.sync_with(None, None).await
+        // Plain (non-cancellable) sync: lock + the lock-free inner directly. Does
+        // not arm the cancel slot (no caller-facing cancel), so no slot needed.
+        let _guard = self.write_mu.lock().await;
+        self.sync_with_locked(None, None).await
     }
 
     /// Cancellable, progress-reporting variant of [`sync`](Store::sync).
@@ -1717,10 +1768,15 @@ impl Store {
     /// pull.
     pub async fn sync_with(
         &self,
+        slot: &CancelSlot,
         cancel: Option<CancelToken>,
         progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
+        // Arm under the lock — RFC 0032 bug #1 (mirrors autosync_write).
+        let _armed = cancel
+            .as_ref()
+            .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
         self.sync_with_locked(cancel, progress).await
     }
 
@@ -1750,13 +1806,19 @@ impl Store {
     /// reason other than a missing origin (which is treated as a no-op).
     pub async fn push(&self) -> Result<(), Error> {
         let _guard = self.write_mu.lock().await;
-        self.push_locked().await
+        self.push_locked(None, None).await
     }
 
-    /// Lock-free inner of [`push`] (see [`sync_with_locked`]).
-    async fn push_locked(&self) -> Result<(), Error> {
+    /// Lock-free inner of [`push`] (see [`sync_with_locked`]). `cancel`/`progress`
+    /// mirror [`sync_with_locked`]; the push is cancellable via the sideband
+    /// callback (see [`push`](crate::storage::StorageBackend::push)).
+    async fn push_locked(
+        &self,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
+    ) -> Result<(), Error> {
         let rcs = self.rcs_ctx().await?;
-        self.storage()?.push(&rcs.ctx()).await
+        self.storage()?.push(&rcs.ctx(), cancel, progress).await
     }
 
     /// Manual sync (pull → push) — the publish path when autosync is off, and the
@@ -1777,15 +1839,23 @@ impl Store {
     /// to sync later), or whatever [`sync_with_locked`] returns.
     pub async fn sync_repo(
         &self,
+        slot: &CancelSlot,
         cancel: Option<CancelToken>,
         progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
+        // Arm under the lock — RFC 0032 bug #1 (mirrors autosync_write).
+        let _armed = cancel
+            .as_ref()
+            .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
 
         // Pull (cancellable, progress-reporting). Hand back Diverged / an Enforce
         // block unchanged for the UI to resolve; otherwise keep the pull result
         // for the success return.
-        let pull_result = match self.sync_with_locked(cancel, progress).await? {
+        let pull_result = match self
+            .sync_with_locked(cancel.clone(), progress.clone())
+            .await?
+        {
             SyncOutcome::Diverged(d) => return Ok(SyncOutcome::Diverged(d)),
             SyncOutcome::FastForwarded(r) if r.authenticity.blocked => {
                 return Ok(SyncOutcome::FastForwarded(r));
@@ -1793,11 +1863,11 @@ impl Store {
             SyncOutcome::FastForwarded(r) => r,
         };
 
-        // Push. A PUSH_REJECTED is a real divergence — surface it as Diverged
-        // with a fresh preview. A network error leaves any local commits to sync
-        // later. Push doesn't move local HEAD, so the pull result still reflects
-        // the post-sync state.
-        match self.push_locked().await {
+        // Push (cancellable). A PUSH_REJECTED is a real divergence — surface it
+        // as Diverged with a fresh preview. A network error leaves any local
+        // commits to sync later. Push doesn't move local HEAD, so the pull result
+        // still reflects the post-sync state.
+        match self.push_locked(cancel, progress).await {
             Ok(()) => Ok(SyncOutcome::FastForwarded(pull_result)),
             Err(e) if e.code == "PUSH_REJECTED" => {
                 log::warn!("sync: push rejected, surfacing divergence");
@@ -2566,6 +2636,26 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     use super::*;
+
+    #[test]
+    fn armed_slot_arms_on_construct_clears_on_drop() {
+        // The load-bearing contract for the RFC 0032 bug #1 fix: the slot holds
+        // the running op's token only while the guard lives, then clears — so a
+        // queued op arming under the next critical section isn't clobbered.
+        let slot: CancelSlot = Arc::new(std::sync::Mutex::new(None));
+        let token: CancelToken = Arc::new(AtomicBool::new(false));
+        {
+            let _armed = ArmedSlot::arm(slot.clone(), token.clone());
+            assert!(
+                slot.lock().unwrap().is_some(),
+                "ArmedSlot::arm must publish the token into the slot"
+            );
+        }
+        assert!(
+            slot.lock().unwrap().is_none(),
+            "ArmedSlot::drop must clear the slot"
+        );
+    }
 
     #[test]
     fn resolve_entry_path_valid_file() {

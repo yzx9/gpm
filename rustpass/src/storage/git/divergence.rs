@@ -417,6 +417,7 @@ pub(super) fn keep_local_advance(repo_path: &Path, fetched_oid: &str) -> Result<
 /// re-encrypted `entries`, apply the local `deletes`, commit on HEAD, and push
 /// (now a fast-forward — our commit sits on the reviewed remote tip). Returns the
 /// new HEAD short hash. Crypto is done by the caller; this is pure git + IO.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn keep_local_finalize(
     repo_path: &Path,
     auth: &GitAuth,
@@ -424,6 +425,8 @@ pub(super) fn keep_local_finalize(
     deletes: &[String],
     name: Option<&str>,
     email: Option<&str>,
+    cancel: Option<&crate::storage::CancelToken>,
+    progress: Option<&crate::storage::ProgressSender>,
 ) -> Result<String, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -468,7 +471,7 @@ pub(super) fn keep_local_finalize(
         &[&parent],
     )?;
 
-    push_current_branch(&repo, auth)?;
+    push_current_branch(&repo, auth, cancel, progress)?;
 
     let head = repo
         .head()?

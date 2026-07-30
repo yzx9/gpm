@@ -224,10 +224,16 @@ impl StorageBackend for GitStorage {
         spawn_blocking(move || commit::commit_initial(&repo_path, &paths, &message)).await?
     }
 
-    async fn push(&self, ctx: &StorageCtx<'_>) -> Result<(), Error> {
+    async fn push(
+        &self,
+        ctx: &StorageCtx<'_>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
+    ) -> Result<(), Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
-        spawn_blocking(move || commit::push(&repo_path, &auth)).await?
+        spawn_blocking(move || commit::push(&repo_path, &auth, cancel.as_ref(), progress.as_ref()))
+            .await?
     }
 
     async fn pull(
@@ -293,6 +299,8 @@ impl StorageBackend for GitStorage {
         ctx: &StorageCtx<'_>,
         ciphertexts: &[(String, Vec<u8>)],
         deletes: &[String],
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
     ) -> Result<String, Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
@@ -308,6 +316,8 @@ impl StorageBackend for GitStorage {
                 &deletes,
                 name.as_deref(),
                 email.as_deref(),
+                cancel.as_ref(),
+                progress.as_ref(),
             )
         })
         .await?

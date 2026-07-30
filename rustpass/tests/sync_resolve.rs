@@ -81,7 +81,7 @@ async fn keep_mine_replays_local_secrets_onto_remote() {
 
     let tip = bare_head_oid(bare_dir.path());
     let result = store
-        .resolve_sync_divergence(&tip, DivergenceChoice::KeepMine)
+        .resolve_sync_divergence(&cancel_slot(), &tip, DivergenceChoice::KeepMine, None)
         .await
         .expect("keep mine");
     assert!(result.changed, "HEAD should advance");
@@ -133,7 +133,7 @@ async fn keep_mine_refuses_same_secret_conflict() {
 
     let tip = bare_head_oid(bare_dir.path());
     let err = store
-        .resolve_sync_divergence(&tip, DivergenceChoice::KeepMine)
+        .resolve_sync_divergence(&cancel_slot(), &tip, DivergenceChoice::KeepMine, None)
         .await
         .unwrap_err();
     assert_eq!(
@@ -168,7 +168,7 @@ async fn keep_mine_re_encrypts_to_current_recipients() {
 
     let tip = bare_head_oid(bare_dir.path());
     let result = store
-        .resolve_sync_divergence(&tip, DivergenceChoice::KeepMine)
+        .resolve_sync_divergence(&cancel_slot(), &tip, DivergenceChoice::KeepMine, None)
         .await
         .expect("keep mine");
     assert!(result.changed);
@@ -229,7 +229,7 @@ async fn keep_mine_preserves_local_deletion() {
 
     let tip = bare_head_oid(bare_dir.path());
     let result = store
-        .resolve_sync_divergence(&tip, DivergenceChoice::KeepMine)
+        .resolve_sync_divergence(&cancel_slot(), &tip, DivergenceChoice::KeepMine, None)
         .await
         .expect("keep mine");
     assert!(result.changed);
@@ -299,7 +299,12 @@ async fn keep_mine_refuses_when_remote_moved() {
     );
 
     let err = store
-        .resolve_sync_divergence(&reviewed_tip, DivergenceChoice::KeepMine)
+        .resolve_sync_divergence(
+            &cancel_slot(),
+            &reviewed_tip,
+            DivergenceChoice::KeepMine,
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(
@@ -330,7 +335,7 @@ async fn keep_mine_refuses_undecryptable_local_entry() {
 
     let tip = bare_head_oid(bare_dir.path());
     let err = store
-        .resolve_sync_divergence(&tip, DivergenceChoice::KeepMine)
+        .resolve_sync_divergence(&cancel_slot(), &tip, DivergenceChoice::KeepMine, None)
         .await
         .unwrap_err();
     assert_eq!(
@@ -391,7 +396,7 @@ async fn keep_mine_reuses_cached_identity_without_wiping() {
     // Keep-mine re-encrypts the local entry — no passphrase is passed here, so
     // success proves the cached identity was reused (no second unlock needed).
     let result = store
-        .resolve_sync_divergence(&tip, DivergenceChoice::KeepMine)
+        .resolve_sync_divergence(&cancel_slot(), &tip, DivergenceChoice::KeepMine, None)
         .await
         .expect("keep mine reuses the cached identity — no second unlock");
     assert!(result.changed, "HEAD should advance");
@@ -498,7 +503,7 @@ async fn autosync_off_skips_network() {
 
     let s = store.clone();
     let outcome = store
-        .autosync_write(None, move || {
+        .autosync_write(&cancel_slot(), None, move || {
             let s = s.clone();
             async move { s.set("offline-entry", b"local-only").await }
         })
@@ -527,7 +532,7 @@ async fn autosync_on_publishes_via_pull_write_push() {
 
     let s = store.clone();
     let outcome = store
-        .autosync_write(None, move || {
+        .autosync_write(&cancel_slot(), None, move || {
             let s = s.clone();
             async move { s.set("published", b"via-orchestrator").await }
         })
@@ -577,7 +582,7 @@ async fn autosync_on_push_rejected_returns_needs_divergence_resolve() {
 
     let s = store.clone();
     let outcome = store
-        .autosync_write(None, move || {
+        .autosync_write(&cancel_slot(), None, move || {
             let s = s.clone();
             async move { s.set("new", b"v").await }
         })
@@ -612,12 +617,14 @@ async fn autosync_concurrent_writes_both_land() {
 
     let s1 = store.clone();
     let s2 = store.clone();
+    let slot1 = cancel_slot();
+    let slot2 = cancel_slot();
     let (r1, r2) = tokio::join!(
-        store.autosync_write(None, move || {
+        store.autosync_write(&slot1, None, move || {
             let s = s1.clone();
             async move { s.set("a", b"1").await }
         }),
-        store.autosync_write(None, move || {
+        store.autosync_write(&slot2, None, move || {
             let s = s2.clone();
             async move { s.set("b", b"2").await }
         }),
@@ -673,7 +680,7 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
     // The user, editing from the stale v1 snapshot, saves via the orchestrator.
     let s = store.clone();
     let outcome = store
-        .autosync_write(None, move || {
+        .autosync_write(&cancel_slot(), None, move || {
             let s = s.clone();
             async move { s.set("entry", b"stale-edit").await }
         })
@@ -712,7 +719,10 @@ async fn sync_repo_publishes_local_commits() {
         .expect("local write");
     let bare_before = bare_head_oid(bare_dir.path());
 
-    let outcome = store.sync_repo(None, None).await.expect("sync_repo");
+    let outcome = store
+        .sync_repo(&cancel_slot(), None, None)
+        .await
+        .expect("sync_repo");
     match outcome {
         SyncOutcome::FastForwarded(r) => {
             assert!(
@@ -759,7 +769,10 @@ async fn sync_repo_pull_diverged_returns_diverged() {
     );
     let bare_after_advance = bare_head_oid(bare_dir.path());
 
-    let outcome = store.sync_repo(None, None).await.expect("sync_repo");
+    let outcome = store
+        .sync_repo(&cancel_slot(), None, None)
+        .await
+        .expect("sync_repo");
     match outcome {
         SyncOutcome::Diverged(div) => {
             assert!(

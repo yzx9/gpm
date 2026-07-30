@@ -36,7 +36,7 @@ async fn cancel_git_flips_armed_token_and_clears_slot() {
     );
     assert!(
         app.state::<AppState>()
-            .active_cancel_token
+            .active_cancel_slot
             .lock()
             .unwrap()
             .is_none(),
@@ -55,7 +55,7 @@ async fn cancel_git_is_noop_when_no_op_armed() {
     crate::git::cancel_git(app_state).expect("cancel_git is Ok(()) with nothing armed");
     assert!(
         app.state::<AppState>()
-            .active_cancel_token
+            .active_cancel_slot
             .lock()
             .unwrap()
             .is_none(),

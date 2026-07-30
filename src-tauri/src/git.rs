@@ -66,29 +66,45 @@ pub(crate) fn fresh_cancel_token() -> rustpass::CancelToken {
 /// Publish `token` as the active cancel token so [`cancel_git`] can abort the
 /// in-flight operation. Stores a clone — the command keeps its own to pass into
 /// the Store method (both share the same `AtomicBool`).
+/// Test helper: arm the cancel slot with `token` (the orchestrators arm under
+/// `write_mu` themselves in production).
+#[cfg(test)]
 pub(crate) fn arm_cancel(state: &State<'_, AppState>, token: rustpass::CancelToken) {
     *state
-        .active_cancel_token
+        .active_cancel_slot
         .lock()
-        .expect("active_cancel_token lock poisoned") = Some(token);
+        .expect("cancel slot poisoned") = Some(token);
 }
 
-/// Clear the active cancel token once the operation has settled (success,
-/// failure, or cancel) — no-op if none was armed.
-pub(crate) fn disarm_cancel(state: &State<'_, AppState>) {
-    *state
-        .active_cancel_token
-        .lock()
-        .expect("active_cancel_token lock poisoned") = None;
+/// RAII guard that arms a cancel `slot` with `token` on construction and clears
+/// it on drop. Used by setup-time ops (clone/configure — single in-flight, no
+/// `write_mu`) that arm up-front. The save/sync/resolve orchestrators arm UNDER
+/// `write_mu` themselves (in rustpass) via the same slot, so `cancel_git` always
+/// targets the running op — not one queued behind the lock (RFC 0032 bug #1).
+pub(crate) struct SlotGuard {
+    slot: rustpass::CancelSlot,
+}
+impl SlotGuard {
+    pub(crate) fn arm(slot: rustpass::CancelSlot, token: rustpass::CancelToken) -> Self {
+        *slot.lock().expect("cancel slot poisoned") = Some(token);
+        Self { slot }
+    }
+}
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        *self.slot.lock().expect("cancel slot poisoned") = None;
+    }
 }
 
 /// Run a cancellable, progress-reporting git operation.
 ///
-/// Arms a fresh cancel token (so [`cancel_git`] can abort it), spawns a progress
-/// drain that forwards `"git-progress"` events, runs `op`, then clears the token
-/// and flushes the drain's final events before returning. Owns the arm → op →
-/// disarm → drain-await ordering in one place so the cancellable commands stay
-/// in sync.
+/// Creates a fresh cancel token and spawns a progress drain that forwards
+/// `"git-progress"` events, then hands BOTH the token and the shared cancel
+/// `slot` to `op`. `op` is responsible for arming the slot for the duration of
+/// its network phase — the save/sync/resolve orchestrators arm UNDER `write_mu`
+/// (so `cancel_git` targets the running op, RFC 0032 bug #1); setup-time ops arm
+/// up-front via [`SlotGuard`]. This wrapper deliberately does NOT arm itself: an
+/// arm outside the lock is exactly the stomp a queued op would exploit.
 pub(crate) async fn run_cancellable<R, F, Fut, T>(
     state: &State<'_, AppState>,
     app: tauri::AppHandle<R>,
@@ -96,30 +112,30 @@ pub(crate) async fn run_cancellable<R, F, Fut, T>(
 ) -> Result<T, Error>
 where
     R: Runtime,
-    F: FnOnce(rustpass::CancelToken, ProgressSender) -> Fut,
+    F: FnOnce(rustpass::CancelToken, ProgressSender, rustpass::CancelSlot) -> Fut,
     Fut: Future<Output = Result<T, Error>>,
 {
     let cancel = fresh_cancel_token();
-    arm_cancel(state, cancel.clone());
+    let slot = state.active_cancel_slot.clone();
     let (tx, drain) = spawn_progress_drain(app);
-    let result = op(cancel, tx).await;
-    disarm_cancel(state);
+    let result = op(cancel, tx, slot).await;
     if let Err(e) = drain.await {
         log::warn!("git: progress drain join failed: {e}");
     }
     result
 }
 
-/// Cancel the in-flight clone/pull, if any. Flips the active cancel token so
-/// git2's `transfer_progress` callback returns `false` on its next tick and
-/// libgit2 aborts the transfer (the Store method then maps it to `CANCELLED`).
+/// Cancel the in-flight clone/pull/push, if any. `take`s the armed token from
+/// the slot and flips it so git2's progress/sideband callback returns `false` on
+/// its next tick and libgit2 aborts the transfer (the Store method then maps it
+/// to `CANCELLED`).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
 pub(crate) fn cancel_git(state: State<'_, AppState>) -> Result<(), Error> {
     if let Some(token) = state
-        .active_cancel_token
+        .active_cancel_slot
         .lock()
-        .expect("active_cancel_token lock poisoned")
+        .expect("cancel slot poisoned")
         .take()
     {
         log::info!("git: cancel");

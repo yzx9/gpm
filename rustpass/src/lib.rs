@@ -88,7 +88,7 @@ pub use signing::{
     AuthenticityConfig, CommitSigInfo, CommitSigPage, CommitSigStatus, IgnoredIssue, TrustedGpgKey,
     TrustedKey, VerifyMode, fingerprint_of_public_key,
 };
-pub use storage::{CancelToken, GitProgress, ProgressSender, StoreBuilder};
+pub use storage::{CancelSlot, CancelToken, GitProgress, ProgressSender, StoreBuilder};
 pub use store::{
     CommitIdentity, DivergenceChoice, RankedPage, Store, SyncDivergence, SyncOutcome, SyncResult,
     WriteOutcome, WriteResult, clamp_lock_mode, normalize_clear_secs,

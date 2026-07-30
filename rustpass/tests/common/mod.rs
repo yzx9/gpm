@@ -7,6 +7,14 @@
 use std::io::Write;
 use std::str::FromStr;
 
+#[allow(dead_code)] // only some test crates exercise the orchestrators
+/// A fresh, never-armed cancel slot for tests that exercise the orchestrators
+/// (`autosync_write` / `sync_repo` / `resolve_sync_divergence`) without testing
+/// cancellation itself. Passed by `&` — the temporary lives through the `.await`.
+pub fn cancel_slot() -> rustpass::CancelSlot {
+    std::sync::Arc::new(std::sync::Mutex::new(None))
+}
+
 use age::secrecy::ExposeSecret;
 use age::ssh;
 use age::x25519::{Identity, Recipient};

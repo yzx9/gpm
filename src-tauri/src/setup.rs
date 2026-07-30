@@ -160,7 +160,10 @@ pub(crate) async fn clone_repo(
 ) -> Result<(), Error> {
     log::info!("setup: clone {}", rustpass::config::redact_url(&repo_url));
     let store = state.store.clone();
-    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
+    crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
+        // Setup-time op (single in-flight, no `write_mu`): arm up-front so the
+        // clone is cancellable. The guard disarms when the future drops.
+        let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
         store
             .clone_only_with(
                 &repo_url,
@@ -625,7 +628,10 @@ pub(crate) async fn setup(
 ) -> Result<(), Error> {
     log::info!("setup: start");
     let store = state.store.clone();
-    crate::git::run_cancellable(&state, app, move |cancel, tx| async move {
+    crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
+        // Setup-time op (single in-flight, no `write_mu`): arm up-front so the
+        // configure (clone + first push) is cancellable.
+        let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
         store
             .configure_with(
                 &repo_url,
@@ -716,7 +722,7 @@ mod tests {
             app_locked: std::sync::atomic::AtomicBool::new(false),
             seal_migrate_state: std::sync::atomic::AtomicU8::new(0),
             backend_resolve_state: std::sync::atomic::AtomicU8::new(0),
-            active_cancel_token: Mutex::new(None),
+            active_cancel_slot: Arc::new(Mutex::new(None)),
             verbose_timer: Mutex::new(None),
             verbose_generation: Arc::new(AtomicU64::new(0)),
         };

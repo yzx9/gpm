@@ -96,6 +96,14 @@ impl fmt::Debug for GitAuth {
 /// [`ErrorCode::Cancelled`](crate::ErrorCode::Cancelled).
 pub type CancelToken = Arc<AtomicBool>;
 
+/// Shared slot holding the in-flight op's [`CancelToken`]. The orchestrator arms
+/// it UNDER `Store::write_mu` (right after acquiring the lock) and clears it when
+/// the critical section ends — so a second op queued behind the lock cannot
+/// overwrite the running op's token (the pre-R032 stomp, RFC 0032 bug #1). The
+/// `cancel_git` command `take`s/sets it. `Arc`'d so the src-tauri command layer
+/// can clone it into the orchestrator (mirrors `lock_generation`).
+pub type CancelSlot = Arc<std::sync::Mutex<Option<CancelToken>>>;
+
 /// Progress data reported by git2 during a transfer. Sent over a synchronous
 /// [`ProgressSender`] from inside git2's C callbacks (which run on the blocking
 /// thread), so the channel is `std::sync::mpsc` — not async — keeping the
@@ -366,13 +374,21 @@ pub trait StorageBackend: Send + Sync {
         message: &str,
     ) -> Result<String, Error>;
 
-    /// Push the current branch to `origin`.
+    /// Push the current branch to `origin`. `cancel`/`progress` mirror [`pull`]:
+    /// flipping the token aborts the in-flight push (via the sideband callback),
+    /// surfaced as [`ErrorCode::Cancelled`].
     ///
     /// # Errors
     ///
-    /// [`ErrorCode::PushRejected`] when the remote diverged; otherwise a
-    /// network/auth error.
-    async fn push(&self, ctx: &StorageCtx<'_>) -> Result<(), Error>;
+    /// [`ErrorCode::PushRejected`] when the remote diverged;
+    /// [`ErrorCode::Cancelled`] when the token was set; otherwise a network/auth
+    /// error.
+    async fn push(
+        &self,
+        ctx: &StorageCtx<'_>,
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
+    ) -> Result<(), Error>;
 
     /// Pull (fetch + fast-forward) from `origin` under `ctx`'s authenticity
     /// policy. Returns [`SyncOutcome::FastForwarded`] for a normal pull or
@@ -447,6 +463,8 @@ pub trait StorageBackend: Send + Sync {
         ctx: &StorageCtx<'_>,
         ciphertexts: &[(String, Vec<u8>)],
         deletes: &[String],
+        cancel: Option<CancelToken>,
+        progress: Option<ProgressSender>,
     ) -> Result<String, Error>;
 
     /// Full hash of the current HEAD commit.
@@ -704,6 +722,17 @@ pub enum WriteOutcome {
     /// not advance). No local write was made. The caller reuses the pull path's
     /// block-issue UI with the carried result.
     AuthenticityBlocked(AuthenticityResult),
+    /// The save was cancelled mid-flight. `committed` is `true` when the local
+    /// commit was already made (cancel landed during the push phase) — it stays
+    /// on disk and publishes on the next manual Sync; `false` when cancelled
+    /// before the write (during the pull phase) — nothing was committed. The
+    /// orchestrator is the one place that knows which phase ran.
+    Cancelled {
+        /// `true` if the local commit was already made (cancel during the push
+        /// phase — it stays on disk, syncs later); `false` if cancelled before
+        /// the write (during the pull phase — nothing committed).
+        committed: bool,
+    },
 }
 
 /// How to resolve a [`SyncOutcome::Diverged`] (the user's choice). "Cancel" is

@@ -91,7 +91,12 @@ async fn resolve_adopts_reviewed_remote_tip() {
     assert_eq!(local_only_entries, vec!["local-only".to_string()]);
 
     let result = store
-        .resolve_sync_divergence(&remote_tip, DivergenceChoice::AdoptRemote)
+        .resolve_sync_divergence(
+            &cancel_slot(),
+            &remote_tip,
+            DivergenceChoice::AdoptRemote,
+            None,
+        )
         .await
         .expect("adopt");
     assert!(result.changed, "HEAD should advance to the remote tip");
@@ -143,7 +148,12 @@ async fn resolve_refused_when_remote_moved() {
     );
 
     let err = store
-        .resolve_sync_divergence(&remote_tip, DivergenceChoice::AdoptRemote)
+        .resolve_sync_divergence(
+            &cancel_slot(),
+            &remote_tip,
+            DivergenceChoice::AdoptRemote,
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(

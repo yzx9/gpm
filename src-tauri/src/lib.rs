@@ -105,10 +105,11 @@ pub(crate) struct AppState {
     /// post-unlock — mirroring `seal_migrate_state`. On a hard failure the
     /// specific error is stashed in `Store` (not here) so `storage()` surfaces it.
     pub(crate) backend_resolve_state: AtomicU8,
-    /// Cancel token for the in-flight clone/pull (if any). Set by the
-    /// `cancel_git` command; cleared by the owning command once the operation
-    /// settles. `None` outside a user-initiated clone/pull.
-    pub(crate) active_cancel_token: Mutex<Option<rustpass::CancelToken>>,
+    /// Cancel slot for the in-flight clone/pull/push (if any). Shared by-ref into
+    /// the rustpass orchestrator so it arms UNDER `write_mu` (not before),
+    /// eliminating the pre-R032 stomp where a queued op overwrote the running
+    /// op's token. `cancel_git` `take`s/sets it.
+    pub(crate) active_cancel_slot: rustpass::CancelSlot,
     /// Verbose deadline timer handle — cancel-and-respawn pattern, same shape
     /// as `clipboard_clear_handle`. Holds the in-flight revert task so a fresh
     /// arm (or a manual Off) aborts the prior one.
@@ -262,7 +263,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
         // (first app_unlock). Stays Pending on non-app-lock/desktop (no unlock).
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),
-        active_cancel_token: Mutex::new(None),
+        active_cancel_slot: Arc::new(Mutex::new(None)),
         verbose_timer: Mutex::new(None),
         verbose_generation: Arc::new(AtomicU64::new(0)),
     };

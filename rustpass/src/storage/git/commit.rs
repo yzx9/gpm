@@ -174,7 +174,12 @@ fn commit_initial_inner(
 ///
 /// `Err` here means the push was rejected — most commonly a non-fast-forward
 /// because the remote advanced (the write-path conflict case).
-pub(super) fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(), Error> {
+pub(super) fn push_current_branch(
+    repo: &Repository,
+    auth: &GitAuth,
+    cancel: Option<&crate::storage::CancelToken>,
+    progress: Option<&crate::storage::ProgressSender>,
+) -> Result<(), Error> {
     // No `origin` → a local-only store (created with no remote). Push is a no-op:
     // there is nothing to push to. Mirrors the `pull_repo` no-op.
     //
@@ -198,10 +203,24 @@ pub(super) fn push_current_branch(repo: &Repository, auth: &GitAuth) -> Result<(
 
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     let mut opts = git2::PushOptions::new();
-    opts.remote_callbacks(transport::build_remote_callbacks(auth, None, None));
-    remote
-        .push(&[&refspec], Some(&mut opts))
-        .map_err(|e| transport::classify_push_error(&e.to_string()))
+    // Push cancel is BEST-EFFORT via the same `sideband_progress` callback the
+    // fetch path uses (git2's `push_transfer_progress` is monitoring-only — it
+    // cannot abort). In libgit2's smart-protocol push, sideband fires in the
+    // pre-flight negotiation and the post-upload report-read phases, so flipping
+    // the token aborts in those windows; during the bulk object upload there is
+    // no checkpoint, so a fast push may complete before the token is polled.
+    // `sideband_progress_cb` returns -1 (abort) when the callback returns false.
+    opts.remote_callbacks(transport::build_remote_callbacks(auth, cancel, progress));
+    if let Err(e) = remote.push(&[&refspec], Some(&mut opts)) {
+        // A cancelled push is benign — the local commit (if any) stays and
+        // publishes on the next sync. Any other failure is classified normally.
+        return Err(if transport::cancelled(cancel) {
+            Error::new(ErrorCode::Cancelled, "Push cancelled")
+        } else {
+            transport::classify_push_error(&e.to_string())
+        });
+    }
+    Ok(())
 }
 
 /// Stage `rel_paths` and commit on the current branch. Returns the short hash
@@ -280,11 +299,16 @@ pub(super) fn commit_initial(
 ///
 /// Returns `PushRejected` when the remote has diverged (non-fast-forward), or a
 /// network/auth error otherwise.
-pub(super) fn push(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
+pub(super) fn push(
+    repo_path: &Path,
+    auth: &GitAuth,
+    cancel: Option<&crate::storage::CancelToken>,
+    progress: Option<&crate::storage::ProgressSender>,
+) -> Result<(), Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
     transport::ensure_https_ca_for_origin(&repo)?;
-    push_current_branch(&repo, auth)
+    push_current_branch(&repo, auth, cancel, progress)
 }
 
 /// Add a remote named `name` pointing at `url` (gopass's `addRemote`). This is
@@ -348,7 +372,7 @@ mod tests {
         let _oid = create_empty_commit(&repo, &test_signature());
 
         // No `origin` configured → push is a no-op (Ok), not an error.
-        push_current_branch(&repo, &GitAuth::None).expect("push no-ops without origin");
+        push_current_branch(&repo, &GitAuth::None, None, None).expect("push no-ops without origin");
     }
 
     #[test]
