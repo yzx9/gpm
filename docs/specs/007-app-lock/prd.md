@@ -6,7 +6,7 @@ version: 1.0.0
 
 # 007 — App Lock & Auto-lock
 
-> Status: Shipped · Last verified: 2026-07-28 · Related: A003
+> Status: Shipped · Last verified: 2026-07-30 · Related: A003
 > Authoritative relock signal not yet done.
 
 ## 1. Introduction
@@ -40,8 +40,9 @@ encryption at rest means whoever pulls the phone's files only sees ciphertext.
 
 ### Functionality
 
-- App Lock, Auto-lock's three modes + activity-reset timer, encryption at rest (all
-  shipped); an authoritative relock signal (not done).
+- App Lock, Auto-lock's three modes + activity-reset timer, encryption at rest, the
+  App Lock in-app idle re-lock, and identity coupling to the gate (all shipped); an
+  authoritative relock signal (not done).
 
 ### Compatibility
 
@@ -49,7 +50,9 @@ encryption at rest means whoever pulls the phone's files only sees ciphertext.
 
 ### Interactive
 
-- Lock-screen overlay; unlock dialog; biometric first; an Auto-lock setting.
+- Lock-screen overlay; unlock dialog; biometric first; an Auto-lock setting; the App
+  Lock idle re-lock mask (non-dismissable, tap to unlock — no auto-prompt); a single
+  "Lock & Identity" settings page.
 
 ### Adaptive
 
@@ -73,5 +76,6 @@ See <./security.md>.
 ## 6. Roadmap
 
 - **Shipped:** App Lock, Auto-lock's three modes, encryption at rest, activity-reset
-  timer.
+  timer, the App Lock in-app idle re-lock, identity coupling to the gate (when
+  Auto-Unlock is on).
 - **Future:** authoritative relock signal (hardening the dependence on OEM / WebView).

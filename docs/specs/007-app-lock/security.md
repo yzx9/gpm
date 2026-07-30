@@ -53,6 +53,19 @@ a non-goal), but the guarantee rests on the WebView firing `visibilitychange` on
 the norm on Android but not contractually guaranteed on every OEM build. An authoritative
 `Activity.onResume` signal is tracked as future hardening.
 
+**In-app idle re-lock (opt-in).** Beyond resume, App Lock can also re-lock after a
+configured stretch of foreground inactivity ("Re-lock when inactive": Off, or 5/15/30
+min; off by default for existing users, 5 min for new). The idle wipe is the same as
+the resume wipe — master key + identity cache gone, non-dismissable mask up — but it
+carries an `idle` reason that suppresses the auto-biometric-prompt: the user is
+present but idle, so the mask waits for a tap rather than firing a prompt. The
+foreground-return lock still auto-prompts as always. The idle timer is backend-owned
+(a throttle-able JS timer could delay the wipe) and shares the in-app activity signal
+with the identity idle timer; like the resume wipe it can fire mid save / autosync /
+delete / divergence-resolve and surface `SealKeyUnavailable` — accepted (consistent
+with the gate's no-write-mutex design), recoverable in git, with exposure bounded by
+the per-operation timer reset to ops longer than the idle window.
+
 **Enrollment does not brick** — the biometric-gated master key is _not_ invalidated by
 enrolling a new fingerprint/face. **Removing all biometrics does** invalidate it → store
 unreadable → re-setup (re-clone, re-enter git token) is the only recovery; no escrow.
@@ -73,6 +86,12 @@ Immediate (decrypt per operation, wipe right after — key in memory only for th
 Idle (cached until timeout; the timer resets on in-app activity, not just secret ops),
 Never (cached for the session). A failed op also clears the cache. During divergence
 resolve the Immediate wipe is deferred (see `005/security.md`).
+
+When **Identity Auto-Unlock** is on, the identity has no independent auto-lock — its
+cache is restored by the gate's unlock and wiped by the gate's lock, so Immediate,
+Idle, and Never are all ignored (the per-op Immediate wipe is suppressed too). The
+settings UI reflects this by disabling the Auto-lock control with a "Managed by App
+Lock" note. When Auto-Unlock is off, the three modes above run unchanged.
 
 ## Cross-references
 
