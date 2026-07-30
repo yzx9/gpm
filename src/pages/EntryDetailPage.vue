@@ -22,6 +22,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import {
   isAuthCancelled,
+  useCancellableSave,
   useDivergence,
   useLockState,
   useSecretReveal,
@@ -68,6 +69,7 @@ const error = ref("");
 // alongside `error` at the start of every action.
 const decryptError = ref(false);
 const deleting = ref(false);
+const { cancelling, cancelSave } = useCancellableSave();
 
 // 2FA affordance visibility. `null` = unknown (not yet probed): show the button
 // as a fallback so the user can always try; `true`/`false` once we know. The
@@ -238,6 +240,14 @@ async function deleteSecret() {
       const { kind: _kind, ...preview } = outcome;
       void _kind;
       openDivergence(preview);
+    } else if (outcome.kind === "cancelled") {
+      // User aborted. Nothing was published; if committed, the local delete stays
+      // and syncs next time. Stay on the detail page — neutral status, not error.
+      toast.info(
+        outcome.committed
+          ? t("entry.deleteCancelledLocalStays")
+          : t("entry.deleteCancelledNothingPublished"),
+      );
     } else {
       // authenticity_blocked — pre-write pull refused under Enforce.
       error.value = t("entry.deleteBlocked");
@@ -247,6 +257,7 @@ async function deleteSecret() {
     error.value = appError?.message || t("entry.deleteFailed");
   } finally {
     deleting.value = false;
+    cancelling.value = false;
   }
 }
 
@@ -338,16 +349,28 @@ function handleKeydown(e: KeyboardEvent) {
       {{ t("entry.editLabel") }}
     </BaseButton>
 
-    <BaseButton
-      variant="danger"
-      block
-      class="mb-6"
-      :disabled="deleting || loading"
-      :aria-label="t('entry.deleteAria', { name: entryName })"
-      @click="deleteSecret"
-    >
-      {{ deleting ? t("entry.deleting") : t("entry.deleteLabel") }}
-    </BaseButton>
+    <div class="flex gap-3 mb-6">
+      <BaseButton
+        variant="danger"
+        class="flex-1"
+        :disabled="deleting || loading"
+        :aria-label="t('entry.deleteAria', { name: entryName })"
+        @click="deleteSecret"
+      >
+        {{ deleting ? t("entry.deleting") : t("entry.deleteLabel") }}
+      </BaseButton>
+      <BaseButton
+        v-if="deleting"
+        variant="outline"
+        type="button"
+        class="flex-1"
+        :disabled="cancelling"
+        :aria-label="t('entry.cancelSaveAria')"
+        @click="cancelSave"
+      >
+        {{ cancelling ? t("entry.cancellingSave") : t("entry.cancelSave") }}
+      </BaseButton>
+    </div>
 
     <div
       v-if="loading"

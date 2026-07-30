@@ -23,6 +23,7 @@ import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
+  useCancellableSave,
   useDivergence,
   useLockState,
   useSecureClaim,
@@ -60,6 +61,7 @@ let generateToken = 0;
 
 const submitting = ref(false);
 const error = ref("");
+const { cancelling, cancelSave } = useCancellableSave();
 
 const {
   divergence,
@@ -159,6 +161,12 @@ async function onSave() {
       const { kind: _kind, ...preview } = outcome;
       void _kind;
       openDivergence(preview);
+    } else if (outcome.kind === "cancelled") {
+      toast.info(
+        outcome.committed
+          ? t("create.saveCancelledLocalStays")
+          : t("create.saveCancelledNothingPublished"),
+      );
     } else {
       error.value = t("create.saveBlocked");
     }
@@ -168,6 +176,7 @@ async function onSave() {
     error.value = appError?.message || t("create.createFailed");
   } finally {
     submitting.value = false;
+    cancelling.value = false;
   }
 }
 
@@ -260,9 +269,27 @@ useWipeOnLeave(wipeFields);
             </button>
           </div>
         </div>
-        <BaseButton variant="primary" type="submit" :disabled="!canSubmit">{{
-          submitting ? t("create.saving") : t("create.saveSecret")
-        }}</BaseButton>
+        <div class="flex gap-3">
+          <BaseButton
+            variant="primary"
+            type="submit"
+            class="flex-1"
+            :disabled="!canSubmit"
+            >{{ submitting ? t("create.saving") : t("create.saveSecret") }}
+          </BaseButton>
+          <BaseButton
+            v-if="submitting"
+            variant="outline"
+            type="button"
+            class="flex-1"
+            :disabled="cancelling"
+            :aria-label="t('create.cancelSaveAria')"
+            @click="cancelSave"
+            >{{
+              cancelling ? t("create.cancellingSave") : t("create.cancelSave")
+            }}
+          </BaseButton>
+        </div>
       </form>
     </section>
 

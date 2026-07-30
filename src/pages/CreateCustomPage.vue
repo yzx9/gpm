@@ -19,6 +19,7 @@ import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
+  useCancellableSave,
   useDivergence,
   useLockState,
   useSecureClaim,
@@ -44,6 +45,7 @@ const customName = ref("");
 const customContent = ref("");
 const submitting = ref(false);
 const error = ref("");
+const { cancelling, cancelSave } = useCancellableSave();
 
 // Template hint / live preview (location-based, gopass).
 const hasTemplate = ref(false);
@@ -118,6 +120,14 @@ async function onSave() {
       const { kind: _kind, ...preview } = outcome;
       void _kind;
       openDivergence(preview);
+    } else if (outcome.kind === "cancelled") {
+      // User aborted. Nothing was published; if committed, it stays local and
+      // syncs next time. Stay on the form — neutral status, not an error.
+      toast.info(
+        outcome.committed
+          ? t("create.saveCancelledLocalStays")
+          : t("create.saveCancelledNothingPublished"),
+      );
     } else {
       error.value = t("create.saveBlocked");
     }
@@ -127,6 +137,7 @@ async function onSave() {
     error.value = appError?.message || t("create.createFailed");
   } finally {
     submitting.value = false;
+    cancelling.value = false;
   }
 }
 
@@ -193,9 +204,27 @@ onBeforeUnmount(() => {
         {{ t("create.templateHint") }}
       </BaseAlert>
       <pre v-if="preview" class="preview">{{ preview }}</pre>
-      <BaseButton variant="primary" type="submit" :disabled="!canSubmit">{{
-        submitting ? t("create.saving") : t("create.saveSecret")
-      }}</BaseButton>
+      <div class="flex gap-3">
+        <BaseButton
+          variant="primary"
+          type="submit"
+          class="flex-1"
+          :disabled="!canSubmit"
+          >{{ submitting ? t("create.saving") : t("create.saveSecret") }}
+        </BaseButton>
+        <BaseButton
+          v-if="submitting"
+          variant="outline"
+          type="button"
+          class="flex-1"
+          :disabled="cancelling"
+          :aria-label="t('create.cancelSaveAria')"
+          @click="cancelSave"
+          >{{
+            cancelling ? t("create.cancellingSave") : t("create.cancelSave")
+          }}
+        </BaseButton>
+      </div>
     </form>
 
     <DivergenceModal

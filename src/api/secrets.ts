@@ -101,7 +101,8 @@ export interface WriteResult {
 export type WriteOutcome =
   | ({ kind: "written" } & WriteResult)
   | ({ kind: "needs_divergence_resolve" } & SyncDivergence)
-  | ({ kind: "authenticity_blocked" } & AuthenticityResult);
+  | ({ kind: "authenticity_blocked" } & AuthenticityResult)
+  | { kind: "cancelled"; committed: boolean };
 
 /** List one page of entries (no query). */
 export async function listEntries(

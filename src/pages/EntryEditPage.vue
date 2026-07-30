@@ -19,6 +19,7 @@ import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import {
   isAuthCancelled,
+  useCancellableSave,
   useDivergence,
   useLockState,
   useSecureClaim,
@@ -63,6 +64,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const decryptError = ref(false);
+const { cancelling, cancelSave } = useCancellableSave();
 
 // R031: the edit form shows decrypted plaintext, so hold a screen-capture claim
 // for the page's lifetime. `withClaim` raises FLAG_SECURE before loadBody fills
@@ -180,6 +182,14 @@ async function onSave() {
       const { kind: _kind, ...preview } = outcome;
       void _kind;
       openDivergence(preview);
+    } else if (outcome.kind === "cancelled") {
+      // User aborted. Nothing was published; if a commit was made it stays local
+      // and syncs next time. Stay on the form — neutral status, not an error.
+      toast.info(
+        outcome.committed
+          ? t("entry.saveCancelledLocalStays")
+          : t("entry.saveCancelledNothingPublished"),
+      );
     } else {
       // authenticity_blocked — pre-write pull refused under Enforce.
       error.value = t("entry.saveBlocked");
@@ -189,6 +199,7 @@ async function onSave() {
     error.value = appError?.message || t("entry.saveFailed");
   } finally {
     saving.value = false;
+    cancelling.value = false;
   }
 }
 
@@ -264,11 +275,19 @@ function goBack() {
           variant="outline"
           type="button"
           class="flex-1"
-          :disabled="saving"
-          :aria-label="t('entry.cancelEditAria')"
-          @click="goBack"
+          :disabled="cancelling"
+          :aria-label="
+            saving ? t('entry.cancelSaveAria') : t('entry.cancelEditAria')
+          "
+          @click="saving ? cancelSave() : goBack()"
         >
-          {{ t("common.button.cancel") }}
+          {{
+            cancelling
+              ? t("entry.cancellingSave")
+              : saving
+                ? t("entry.cancelSave")
+                : t("common.button.cancel")
+          }}
         </BaseButton>
       </div>
     </form>

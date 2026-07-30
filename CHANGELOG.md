@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - gpm now syncs your store automatically when you open the app or come back to it from the background, so it stays current with your other devices without a manual pull-down. This runs only when **Auto-sync** is on (turn Auto-sync off and nothing syncs automatically, as before). It's best-effort and stays out of your way: it never raises a sync-conflict dialog on its own — if your local and remote copies have diverged, a small status badge appears and you tap it when you're ready to review; network hiccups are retried quietly without nagging.
 - A new **Settings → Permissions & data** screen lists what gpm accesses on your device — notifications, biometrics, clipboard, network, and files — explains why each is needed, and, when Android has stopped re-asking about notifications or biometrics after you dismissed the prompt twice, links you straight to the relevant system settings to turn them back on. The clipboard, network, and files rows are explainers only; Android offers no separate permission for the clipboard.
+- You can now **cancel a save in flight**. If a create, edit, or delete hangs while syncing to a slow or dropping remote, a Cancel button appears next to the Saving button — tap it to abort within a second or two instead of waiting out the network timeout. Your change either stays local and publishes on the next manual Sync (if the save had already committed), or nothing was saved yet (if it canceled during the initial pull).
 
 ### Changed
 
@@ -19,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Page transitions now slide on every navigation. Previously the animation was skipped when moving between a screen that shows a secret (entry detail, edit, create, generate) and one that doesn't, because screen-capture protection used to cover the whole page. Protection now follows the secret itself — the screenshot block is raised only while a secret is actually on screen — so the boundary no longer needs freezing, and pages that never show a secret (like Settings → Repository) are screenshot-safe the whole time you're on them.
 
 ### Fixed
+
+- A save or manual Sync whose push hung on an unresponsive remote no longer locks the whole app until the network timeout — the push phase is now abortable, so Cancel frees the store and you can keep working immediately instead of waiting minutes for the transfer to time out.
 
 - On Android, tapping a control no longer leaves it stuck in a highlighted state until you tap somewhere else. The highlight that previews a press now only appears for a mouse or trackpad, the way it does on desktop; touch press feedback is unchanged.
 
