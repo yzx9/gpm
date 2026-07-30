@@ -200,6 +200,9 @@
               # Cross-tool store interop: drive the real `gopass` binary (age backend)
               # so the gopass-interop tests verify gpm reads a store gopass produced.
               gopass
+
+              # Testing
+              playwright-mcp
             ]
             ++ lib.optionals pkgs.stdenv.isLinux (
               [
