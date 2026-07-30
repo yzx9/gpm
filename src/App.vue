@@ -11,10 +11,12 @@ import {
 } from "@/api";
 import { onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
 import ToastHost from "./components/ToastHost.vue";
 import UnlockModal from "./components/UnlockModal.vue";
 import {
+  createForegroundSyncStore,
   createLockActivity,
   useAppLockState,
   useLockState,
@@ -41,6 +43,13 @@ const {
 // Activity bumper: any in-app tap/scroll/key extends the identity idle-lock
 // timer (no-op under Immediate/Never; throttled; backend timer authoritative).
 const lockActivity = createLockActivity(lockMode, identityCached);
+// Best-effort foreground sync (RFC R060 Tier 1): pull + push on cold-start/resume
+// when AutoSync is on; surfaces divergence / Enforce-block as a passive status
+// badge, never a modal; silent on success and failure.
+const foregroundSync = createForegroundSyncStore(
+  useAppLockState(),
+  useRouter(),
+);
 const {
   initSecureScreen,
   setSecureOverlay,
@@ -108,6 +117,8 @@ onMounted(() => {
   init();
   // init the app-launch gate state (no-op when the gate is off / on desktop).
   initAppLock();
+  // Arm the foreground-sync resume listener + cold-start sync (R060 Tier 1).
+  foregroundSync.init();
   // Prime the view-clear cache so the first reveal uses the configured timer.
   loadSecuritySettings();
   // Start extending the identity idle-lock timer on in-app activity (Idle mode).
@@ -126,6 +137,23 @@ onMounted(() => {
     <!-- Unified toast host: top-of-shell, in-flow. Renders the useToast queue
          once for every caller (pages + app-shell code like the router guard). -->
     <ToastHost />
+    <!--
+      Foreground-sync attention badge (R060 Tier 1): a passive, persistent
+      indicator that a foreground sync hit a divergence / Enforce block. Tap takes
+      the user to the entry list, where a pull-to-refresh engages the existing
+      resolve flow — the sync itself never opens a modal or enters
+      conflict-resolution. The colored word carries the meaning (no icon pill).
+    -->
+    <button
+      v-if="foregroundSync.syncAttention.value"
+      class="sync-attention"
+      type="button"
+      :aria-label="t('common.sync.attentionHint')"
+      :title="t('common.sync.attentionHint')"
+      @click="foregroundSync.engage()"
+    >
+      {{ t("common.sync.attentionBadge") }}
+    </button>
     <!--
       Stack-style slide between pages. No `mode="out-in"`: push/pop animate the
       departing and arriving pages simultaneously (iOS NavigationController
@@ -162,3 +190,28 @@ onMounted(() => {
     />
   </div>
 </template>
+
+<style scoped>
+/* Foreground-sync attention badge — a small colored word (RFC R060 Tier 1).
+   Reuses the warning tokens (which dark-adapt via both prefers-color-scheme and
+   [data-theme="dark"]), matching the rest of the codebase. Placement is a
+   best-effort top-center pill; a design pass can refine it. */
+.sync-attention {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  min-height: 44px;
+  padding: 0 1rem;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+</style>

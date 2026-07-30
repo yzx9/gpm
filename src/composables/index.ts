@@ -6,6 +6,7 @@
 export * from "./useAppLockState";
 export * from "./useCommitSignature";
 export * from "./useDivergence";
+export * from "./useForegroundSync";
 export * from "./useLockActivity";
 export * from "./useLockState";
 export * from "./useNavDirection";

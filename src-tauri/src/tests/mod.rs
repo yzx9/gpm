@@ -15,6 +15,7 @@
 //! `AppHandle` run against a headless [`MockRuntime`] app
 //! (`tauri::test::mock_builder`) rather than a real webview.
 
+mod background_sync;
 mod clipboard_clear;
 mod git_commands;
 mod lock_state;

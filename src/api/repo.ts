@@ -64,6 +64,15 @@ export async function syncRepo(): Promise<SyncOutcome> {
   return invoke<SyncOutcome>("sync_repo");
 }
 
+/** Best-effort background sync (cold-start / resume, RFC R060 Tier 1). Pull + push
+ *  directly, bypassing the cancel slot + progress UI. Returns the outcome so the
+ *  caller can surface divergence / an Enforce block as a passive badge, or `null`
+ *  when skipped (no repo / app-locked) or on a silent network error. Only invoked
+ *  when AutoSync is on — the composable gates that. Emits `"sync-outcome"`. */
+export async function backgroundSync(): Promise<SyncOutcome | null> {
+  return invoke<SyncOutcome | null>("background_sync");
+}
+
 /** Push the local store to the remote. */
 export async function pushRepo(): Promise<void> {
   await invoke("push_repo");
@@ -98,4 +107,13 @@ export async function subscribeGitProgress(
   cb: (progress: GitProgressEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<GitProgressEvent>("git-progress", (e) => cb(e.payload));
+}
+
+/** Subscribe to the best-effort foreground-sync outcome (`"sync-outcome"`); returns
+ *  an unlisten handle. Used by the entry list to refresh on a fast-forward. The
+ *  composable also surfaces divergence / Enforce-block as a passive badge. */
+export async function subscribeSyncOutcome(
+  cb: (outcome: SyncOutcome) => void,
+): Promise<UnlistenFn> {
+  return listen<SyncOutcome>("sync-outcome", (e) => cb(e.payload));
 }

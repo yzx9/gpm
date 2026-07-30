@@ -112,5 +112,9 @@
   "setup": {
     "introAppKey": "为了打开你的仓库，gpm 会在本设备上保留一个应用密钥 —— 你的私钥加上 git 凭据。",
     "storedLocally": "仅本地保存。不会向外部发送任何数据。"
+  },
+  "sync": {
+    "attentionBadge": "同步需要处理",
+    "attentionHint": "本地与远端存在分歧 —— 点击前往列表处理"
   }
 }

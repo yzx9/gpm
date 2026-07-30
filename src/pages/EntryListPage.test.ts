@@ -5,6 +5,7 @@
 import type { Entry, EntryPage } from "@/api";
 import { mountWithApp } from "@/test/appTestUtils";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EntryListPage from "./EntryListPage.vue";
@@ -888,6 +889,61 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(mockPush).toHaveBeenCalledWith({ name: "history" });
+    });
+  });
+
+  describe("foreground sync-outcome listener", () => {
+    /** Grab the `sync-outcome` handler the page registered in onMounted. */
+    function syncOutcomeHandler(): (e: { payload: unknown }) => void {
+      const h = vi
+        .mocked(listen)
+        .mock.calls.find((c) => c[0] === "sync-outcome")?.[1];
+      if (!h) throw new Error("sync-outcome listener not registered");
+      return h as (e: { payload: unknown }) => void;
+    }
+    function countListCalls(): number {
+      return vi.mocked(invoke).mock.calls.filter((c) => c[0] === "list_entries")
+        .length;
+    }
+
+    it("refreshes the list on a fast-forward foreground sync", async () => {
+      mountPage();
+      await flushPromises();
+      const before = countListCalls();
+      syncOutcomeHandler()({
+        payload: {
+          kind: "fast_forwarded",
+          changed: true,
+          head: "newtip",
+          authenticity: {
+            mode: "off",
+            new_commits: [],
+            open_issues: [],
+            blocked: false,
+          },
+        },
+      });
+      await flushPromises();
+      expect(countListCalls()).toBe(before + 1);
+    });
+
+    it("does NOT reload on a diverged foreground sync (the badge owns it)", async () => {
+      mountPage();
+      await flushPromises();
+      const before = countListCalls();
+      syncOutcomeHandler()({
+        payload: {
+          kind: "diverged",
+          local_ahead: 1,
+          remote_ahead: 1,
+          remote_tip: "x",
+          local_only_entries: [],
+          modified_entries: [],
+          other_changed_files: [],
+        },
+      });
+      await flushPromises();
+      expect(countListCalls()).toBe(before); // no reload — divergence is passive
     });
   });
 });

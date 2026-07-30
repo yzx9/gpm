@@ -34,15 +34,24 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use rustpass::template::{self, CreatePreset};
 use rustpass::{
     DivergenceChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
 };
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::AppState;
 use crate::identity::{maybe_soft_wipe, reset_lock_timer};
+
+/// Hard deadline (seconds) for a best-effort background sync. A companion task
+/// flips the background sync's private cancel token at this point so a stalled or
+/// malicious remote can't hold `write_mu` indefinitely and queue every user
+/// save/Sync behind a headless, non-user-initiated op.
+const BACKGROUND_SYNC_DEADLINE_SECS: u64 = 30;
 
 /// Run a local-only write under the autosync orchestrator, with the pull phase
 /// cancellable via the global cancel slot (mirrors `pull_repo`). Returns the
@@ -276,6 +285,65 @@ pub(crate) async fn sync_repo(
     .await
     .inspect(|o| log::info!("sync: done: {o:?}"))
     .inspect_err(|e| log::warn!("sync failed: {e}"))
+}
+
+/// Best-effort background sync (cold-start / resume, RFC R060 Tier 1) — pull + push
+/// directly, **bypassing `run_cancellable`** so it never touches the shared cancel
+/// slot the user's pull-to-refresh relies on, and reporting no progress (it's a
+/// headless trigger, not a user-initiated action). Returns the outcome so the
+/// frontend can surface divergence / an Enforce block as a **passive status badge**
+/// (never a modal); `None` when skipped (no repo configured, or `app_locked` —
+/// `repo.json` is unreadable while the `AppLock` biometric launch-gate holds the
+/// master key) or on a silent network error (best-effort: never nags on a flaky
+/// resume). Gated on `AutoSync` being on — the frontend checks first, and the
+/// backend re-checks as defense-in-depth (a compromised `WebView` invoking this
+/// directly must not publish local commits when the user turned `AutoSync` off).
+/// Emits `"sync-outcome"` so a mounted entry list can refresh on a fast-forward.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn background_sync<R: Runtime>(
+    state: State<'_, AppState>,
+    app: AppHandle<R>,
+) -> Result<Option<SyncOutcome>, Error> {
+    // Defense-in-depth gates (cheap, sync): first-run + app-locked + AutoSync-off.
+    // The frontend also gates, but this stops a stray (or XSS-driven) invoke from
+    // touching the network before the store exists, while repo.json is sealed
+    // behind the launch gate, or when the user turned AutoSync off.
+    if !state.store.is_repo_ready()
+        || state.app_locked.load(Ordering::SeqCst)
+        || !state.store.autosync()
+    {
+        return Ok(None);
+    }
+    // Bound the best-effort sync so a stalled/malicious remote can't hold
+    // `write_mu` indefinitely and queue every user save/Sync behind it. A
+    // companion task flips a PRIVATE cancel token at the deadline; `sync_repo`
+    // polls it in libgit2's fetch callback and aborts the pull cleanly (mapped
+    // below to a silent `Ok(None)`, same as `cancel_git`). Private token ⇒ this
+    // never touches the shared cancel slot the user's pull-to-refresh relies on.
+    // (The push phase doesn't poll the token — same non-cancellable property as
+    // the manual sync — but pushes are local→remote and short.)
+    let cancel = crate::git::fresh_cancel_token();
+    let deadline = tauri::async_runtime::spawn({
+        let cancel = Arc::clone(&cancel);
+        async move {
+            tokio::time::sleep(Duration::from_secs(BACKGROUND_SYNC_DEADLINE_SECS)).await;
+            cancel.store(true, Ordering::SeqCst);
+        }
+    });
+    let result = state.store.sync_repo(Some(cancel), None).await;
+    deadline.abort(); // settled (ok, err, or deadline-cancelled) — stop the timer
+    match result {
+        Ok(outcome) => {
+            log::info!("background-sync: {outcome:?}");
+            let _ = app.emit("sync-outcome", &outcome);
+            Ok(Some(outcome))
+        }
+        Err(e) => {
+            log::warn!("background-sync failed: {e}");
+            Ok(None)
+        }
+    }
 }
 
 /// Push the current branch to `origin`. Used by the create flow's deferred first

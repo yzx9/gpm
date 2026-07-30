@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- gpm now syncs your store automatically when you open the app or come back to it from the background, so it stays current with your other devices without a manual pull-down. This runs only when **Auto-sync** is on (turn Auto-sync off and nothing syncs automatically, as before). It's best-effort and stays out of your way: it never raises a sync-conflict dialog on its own — if your local and remote copies have diverged, a small status badge appears and you tap it when you're ready to review; network hiccups are retried quietly without nagging.
 - A new **Settings → Permissions & data** screen lists what gpm accesses on your device — notifications, biometrics, clipboard, network, and files — explains why each is needed, and, when Android has stopped re-asking about notifications or biometrics after you dismissed the prompt twice, links you straight to the relevant system settings to turn them back on. The clipboard, network, and files rows are explainers only; Android offers no separate permission for the clipboard.
 
 ### Changed

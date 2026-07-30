@@ -13,6 +13,7 @@ import {
   searchEntries,
   setVerificationMode,
   subscribeGitProgress,
+  subscribeSyncOutcome,
   syncRepo as syncRepoCmd,
   trustCommitSigner,
   type AppError,
@@ -22,6 +23,7 @@ import {
   type Entry,
   type GitProgressEvent,
   type SyncDivergence,
+  type SyncOutcome,
 } from "@/api";
 import AuthenticityBlockModal from "@/components/AuthenticityBlockModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
@@ -100,6 +102,7 @@ const pullResult = ref("");
 const pullProgressText = ref("");
 const pullProgressPercent = ref(0);
 let pullProgressUnlisten: UnlistenFn | null = null;
+let syncOutcomeUnlisten: UnlistenFn | null = null;
 
 const lastSyncTime = ref<number | null>(null);
 const now = ref(Date.now());
@@ -302,6 +305,26 @@ async function cancelSync() {
   }
 }
 
+/** Refresh the list + sync timestamp + authenticity badge after a successful
+ *  pull. Shared by the manual pull-to-refresh path and the foreground-sync
+ *  outcome listener (RFC R060 Tier 1) so the post-sync refresh stays in one
+ *  place — a DRY seam between the two sync entry points. */
+async function refreshAfterSync() {
+  await fetchPage(search.value.trim(), 0, true);
+  lastSyncTime.value = Date.now();
+  await loadAuthState();
+}
+
+/** Foreground-sync outcome (`"sync-outcome"`, R060 Tier 1). Best-effort and
+ *  non-disturbing: refresh the list on a clean fast-forward; ignore divergence /
+ *  Enforce-block (the app-shell attention badge surfaces those passively) and
+ *  ignore no-change. Never opens a modal. */
+async function onSyncOutcome(outcome: SyncOutcome) {
+  if (outcome.kind === "fast_forwarded" && outcome.changed) {
+    await refreshAfterSync();
+  }
+}
+
 async function syncRepo() {
   pulling.value = true;
   pullResult.value = "";
@@ -321,13 +344,13 @@ async function syncRepo() {
     }
     if (result.changed) {
       pullResult.value = t("entries.toastUpdatedTo", { head: result.head });
-      await fetchPage(search.value.trim(), 0, true);
-      lastSyncTime.value = Date.now();
+      await refreshAfterSync();
     } else {
       pullResult.value = "Already up to date";
+      // Refresh the badge with the new HEAD state (unchanged content, possibly
+      // changed signature state).
+      await loadAuthState();
     }
-    // Refresh the badge with the new HEAD state.
-    await loadAuthState();
 
     // Audit mismatch → informational modal (sync already succeeded).
     if (
@@ -497,6 +520,11 @@ function openHistory() {
 onMounted(() => {
   void fetchPage("", 0, true); // initial browse page 0
   loadAuthState();
+  // Foreground-sync outcome (RFC R060 Tier 1): refresh the list when a cold-start
+  // / resume sync fast-forwards. Fire-and-forget the async subscribe.
+  void subscribeSyncOutcome(onSyncOutcome).then((u) => {
+    syncOutcomeUnlisten = u;
+  });
   tickTimer = setInterval(() => {
     now.value = Date.now();
   }, 60_000);
@@ -519,6 +547,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   pullProgressUnlisten?.();
   pullProgressUnlisten = null;
+  syncOutcomeUnlisten?.();
+  syncOutcomeUnlisten = null;
   io?.disconnect();
   io = null;
   if (tickTimer) {

@@ -112,5 +112,9 @@
   "setup": {
     "introAppKey": "To open your repository, gpm keeps an app key on this device — your private key plus the git credentials.",
     "storedLocally": "Stored locally. Nothing leaves your device."
+  },
+  "sync": {
+    "attentionBadge": "Sync needs review",
+    "attentionHint": "Local and remote diverged — tap to review on the list"
   }
 }

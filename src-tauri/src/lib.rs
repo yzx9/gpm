@@ -393,6 +393,7 @@ pub fn run() {
             // write / sync
             write::pull_repo,
             write::sync_repo,
+            write::background_sync,
             git::cancel_git,
             write::push_repo,
             write::resolve_sync_divergence,
