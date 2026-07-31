@@ -11,6 +11,7 @@ members = [
   "tauri-plugin-clipboard-notify",
   "tauri-plugin-device-info",
   "tauri-plugin-file-save",
+  "tauri-plugin-background-sync",
 ]
 
 [workspace.package]

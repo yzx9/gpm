@@ -2,7 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { backgroundSync, getAppConfig, type SyncOutcome } from "@/api";
+import {
+  backgroundSync,
+  consumeSyncAttention,
+  getAppConfig,
+  type SyncOutcome,
+} from "@/api";
 import { ref, watch, type Ref } from "vue";
 import type { Router } from "vue-router";
 
@@ -154,6 +159,17 @@ export function createForegroundSyncStore(
     if (initialized) return;
     initialized = true;
     document.addEventListener("visibilitychange", onVisibilityChange);
+    // R061: if the background sync left an attention marker, run a foreground
+    // sync now — it re-evaluates the store and surfaces the live badge if the
+    // divergence persists. `consumeSyncAttention` is take-once (reads + removes
+    // the marker atomically), so no stale-cache race (review #4).
+    void (async () => {
+      try {
+        if (await consumeSyncAttention()) void maybeSync();
+      } catch {
+        // best-effort — never block the app on this read
+      }
+    })();
   }
 
   /** Badge tap: take the user to the list (where a pull-to-refresh engages the

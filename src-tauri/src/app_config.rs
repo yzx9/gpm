@@ -72,6 +72,11 @@ use crate::verbose::{arm_verbose_timer, disarm_verbose_timer};
 
 /// File name of the plaintext display-prefs file (post-split).
 const PREF_FILE: &str = "pref.json";
+/// Sync-attention marker — a dedicated file (NOT a `pref.json` field) so the
+/// headless Worker writes it atomically with no read-modify-write that could
+/// race a foreground pref write (R061 review #4). Set when a sync hits a
+/// divergence / authenticity-block needing the user's review.
+const SYNC_ATTENTION_FILE: &str = ".sync_attention";
 
 /// File name of the legacy single-shape app config (pre-split) AND the sealed
 /// behavior slot (post-split). The `m0005` migration repurposes it from
@@ -273,6 +278,9 @@ pub(crate) struct AppConfig {
     /// byte-identical on round-trip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) verbose_until: Option<u64>,
+    /// Periodic background-sync cadence (pref.json). `Off` (default) omitted.
+    #[serde(default, skip_serializing_if = "BackgroundSyncCadence::is_off")]
+    pub(crate) background_sync: BackgroundSyncCadence,
 }
 
 impl Default for AppConfig {
@@ -292,6 +300,53 @@ impl Default for AppConfig {
             // stays at 1 so a pre-split app.json still runs the registry.)
             schema_version: crate::migrations::APP_CONFIG_SCHEMA_VERSION,
             verbose_until: None,
+            background_sync: BackgroundSyncCadence::default(),
+        }
+    }
+}
+
+/// Periodic background-sync cadence (plaintext `pref.json`). `Off` (the
+/// default) is opt-in — no periodic background sync; the foreground sync
+/// (cold-start/resume/unlock) still runs. `1h`..`3d` enqueues an Android
+/// `WorkManager` periodic **pull**. Linked to `AutoSync`: background sync runs
+/// only when `AutoSync` is on AND cadence is not `Off`. Lives in plaintext so
+/// the headless worker can read it pre-unlock.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum BackgroundSyncCadence {
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "1h")]
+    Hours1,
+    #[serde(rename = "6h")]
+    Hours6,
+    #[serde(rename = "12h")]
+    Hours12,
+    #[serde(rename = "1d")]
+    Days1,
+    #[serde(rename = "3d")]
+    Days3,
+}
+
+impl BackgroundSyncCadence {
+    /// `Off` is the default; omit it from serialization to keep `pref.json` tidy.
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` passes `&T`.
+    pub(crate) fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
+
+    /// The scheduling interval in hours, or `None` for `Off`. (Used in the
+    /// Android-only scheduling path; `dead_code` on desktop targets.)
+    #[must_use]
+    #[allow(dead_code)]
+    pub(crate) fn hours(self) -> Option<u64> {
+        match self {
+            Self::Off => None,
+            Self::Hours1 => Some(1),
+            Self::Hours6 => Some(6),
+            Self::Hours12 => Some(12),
+            Self::Days1 => Some(24),
+            Self::Days3 => Some(72),
         }
     }
 }
@@ -323,6 +378,10 @@ pub(crate) struct PrefConfig {
     /// differ on purpose.
     #[serde(default = "default_schema_version")]
     pub(crate) schema_version: u32,
+    /// Periodic background-sync cadence (see [`BackgroundSyncCadence`]). `Off`
+    /// (the default) is omitted from serialization.
+    #[serde(default, skip_serializing_if = "BackgroundSyncCadence::is_off")]
+    pub(crate) background_sync: BackgroundSyncCadence,
 }
 
 impl Default for PrefConfig {
@@ -335,6 +394,7 @@ impl Default for PrefConfig {
             // legacy no-op migrations. (The serde missing-key default below
             // stays at 1 so a pre-split app.json still runs the registry.)
             schema_version: crate::migrations::APP_CONFIG_SCHEMA_VERSION,
+            background_sync: BackgroundSyncCadence::default(),
         }
     }
 }
@@ -351,6 +411,7 @@ impl PrefConfig {
             theme_mode: cfg.theme_mode.clone(),
             verbose_until: cfg.verbose_until,
             schema_version: cfg.schema_version,
+            background_sync: BackgroundSyncCadence::default(),
         }
     }
 }
@@ -858,6 +919,18 @@ impl AppConfigStore {
             .clone()
     }
 
+    /// Snapshot the background-sync cadence (pref cache — plaintext, readable
+    /// pre-unlock, so the headless worker and a cold-start under `AppLock` can
+    /// read it without the master key). (Used in the Android-only scheduling
+    /// path; `dead_code` on desktop targets.)
+    #[allow(dead_code)]
+    pub(crate) fn background_sync(&self) -> BackgroundSyncCadence {
+        self.pref
+            .lock()
+            .expect("pref lock poisoned")
+            .background_sync
+    }
+
     /// Merge the pref + behavior caches into an [`AppConfig`] (the IPC view).
     /// This is what `get_app_config`, `apply_security_caches`, and tests
     /// consume — it stays the superset of every field that previously lived in
@@ -878,6 +951,7 @@ impl AppConfigStore {
             gate_idle: behavior.gate_idle,
             schema_version: pref.schema_version,
             verbose_until: pref.verbose_until,
+            background_sync: pref.background_sync,
         }
     }
 
@@ -918,6 +992,38 @@ impl AppConfigStore {
     pub(crate) async fn set_verbose(&self, on: bool) -> Result<AppConfig, Error> {
         self.update_pref(|p| p.verbose_until = on.then(|| now_unix() + VERBOSE_WINDOW_SECS))
             .await
+    }
+
+    /// Set the periodic background-sync cadence; persists `pref.json` and
+    /// returns the merged [`AppConfig`].
+    pub(crate) async fn set_background_sync(
+        &self,
+        cadence: BackgroundSyncCadence,
+    ) -> Result<AppConfig, Error> {
+        self.update_pref(|p| p.background_sync = cadence).await
+    }
+
+    /// Path of the sync-attention marker file.
+    fn sync_attention_marker_path(&self) -> PathBuf {
+        self.pref_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(SYNC_ATTENTION_FILE)
+    }
+
+    /// Atomically create the attention marker (headless Worker, on divergence).
+    /// No read-modify-write ⇒ no race with a concurrent foreground pref write.
+    #[allow(dead_code)] // reached only on the headless-sync Ok path (android / divergence tests).
+    pub(crate) async fn set_sync_attention_marker(&self) -> Result<(), Error> {
+        save_atomic(&self.sync_attention_marker_path(), b"").await
+    }
+
+    /// Take-once: whether the marker existed, and remove it. Used by the
+    /// foreground on cold-start to decide whether to trigger a sync.
+    pub(crate) async fn consume_sync_attention_marker(&self) -> bool {
+        tokio::fs::remove_file(self.sync_attention_marker_path())
+            .await
+            .is_ok()
     }
 
     /// Persist-clear an expired verbose deadline (keeps `pref.json` tidy once the

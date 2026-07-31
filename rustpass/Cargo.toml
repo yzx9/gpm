@@ -31,6 +31,10 @@ totp-rs = { workspace = true }
 # (`tauri-plugin-log`) is chosen by the app; in `rustpass`'s own tests the macros
 # are no-ops because no logger is installed.
 log = "0.4"
+# Cross-process repo lock (R061): a `flock`-style advisory lock so the
+# foreground app's Store and a background Worker's separate Store can't mutate
+# the same git repo at once. Unix = flock (Linux + Android); Windows = LockFileEx.
+fs2 = "0.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }

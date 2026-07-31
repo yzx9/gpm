@@ -3,12 +3,18 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import type { AppConfig, AppError, SecureScreenMode } from "@/api";
+import type {
+  AppConfig,
+  AppError,
+  BackgroundSyncCadence,
+  SecureScreenMode,
+} from "@/api";
 import {
   resetConfig as apiResetConfig,
   getAppConfig,
   resolvedLocale,
   setAutosync,
+  setBackgroundSync,
   setLocalePref,
   setThemeMode,
 } from "@/api";
@@ -158,6 +164,37 @@ async function onAutosyncChange(enabled: boolean) {
     error.value = appError?.message || t("settings.autosync.setFailed");
   } finally {
     autosyncLoading.value = false;
+  }
+}
+
+// R061: periodic background-sync cadence. Linked to AutoSync — the control is
+// shown only while AutoSync is on; "off" opts out of the periodic background
+// sync (the foreground sync always runs regardless).
+const backgroundSyncOptions: BackgroundSyncCadence[] = [
+  "off",
+  "1h",
+  "6h",
+  "12h",
+  "1d",
+  "3d",
+];
+const backgroundSyncCadence = computed<BackgroundSyncCadence>(
+  () => appConfig.value?.background_sync ?? "off",
+);
+const backgroundSyncLoading = ref(false);
+
+async function onBackgroundSyncChange(e: Event) {
+  if (!appConfig.value) return;
+  const cadence = (e.target as HTMLSelectElement)
+    .value as BackgroundSyncCadence;
+  backgroundSyncLoading.value = true;
+  try {
+    appConfig.value = await setBackgroundSync(cadence);
+  } catch (err) {
+    const appError = err as AppError;
+    error.value = appError?.message || t("settings.backgroundSync.setFailed");
+  } finally {
+    backgroundSyncLoading.value = false;
   }
 }
 
@@ -316,6 +353,33 @@ onMounted(() => {
             </p>
           </template>
         </BaseSegmentedControl>
+      </BaseCard>
+
+      <!-- Periodic background sync (R061) — shown only when AutoSync is on. -->
+      <BaseCard v-if="autosyncEnabled" as="section">
+        <h2 class="text-sm font-medium mb-3">
+          {{ t("settings.backgroundSync.title") }}
+        </h2>
+        <label
+          for="background-sync-cadence"
+          class="block text-xs text-muted mb-1"
+        >
+          {{ t("settings.backgroundSync.legend") }}
+        </label>
+        <select
+          id="background-sync-cadence"
+          class="w-full rounded border bg-transparent px-3 py-2 text-sm"
+          :value="backgroundSyncCadence"
+          :disabled="backgroundSyncLoading"
+          @change="onBackgroundSyncChange"
+        >
+          <option v-for="opt in backgroundSyncOptions" :key="opt" :value="opt">
+            {{ t(`settings.backgroundSync.${opt}`) }}
+          </option>
+        </select>
+        <p class="text-xs text-muted mt-1">
+          {{ t("settings.backgroundSync.hint") }}
+        </p>
       </BaseCard>
 
       <!-- Danger zone -->

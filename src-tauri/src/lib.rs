@@ -38,6 +38,7 @@ mod diagnostics_export;
 mod generator;
 mod git;
 mod identity;
+mod jni_sync;
 mod logging;
 mod migrations;
 mod page;
@@ -310,6 +311,56 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     app_state
 }
 
+/// Re-apply the periodic background-sync schedule from `cadence` (R061). Called
+/// on app setup (once the cadence is loaded) and whenever the cadence changes
+/// (the `set_background_sync` command). On Android: enqueues/replaces the
+/// `WorkManager` periodic work (or cancels it when `Off`), passing `config_dir`
+/// through as `InputData` so the Worker never reconstructs the path (D2). On
+/// other targets: a no-op (the foreground sync covers desktop). Best-effort —
+/// errors are swallowed (a missed reschedule keeps the previous cadence).
+#[allow(clippy::unused_async)] // the Android branch awaits; the desktop branch is a no-op.
+pub(crate) async fn reschedule_background_sync<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cadence: app_config::BackgroundSyncCadence,
+) {
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_background_sync::BackgroundSyncExt;
+        let sched = app.background_sync_sched();
+        match cadence.hours() {
+            Some(hours) => match app.path().app_config_dir() {
+                Ok(config_dir) => {
+                    sched
+                        .schedule(hours, config_dir.to_string_lossy().into_owned())
+                        .await;
+                }
+                Err(e) => log::warn!("bg-sync: config dir unavailable; not rescheduling: {e}"),
+            },
+            None => sched.cancel().await,
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        // Desktop: no WorkManager; the foreground sync covers convergence.
+        let _ = (app, cadence);
+    }
+}
+
+/// Cancel the periodic background-sync schedule (R061 #8 — called when `AutoSync`
+/// is turned off, since background sync is linked to `AutoSync`). No-op off-Android.
+#[allow(clippy::unused_async)] // the Android branch awaits; desktop is a no-op.
+pub(crate) async fn cancel_background_sync<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_background_sync::BackgroundSyncExt;
+        app.background_sync_sched().cancel().await;
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+    }
+}
+
 /// Application entry point.
 ///
 /// # Panics
@@ -352,6 +403,7 @@ pub fn run() {
         .plugin(tauri_plugin_file_save::init())
         .plugin(tauri_plugin_screen_secure::init())
         .plugin(tauri_plugin_clipboard_notify::init())
+        .plugin(tauri_plugin_background_sync::init())
         .plugin(tauri_plugin_opener::init())
         // OS notifications (tauri-plugin-notification). POST_NOTIFICATIONS is
         // already declared via the clipboard-notify manifest merge, so this
@@ -361,7 +413,17 @@ pub fn run() {
         // Best-effort display language baked in pre-paint; `resolved_locale` IPC reconciles a pinned preference after mount (see `app_config`).
         .append_invoke_initialization_script(app_config::locale_init_script())
         .setup(|app| {
-            app.manage(init_state(app));
+            let state = init_state(app);
+            // R061: apply the persisted background-sync cadence on launch
+            // (enqueue/cancel the WorkManager periodic work).
+            #[cfg(target_os = "android")]
+            let cadence = state.app_config.background_sync();
+            app.manage(state);
+            #[cfg(target_os = "android")]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::block_on(reschedule_background_sync(&handle, cadence));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -427,6 +489,8 @@ pub fn run() {
             config::set_view_clear_secs,
             config::set_clipboard_clear_secs,
             config::set_autosync,
+            config::set_background_sync,
+            config::consume_sync_attention,
             config::get_commit_identity_default,
             config::reset_config,
             // app config: screen-capture master toggle + display language + theme + platform availability

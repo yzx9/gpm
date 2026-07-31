@@ -1249,6 +1249,7 @@ impl Store {
         // One critical section across pull → write → push. `set`/`delete` (the
         // local-only primitives the closure calls) do NOT re-acquire this guard.
         let _guard = self.write_mu.lock().await;
+        let _repo_lock = self.repo_lock()?;
 
         let autosync = self.autosync.load(Ordering::Relaxed);
         if !autosync {
@@ -1349,6 +1350,7 @@ impl Store {
         cancel: Option<CancelToken>,
     ) -> Result<SyncResult, Error> {
         let _guard = self.write_mu.lock().await;
+        let _repo_lock = self.repo_lock()?;
         // Arm under the lock so a cancel during the keep-mine push (the
         // DivergenceModal "Cancel push" affordance) targets this resolve — RFC 0032.
         let _armed = cancel
@@ -1735,6 +1737,17 @@ impl Store {
         Ok(())
     }
 
+    /// Acquire the cross-process repo lock (R061). Non-blocking; on contention
+    /// returns [`ErrorCode::RepoBusy`] so a best-effort sync caller can skip
+    /// rather than race another `Store` instance / process on the git index.
+    /// The lock auto-releases on drop and on process death (no stale-lockfile).
+    /// Callers already hold `write_mu` (this is called right after acquiring
+    /// it), so the only contention is cross-instance — a background Worker vs
+    /// the foreground app during cold-start overlap.
+    fn repo_lock(&self) -> Result<crate::repo_lock::RepoLock, Error> {
+        crate::repo_lock::RepoLock::try_acquire(self.config.config_dir())
+    }
+
     /// Pull latest changes from the remote (fast-forward only).
     ///
     /// Applies repository-authenticity verification (per the stored
@@ -1751,6 +1764,7 @@ impl Store {
         // Plain (non-cancellable) sync: lock + the lock-free inner directly. Does
         // not arm the cancel slot (no caller-facing cancel), so no slot needed.
         let _guard = self.write_mu.lock().await;
+        let _repo_lock = self.repo_lock()?;
         self.sync_with_locked(None, None).await
     }
 
@@ -1773,6 +1787,7 @@ impl Store {
         progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
+        let _repo_lock = self.repo_lock()?;
         // Arm under the lock — RFC 0032 bug #1 (mirrors autosync_write).
         let _armed = cancel
             .as_ref()
@@ -1806,6 +1821,7 @@ impl Store {
     /// reason other than a missing origin (which is treated as a no-op).
     pub async fn push(&self) -> Result<(), Error> {
         let _guard = self.write_mu.lock().await;
+        let _repo_lock = self.repo_lock()?;
         self.push_locked(None, None).await
     }
 
@@ -1844,6 +1860,7 @@ impl Store {
         progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
+        let _repo_lock = self.repo_lock()?;
         // Arm under the lock — RFC 0032 bug #1 (mirrors autosync_write).
         let _armed = cancel
             .as_ref()

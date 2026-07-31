@@ -23,6 +23,7 @@ tauri-plugin-secure-keystore = { path = "../tauri-plugin-secure-keystore" }
 tauri-plugin-file-picker = { path = "../tauri-plugin-file-picker" }
 tauri-plugin-screen-secure = { path = "../tauri-plugin-screen-secure" }
 tauri-plugin-clipboard-notify = { path = "../tauri-plugin-clipboard-notify" }
+tauri-plugin-background-sync = { path = "../tauri-plugin-background-sync" }
 tauri-plugin-device-info = { path = "../tauri-plugin-device-info" }
 tauri-plugin-file-save = { path = "../tauri-plugin-file-save" }
 tauri-plugin-log = "2"
@@ -39,6 +40,13 @@ tokio = { workspace = true, features = ["rt", "fs"] }
 base64 = { workspace = true }
 sys-locale = "0.3"
 log = "0.4"
+
+# Android-only: the headless background-sync JNI entry (R061). `jni` for the
+# `#[no_mangle]` shim in `jni_sync.rs`; `rt-multi-thread` for its owned
+# `tokio::runtime` (host builds don't compile the shim).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -57,6 +57,7 @@ pub mod generator;
 pub mod identity;
 /// Recipient discovery and identity validation.
 pub mod recipient;
+pub mod repo_lock;
 /// Cryptographically-strong randomness primitives (OS CSPRNG + uniform index).
 pub mod rng;
 /// At-rest AEAD encryption for local private files (`repo.json`, `identity`).
@@ -83,6 +84,7 @@ pub use entry::Entry;
 pub use error::{Error, ErrorCode};
 pub use generator::{GenerateMode, GenerateOptions, generate_password};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
+pub use repo_lock::RepoLock;
 pub use secret::Secret;
 pub use signing::{
     AuthenticityConfig, CommitSigInfo, CommitSigPage, CommitSigStatus, IgnoredIssue, TrustedGpgKey,

@@ -48,6 +48,11 @@ export interface SafeAreaInsets {
  * on a fresh config ⇒ the default (After 300s). */
 export type GateIdle = "off" | { after: number };
 
+/** Periodic background-sync cadence (R061). `"off"` (absent) ⇒ no periodic
+ *  background sync; the foreground sync still runs. Linked to AutoSync: the
+ *  background sync runs only when AutoSync is on AND cadence ≠ `"off"`. */
+export type BackgroundSyncCadence = "off" | "1h" | "6h" | "12h" | "1d" | "3d";
+
 /** The canonical gate-idle default (mirrors the backend: absent ⇒ After 300s). */
 export const DEFAULT_GATE_IDLE: GateIdle = { after: 300 };
 
@@ -70,6 +75,8 @@ export interface AppConfig {
   /** Per-device autosync: on (absent ⇒ true) ⇒ every save pull-write-pushes;
    *  off ⇒ saves stay local until a manual Sync publishes. */
   autosync?: boolean;
+  /** Periodic background-sync cadence (R061). Absent ⇒ `"off"`. */
+  background_sync?: BackgroundSyncCadence;
   /** Persisted intent for the app-launch biometric gate. **Write-only** — the
    *  Settings toggle + runtime gate read `getAppLockState` (Keystore truth),
    *  not this flag; it exists only as a persisted record. */
@@ -224,6 +231,21 @@ export async function setClipboardClearSecs(
  */
 export async function setAutosync(enabled: boolean): Promise<AppConfig> {
   return invoke<AppConfig>("set_autosync", { enabled });
+}
+
+/** Set the periodic background-sync cadence (`"off"` opts out). Returns the
+ *  updated config. */
+export async function setBackgroundSync(
+  cadence: BackgroundSyncCadence,
+): Promise<AppConfig> {
+  return invoke<AppConfig>("set_background_sync", { cadence });
+}
+
+/** Take-once: whether a background sync left a divergence / authenticity-block
+ *  attention marker (removing it). The foreground calls this on cold-start to
+ *  decide whether to trigger a sync + surface the badge (R061 #4). */
+export async function consumeSyncAttention(): Promise<boolean> {
+  return invoke<boolean>("consume_sync_attention");
 }
 
 /**

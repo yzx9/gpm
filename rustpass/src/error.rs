@@ -71,6 +71,11 @@ pub enum ErrorCode {
     /// unknown crypto kind in `repo.json`. The store is unusable until
     /// reconfigured to a backend this build offers.
     BackendNotAvailable,
+    /// Another process/instance holds the cross-process repo lock (a
+    /// best-effort background sync colliding with a foreground op, or vice
+    /// versa). The caller should skip-and-retry, not propagate as a hard
+    /// failure (R061).
+    RepoBusy,
 }
 
 /// Safe error type that never contains secret content.
@@ -113,6 +118,7 @@ impl Error {
                 ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
                 ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
                 ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
+                ErrorCode::RepoBusy => "REPO_BUSY",
             }
             .to_string(),
             message: message.into(),
@@ -210,6 +216,7 @@ mod tests {
             ErrorCode::PluginUnavailable => "PLUGIN_UNAVAILABLE",
             ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
             ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
+            ErrorCode::RepoBusy => "REPO_BUSY",
         }
     }
 

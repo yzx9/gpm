@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- WorkManager's network constraint needs network-state access. INTERNET
+         is already declared in the app manifest. No new runtime permission
+         prompts (ACCESS_NETWORK_STATE is normal, not dangerous). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+</manifest>

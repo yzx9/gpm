@@ -145,6 +145,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
                 theme_mode: v4.theme_mode.clone(),
                 verbose_until: v4.verbose_until,
                 schema_version: v4.schema_version,
+                ..PrefConfig::default()
             })
             .await?;
     }

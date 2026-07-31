@@ -290,6 +290,38 @@ pub(crate) async fn sync_repo(
     .inspect_err(|e| log::warn!("sync failed: {e}"))
 }
 
+/// Run a best-effort, deadline-bounded sync under a PRIVATE throwaway cancel
+/// slot (R061 D4). Shared by the foreground cold-start/resume sync and the
+/// headless background-sync JNI entry, so the deadline + private-slot logic
+/// lives in one place. The private slot never touches the shared
+/// `active_cancel_slot` the user's pull-to-refresh relies on. The caller passes
+/// the sync op (foreground: pull+push `sync_repo`; background: pull-only
+/// `sync_with`) as a closure receiving the private slot + the cancel token.
+///
+/// A companion task flips the token at `BACKGROUND_SYNC_DEADLINE_SECS`, capping
+/// how long a stalled/malicious remote can hold `write_mu`. Uses `tokio::spawn`
+/// (works on the Tauri runtime and the JNI entry's own runtime).
+pub(crate) async fn run_best_effort_sync<F, Fut>(op: F) -> Result<SyncOutcome, Error>
+where
+    F: FnOnce(rustpass::CancelSlot, rustpass::CancelToken) -> Fut,
+    Fut: Future<Output = Result<SyncOutcome, Error>>,
+{
+    let cancel = crate::git::fresh_cancel_token();
+    let deadline = tokio::spawn({
+        let cancel = Arc::clone(&cancel);
+        async move {
+            tokio::time::sleep(Duration::from_secs(BACKGROUND_SYNC_DEADLINE_SECS)).await;
+            cancel.store(true, Ordering::SeqCst);
+        }
+    });
+    // PRIVATE throwaway slot — never the shared `active_cancel_slot` (the user's
+    // pull-to-refresh cancel). Nobody polls this slot; it just satisfies the arm.
+    let private_slot: rustpass::CancelSlot = Arc::new(std::sync::Mutex::new(None));
+    let result = op(private_slot, cancel).await;
+    deadline.abort(); // settled (ok, err, or deadline-cancelled) — stop the timer
+    result
+}
+
 /// Best-effort background sync (cold-start / resume, RFC R060 Tier 1) — pull + push
 /// directly, **bypassing `run_cancellable`** so it never touches the shared cancel
 /// slot the user's pull-to-refresh relies on, and reporting no progress (it's a
@@ -319,30 +351,14 @@ pub(crate) async fn background_sync<R: Runtime>(
         return Ok(None);
     }
     // Bound the best-effort sync so a stalled/malicious remote can't hold
-    // `write_mu` indefinitely and queue every user save/Sync behind it. A
-    // companion task flips a PRIVATE cancel token at the deadline; `sync_repo`
-    // polls it in libgit2's fetch callback and aborts the pull cleanly (mapped
-    // below to a silent `Ok(None)`, same as `cancel_git`). Private token ⇒ this
-    // never touches the shared cancel slot the user's pull-to-refresh relies on.
-    // (The push phase doesn't poll the token — same non-cancellable property as
-    // the manual sync — but pushes are local→remote and short.)
-    let cancel = crate::git::fresh_cancel_token();
-    let deadline = tauri::async_runtime::spawn({
-        let cancel = Arc::clone(&cancel);
-        async move {
-            tokio::time::sleep(Duration::from_secs(BACKGROUND_SYNC_DEADLINE_SECS)).await;
-            cancel.store(true, Ordering::SeqCst);
-        }
-    });
-    // Arm into a PRIVATE throwaway slot, not the shared `active_cancel_slot` —
-    // background-sync must never disturb the user's pull-to-refresh cancel (see
-    // the rationale above). Nobody polls this slot; it just satisfies the arm.
-    let private_slot: rustpass::CancelSlot = Arc::new(std::sync::Mutex::new(None));
-    let result = state
-        .store
-        .sync_repo(&private_slot, Some(cancel), None)
-        .await;
-    deadline.abort(); // settled (ok, err, or deadline-cancelled) — stop the timer
+    // `write_mu` indefinitely and queue every user save/Sync behind it. The
+    // private-slot + 30s deadline live in [`run_best_effort_sync`]; this is the
+    // foreground (pull+push) variant.
+    let store = state.store.clone();
+    let result = run_best_effort_sync(|slot, cancel| async move {
+        store.sync_repo(&slot, Some(cancel), None).await
+    })
+    .await;
     match result {
         Ok(outcome) => {
             log::info!("background-sync: {outcome:?}");

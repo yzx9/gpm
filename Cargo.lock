@@ -1864,6 +1864,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2252,6 +2262,7 @@ dependencies = [
  "age",
  "base64 0.22.1",
  "git2",
+ "jni",
  "log",
  "rustpass",
  "serde",
@@ -2259,6 +2270,7 @@ dependencies = [
  "sys-locale",
  "tauri",
  "tauri-build",
+ "tauri-plugin-background-sync",
  "tauri-plugin-biometric-keystore",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-clipboard-notify",
@@ -4623,6 +4635,7 @@ dependencies = [
  "async-trait",
  "bech32",
  "foreign-types 0.3.2",
+ "fs2",
  "getrandom 0.2.17",
  "git2",
  "libgit2-sys",
@@ -5524,6 +5537,16 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-background-sync"
+version = "0.14.2"
+dependencies = [
+ "log",
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]
