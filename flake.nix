@@ -121,6 +121,24 @@
               # rustfmt must receive the staged filenames to format per-file.
               pass_filenames = true;
             };
+
+            # Conventional-Commit gate at the `commit-msg` stage. Validates the
+            # subject and confines the scope to a closed allowlist: feature scopes
+            # are read live from docs/specs/*/prd.md `scope:` frontmatter (so a
+            # new spec + token auto-extends the list), code-area scopes live in
+            # the script. `stages = ["commit-msg"]` makes git-hooks.nix install
+            # the git commit-msg hook — install_stages is the union of enabled
+            # hooks' stages, so this adds commit-msg alongside the pre-commit
+            # install rather than replacing it.
+            conventional-commit = {
+              enable = true;
+              name = "conventional-commit-scope";
+              description = "Conventional Commits + closed scope enum (scopes from PRD frontmatter)";
+              entry = "${pkgs.bash}/bin/bash ${./nix/hooks/check-commit-msg.sh}";
+              stages = [ "commit-msg" ];
+              language = "system";
+              pass_filenames = true;
+            };
           };
         };
 

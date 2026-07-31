@@ -2,6 +2,7 @@
 pm: Zexin Yuan
 created: 2026-07-15
 version: 1.0.0
+scope: secrets
 ---
 
 # 002 — Secret Management (create, edit, generate)

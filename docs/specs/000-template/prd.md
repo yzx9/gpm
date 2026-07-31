@@ -2,6 +2,7 @@
 pm: <name>
 created: YYYY-MM-DD
 version: 1.0.0
+scope: <kebab-token> # Conventional-Commit scope for this feature domain
 ---
 
 # <Feature Title>
@@ -16,6 +17,11 @@ not here. Keep "current state" to a few sentences; detail belongs to the product
 Stay at product altitude — capabilities and user-facing behavior, not APIs, protocol
 strings (e.g. `otpauth://`), file formats, crypto algorithm names, or layout / bug-level
 details; those are implementation.
+
+The `scope:` frontmatter field is this feature's Conventional-Commit scope token —
+short, stable, lowercase kebab-case (e.g. the `007-app-lock` spec uses `lock`). The
+commit-msg hook reads it live, so `feat(<token>): ...` is allowed as soon as this spec
+lands; see CONTRIBUTING.md -> Commit Conventions for the full scope rules.
 
 Only `prd.md` is required. `design.md` / `security.md` / `research.md` are optional
 companions — see 000-template/README.md. Delete this comment when filling it in.

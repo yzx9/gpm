@@ -2,6 +2,7 @@
 pm: Zexin Yuan
 created: 2026-07-15
 version: 1.0.0
+scope: git
 ---
 
 # 005 — Git Storage & Sync

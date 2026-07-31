@@ -2,6 +2,7 @@
 pm: Zexin Yuan
 created: 2026-07-24
 version: 1.0.0
+scope: autofill
 ---
 
 # 008 — Android Autofill (cross-app fill)
