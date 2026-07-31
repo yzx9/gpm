@@ -9,13 +9,19 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import { useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
+import {
+  useDialog,
+  useSecureClaim,
+  useToast,
+  useWipeOnLeave,
+} from "@/composables";
 import { Copy, KeyRound, LockOpen, TriangleAlert } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 const { toast } = useToast();
+const { dialog } = useDialog();
 
 const publicKey = ref("");
 const privateKey = ref("");
@@ -45,7 +51,12 @@ async function loadPublicKey() {
 }
 
 async function exportPrivateKey() {
-  if (!confirm(t("sshKey.exportConfirm"))) return;
+  const confirmed = await dialog.confirm({
+    message: t("sshKey.exportConfirm"),
+    confirmLabel: t("common.button.export"),
+    danger: true,
+  });
+  if (!confirmed) return;
   exporting.value = true;
   error.value = "";
   try {

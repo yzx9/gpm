@@ -6,6 +6,7 @@
 export * from "./useAppLockState";
 export * from "./useCancellableSave";
 export * from "./useCommitSignature";
+export * from "./useDialog";
 export * from "./useDivergence";
 export * from "./useForegroundSync";
 export * from "./useLockActivity";

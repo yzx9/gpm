@@ -5,16 +5,19 @@
 import {
   APP_LOCK_KEY,
   createAppLockStore,
+  createDialog,
   createLockState,
   createSecureScreen,
   createSecuritySettings,
   createToast,
+  DIALOG_KEY,
   LOCK_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
 } from "@/composables";
 import { mount, type ComponentMountingOptions } from "@vue/test-utils";
+import { vi } from "vitest";
 import type { Component } from "vue";
 
 interface MountWithAppOptions<C extends Component> {
@@ -49,6 +52,12 @@ export function mountWithApp<C extends Component>(
   });
   const securitySettings = createSecuritySettings();
   const toast = createToast();
+  const dialog = createDialog();
+  // Page tests don't mount DialogHost, so drive `confirm` directly. Default to
+  // "proceed" (the former global confirm()=true default in setup.ts); a test
+  // that needs the cancel branch overrides it:
+  //   vi.mocked(dialog.dialog.confirm).mockResolvedValue(false)
+  vi.spyOn(dialog.dialog, "confirm").mockResolvedValue(true);
   const wrapper = mount(comp, {
     ...opts.mountOpts,
     global: {
@@ -60,8 +69,17 @@ export function mountWithApp<C extends Component>(
         [SECURE_SCREEN_KEY]: secureScreen,
         [SECURITY_SETTINGS_KEY]: securitySettings,
         [TOAST_KEY]: toast,
+        [DIALOG_KEY]: dialog,
       },
     },
   });
-  return { wrapper, lock, appLock, secureScreen, securitySettings, toast };
+  return {
+    wrapper,
+    lock,
+    appLock,
+    secureScreen,
+    securitySettings,
+    toast,
+    dialog,
+  };
 }

@@ -30,7 +30,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import { useToast } from "@/composables";
+import { useDialog, useToast } from "@/composables";
 import { Database, FileUp, History, KeyRound, Plus } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -38,6 +38,7 @@ import { onBeforeRouteLeave, useRouter } from "vue-router";
 
 const router = useRouter();
 const { toast } = useToast();
+const { dialog } = useDialog();
 const { t } = useI18n();
 
 const config = ref<RepoConfig | null>(null);
@@ -178,7 +179,12 @@ async function onModeChange(mode: VerifyMode) {
 }
 
 async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
-  if (!confirm(t("settings.auth.removeConfirm"))) return;
+  const confirmed = await dialog.confirm({
+    message: t("settings.auth.removeConfirm"),
+    confirmLabel: t("common.button.remove"),
+    danger: true,
+  });
+  if (!confirmed) return;
   authLoading.value = true;
   try {
     if (kind === "gpg") {

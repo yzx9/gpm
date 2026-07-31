@@ -31,8 +31,6 @@ function routeInvoke(
 describe("LogViewerPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // confirm() defaults to true (src/test/setup.ts); reset per test.
-    vi.mocked(globalThis.confirm).mockReturnValue(true);
     // Default: log text present, no verbose deadline ⇒ toggle Off.
     routeInvoke({ read_log: "line one\nline two", get_app_config: {} });
   });
@@ -166,8 +164,8 @@ describe("LogViewerPage", () => {
     expect(wrapper.find("pre.log-display").exists()).toBe(false);
   });
 
-  it("clears the log after confirm() (Clear button)", async () => {
-    const { wrapper } = mountWithApp(LogViewerPage);
+  it("clears the log after the confirm dialog is accepted (Clear button)", async () => {
+    const { wrapper, dialog } = mountWithApp(LogViewerPage);
     await flushPromises();
 
     const clearBtn = wrapper
@@ -177,14 +175,14 @@ describe("LogViewerPage", () => {
     await clearBtn!.trigger("click");
     await flushPromises();
 
-    expect(vi.mocked(globalThis.confirm)).toHaveBeenCalled();
+    expect(dialog.dialog.confirm).toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledWith("clear_log");
     expect(wrapper.find("pre.log-display").exists()).toBe(false);
   });
 
-  it("aborts clear when confirm() is cancelled", async () => {
-    vi.mocked(globalThis.confirm).mockReturnValue(false);
-    const { wrapper } = mountWithApp(LogViewerPage);
+  it("aborts clear when the confirm dialog is cancelled", async () => {
+    const { wrapper, dialog } = mountWithApp(LogViewerPage);
+    vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
     await flushPromises();
 
     const clearBtn = wrapper

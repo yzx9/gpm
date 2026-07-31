@@ -23,6 +23,7 @@ import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import {
   isAuthCancelled,
   useCancellableSave,
+  useDialog,
   useDivergence,
   useLockState,
   useSecretReveal,
@@ -42,6 +43,7 @@ const route = useRoute();
 const router = useRouter();
 const { runWithAuth, identityCached } = useLockState();
 const { toast } = useToast();
+const { dialog } = useDialog();
 
 const pathMatch = route.params.pathMatch;
 const entryPath = decodeURIComponent(
@@ -220,9 +222,12 @@ async function copyTotp() {
 
 async function deleteSecret() {
   if (deleting.value) return;
-  if (!confirm(t("entry.deleteConfirm", { name: entryName }))) {
-    return;
-  }
+  const confirmed = await dialog.confirm({
+    message: t("entry.deleteConfirm", { name: entryName }),
+    confirmLabel: t("common.button.delete"),
+    danger: true,
+  });
+  if (!confirmed) return;
   deleting.value = true;
   error.value = "";
   decryptError.value = false;

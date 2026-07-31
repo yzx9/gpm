@@ -13,6 +13,7 @@ import { computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
+import DialogHost from "./components/DialogHost.vue";
 import ToastHost from "./components/ToastHost.vue";
 import UnlockModal from "./components/UnlockModal.vue";
 import {
@@ -152,6 +153,9 @@ onMounted(() => {
     <!-- Unified toast host: top-of-shell, in-flow. Renders the useToast queue
          once for every caller (pages + app-shell code like the router guard). -->
     <ToastHost />
+    <!-- Unified confirm/prompt dialog host: renders the useDialog() queue once
+         for every caller, retiring the WebView's native window.confirm(). -->
+    <DialogHost />
     <!--
       Foreground-sync attention badge (R060 Tier 1): a passive, persistent
       indicator that a foreground sync hit a divergence / Enforce block. Tap takes

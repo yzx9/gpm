@@ -3,7 +3,12 @@
   "loading": "Loading...",
   "opensInNewWindow": "opens in a new window",
   "button": {
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "clear": "Clear",
+    "export": "Export",
+    "remove": "Remove"
   },
   "toast": {
     "secureScreenFailed": "Couldn't secure screen — try again",

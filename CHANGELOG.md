@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Page transitions now slide on every navigation. Previously the animation was skipped when moving between a screen that shows a secret (entry detail, edit, create, generate) and one that doesn't, because screen-capture protection used to cover the whole page. Protection now follows the secret itself — the screenshot block is raised only while a secret is actually on screen — so the boundary no longer needs freezing, and pages that never show a secret (like Settings → Repository) are screenshot-safe the whole time you're on them.
 - **Identity Auto-Unlock now ties your passwords' lock to App Lock.** When Auto-Unlock is on (which requires App Lock), your passwords unlock and lock together with the app, so the separate Auto-lock timing doesn't apply meanwhile — it's shown as managed by App Lock. Turn Auto-Unlock off to set a separate auto-lock time again.
 - The separate **Locking** and **Identity & unlock** settings pages are now combined into a single **Lock & Identity** page.
+- Confirmation prompts for destructive actions — deleting an entry, exporting your private SSH key, clearing the log, exporting diagnostics, and removing a trusted signing key — now use gpm's own dialog instead of the phone's generic system popup, so they match the rest of the app and dismiss the same way as your other in-app prompts.
 
 ### Fixed
 

@@ -157,7 +157,6 @@ describe("SettingsRepositoryPage", () => {
         trusted_gpg_keys: [],
         ignored: [],
       });
-      vi.mocked(globalThis.confirm).mockReturnValue(true);
       when("remove_trusted_key", undefined);
       const wrapper = mountPage();
       await flushPromises();
@@ -191,7 +190,6 @@ describe("SettingsRepositoryPage", () => {
         ],
         ignored: [],
       });
-      vi.mocked(globalThis.confirm).mockReturnValue(true);
       when("remove_trusted_gpg_key", undefined);
       const wrapper = mountPage();
       await flushPromises();

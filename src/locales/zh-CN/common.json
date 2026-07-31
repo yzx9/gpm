@@ -3,7 +3,12 @@
   "loading": "加载中……",
   "opensInNewWindow": "在新窗口中打开",
   "button": {
-    "cancel": "取消"
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "clear": "清除",
+    "export": "导出",
+    "remove": "移除"
   },
   "toast": {
     "secureScreenFailed": "无法保护屏幕 —— 请重试",

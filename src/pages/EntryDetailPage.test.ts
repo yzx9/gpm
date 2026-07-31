@@ -505,13 +505,9 @@ describe("EntryDetailPage", () => {
   });
 
   describe("deleteSecret", () => {
-    // The native confirm() dialog defaults to "proceed" for these tests; the
-    // cancel case overrides it explicitly.
+    // mountWithApp provides a dialog whose confirm resolves true by default
+    // (the "proceed" case); the cancel test overrides it to false.
     const deleteBtn = () => 'button[aria-label="Delete servers/prod"]';
-
-    beforeEach(() => {
-      vi.spyOn(window, "confirm").mockReturnValue(true);
-    });
 
     it("on confirm, invokes delete_secret with the entry name", async () => {
       vi.mocked(invoke).mockResolvedValue({ commit: "abc1234" });
@@ -625,9 +621,9 @@ describe("EntryDetailPage", () => {
     });
 
     it("does not invoke when confirm is cancelled", async () => {
-      vi.spyOn(window, "confirm").mockReturnValue(false);
       vi.mocked(invoke).mockResolvedValue({ commit: "abc1234" });
-      const wrapper = mountPage();
+      const { wrapper, dialog } = mountWithApp(EntryDetailPage);
+      vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
 

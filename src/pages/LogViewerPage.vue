@@ -18,7 +18,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import { useToast } from "@/composables";
+import { useDialog, useToast } from "@/composables";
 import { Download, RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
 import { listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
@@ -26,6 +26,7 @@ import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 const { toast } = useToast();
+const { dialog } = useDialog();
 
 const logText = ref("");
 const loading = ref(false);
@@ -172,7 +173,12 @@ async function onVerboseChange(enabled: boolean) {
 }
 
 async function onClear() {
-  if (!confirm(t("log.clearConfirm"))) return;
+  const confirmed = await dialog.confirm({
+    message: t("log.clearConfirm"),
+    confirmLabel: t("common.button.clear"),
+    danger: true,
+  });
+  if (!confirmed) return;
   clearing.value = true;
   try {
     await clearLog();
@@ -187,7 +193,11 @@ async function onClear() {
 }
 
 async function onExport() {
-  if (!confirm(t("log.exportConfirm"))) return;
+  const confirmed = await dialog.confirm({
+    message: t("log.exportConfirm"),
+    confirmLabel: t("common.button.export"),
+  });
+  if (!confirmed) return;
   exporting.value = true;
   try {
     await exportDiagnostics();
