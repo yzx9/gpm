@@ -34,7 +34,7 @@ async fn background_sync_skips_while_app_locked_and_never_arms_cancel_slot() {
     );
     assert!(
         app.state::<AppState>()
-            .active_cancel_token
+            .active_cancel_slot
             .lock()
             .unwrap()
             .is_none(),

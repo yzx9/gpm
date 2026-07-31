@@ -332,7 +332,14 @@ pub(crate) async fn background_sync<R: Runtime>(
             cancel.store(true, Ordering::SeqCst);
         }
     });
-    let result = state.store.sync_repo(Some(cancel), None).await;
+    // Arm into a PRIVATE throwaway slot, not the shared `active_cancel_slot` —
+    // background-sync must never disturb the user's pull-to-refresh cancel (see
+    // the rationale above). Nobody polls this slot; it just satisfies the arm.
+    let private_slot: rustpass::CancelSlot = Arc::new(std::sync::Mutex::new(None));
+    let result = state
+        .store
+        .sync_repo(&private_slot, Some(cancel), None)
+        .await;
     deadline.abort(); // settled (ok, err, or deadline-cancelled) — stop the timer
     match result {
         Ok(outcome) => {
