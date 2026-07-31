@@ -44,13 +44,17 @@ clipboard — easier, and safer than copying.
 ### Functionality
 
 - Focus a login field in another app → the system calls gpm → gpm recognizes which app /
-  site you're logging into, matches it to an entry → biometric unlock → drop the account
-  and password straight into the target field (Future).
+  site you're logging into, matches it to an entry → unlock (following the app-lock mode,
+  like copy/show) → drop the account and password straight into the target field (Future).
 
 ### Compatibility
 
-- Match entries by app identity / website; a correspondence the user picks once is
-  remembered and auto-filled next time; follows gopass's URL convention.
+- Match entries by app identity / website. For web logins the entry path
+  (`websites/<domain>/...`) is a plaintext, browseable key, so a match can be offered
+  before any unlock; a correspondence the user picks once is remembered and auto-filled
+  next time. Native apps expose a package id rather than a domain, so they rely on that
+  learned mapping and need one manual pick before they auto-fill. Matching follows
+  gopass's URL convention.
 
 ### Interactive
 
@@ -69,15 +73,21 @@ See <./security.md>.
 
 - The service sees only the focused-screen region the system hands it; it does not scan
   the screen on its own. An app / site it can't recognize falls back to manual search
-  and selection.
+  and selection. At first the service fills only fields that declare username/password
+  autofill hints; fields without hints are not filled by the framework path until a
+  later phase.
 
 ## 5. Open Questions & Key Decisions
 
-- How to associate an entry with a target app / website (combining learned mappings with
-  the URL convention in the entry body).
-- Whether to offer an optional assisted-recognition fallback for apps the framework
-  can't identify.
-- Credential Manager / passkey as a follow-on layer above autofill.
+- **Decided — entry association.** Match on three signals: the entry path
+  (`websites/<domain>/...`, plaintext, usable before unlock) for web logins; a learned,
+  encrypted `app/site → entry` mapping built from the user's first pick, primary for
+  native apps and fallback elsewhere; and the `url:` field the website template writes
+  into the body as a secondary accelerator.
+- **Decided — hint-poor apps.** The MVP fills only fields that declare username/password
+  autofill hints; the Accessibility-based variant is held in reserve as the fallback for
+  apps the framework cannot identify.
+- Credential Manager / passkey as a follow-on layer above autofill (still open).
 
 ## 6. Roadmap
 

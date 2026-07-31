@@ -14,10 +14,15 @@ from any app, on top of 001's in-app access paths (copy / show).
 ## Net effect on the existing model
 
 Autofill does **not** change at-rest encryption or the per-op identity lifecycle
-— an autofill request is simply another operation that triggers the same
-biometric-gated unlock as copy/show, with no cached bypass. The credential goes
-straight into the target app's focused field and never reaches the clipboard, so
-vs. copy it is a net security improvement.
+— an autofill request is simply another operation that runs through the same
+biometric-gated unlock path as copy/show, and follows the user's app-lock mode
+the same way: under the immediate-wipe default it re-unlocks per fill; under
+idle/never it may reuse a cached identity within an active session. "No cached
+bypass" means autofill gets no privileged path beyond what copy/show have, not
+that it forces a biometric prompt every fill; the cross-app origin is bounded by
+an explicit user tap on a suggestion that names the target app/site. The
+credential goes straight into the target app's focused field and never reaches
+the clipboard, so vs. copy it is a net security improvement.
 
 ## New surfaces specific to autofill
 
