@@ -46,9 +46,6 @@ use crate::app_config::{BehaviorConfig, GateIdle, PrefConfig};
 use crate::migrations::MigrationOutcome;
 use crate::migrations::m0004_verbose_from_debug::AppConfigV4;
 
-// NOTE: this migration carries the v1.0.0 removal TODO for the whole registry —
-// see `migrations/mod.rs`.
-
 /// Split the schema-4 plaintext single-file `app.json` (read as [`AppConfigV4`])
 /// into `pref.json` + sealed `app.json`, bumping `schema_version` to 5. See the
 /// module docs for the app-lock resume semantics.

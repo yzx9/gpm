@@ -33,9 +33,6 @@ use crate::AppState;
 use crate::app_config::{BehaviorConfig, GateIdle};
 use crate::migrations::MigrationOutcome;
 
-// NOTE: this migration carries the v1.0.0 removal TODO for the whole registry —
-// see `migrations/mod.rs`.
-
 /// Set `behavior.gate_idle = Off` on existing configs, bumping `schema_version`
 /// to 6. See the module docs for the app-lock resume semantics.
 ///
