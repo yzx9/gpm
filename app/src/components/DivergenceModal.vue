@@ -11,6 +11,7 @@
 
 <script setup lang="ts">
 import type { DivergenceChoice, SyncDivergence } from "@/api";
+import { Z } from "@/composables";
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
@@ -117,7 +118,6 @@ watch(
     variant="sheet"
     role="alertdialog"
     :aria-label="t('common.divergence.sheetAriaLabel')"
-    :dismiss-on-back="!pendingChoice"
     @close="cancelAll"
   >
     <h2
@@ -208,7 +208,7 @@ watch(
   <BaseModalShell
     v-if="divergence && pendingChoice"
     variant="center"
-    :z="70"
+    :z="Z.overlay"
     role="alertdialog"
     :aria-label="
       pendingChoice === 'adopt_remote'

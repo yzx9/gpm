@@ -3,7 +3,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { useOverlayBackHandler, useScrollLock } from "@/composables";
+import {
+  useOverlayBackHandler,
+  useScrollLock,
+  Z,
+  type ZTier,
+} from "@/composables";
 import { computed, ref } from "vue";
 import BaseCard from "./BaseCard.vue";
 
@@ -11,8 +16,9 @@ const props = withDefaults(
   defineProps<{
     /** `center` = always-centered gate (unlock/app-lock); `sheet` = bottom-sheet on mobile, centered ≥sm. */
     variant: "center" | "sheet";
-    /** Stacking layer. Defaults: center→60, sheet→40. AppLockOverlay passes 70 to sit above the identity modal. */
-    z?: number;
+    /** Stacking layer — a `Z` tier (`Z.overlay` default) or an explicit number.
+     *  AppLockOverlay passes `Z.gate` to sit above every overlay. */
+    z?: ZTier | number;
     /** Accessibility role; `dialog` (default) or `alertdialog`. */
     role?: string;
     /** Whether a backdrop tap emits `close` (default true). Set false to force a
@@ -30,9 +36,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: "close"): void }>();
 
-const resolvedZ = computed(
-  () => props.z ?? (props.variant === "center" ? 60 : 40),
-);
+const resolvedZ = computed(() => props.z ?? Z.overlay);
 
 // Backdrop and back are decoupled: each emits `close` only when its own prop
 // allows it. A caller without `@close` still gets no dismissal (emit is a
@@ -43,12 +47,17 @@ function onBackdrop() {
 }
 
 // The shell is mounted only when shown (every caller uses v-if), so a constant
-// `ref(true)` arms the listener for the component's lifetime and the
-// composable's onBeforeUnmount releases it. See useOverlayBackHandler for the
-// async-registration race guards.
-useOverlayBackHandler(ref(true), () => {
-  if (props.dismissOnBack) emit("close");
-});
+// `ref(true)` arms the handler for the component's lifetime and
+// onBeforeUnmount pops it. `resolvedZ.value` is the back-routing tier (stable
+// for the shell's life). See useBackHandlerRegistry for the dispatch rule and
+// stale-registration guards.
+useOverlayBackHandler(
+  ref(true),
+  () => {
+    if (props.dismissOnBack) emit("close");
+  },
+  resolvedZ.value,
+);
 
 // Freeze the document scroller for the shell's lifetime. The backdrop covers
 // the viewport visually, but a drag on a non-scrolling fixed layer still

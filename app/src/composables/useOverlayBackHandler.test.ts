@@ -2,127 +2,76 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import { Z } from "@/zTiers";
 import { flushPromises, mount } from "@vue/test-utils";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, ref, type Ref } from "vue";
+import {
+  BACK_HANDLER_KEY,
+  type BackHandlerHandle,
+  type BackHandlerRegistry,
+} from "./useBackHandlerRegistry";
 import { useOverlayBackHandler } from "./useOverlayBackHandler";
 
-// Override the global setup.ts mock with a DEFERRED onBackButtonPress so tests
-// can control when "registration completes" — needed to exercise the
-// toggle-off-during-await race. unregister() clears the captured handler so
-// fireBack() after unregister is a no-op (mirrors Tauri no longer emitting to a
-// released listener).
-const api = vi.hoisted(() => {
-  let handler: ((p: { canGoBack: boolean }) => void) | null = null;
-  const unregister = vi.fn(async () => {
-    handler = null;
-  });
-  let pendingResolve: ((l: { unregister: typeof unregister }) => void) | null =
-    null;
-  const onBackButtonPress = vi.fn((h: (p: { canGoBack: boolean }) => void) => {
-    handler = h;
-    return new Promise<{ unregister: typeof unregister }>((res) => {
-      pendingResolve = res;
-    });
-  });
-  const resolveRegistration = () => {
-    pendingResolve?.({ unregister });
-    pendingResolve = null;
-  };
-  const fireBack = () => {
-    handler?.({ canGoBack: false });
-  };
-  return { onBackButtonPress, unregister, resolveRegistration, fireBack };
-});
-vi.mock("@tauri-apps/api/app", () => ({
-  onBackButtonPress: api.onBackButtonPress,
-}));
+// A fake registry isolates the composable from the real one (which has its own
+// suite). We only assert push/pop wiring + z forwarding — the dispatch rule,
+// listener lifecycle, and stale-registration guards live in
+// useBackHandlerRegistry.test.ts. (The old per-instance "toggled-off-during-await"
+// race test is gone: that guard moved to the registry.) The fake is PROVIDED via
+// BACK_HANDLER_KEY — the composable injects it (no registry parameter).
+const HANDLE = 1 as unknown as BackHandlerHandle;
+function makeFakeRegistry(): BackHandlerRegistry {
+  return { push: vi.fn(() => HANDLE), pop: vi.fn() };
+}
 
-// `shown` is shared, but each test mounts a fresh component and unmounts it in
-// afterEach — the composable's watcher is tied to the component scope, so an
-// unmount stops it and prevents watcher pile-up across tests.
 const shown: Ref<boolean> = ref(false);
 const onBack = vi.fn();
 
-const Wrapper = defineComponent({
-  setup() {
-    useOverlayBackHandler(shown, onBack);
-    return {};
-  },
-  template: "<div />",
-});
-
 describe("useOverlayBackHandler", () => {
-  let wrapper: ReturnType<typeof mount> | null = null;
-
   beforeEach(() => {
     shown.value = false;
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    wrapper?.unmount();
-    wrapper = null;
-  });
+  // Mounts a host that calls useOverlayBackHandler, PROVIDING `reg` via
+  // BACK_HANDLER_KEY (the production path is provide/inject, not a param).
+  function mountWith(reg: BackHandlerRegistry, z: number) {
+    return mount(
+      defineComponent({
+        setup() {
+          useOverlayBackHandler(shown, onBack, z);
+          return {};
+        },
+        template: "<div />",
+      }),
+      { global: { provide: { [BACK_HANDLER_KEY]: reg } } },
+    );
+  }
 
-  const mountWrapper = () => {
-    wrapper = mount(Wrapper);
-    return wrapper;
-  };
-
-  it("does not register while hidden; registers when shown; fires onBack on back; unregisters when hidden again", async () => {
-    mountWrapper();
+  it("does not push while hidden; pushes (onBack, z) when shown; pops when hidden again", async () => {
+    const reg = makeFakeRegistry();
+    mountWith(reg, Z.gate);
     await flushPromises();
-    expect(api.onBackButtonPress).not.toHaveBeenCalled();
+    expect(reg.push).not.toHaveBeenCalled();
 
     shown.value = true;
-    await flushPromises(); // watcher fires → onBackButtonPress called, pending
-    expect(api.onBackButtonPress).toHaveBeenCalledTimes(1);
-
-    api.resolveRegistration(); // registration completes
     await flushPromises();
-    expect(api.unregister).not.toHaveBeenCalled(); // still registered
-
-    api.fireBack();
-    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(reg.push).toHaveBeenCalledWith(onBack, Z.gate);
 
     shown.value = false;
     await flushPromises();
-    expect(api.unregister).toHaveBeenCalledTimes(1);
+    expect(reg.pop).toHaveBeenCalledWith(HANDLE);
   });
 
-  it("toggled off during the registration await drops the stale listener (race guard)", async () => {
-    mountWrapper();
-    shown.value = true;
-    await flushPromises(); // onBackButtonPress called, registration pending
-    expect(api.onBackButtonPress).toHaveBeenCalledTimes(1);
-
-    shown.value = false; // hidden BEFORE registration resolves
-    await flushPromises(); // else-branch: listener still null → no-op here
-    expect(api.unregister).not.toHaveBeenCalled();
-
-    api.resolveRegistration(); // stale registration now completes
-    await flushPromises();
-    // The guard saw `shown` already false → unregistered the stale listener…
-    expect(api.unregister).toHaveBeenCalledTimes(1);
-    // …and a back press no longer reaches onBack (handler cleared on unregister).
-    api.fireBack();
-    expect(onBack).not.toHaveBeenCalled();
-  });
-
-  it("releases the listener on unmount while the overlay is still shown (no leak)", async () => {
-    mountWrapper();
+  it("pops on unmount while still shown (no leak)", async () => {
+    const reg = makeFakeRegistry();
+    const wrapper = mountWith(reg, Z.overlay);
     shown.value = true;
     await flushPromises();
-    api.resolveRegistration(); // registration completes → listener assigned
-    await flushPromises();
-    expect(api.onBackButtonPress).toHaveBeenCalledTimes(1);
+    expect(reg.push).toHaveBeenCalledTimes(1);
 
-    // Unmount WITHOUT toggling shown back to false — exercises onBeforeUnmount.
-    wrapper!.unmount();
+    wrapper.unmount();
     await flushPromises();
-    expect(api.unregister).toHaveBeenCalledTimes(1);
-    api.fireBack();
-    expect(onBack).not.toHaveBeenCalled();
+    expect(reg.pop).toHaveBeenCalledWith(HANDLE);
   });
 });

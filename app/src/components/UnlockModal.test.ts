@@ -2,30 +2,39 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { createScrollLockController, SCROLL_LOCK_KEY } from "@/composables";
+import {
+  BACK_HANDLER_KEY,
+  createBackHandlerRegistry,
+  createScrollLockController,
+  SCROLL_LOCK_KEY,
+} from "@/composables";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  type ComponentMountingOptions,
   enableAutoUnmount,
   flushPromises,
   mount,
+  type ComponentMountingOptions,
 } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UnlockModal from "./UnlockModal.vue";
 
-// UnlockModal mounts a BaseModalShell, which injects SCROLL_LOCK_KEY. Provide a
-// fresh controller per mount via mountUnlock so the lock count never bleeds
-// across tests; enableAutoUnmount still unmounts every wrapper after each test.
+// UnlockModal mounts a BaseModalShell, which locks the document scroller on
+// mount (useScrollLock). Unmount every wrapper after each test so the shared
+// lock count returns to 0 instead of climbing across these ~14 mounts.
 enableAutoUnmount(afterEach);
 
-function mountUnlock(opts: ComponentMountingOptions<typeof UnlockModal> = {}) {
+// Back-handler registry: one fresh instance shared across this file's mounts
+// (enableAutoUnmount drains it between tests). UnlockModal → BaseModalShell
+// injects BACK_HANDLER_KEY, so every mount must provide it.
+const backHandler = createBackHandlerRegistry();
+function mountUnlock(opts?: ComponentMountingOptions<typeof UnlockModal>) {
   return mount(UnlockModal, {
-    ...opts,
+    ...(opts ?? {}),
     global: {
-      ...opts.global,
+      ...(opts?.global ?? {}),
       provide: {
-        ...opts.global?.provide,
         [SCROLL_LOCK_KEY]: createScrollLockController(),
+        [BACK_HANDLER_KEY]: backHandler,
       },
     },
   });

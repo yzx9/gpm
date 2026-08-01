@@ -10,7 +10,9 @@ import "./style.css";
 import { installFrontendLogger } from "./api";
 import {
   APP_LOCK_KEY,
+  BACK_HANDLER_KEY,
   createAppLockStore,
+  createBackHandlerRegistry,
   createDialog,
   createLockState,
   createNavDirection,
@@ -47,6 +49,7 @@ const securitySettingsState = createSecuritySettings();
 const toastState = createToast();
 const dialogState = createDialog();
 const scrollLock = createScrollLockController();
+const backHandlerRegistry = createBackHandlerRegistry();
 
 // Screen-capture protection (FLAG_SECURE) is component-level (R031): each
 // secret-bearing component acquires a claim while its secret is on screen (see
@@ -216,6 +219,7 @@ void (async () => {
   app.provide(TOAST_KEY, toastState);
   app.provide(DIALOG_KEY, dialogState);
   app.provide(SCROLL_LOCK_KEY, scrollLock);
+  app.provide(BACK_HANDLER_KEY, backHandlerRegistry);
 
   const boot = currentLocale();
   // Mirror the boot locale to <html lang> for accessibility and :lang() CSS.

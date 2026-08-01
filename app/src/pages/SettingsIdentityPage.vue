@@ -45,6 +45,7 @@ import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
+  Z,
   useSecureClaim,
   useSecuritySettings,
   useToast,
@@ -792,7 +793,7 @@ onMounted(() => {
     <BaseModalShell
       v-if="passphraseModal"
       variant="sheet"
-      :z="50"
+      :z="Z.overlay"
       role="dialog"
       :aria-label="ppModalTitle"
       @close="closePassphraseModal"

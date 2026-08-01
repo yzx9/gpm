@@ -26,7 +26,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import { useSecureScreen, useToast } from "@/composables";
+import { useSecureScreen, useToast, Z } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
 import { applyTheme, normalizeThemeMode, type ThemeMode } from "@/theme";
 import { SlidersHorizontal, Trash2 } from "@lucide/vue";
@@ -400,7 +400,7 @@ onMounted(() => {
     <BaseModalShell
       v-if="resetOpen"
       variant="center"
-      :z="80"
+      :z="Z.overlay"
       role="alertdialog"
       :aria-label="t('settings.reset.ariaLabel')"
       @close="resetOpen = false"

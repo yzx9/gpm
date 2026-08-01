@@ -4,6 +4,8 @@
 
 import BaseButton from "@/components/base/BaseButton.vue";
 import {
+  BACK_HANDLER_KEY,
+  createBackHandlerRegistry,
   createDialog,
   createScrollLockController,
   DIALOG_KEY,
@@ -24,8 +26,8 @@ function mountHost() {
     global: {
       provide: {
         [DIALOG_KEY]: d,
-        // DialogHost renders BaseModalShell, which injects SCROLL_LOCK_KEY.
         [SCROLL_LOCK_KEY]: createScrollLockController(),
+        [BACK_HANDLER_KEY]: createBackHandlerRegistry(),
       },
     },
   });

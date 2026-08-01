@@ -2,62 +2,65 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { createScrollLockController, SCROLL_LOCK_KEY } from "@/composables";
 import {
-  type ComponentMountingOptions,
+  BACK_HANDLER_KEY,
+  createBackHandlerRegistry,
+  createScrollLockController,
+  SCROLL_LOCK_KEY,
+} from "@/composables";
+import { Z } from "@/zTiers";
+import {
   enableAutoUnmount,
   flushPromises,
   mount,
+  type ComponentMountingOptions,
 } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BaseModalShell from "./BaseModalShell.vue";
 
-// BaseModalShell injects SCROLL_LOCK_KEY on mount (useScrollLock). Provide a
-// fresh controller per mount via mountShell so the lock count never bleeds
-// across tests; enableAutoUnmount still unmounts every wrapper after each test.
+// BaseModalShell locks the document scroller on mount (useScrollLock). Unmount
+// every wrapper after each test so the shared lock count returns to 0 instead of
+// climbing across tests that mount without an explicit unmount.
 enableAutoUnmount(afterEach);
 
+// Back-handler registry: one fresh instance shared across this file's mounts
+// (enableAutoUnmount drains it between tests). BaseModalShell injects it via
+// BACK_HANDLER_KEY, so every mount must provide it.
+const backHandler = createBackHandlerRegistry();
 function mountShell(
-  opts: ComponentMountingOptions<typeof BaseModalShell> = {},
+  options: ComponentMountingOptions<typeof BaseModalShell> = {},
 ) {
   return mount(BaseModalShell, {
-    ...opts,
+    ...options,
     global: {
-      ...opts.global,
+      ...options.global,
       provide: {
-        ...opts.global?.provide,
         [SCROLL_LOCK_KEY]: createScrollLockController(),
+        [BACK_HANDLER_KEY]: backHandler,
       },
     },
   });
 }
 
-// Override the global setup.ts no-op mock with a DEFERRED onBackButtonPress so
-// tests can drive "registration completes" and "back pressed". Mirrors the
-// composable's own test. unregister() clears the captured handler so fireBack()
-// after unregister is a no-op (mirrors Tauri no longer emitting to a released
-// listener). Applies to this file only.
+// Override the global setup.ts no-op mock so tests can drive "back pressed".
+// Resolves immediately — no deferred registration here (the registry's own suite
+// covers the stale-registration race; deferring would leave the shared
+// defaultRegistry's `subscribing` flag stuck true across tests). unregister()
+// clears the captured handler so fireBack() after unregister is a no-op. This
+// file only.
 const api = vi.hoisted(() => {
   let handler: ((p: { canGoBack: boolean }) => void) | null = null;
   const unregister = vi.fn(async () => {
     handler = null;
   });
-  let pendingResolve: ((l: { unregister: typeof unregister }) => void) | null =
-    null;
   const onBackButtonPress = vi.fn((h: (p: { canGoBack: boolean }) => void) => {
     handler = h;
-    return new Promise<{ unregister: typeof unregister }>((res) => {
-      pendingResolve = res;
-    });
+    return Promise.resolve({ unregister });
   });
-  const resolveRegistration = () => {
-    pendingResolve?.({ unregister });
-    pendingResolve = null;
-  };
   const fireBack = () => {
     handler?.({ canGoBack: false });
   };
-  return { onBackButtonPress, unregister, resolveRegistration, fireBack };
+  return { onBackButtonPress, unregister, fireBack };
 });
 vi.mock("@tauri-apps/api/app", () => ({
   onBackButtonPress: api.onBackButtonPress,
@@ -85,14 +88,16 @@ describe("BaseModalShell", () => {
     expect(wrapper.emitted("close")).toBeUndefined();
   });
 
-  it("defaults z-index to 60 for `center` and 40 for `sheet`", () => {
+  it("defaults z-index to Z.overlay (1000) for both variants", () => {
     const center = mountShell({ props: { variant: "center" } });
     expect(center.find(".overlay").attributes("style")).toContain(
-      "z-index: 60",
+      "z-index: 1000",
     );
 
     const sheet = mountShell({ props: { variant: "sheet" } });
-    expect(sheet.find(".overlay").attributes("style")).toContain("z-index: 40");
+    expect(sheet.find(".overlay").attributes("style")).toContain(
+      "z-index: 1000",
+    );
   });
 
   it("honors an explicit `z` override (app-lock sits above the identity modal)", () => {
@@ -161,11 +166,32 @@ describe("BaseModalShell", () => {
   it("unregisters the back listener on unmount", async () => {
     const wrapper = mountShell({ props: { variant: "center" } });
     await flushPromises();
-    api.resolveRegistration();
     await flushPromises();
     expect(api.unregister).not.toHaveBeenCalled();
     wrapper.unmount();
     await flushPromises();
     expect(api.unregister).toHaveBeenCalledTimes(1);
+  });
+
+  it("two stacked shells: a higher-z shell receives back, the lower does not", async () => {
+    const lower = mountShell({ props: { variant: "center" } });
+    const higher = mountShell({
+      props: { variant: "center", z: Z.gate },
+    });
+    await flushPromises();
+    api.fireBack();
+    await flushPromises();
+    expect(higher.emitted("close")).toHaveLength(1);
+    expect(lower.emitted("close")).toBeUndefined();
+  });
+
+  it("two same-z shells: the most-recently-mounted receives back (LIFO tie-break)", async () => {
+    const first = mountShell({ props: { variant: "center" } });
+    const second = mountShell({ props: { variant: "center" } });
+    await flushPromises();
+    api.fireBack();
+    await flushPromises();
+    expect(second.emitted("close")).toHaveLength(1);
+    expect(first.emitted("close")).toBeUndefined();
   });
 });

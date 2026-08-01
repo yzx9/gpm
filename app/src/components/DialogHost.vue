@@ -13,20 +13,20 @@ import BaseModalShell from "./base/BaseModalShell.vue";
 // `BaseModalShell` confirms. This is the surface that retires the WebView's
 // native `window.confirm()`: every confirm the user sees is now our UI.
 //
-// Each queued request renders as its own shell; `z` rises with queue position
-// so a (rare) second confirm stacks above a pending first. Backdrop tap and
-// Android back both route through the shell's `@close` → `resolve(false)`.
+// Each queued request renders as its own shell at the default overlay tier;
+// a same-z second confirm stacks above a pending first by DOM order, and the
+// back-handler registry dismisses the topmost (LIFO tie-break). Backdrop tap
+// and Android back both route through the shell's `@close` → `resolve(false)`.
 const { pending } = useDialog();
 const { t } = useI18n();
 </script>
 
 <template>
   <BaseModalShell
-    v-for="(req, i) in pending"
+    v-for="req in pending"
     :key="req.id"
     variant="center"
     role="alertdialog"
-    :z="60 + i * 2"
     :aria-label="req.opts.title || req.opts.message"
     @close="req.resolve(false)"
   >

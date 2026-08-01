@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import type { AppLockError } from "@/api";
 import { appUnlock, asAppLockError } from "@/api";
-import { useAppLockState } from "@/composables";
+import { useAppLockState, Z } from "@/composables";
 import { reconcileLocaleFromBackend } from "@/i18n";
 import { appLockUnlockPrompt } from "@/i18n/native";
 import { LockKeyhole, ScanFace } from "@lucide/vue";
@@ -87,7 +87,7 @@ onUnmounted(() => {
 <template>
   <BaseModalShell
     variant="center"
-    :z="70"
+    :z="Z.gate"
     :dismiss-on-backdrop="false"
     :dismiss-on-back="false"
     :aria-label="t('common.appLock.title')"

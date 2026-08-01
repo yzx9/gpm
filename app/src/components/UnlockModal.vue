@@ -14,7 +14,7 @@ import {
   unlock,
   type LockMode,
 } from "@/api";
-import { useWipeOnLeave } from "@/composables";
+import { useWipeOnLeave, Z } from "@/composables";
 import { reconcileLocaleFromBackend } from "@/i18n";
 import { identityUnlockPrompt } from "@/i18n/native";
 import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
@@ -215,7 +215,7 @@ onUnmounted(() => {
 <template>
   <BaseModalShell
     variant="center"
-    :z="60"
+    :z="Z.overlay"
     :aria-label="t('common.unlock.title')"
     @close="emit('close')"
   >

@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  BACK_HANDLER_KEY,
+  createBackHandlerRegistry,
   createSecureScreen,
   createToast,
   SECURE_SCREEN_KEY,
@@ -60,6 +62,7 @@ describe("SetupPage", () => {
         provide: {
           [TOAST_KEY]: createToast(),
           [SECURE_SCREEN_KEY]: createSecureScreen({ available: false }),
+          [BACK_HANDLER_KEY]: createBackHandlerRegistry(),
         },
       },
     });

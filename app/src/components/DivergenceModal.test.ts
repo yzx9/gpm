@@ -3,39 +3,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SyncDivergence } from "@/api";
-import { createScrollLockController, SCROLL_LOCK_KEY } from "@/composables";
 import {
-  type ComponentMountingOptions,
+  BACK_HANDLER_KEY,
+  createBackHandlerRegistry,
+  createScrollLockController,
+  SCROLL_LOCK_KEY,
+} from "@/composables";
+import {
   enableAutoUnmount,
   flushPromises,
   mount,
+  type ComponentMountingOptions,
 } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DivergenceModal from "./DivergenceModal.vue";
 
-// DivergenceModal mounts BaseModalShell(s), which inject SCROLL_LOCK_KEY.
-// Provide a fresh controller per mount via mountDiv so the lock count never
-// bleeds across tests; enableAutoUnmount still unmounts every wrapper after
-// each test.
+// DivergenceModal mounts BaseModalShell(s), which lock the document scroller on
+// mount (useScrollLock). Unmount every wrapper after each test so the shared
+// lock count returns to 0 instead of climbing across tests that mount without an
+// explicit unmount.
 enableAutoUnmount(afterEach);
 
-function mountDiv(opts: ComponentMountingOptions<typeof DivergenceModal> = {}) {
+// Back-handler registry: one fresh instance shared across this file's mounts
+// (enableAutoUnmount drains it between tests). DivergenceModal's BaseModalShells
+// inject BACK_HANDLER_KEY, so every mount must provide it.
+const backHandler = createBackHandlerRegistry();
+function mountDiv(options: ComponentMountingOptions<typeof DivergenceModal>) {
   return mount(DivergenceModal, {
-    ...opts,
+    ...options,
     global: {
-      ...opts.global,
+      ...options.global,
       provide: {
-        ...opts.global?.provide,
         [SCROLL_LOCK_KEY]: createScrollLockController(),
+        [BACK_HANDLER_KEY]: backHandler,
       },
     },
   });
 }
 
-// Deferred-mock (mirrors BaseModalShell.test.ts / useOverlayBackHandler.test.ts)
-// so tests can drive "back pressed". Each BaseModalShell inside DivergenceModal
-// registers its own listener; Tauri fans one back press to ALL registered
-// listeners, so fireBack() delivers to every currently-mounted shell.
+// Deferred-mock (mirrors BaseModalShell.test.ts / useBackHandlerRegistry.test.ts)
+// so tests can drive "back pressed". The back-handler registry owns ONE global
+// listener; fireBack() delivers to the TOP entry only (highest z, LIFO tie) — so
+// a press reaches the step-2 confirm while it is up, not the step-1 sheet below.
 const api = vi.hoisted(() => {
   let handler: ((p: { canGoBack: boolean }) => void) | null = null;
   const unregister = vi.fn(async () => {
@@ -116,8 +125,8 @@ describe("DivergenceModal back/backdrop coordination", () => {
     const step2 = wrapper.find(STEP2_ADOPT);
     expect(step2.exists()).toBe(true);
 
-    // Back press: step 1 swallows (!pendingChoice=false), step 2 swallows
-    // (!resolving=false). Net: fully trapped.
+    // Back press: step 2 is the top entry and traps (dismissOnBack=!resolving).
+    // Step 1 is not consulted — only the top fires. Net: fully trapped.
     api.fireBack();
     await flushPromises();
     expect(wrapper.emitted("close")).toBeUndefined();

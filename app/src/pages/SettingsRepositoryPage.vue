@@ -30,7 +30,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import { useDialog, useToast } from "@/composables";
+import { useDialog, useToast, Z } from "@/composables";
 import { Database, FileUp, History, KeyRound, Plus } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -514,7 +514,7 @@ onMounted(() => {
     <BaseModalShell
       v-if="unsavedOpen"
       variant="sheet"
-      :z="50"
+      :z="Z.overlay"
       role="alertdialog"
       :aria-label="t('settings.unsaved.ariaLabel')"
       @close="resolveUnsaved('cancel')"

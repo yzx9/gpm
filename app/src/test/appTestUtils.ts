@@ -4,7 +4,9 @@
 
 import {
   APP_LOCK_KEY,
+  BACK_HANDLER_KEY,
   createAppLockStore,
+  createBackHandlerRegistry,
   createDialog,
   createLockState,
   createScrollLockController,
@@ -56,6 +58,7 @@ export function mountWithApp<C extends Component>(
   const toast = createToast();
   const dialog = createDialog();
   const scrollLock = createScrollLockController();
+  const backHandler = createBackHandlerRegistry();
   // Page tests don't mount DialogHost, so drive `confirm` directly. Default to
   // "proceed" (the former global confirm()=true default in setup.ts); a test
   // that needs the cancel branch overrides it:
@@ -74,6 +77,7 @@ export function mountWithApp<C extends Component>(
         [TOAST_KEY]: toast,
         [DIALOG_KEY]: dialog,
         [SCROLL_LOCK_KEY]: scrollLock,
+        [BACK_HANDLER_KEY]: backHandler,
       },
     },
   });
@@ -86,5 +90,6 @@ export function mountWithApp<C extends Component>(
     toast,
     dialog,
     scrollLock,
+    backHandler,
   };
 }
