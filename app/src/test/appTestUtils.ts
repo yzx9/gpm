@@ -7,11 +7,13 @@ import {
   createAppLockStore,
   createDialog,
   createLockState,
+  createScrollLockController,
   createSecureScreen,
   createSecuritySettings,
   createToast,
   DIALOG_KEY,
   LOCK_KEY,
+  SCROLL_LOCK_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
@@ -28,14 +30,14 @@ interface MountWithAppOptions<C extends Component> {
   /** Default `true`: start secureScreen with the plugin reported available
    *  (Android, the production target). Pass `false` for desktop/no-plugin. */
   secureAvailable?: boolean;
-  /** Forwarded to `mount`, merged under the 5-key provide block. */
+  /** Forwarded to `mount`, merged under the 6-key provide block. */
   mountOpts?: ComponentMountingOptions<C>;
 }
 
 /**
- * Mount `comp` with ALL 5 app-shell states provided, fresh per call. Returns the
+ * Mount `comp` with ALL 6 app-shell states provided, fresh per call. Returns the
  * wrapper and every state handle so a test can drive any instance via real
- * methods. Providing all 5 every time covers transitive injection automatically
+ * methods. Providing all 6 every time covers transitive injection automatically
  * — e.g. `EntryDetailPage` calls `useSecretReveal()` unconditionally at
  * setup, which injects `useSecuritySettings()` + `useLockState()`, so every
  * CreatePage/EntryDetailPage test needs those keys or setup throws. Fail-loud
@@ -53,6 +55,7 @@ export function mountWithApp<C extends Component>(
   const securitySettings = createSecuritySettings();
   const toast = createToast();
   const dialog = createDialog();
+  const scrollLock = createScrollLockController();
   // Page tests don't mount DialogHost, so drive `confirm` directly. Default to
   // "proceed" (the former global confirm()=true default in setup.ts); a test
   // that needs the cancel branch overrides it:
@@ -70,6 +73,7 @@ export function mountWithApp<C extends Component>(
         [SECURITY_SETTINGS_KEY]: securitySettings,
         [TOAST_KEY]: toast,
         [DIALOG_KEY]: dialog,
+        [SCROLL_LOCK_KEY]: scrollLock,
       },
     },
   });
@@ -81,5 +85,6 @@ export function mountWithApp<C extends Component>(
     securitySettings,
     toast,
     dialog,
+    scrollLock,
   };
 }

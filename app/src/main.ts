@@ -14,12 +14,14 @@ import {
   createDialog,
   createLockState,
   createNavDirection,
+  createScrollLockController,
   createSecureScreen,
   createSecuritySettings,
   createToast,
   DIALOG_KEY,
   LOCK_KEY,
   NAV_DIRECTION_KEY,
+  SCROLL_LOCK_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
@@ -44,6 +46,7 @@ const secureScreenState = createSecureScreen();
 const securitySettingsState = createSecuritySettings();
 const toastState = createToast();
 const dialogState = createDialog();
+const scrollLock = createScrollLockController();
 
 // Screen-capture protection (FLAG_SECURE) is component-level (R031): each
 // secret-bearing component acquires a claim while its secret is on screen (see
@@ -212,6 +215,7 @@ void (async () => {
   app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);
   app.provide(TOAST_KEY, toastState);
   app.provide(DIALOG_KEY, dialogState);
+  app.provide(SCROLL_LOCK_KEY, scrollLock);
 
   const boot = currentLocale();
   // Mirror the boot locale to <html lang> for accessibility and :lang() CSS.

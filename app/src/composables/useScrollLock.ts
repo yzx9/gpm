@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { onBeforeUnmount, onMounted } from "vue";
+import { inject, onBeforeUnmount, onMounted, type InjectionKey } from "vue";
 
 /**
  * Lock background scrolling while a modal/overlay is up.
@@ -41,9 +41,11 @@ import { onBeforeUnmount, onMounted } from "vue";
  * unlocks only when the last shell goes down, so an inner modal dismissing
  * never unlocks the page behind an outer one still showing.
  *
- * The counter lives on a controller instance so tests can construct a fresh
- * one per case (no module-singleton `__reset` hazard); `useScrollLock()` uses
- * a shared default controller so every shell in the app shares one count.
+ * The counter lives on a controller instance provided app-wide via
+ * `SCROLL_LOCK_KEY` (see `main.ts`), so every shell in the app shares one
+ * count; tests construct a fresh `createScrollLockController` per case (no
+ * module-singleton `__reset` hazard) — same shape as the other app-shell
+ * composables (`useToast`, `useDialog`, ...).
  *
  * Must be called from a component `setup()` (uses `onMounted`/`onBeforeUnmount`,
  * not `onActivated`/`onDeactivated` — a `<KeepAlive>` host would hold the lock
@@ -57,6 +59,11 @@ export interface ScrollLockController {
   release: () => void;
 }
 
+/**
+ * Create a fresh scroll-lock controller. Production calls this once in
+ * `main.ts` and provides it via `SCROLL_LOCK_KEY`; tests call it per-case for
+ * isolation (no module singleton to reset).
+ */
 export function createScrollLockController(): ScrollLockController {
   let count = 0;
   let savedOverflow = "";
@@ -83,20 +90,22 @@ export function createScrollLockController(): ScrollLockController {
   };
 }
 
-// One shared counter for the whole app — every BaseModalShell increments /
-// decrements the same count so stacked shells keep the lock until the last one
-// unmounts.
-const defaultController = createScrollLockController();
+/** Injection key for the app-wide scroll-lock controller. */
+export const SCROLL_LOCK_KEY: InjectionKey<ScrollLockController> = Symbol(
+  "ScrollLockController",
+);
 
 /**
  * Lock the document scroller for the lifetime of the calling component. Pairs
  * `onMounted`/`onBeforeUnmount`, so a `v-if`-mounted shell locks on show and
- * unlocks on hide. Pass a controller (e.g. a fresh `createScrollLockController`
- * or a fake) to test in isolation from the app-wide counter.
+ * unlocks on hide. Injects `SCROLL_LOCK_KEY`, which `main.ts` provides once for
+ * the whole app; throws if missing so a forgotten `provide` fails loudly.
  */
-export function useScrollLock(
-  controller: ScrollLockController = defaultController,
-) {
+export function useScrollLock(): void {
+  const controller = inject(SCROLL_LOCK_KEY);
+  if (!controller) {
+    throw new Error("useScrollLock() requires SCROLL_LOCK_KEY to be provided");
+  }
   onMounted(() => controller.acquire());
   onBeforeUnmount(() => controller.release());
 }

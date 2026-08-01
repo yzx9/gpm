@@ -2,15 +2,34 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import { createScrollLockController, SCROLL_LOCK_KEY } from "@/composables";
 import { invoke } from "@tauri-apps/api/core";
-import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import {
+  type ComponentMountingOptions,
+  enableAutoUnmount,
+  flushPromises,
+  mount,
+} from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UnlockModal from "./UnlockModal.vue";
 
-// UnlockModal mounts a BaseModalShell, which locks the document scroller on
-// mount (useScrollLock). Unmount every wrapper after each test so the shared
-// lock count returns to 0 instead of climbing across these ~14 mounts.
+// UnlockModal mounts a BaseModalShell, which injects SCROLL_LOCK_KEY. Provide a
+// fresh controller per mount via mountUnlock so the lock count never bleeds
+// across tests; enableAutoUnmount still unmounts every wrapper after each test.
 enableAutoUnmount(afterEach);
+
+function mountUnlock(opts: ComponentMountingOptions<typeof UnlockModal> = {}) {
+  return mount(UnlockModal, {
+    ...opts,
+    global: {
+      ...opts.global,
+      provide: {
+        ...opts.global?.provide,
+        [SCROLL_LOCK_KEY]: createScrollLockController(),
+      },
+    },
+  });
+}
 
 const { mockPush } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -58,7 +77,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockResolvedValueOnce(undefined); // biometric_unlock (auto-prompt)
-    mount(UnlockModal);
+    mountUnlock();
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
@@ -69,7 +88,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal, {
+    const wrapper = mountUnlock({
       props: { autoPromptBiometric: false },
     });
     await flushPromises();
@@ -92,7 +111,7 @@ describe("UnlockModal", () => {
         code: "BIOMETRIC_CANCELLED",
         message: "cancel",
       }); // biometric_unlock (auto-prompt)
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     // No notice shown for a plain cancel.
@@ -114,7 +133,7 @@ describe("UnlockModal", () => {
         message: "invalidated",
       }) // biometric_unlock
       .mockResolvedValueOnce(undefined); // disable_biometric_unlock (self-heal)
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("disable_biometric_unlock");
@@ -129,7 +148,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     expect(invoke).not.toHaveBeenCalledWith("biometric_unlock");
@@ -143,7 +162,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce(undefined); // unlock
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     await wrapper.find('input[type="password"]').setValue("secret");
@@ -157,7 +176,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     const input = () =>
@@ -178,7 +197,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
       .mockResolvedValueOnce(undefined); // manual button -> biometric_unlock
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     const btn = wrapper
@@ -197,7 +216,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     // Starts in biometric mode (no passphrase input yet).
@@ -226,7 +245,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     // Reveal the passphrase form first.
@@ -260,7 +279,7 @@ describe("UnlockModal", () => {
         message: "Too many attempts, try later",
       }) // auto-prompt (transient)
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     // Notice shown, but still in biometric mode — no auto-switch, no disable.
@@ -276,7 +295,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "immediate" }) // get_app_config
       .mockRejectedValueOnce({ code: "WRONG_PASSPHRASE", message: "nope" }); // unlock
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     await wrapper.find('input[type="password"]').setValue("wrong");
@@ -292,7 +311,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     const closeBtn = wrapper.find('button[aria-label="Close"]');
@@ -308,7 +327,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     // BaseModalShell emits `close` on @click.self of its overlay (role=dialog).
@@ -323,7 +342,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     expect(wrapper.text()).toContain("Identity is cleared after every action.");
@@ -334,7 +353,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: { idle: 300 } }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     expect(wrapper.text()).toContain(
@@ -347,7 +366,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "never" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     expect(wrapper.text()).toContain(
@@ -360,7 +379,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockRejectedValueOnce(new Error("pre-setup")); // get_app_config rejects
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("get_app_config");
@@ -372,7 +391,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     const helpBtn = wrapper.find(
@@ -393,7 +412,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("unavailable") // is_biometric_available
       .mockResolvedValueOnce(false) // is_biometric_unlock_enabled
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
-    const wrapper = mount(UnlockModal);
+    const wrapper = mountUnlock();
     await flushPromises();
 
     const resetBtn = wrapper

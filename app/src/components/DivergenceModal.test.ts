@@ -3,15 +3,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SyncDivergence } from "@/api";
-import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { createScrollLockController, SCROLL_LOCK_KEY } from "@/composables";
+import {
+  type ComponentMountingOptions,
+  enableAutoUnmount,
+  flushPromises,
+  mount,
+} from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DivergenceModal from "./DivergenceModal.vue";
 
-// DivergenceModal mounts BaseModalShell(s), which lock the document scroller on
-// mount (useScrollLock). Unmount every wrapper after each test so the shared
-// lock count returns to 0 instead of climbing across tests that mount without an
-// explicit unmount.
+// DivergenceModal mounts BaseModalShell(s), which inject SCROLL_LOCK_KEY.
+// Provide a fresh controller per mount via mountDiv so the lock count never
+// bleeds across tests; enableAutoUnmount still unmounts every wrapper after
+// each test.
 enableAutoUnmount(afterEach);
+
+function mountDiv(opts: ComponentMountingOptions<typeof DivergenceModal> = {}) {
+  return mount(DivergenceModal, {
+    ...opts,
+    global: {
+      ...opts.global,
+      provide: {
+        ...opts.global?.provide,
+        [SCROLL_LOCK_KEY]: createScrollLockController(),
+      },
+    },
+  });
+}
 
 // Deferred-mock (mirrors BaseModalShell.test.ts / useOverlayBackHandler.test.ts)
 // so tests can drive "back pressed". Each BaseModalShell inside DivergenceModal
@@ -55,7 +74,7 @@ describe("DivergenceModal back/backdrop coordination", () => {
   });
 
   it("step 1: back emits `close` (cancelAll) to the parent", async () => {
-    const wrapper = mount(DivergenceModal, {
+    const wrapper = mountDiv({
       props: { divergence: DIV, context: "sync" },
     });
     await flushPromises();
@@ -68,7 +87,7 @@ describe("DivergenceModal back/backdrop coordination", () => {
   });
 
   it("step 2: back returns to step 1 — no parent `close`, step 2 dismissed", async () => {
-    const wrapper = mount(DivergenceModal, {
+    const wrapper = mountDiv({
       props: { divergence: DIV, context: "sync" },
     });
     await flushPromises();
@@ -88,7 +107,7 @@ describe("DivergenceModal back/backdrop coordination", () => {
   });
 
   it("step 2 while resolving: back AND backdrop are both trapped (no dismiss, no close)", async () => {
-    const wrapper = mount(DivergenceModal, {
+    const wrapper = mountDiv({
       props: { divergence: DIV, context: "sync", resolving: true },
     });
     await flushPromises();

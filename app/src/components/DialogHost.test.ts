@@ -3,7 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import BaseButton from "@/components/base/BaseButton.vue";
-import { DIALOG_KEY, createDialog } from "@/composables";
+import {
+  createDialog,
+  createScrollLockController,
+  DIALOG_KEY,
+  SCROLL_LOCK_KEY,
+} from "@/composables";
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import DialogHost from "./DialogHost.vue";
@@ -16,7 +21,13 @@ enableAutoUnmount(afterEach);
 function mountHost() {
   const d = createDialog();
   const wrapper = mount(DialogHost, {
-    global: { provide: { [DIALOG_KEY]: d } },
+    global: {
+      provide: {
+        [DIALOG_KEY]: d,
+        // DialogHost renders BaseModalShell, which injects SCROLL_LOCK_KEY.
+        [SCROLL_LOCK_KEY]: createScrollLockController(),
+      },
+    },
   });
   return { wrapper, d };
 }

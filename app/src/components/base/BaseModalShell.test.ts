@@ -2,14 +2,35 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { createScrollLockController, SCROLL_LOCK_KEY } from "@/composables";
+import {
+  type ComponentMountingOptions,
+  enableAutoUnmount,
+  flushPromises,
+  mount,
+} from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BaseModalShell from "./BaseModalShell.vue";
 
-// BaseModalShell locks the document scroller on mount (useScrollLock). Unmount
-// every wrapper after each test so the shared lock count returns to 0 instead of
-// climbing across tests that mount without an explicit unmount.
+// BaseModalShell injects SCROLL_LOCK_KEY on mount (useScrollLock). Provide a
+// fresh controller per mount via mountShell so the lock count never bleeds
+// across tests; enableAutoUnmount still unmounts every wrapper after each test.
 enableAutoUnmount(afterEach);
+
+function mountShell(
+  opts: ComponentMountingOptions<typeof BaseModalShell> = {},
+) {
+  return mount(BaseModalShell, {
+    ...opts,
+    global: {
+      ...opts.global,
+      provide: {
+        ...opts.global?.provide,
+        [SCROLL_LOCK_KEY]: createScrollLockController(),
+      },
+    },
+  });
+}
 
 // Override the global setup.ts no-op mock with a DEFERRED onBackButtonPress so
 // tests can drive "registration completes" and "back pressed". Mirrors the
@@ -48,13 +69,13 @@ describe("BaseModalShell", () => {
   });
 
   it("emits `close` when the overlay backdrop is clicked", async () => {
-    const wrapper = mount(BaseModalShell, { props: { variant: "center" } });
+    const wrapper = mountShell({ props: { variant: "center" } });
     await wrapper.find(".overlay").trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
 
   it("does NOT emit `close` when a click lands inside the card", async () => {
-    const wrapper = mount(BaseModalShell, {
+    const wrapper = mountShell({
       props: { variant: "center" },
       slots: { default: "<p>body</p>" },
     });
@@ -65,17 +86,17 @@ describe("BaseModalShell", () => {
   });
 
   it("defaults z-index to 60 for `center` and 40 for `sheet`", () => {
-    const center = mount(BaseModalShell, { props: { variant: "center" } });
+    const center = mountShell({ props: { variant: "center" } });
     expect(center.find(".overlay").attributes("style")).toContain(
       "z-index: 60",
     );
 
-    const sheet = mount(BaseModalShell, { props: { variant: "sheet" } });
+    const sheet = mountShell({ props: { variant: "sheet" } });
     expect(sheet.find(".overlay").attributes("style")).toContain("z-index: 40");
   });
 
   it("honors an explicit `z` override (app-lock sits above the identity modal)", () => {
-    const wrapper = mount(BaseModalShell, {
+    const wrapper = mountShell({
       props: { variant: "center", z: 70 },
     });
     expect(wrapper.find(".overlay").attributes("style")).toContain(
@@ -84,7 +105,7 @@ describe("BaseModalShell", () => {
   });
 
   it("emits `close` on Android back by default (dismissOnBack=true)", async () => {
-    const wrapper = mount(BaseModalShell, { props: { variant: "center" } });
+    const wrapper = mountShell({ props: { variant: "center" } });
     await flushPromises();
     api.fireBack();
     await flushPromises();
@@ -92,7 +113,7 @@ describe("BaseModalShell", () => {
   });
 
   it("traps back when `dismissOnBack=false` — no `close`, but the listener is still registered (suppresses default goBack)", async () => {
-    const wrapper = mount(BaseModalShell, {
+    const wrapper = mountShell({
       props: { variant: "center", dismissOnBack: false },
     });
     await flushPromises();
@@ -103,7 +124,7 @@ describe("BaseModalShell", () => {
   });
 
   it("does NOT emit `close` on a backdrop tap when `dismissOnBackdrop=false`", async () => {
-    const wrapper = mount(BaseModalShell, {
+    const wrapper = mountShell({
       props: { variant: "center", dismissOnBackdrop: false },
     });
     await wrapper.find(".overlay").trigger("click");
@@ -111,7 +132,7 @@ describe("BaseModalShell", () => {
   });
 
   it("back still dismisses when `dismissOnBackdrop=false` (the two props are decoupled)", async () => {
-    const wrapper = mount(BaseModalShell, {
+    const wrapper = mountShell({
       props: { variant: "center", dismissOnBackdrop: false },
     });
     await wrapper.find(".overlay").trigger("click");
@@ -123,7 +144,7 @@ describe("BaseModalShell", () => {
   });
 
   it("respects `dismissOnBack` toggled after mount (DivergenceModal step1→step2 pattern)", async () => {
-    const wrapper = mount(BaseModalShell, {
+    const wrapper = mountShell({
       props: { variant: "center", dismissOnBack: true },
     });
     await flushPromises();
@@ -138,7 +159,7 @@ describe("BaseModalShell", () => {
   });
 
   it("unregisters the back listener on unmount", async () => {
-    const wrapper = mount(BaseModalShell, { props: { variant: "center" } });
+    const wrapper = mountShell({ props: { variant: "center" } });
     await flushPromises();
     api.resolveRegistration();
     await flushPromises();
