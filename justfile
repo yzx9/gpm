@@ -125,7 +125,7 @@ android-install-release: android-release
   adb install "app/src-tauri/gen/android/app/build/outputs/apk/$$APK"
 
 # Bump version, commit, and tag for release
-release new_version:
+release new_version: gen-icons
   ./scripts/bump-version.sh {{new_version}}
   git add Cargo.toml Cargo.lock app/package.json app/src-tauri/tauri.conf.json CHANGELOG.md
   git commit -m "build: release v{{new_version}}"
