@@ -92,10 +92,17 @@ pub async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
 /// sealed at rest with AEAD where the platform supports it; on desktop the
 /// master key is `None` so the [`Seal`] is a plaintext passthrough.
 #[derive(Debug)]
+#[allow(clippy::struct_field_names)] // `config_dir` is a deliberate, clear name
 pub struct Config {
     config_dir: PathBuf,
-    /// At-rest AEAD layer; `None` master key ⇒ plaintext passthrough.
-    seal: Seal,
+    /// Auth-free AEAD layer — seals non-secret metadata (`repo.json`,
+    /// `app.json`). Backed by the permanent auth-free **master key** (R064).
+    /// `None` ⇒ plaintext passthrough (desktop / tests).
+    master_seal: Seal,
+    /// Auth-gated AEAD layer — seals the age `identity` and its passphrase slot
+    /// (`app_id_pass`). Backed by the **vault key** (biometric when App Lock is
+    /// on). `None` ⇒ plaintext passthrough (desktop / tests).
+    vault_seal: Seal,
 }
 
 impl Config {
@@ -103,11 +110,18 @@ impl Config {
     ///
     /// `master_key` seals `repo.json`/`identity` at rest (AES-256-GCM); pass
     /// `None` for plaintext passthrough (desktop / tests).
+    ///
+    /// **R064 bridge:** both the auth-free `master_seal` (metadata) and the
+    /// auth-gated `vault_seal` (identity) are initialized to the same injected
+    /// key, so behavior is identical to the pre-split single seal. A later
+    /// chunk threads a distinct vault key so `vault_seal` gates the identity
+    /// while `master_seal` stays auth-free.
     #[must_use]
     pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
         Self {
             config_dir,
-            seal: Seal::new(master_key),
+            master_seal: Seal::new(master_key),
+            vault_seal: Seal::new(master_key),
         }
     }
 
@@ -116,8 +130,24 @@ impl Config {
     /// the biometric-gated Keystore) and to wipe it (`None`) when the process is
     /// backgrounded, so a locked store's envelopes fail `SealKeyUnavailable`
     /// until the next unlock. On desktop the key stays `None` (passthrough).
+    ///
+    /// **R064 bridge:** sets BOTH `master_seal` and `vault_seal` so the app
+    /// keeps working while the two keys are still the same value. A later chunk
+    /// narrows this to `master_seal` only and adds `set_vault_key` for the
+    /// identity gate.
     pub fn set_master_key(&self, master_key: Option<[u8; 32]>) {
-        self.seal.set_key(master_key);
+        self.master_seal.set_key(master_key);
+        self.vault_seal.set_key(master_key);
+        // Bridge invariant: both seals must hold the same key state while R064
+        // keeps them bridged. Catches drift early — a poisoned `Seal` lock
+        // silently no-op'ing one of the two `set_key` calls, or a future chunk
+        // that narrows this without keeping the pair in sync. (The eventual
+        // split gives `vault_seal` its own key and drops this assert.)
+        debug_assert_eq!(
+            self.master_seal.has_key(),
+            self.vault_seal.has_key(),
+            "master_seal and vault_seal diverged — bridge invariant broken"
+        );
     }
 
     /// Whether a master key is currently in memory (i.e. a real envelope can be
@@ -128,7 +158,9 @@ impl Config {
     /// expected, and never defers on desktop.
     #[must_use]
     pub fn has_master_key(&self) -> bool {
-        self.seal.has_key()
+        // R064 bridge: both seals share the same key, so the master seal's state
+        // represents the whole. Gates the `m0004`/`m0005`/`m0006` Pending defers.
+        self.master_seal.has_key()
     }
 
     /// Get the config directory used by this instance.
@@ -168,7 +200,7 @@ impl Config {
             Some(pw) if !pw.is_empty() => crypto::encrypt_identity(pw, identity)?,
             _ => identity.to_vec(),
         };
-        let sealed = self.seal.seal("identity", &inner)?;
+        let sealed = self.vault_seal.seal("identity", &inner)?;
 
         save_atomic(&self.identity_path(), &sealed).await
     }
@@ -206,7 +238,7 @@ impl Config {
             ));
         }
         let raw = fs::read(&path).await?;
-        self.seal.unseal("identity", &raw)
+        self.vault_seal.unseal("identity", &raw)
     }
 
     /// Delete the stored identity.
@@ -245,7 +277,7 @@ impl Config {
     /// seal fails, or the file cannot be written.
     pub async fn save_app_identity_pass(&self, passphrase: &[u8]) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
-        let sealed = self.seal.seal("app_identity_pass", passphrase)?;
+        let sealed = self.vault_seal.seal("app_identity_pass", passphrase)?;
         save_atomic(&self.app_identity_pass_path(), &sealed).await
     }
 
@@ -266,7 +298,7 @@ impl Config {
             ));
         }
         let raw = fs::read(&path).await?;
-        self.seal.unseal("app_identity_pass", &raw)
+        self.vault_seal.unseal("app_identity_pass", &raw)
     }
 
     /// Clear the identity-passphrase slot (best-effort). Used when the opt-in is
@@ -306,7 +338,7 @@ impl Config {
     /// cannot be written.
     pub async fn save_app_behavior(&self, bytes: &[u8]) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
-        let sealed = self.seal.seal("app_behavior", bytes)?;
+        let sealed = self.master_seal.seal("app_behavior", bytes)?;
         save_atomic(&self.app_behavior_path(), &sealed).await
     }
 
@@ -327,7 +359,7 @@ impl Config {
             ));
         }
         let raw = fs::read(&path).await?;
-        self.seal.unseal("app_behavior", &raw)
+        self.master_seal.unseal("app_behavior", &raw)
     }
 
     /// Save repository configuration (URL + local path).
@@ -381,7 +413,7 @@ impl Config {
     pub async fn save_repo_config_full(&self, config: &RepoConfig) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
         let json = serde_json::to_string_pretty(config)?;
-        let sealed = self.seal.seal("repo_config", json.as_bytes())?;
+        let sealed = self.master_seal.seal("repo_config", json.as_bytes())?;
         save_atomic(&self.repo_config_path(), &sealed).await
     }
 
@@ -403,7 +435,7 @@ impl Config {
             ));
         }
         let raw = fs::read(&path).await?;
-        let json = self.seal.unseal("repo_config", &raw)?;
+        let json = self.master_seal.unseal("repo_config", &raw)?;
         Ok(serde_json::from_slice(&json)?)
     }
 
@@ -456,8 +488,11 @@ impl Config {
     /// envelope as `GPMSEL1`. No-op when no master key is configured (desktop /
     /// tests), for current-magic envelopes, and for missing files. Each change
     /// is verified by roundtrip then committed atomically, so a crash leaves the
-    /// prior bytes intact. Covers `repo_config`, `identity`, and the optional
-    /// identity-auto-unlock passphrase slot (file `app_id_pass`, AAD `app_identity_pass`).
+    /// prior bytes intact. Routes each file to its seal (R064): `repo_config`
+    /// → `master_seal`; `identity` + the optional identity-auto-unlock passphrase
+    /// slot (file `app_id_pass`, AAD `app_identity_pass`) → `vault_seal`. While
+    /// the two seals are bridged to the same key this is transparent; once they
+    /// split, a vault-key arrival must re-run any soft-skipped legacy re-wrap.
     ///
     /// When the master key is absent (App Lock deferred at cold start), legacy
     /// re-wraps soft-skip rather than error — see [`wrap_if_needed`].
@@ -466,12 +501,16 @@ impl Config {
     ///
     /// Returns an error if a file cannot be read, sealed/unsealed, or written.
     pub async fn migrate_seal(&self) -> Result<(), Error> {
-        self.wrap_if_needed(&self.repo_config_path(), "repo_config")
+        self.wrap_if_needed(&self.master_seal, &self.repo_config_path(), "repo_config")
             .await?;
-        self.wrap_if_needed(&self.identity_path(), "identity")
+        self.wrap_if_needed(&self.vault_seal, &self.identity_path(), "identity")
             .await?;
-        self.wrap_if_needed(&self.app_identity_pass_path(), "app_identity_pass")
-            .await?;
+        self.wrap_if_needed(
+            &self.vault_seal,
+            &self.app_identity_pass_path(),
+            "app_identity_pass",
+        )
+        .await?;
         Ok(())
     }
 
@@ -484,7 +523,7 @@ impl Config {
     /// startup migrate stays a clean no-op under App Lock; conversion then runs
     /// via the one-shot post-unlock migrate in `applock::app_unlock`. A tampered
     /// envelope (wrong key) still propagates as [`ErrorCode::SealTampered`].
-    async fn wrap_if_needed(&self, path: &Path, name: &str) -> Result<(), Error> {
+    async fn wrap_if_needed(&self, seal: &Seal, path: &Path, name: &str) -> Result<(), Error> {
         if !path.exists() {
             return Ok(());
         }
@@ -494,15 +533,15 @@ impl Config {
             if crate::seal::is_legacy_envelope(&raw) {
                 // Soft-skip SealKeyUnavailable: key absent = App Lock deferred
                 // at cold start, expected, not an error. Tampered propagates.
-                let plain = match self.seal.unseal(name, &raw) {
+                let plain = match seal.unseal(name, &raw) {
                     Ok(p) => p,
                     Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => return Ok(()),
                     Err(e) => return Err(e),
                 };
-                let resealed = self.seal.seal(name, &plain)?;
+                let resealed = seal.seal(name, &plain)?;
                 // Verify the roundtrip before committing, so a broken re-wrap
                 // never overwrites a readable envelope.
-                if self.seal.unseal(name, &resealed)? != plain {
+                if seal.unseal(name, &resealed)? != plain {
                     return Err(Error::new(
                         ErrorCode::StoreError,
                         "seal migration roundtrip check failed",
@@ -512,10 +551,10 @@ impl Config {
             }
             return Ok(());
         }
-        let sealed = self.seal.seal(name, &raw)?;
+        let sealed = seal.seal(name, &raw)?;
         // Verify the roundtrip before committing, so a broken seal never
         // overwrites readable plaintext.
-        if self.seal.unseal(name, &sealed)? != raw {
+        if seal.unseal(name, &sealed)? != raw {
             return Err(Error::new(
                 ErrorCode::StoreError,
                 "seal migration roundtrip check failed",
