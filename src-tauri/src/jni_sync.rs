@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Headless background-sync entry for the Android `WorkManager` Worker (R061).
+//! Headless background-sync entry for the Android `WorkManager` Worker.
 //!
 //! [`run_headless_sync`] is the pure, host-testable core (gates + `Store` +
 //! pull-only `sync_with` + the attention flag). The `#[no_mangle]` JNI shim at
@@ -33,13 +33,13 @@ pub(crate) enum BackgroundSyncResult {
     Error { message: String },
 }
 
-/// Run one best-effort background sync (pull-only, R061 D5) headlessly — no
+/// Run one best-effort background sync (pull-only) headlessly — no
 /// Tauri runtime, no `AppHandle`. The JNI shim constructs this from a config
 /// dir + a base64 master key the Kotlin Worker retrieved from the Keystore.
 ///
 /// Gates (defense-in-depth, since the Worker also gates): cadence ≠ `Off`
 /// (`pref.json`), AppLock-off (master key present ⇒ `repo.json` readable),
-/// `is_repo_ready`, and `AutoSync`-on (D7 — background sync is linked to
+/// `is_repo_ready`, and `AutoSync`-on (background sync is linked to
 /// `AutoSync`). Then a pull-only `run_best_effort_sync` (the shared private-slot +
 /// 30s deadline helper). On a divergence or an authenticity-blocked
 /// fast-forward, atomically creates a passive attention marker file (NOT a
@@ -82,7 +82,7 @@ pub(crate) async fn run_headless_sync(
             reason: "not_ready",
         };
     }
-    // AutoSync gate (D7). Reading the persisted flag unseals app.json via the
+    // AutoSync gate. Reading the persisted flag unseals app.json via the
     // master key (already injected above).
     if let Err(e) = app_cfg.reload_behavior().await {
         return BackgroundSyncResult::Error {
@@ -95,7 +95,7 @@ pub(crate) async fn run_headless_sync(
         };
     }
 
-    // Pull-only (D5): the heavy-autofill persona is read-only, so push is dead
+    // Pull-only: the heavy-autofill persona is read-only, so push is dead
     // weight. Foreground autosync_write still publishes occasional creates.
     let store_for_sync = Arc::clone(&store);
     let result = crate::write::run_best_effort_sync(|slot, cancel| async move {
@@ -107,7 +107,7 @@ pub(crate) async fn run_headless_sync(
         Ok(outcome) => {
             // Persist a passive marker only (the full SyncOutcome leaks entry
             // names). A dedicated marker file — NOT a pref.json field — so the
-            // write can't race a concurrent foreground pref write (review #4).
+            // write can't race a concurrent foreground pref write.
             let needs_attention = matches!(outcome, SyncOutcome::Diverged(_))
                 || matches!(&outcome, SyncOutcome::FastForwarded(r) if r.authenticity.blocked);
             let marker_res = if needs_attention {
@@ -155,7 +155,7 @@ mod jni {
         })
     }
 
-    /// Entry point for `SyncWorker.nativeSync(configDir, masterKeyB64)` (R061).
+    /// Entry point for `SyncWorker.nativeSync(configDir, masterKeyB64)`.
     /// Returns the [`BackgroundSyncResult`] serialized as JSON.
     ///
     /// # Safety
@@ -180,7 +180,7 @@ mod jni {
 
         // `catch_unwind` so a Rust panic (e.g. a poisoned `Mutex`) returns an
         // error JSON instead of unwinding through `extern "system"` and aborting
-        // the Worker process (review #7) — Kotlin's `catch(Throwable)` can't
+        // the Worker process — Kotlin's `catch(Throwable)` can't
         // catch a native abort.
         let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runtime().block_on(super::run_headless_sync(

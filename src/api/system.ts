@@ -48,7 +48,7 @@ export interface SafeAreaInsets {
  * on a fresh config ⇒ the default (After 300s). */
 export type GateIdle = "off" | { after: number };
 
-/** Periodic background-sync cadence (R061). `"off"` (absent) ⇒ no periodic
+/** Periodic background-sync cadence. `"off"` (absent) ⇒ no periodic
  *  background sync; the foreground sync still runs. Linked to AutoSync: the
  *  background sync runs only when AutoSync is on AND cadence ≠ `"off"`. */
 export type BackgroundSyncCadence = "off" | "1h" | "6h" | "12h" | "1d" | "3d";
@@ -75,7 +75,7 @@ export interface AppConfig {
   /** Per-device autosync: on (absent ⇒ true) ⇒ every save pull-write-pushes;
    *  off ⇒ saves stay local until a manual Sync publishes. */
   autosync?: boolean;
-  /** Periodic background-sync cadence (R061). Absent ⇒ `"off"`. */
+  /** Periodic background-sync cadence. Absent ⇒ `"off"`. */
   background_sync?: BackgroundSyncCadence;
   /** Persisted intent for the app-launch biometric gate. **Write-only** — the
    *  Settings toggle + runtime gate read `getAppLockState` (Keystore truth),
@@ -243,7 +243,7 @@ export async function setBackgroundSync(
 
 /** Take-once: whether a background sync left a divergence / authenticity-block
  *  attention marker (removing it). The foreground calls this on cold-start to
- *  decide whether to trigger a sync + surface the badge (R061 #4). */
+ *  decide whether to trigger a sync + surface the badge. */
 export async function consumeSyncAttention(): Promise<boolean> {
   return invoke<boolean>("consume_sync_attention");
 }

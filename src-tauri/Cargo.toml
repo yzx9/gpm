@@ -41,7 +41,7 @@ base64 = { workspace = true }
 sys-locale = "0.3"
 log = "0.4"
 
-# Android-only: the headless background-sync JNI entry (R061). `jni` for the
+# Android-only: the headless background-sync JNI entry. `jni` for the
 # `#[no_mangle]` shim in `jni_sync.rs`; `rt-multi-thread` for its owned
 # `tokio::runtime` (host builds don't compile the shim).
 [target.'cfg(target_os = "android")'.dependencies]

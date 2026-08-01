@@ -11,7 +11,7 @@ import androidx.work.WorkerParameters
 import org.json.JSONObject
 
 /**
- * The periodic background-sync worker (R061). Runs pull-only (the heavy-autofill
+ * The periodic background-sync worker. Runs pull-only (the heavy-autofill
  * persona is read-only), gated on AutoSync + cadence + AppLock (all re-checked
  * in the Rust entry). Loads `libgpm_lib.so` (already packaged by Tauri's
  * `RustPlugin.kt`) and crosses into Rust via [nativeSync].
@@ -32,13 +32,13 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
     }
 
     override suspend fun doWork(): Result {
-        // Skip-if-foreground (D6): the app is open — the foreground sync owns
+        // Skip-if-foreground: the app is open — the foreground sync owns
         // convergence, and this avoids contending the cross-process repo lock.
         // Best-effort heuristic (the flock is the real mutex); if this read is
         // unreliable the worst case is a redundant skip/retry.
         // The app being foregrounded is the common, deliberate case (the
         // foreground owns convergence) — `success`, not `retry`, so it doesn't
-        // burn the retry budget (review #9).
+        // burn the retry budget.
         if (isAppForegrounded()) return Result.success()
 
         val configDir =

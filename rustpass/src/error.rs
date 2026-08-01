@@ -74,7 +74,7 @@ pub enum ErrorCode {
     /// Another process/instance holds the cross-process repo lock (a
     /// best-effort background sync colliding with a foreground op, or vice
     /// versa). The caller should skip-and-retry, not propagate as a hard
-    /// failure (R061).
+    /// failure.
     RepoBusy,
 }
 

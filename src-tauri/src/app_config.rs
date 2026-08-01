@@ -74,7 +74,7 @@ use crate::verbose::{arm_verbose_timer, disarm_verbose_timer};
 const PREF_FILE: &str = "pref.json";
 /// Sync-attention marker — a dedicated file (NOT a `pref.json` field) so the
 /// headless Worker writes it atomically with no read-modify-write that could
-/// race a foreground pref write (R061 review #4). Set when a sync hits a
+/// race a foreground pref write. Set when a sync hits a
 /// divergence / authenticity-block needing the user's review.
 const SYNC_ATTENTION_FILE: &str = ".sync_attention";
 

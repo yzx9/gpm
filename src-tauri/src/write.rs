@@ -22,7 +22,7 @@
 //! was refused under Enforce signature verification. The frontend's shared
 //! divergence modal routes a `NeedsDivergenceResolve` to [`resolve_sync_divergence`].
 //!
-//! ## Immediate-mode wipe (D3)
+//! ## Immediate-mode wipe
 //!
 //! `do_save`/`delete_secret` reset the auto-lock timer on every attempt, but
 //! wipe the identity only on **terminal** outcomes — a `NeedsDivergenceResolve`
@@ -291,7 +291,7 @@ pub(crate) async fn sync_repo(
 }
 
 /// Run a best-effort, deadline-bounded sync under a PRIVATE throwaway cancel
-/// slot (R061 D4). Shared by the foreground cold-start/resume sync and the
+/// slot. Shared by the foreground cold-start/resume sync and the
 /// headless background-sync JNI entry, so the deadline + private-slot logic
 /// lives in one place. The private slot never touches the shared
 /// `active_cancel_slot` the user's pull-to-refresh relies on. The caller passes

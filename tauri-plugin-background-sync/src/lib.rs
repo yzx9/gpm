@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tauri plugin that schedules the periodic Android background sync (R061) via
+//! Tauri plugin that schedules the periodic Android background sync via
 //! WorkManager, and cancels it when the cadence is turned `Off`.
 //!
 //! **Backend-only** from the capability standpoint: the frontend never calls

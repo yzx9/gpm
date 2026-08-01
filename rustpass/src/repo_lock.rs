@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Cross-process repo lock (R061).
+//! Cross-process repo lock.
 //!
 //! `Store::write_mu` only serializes repo mutations within ONE `Store`
 //! instance. The foreground app's `Store` and a background Worker's `Store`
@@ -26,7 +26,7 @@ use crate::error::{Error, ErrorCode};
 
 /// The lockfile name, sibling to `repo.json` / `repo/` in the config dir.
 pub const REPO_LOCK_FILE: &str = "gpm_sync.lock";
-/// Contention retry count (review #1). Total wait ≈ retries × sleep ≈ 100 ms.
+/// Contention retry count. Total wait ≈ retries × sleep ≈ 100 ms.
 const REPO_LOCK_RETRIES: u32 = 4;
 const REPO_LOCK_RETRY_SLEEP_MS: u64 = 25;
 
@@ -64,7 +64,7 @@ impl RepoLock {
             .write(true)
             .open(&path)
             .map_err(|e| Error::new(ErrorCode::IoError, format!("repo lock open: {e}")))?;
-        // Bounded retry on contention (R061 review #1). Contention is rare
+        // Bounded retry on contention. Contention is rare
         // (skip-if-foreground prevents most overlap), so a short busy-wait is
         // fine; the total bound (~100 ms) is negligible next to the sync's own
         // 30 s deadline.

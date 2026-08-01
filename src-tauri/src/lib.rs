@@ -311,11 +311,11 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     app_state
 }
 
-/// Re-apply the periodic background-sync schedule from `cadence` (R061). Called
+/// Re-apply the periodic background-sync schedule from `cadence`. Called
 /// on app setup (once the cadence is loaded) and whenever the cadence changes
 /// (the `set_background_sync` command). On Android: enqueues/replaces the
 /// `WorkManager` periodic work (or cancels it when `Off`), passing `config_dir`
-/// through as `InputData` so the Worker never reconstructs the path (D2). On
+/// through as `InputData` so the Worker never reconstructs the path. On
 /// other targets: a no-op (the foreground sync covers desktop). Best-effort —
 /// errors are swallowed (a missed reschedule keeps the previous cadence).
 #[allow(clippy::unused_async)] // the Android branch awaits; the desktop branch is a no-op.
@@ -346,7 +346,7 @@ pub(crate) async fn reschedule_background_sync<R: tauri::Runtime>(
     }
 }
 
-/// Cancel the periodic background-sync schedule (R061 #8 — called when `AutoSync`
+/// Cancel the periodic background-sync schedule (called when `AutoSync`
 /// is turned off, since background sync is linked to `AutoSync`). No-op off-Android.
 #[allow(clippy::unused_async)] // the Android branch awaits; desktop is a no-op.
 pub(crate) async fn cancel_background_sync<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -414,7 +414,7 @@ pub fn run() {
         .append_invoke_initialization_script(app_config::locale_init_script())
         .setup(|app| {
             let state = init_state(app);
-            // R061: apply the persisted background-sync cadence on launch
+            // Apply the persisted background-sync cadence on launch
             // (enqueue/cancel the WorkManager periodic work).
             #[cfg(target_os = "android")]
             let cadence = state.app_config.background_sync();

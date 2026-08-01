@@ -1737,7 +1737,7 @@ impl Store {
         Ok(())
     }
 
-    /// Acquire the cross-process repo lock (R061). Non-blocking; on contention
+    /// Acquire the cross-process repo lock. Non-blocking; on contention
     /// returns [`ErrorCode::RepoBusy`] so a best-effort sync caller can skip
     /// rather than race another `Store` instance / process on the git index.
     /// The lock auto-releases on drop and on process death (no stale-lockfile).

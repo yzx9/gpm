@@ -128,7 +128,7 @@ pub(crate) async fn set_autosync(
     log::info!("config: set-autosync: {enabled}");
     let cfg = state.app_config.set_autosync(enabled).await?;
     state.store.set_autosync(enabled);
-    // R061 #8: background sync is linked to AutoSync — re-apply the schedule
+    // Background sync is linked to AutoSync — re-apply the schedule
     // when AutoSync goes on, cancel it when off (else the Worker wakes every
     // interval just to no-op-skip on the autosync gate, wasting battery).
     if enabled {
@@ -141,7 +141,7 @@ pub(crate) async fn set_autosync(
 
 /// Take-once: whether a background sync left a divergence / authenticity-block
 /// attention marker, removing it. The foreground calls this on cold-start to
-/// decide whether to trigger a sync + surface the badge (R061 #4).
+/// decide whether to trigger a sync + surface the badge.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn consume_sync_attention(state: State<'_, AppState>) -> Result<bool, Error> {
@@ -150,8 +150,7 @@ pub(crate) async fn consume_sync_attention(state: State<'_, AppState>) -> Result
 
 /// Set the periodic background-sync cadence (`Off` opts out). Persists to
 /// `pref.json` and returns the merged config. The Android `WorkManager`
-/// schedule is re-applied by the scheduling wiring (R061 Step 5) on the
-/// `AppHandle`, added when the background-sync plugin lands.
+/// schedule is re-applied by the scheduling wiring on the `AppHandle`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn set_background_sync(
@@ -161,7 +160,7 @@ pub(crate) async fn set_background_sync(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-background-sync: {cadence:?}");
     let cfg = state.app_config.set_background_sync(cadence).await?;
-    // R061: re-apply the WorkManager schedule from the new cadence.
+    // Re-apply the WorkManager schedule from the new cadence.
     crate::reschedule_background_sync(&app, cadence).await;
     Ok(cfg)
 }

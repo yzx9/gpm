@@ -159,10 +159,10 @@ export function createForegroundSyncStore(
     if (initialized) return;
     initialized = true;
     document.addEventListener("visibilitychange", onVisibilityChange);
-    // R061: if the background sync left an attention marker, run a foreground
+    // If the background sync left an attention marker, run a foreground
     // sync now — it re-evaluates the store and surfaces the live badge if the
     // divergence persists. `consumeSyncAttention` is take-once (reads + removes
-    // the marker atomically), so no stale-cache race (review #4).
+    // the marker atomically), so no stale-cache race.
     void (async () => {
       try {
         if (await consumeSyncAttention()) void maybeSync();
