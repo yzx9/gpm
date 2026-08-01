@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.15.0] - 2026-08-01
+
 ### Added
 
 - gpm now syncs your store automatically when you open the app or come back to it from the background, so it stays current with your other devices without a manual pull-down. This runs only when **Auto-sync** is on (turn Auto-sync off and nothing syncs automatically, as before). It's best-effort and stays out of your way: it never raises a sync-conflict dialog on its own — if your local and remote copies have diverged, a small status badge appears and you tap it when you're ready to review; network hiccups are retried quietly without nagging.
@@ -363,7 +365,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.14.2...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.15.0...HEAD
+[v0.15.0]: https://github.com/yzx9/gpm/compare/v0.14.2...v0.15.0
 [v0.14.2]: https://github.com/yzx9/gpm/compare/v0.14.1...v0.14.2
 [v0.14.1]: https://github.com/yzx9/gpm/compare/v0.14.0...v0.14.1
 [v0.14.0]: https://github.com/yzx9/gpm/compare/v0.13.0...v0.14.0
