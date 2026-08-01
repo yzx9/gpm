@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
  *
  * These lock the plugin's *current* behavior; they do NOT detect cross-plugin
  * drift with biometric-keystore's copies (a unilateral change passes both
- * suites). Drift detection needs the deferred shared-module de-dup (RFC-0041).
+ * suites). Drift detection needs the deferred shared-module de-dup.
  * `decodeBlob` preserves the original `readCipherData` semantics exactly: null
  * iff an input is null (nothing sealed); a present-but-empty string decodes to
  * an empty `ByteArray` (NOT null) — characterization, not a behavior change.

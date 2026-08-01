@@ -18,7 +18,7 @@ import org.robolectric.annotation.Config
  * These lock the plugin's *current* behavior. They do NOT detect cross-plugin
  * drift with secure-keystore's copies — a unilateral change to one plugin's
  * mapping passes both suites. Drift detection needs the deferred shared-module
- * de-dup (RFC-0041); the exhaustive `mapErrorCode` table here makes a divergence
+ * de-dup; the exhaustive `mapErrorCode` table here makes a divergence
  * visible at review time and doubles as the safety net for that future refactor.
  */
 @RunWith(RobolectricTestRunner::class)

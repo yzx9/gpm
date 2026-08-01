@@ -83,6 +83,39 @@ internal fun takeManualClearFlag(prefs: SharedPreferences): Boolean {
 internal fun shouldRequestNotificationPermission(sdkInt: Int, notificationsEnabled: Boolean): Boolean =
     sdkInt >= Build.VERSION_CODES.TIRAMISU && !notificationsEnabled
 
+/** PendingIntent flags for the manifest-receiver tap broadcast: always
+ *  [PendingIntent.FLAG_UPDATE_CURRENT], plus [PendingIntent.FLAG_IMMUTABLE]
+ *  on API 23+ (M) — a PendingIntent the app fully owns must never be mutable
+ *  (mutable PendingIntents are a known Android escalation vector). Pre-M the
+ *  immutability flag does not exist. Pure so the gating is Robolectric-testable. */
+internal fun broadcastPendingIntentFlags(sdkInt: Int): Int {
+    val base = android.app.PendingIntent.FLAG_UPDATE_CURRENT
+    return if (sdkInt >= Build.VERSION_CODES.M) {
+        base or android.app.PendingIntent.FLAG_IMMUTABLE
+    } else {
+        base
+    }
+}
+
+/** Builds the manifest-receiver tap [android.app.PendingIntent]. Top-level
+ *  (takes a [Context] rather than the plugin's activity) so the wiring — that
+ *  [broadcastPendingIntentFlags]'s bits actually reach `getBroadcast(...)` — is
+ *  Robolectric-testable without instantiating the Tauri plugin. The explicit
+ *  class target + `exported=false` keeps other apps out and delivers the tap
+ *  regardless of the receiver's export status. */
+internal fun buildClearBroadcastPendingIntent(
+    context: Context,
+    sdkInt: Int,
+): android.app.PendingIntent {
+    val intent = Intent(context, ClipboardClearReceiver::class.java)
+    return android.app.PendingIntent.getBroadcast(
+        context,
+        0,
+        intent,
+        broadcastPendingIntentFlags(sdkInt),
+    )
+}
+
 /** Per-app notification-settings intent — the recovery surface when Android has
  *  suppressed the `POST_NOTIFICATIONS` runtime prompt after two denials (the only
  *  way back to re-enabling the clipboard-clear notification). Robolectric-testable
@@ -251,17 +284,8 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun broadcastClearIntent(): android.app.PendingIntent {
-        // Explicit intent to the manifest-declared receiver — exported=false
-        // keeps other apps out; the explicit class target makes the PendingIntent
-        // deliver regardless of export status.
-        val intent = Intent(activity, ClipboardClearReceiver::class.java)
-        var flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        if (SDK_INT >= 23) {
-            flags = flags or android.app.PendingIntent.FLAG_IMMUTABLE
-        }
-        return android.app.PendingIntent.getBroadcast(activity, 0, intent, flags)
-    }
+    private fun broadcastClearIntent(): android.app.PendingIntent =
+        buildClearBroadcastPendingIntent(activity, SDK_INT)
 
     private fun resolveGranted(invoke: Invoke, granted: Boolean) {
         val ret = JSObject()

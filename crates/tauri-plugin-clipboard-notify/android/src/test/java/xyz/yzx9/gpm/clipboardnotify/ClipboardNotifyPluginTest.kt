@@ -4,6 +4,7 @@
 
 package xyz.yzx9.gpm.clipboardnotify
 
+import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -17,6 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -29,7 +31,7 @@ import org.robolectric.annotation.Config
  * directly (a plain BroadcastReceiver — no Tauri runtime) to lock the clear+set
  * end state. Statement-level ordering (reset-before-notify, clear-before-set) is
  * enforced by code review, not unit-tested (driving the Tauri `@Command` entry
- * points is de-prioritized by RFC-0041).
+ * points is de-prioritized).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -108,6 +110,39 @@ class ClipboardNotifyPluginTest {
         assertEquals(
             "xyz.yzx9.gpm",
             intent.getStringExtra(android.provider.Settings.EXTRA_APP_PACKAGE),
+        )
+    }
+
+    // broadcastPendingIntentFlags — pins the immutable-PendingIntent posture:
+    // the tap broadcast the app fully owns must never be mutable. The function
+    // branches on the passed-in sdkInt, so both sides of the gate are reached
+    // despite the class's @Config(sdk = [34]).
+    @Test
+    fun broadcastPendingIntentFlags_preMarshmallow_hasNoImmutabilityBit() {
+        val flags = broadcastPendingIntentFlags(Build.VERSION_CODES.LOLLIPOP_MR1)
+        assertEquals(PendingIntent.FLAG_UPDATE_CURRENT, flags)
+    }
+
+    @Test
+    fun broadcastPendingIntentFlags_marshmallowAndLater_isImmutable() {
+        val expected = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        assertEquals(expected, broadcastPendingIntentFlags(Build.VERSION_CODES.M))
+        assertEquals(expected, broadcastPendingIntentFlags(Build.VERSION_CODES.UPSIDE_DOWN_CAKE))
+    }
+
+    // buildClearBroadcastPendingIntent — integration check that the helper's flag
+    // bits actually reach getBroadcast(...), so a future edit that bypasses the
+    // helper at the wiring site cannot silently make the tap PendingIntent
+    // mutable. Robolectric's ShadowPendingIntent records the flags the
+    // PendingIntent was built with; the real PendingIntent has no flag getter.
+    @Test
+    fun buildClearBroadcastPendingIntent_carriesImmutableFlagOnModernApi() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val pi = buildClearBroadcastPendingIntent(context, Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+        val flags = shadowOf(pi).flags
+        assertTrue(
+            "the tap PendingIntent must carry FLAG_IMMUTABLE on API 23+",
+            flags and PendingIntent.FLAG_IMMUTABLE != 0,
         )
     }
 }
