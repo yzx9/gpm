@@ -131,36 +131,42 @@ impl Config {
     /// backgrounded, so a locked store's envelopes fail `SealKeyUnavailable`
     /// until the next unlock. On desktop the key stays `None` (passthrough).
     ///
-    /// **R064 bridge:** sets BOTH `master_seal` and `vault_seal` so the app
-    /// keeps working while the two keys are still the same value. A later chunk
-    /// narrows this to `master_seal` only and adds `set_vault_key` for the
-    /// identity gate.
+    /// **R064:** sets **`master_seal` only** (the auth-free metadata key). The
+    /// vault key is injected separately via [`set_vault_key`](Self::set_vault_key);
+    /// callers that need both seals keyed pair the two calls explicitly.
     pub fn set_master_key(&self, master_key: Option<[u8; 32]>) {
         self.master_seal.set_key(master_key);
-        self.vault_seal.set_key(master_key);
-        // Bridge invariant: both seals must hold the same key state while R064
-        // keeps them bridged. Catches drift early — a poisoned `Seal` lock
-        // silently no-op'ing one of the two `set_key` calls, or a future chunk
-        // that narrows this without keeping the pair in sync. (The eventual
-        // split gives `vault_seal` its own key and drops this assert.)
-        debug_assert_eq!(
-            self.master_seal.has_key(),
-            self.vault_seal.has_key(),
-            "master_seal and vault_seal diverged — bridge invariant broken"
-        );
     }
 
-    /// Whether a master key is currently in memory (i.e. a real envelope can be
-    /// produced right now). Delegates to [`Seal::has_key`]: `false` on desktop
+    /// Replace the vault key at runtime (R064). The vault key gates `identity` +
+    /// `app_id_pass` (the age identity). Today it is the biometric key when App Lock
+    /// is on, and equals the master key when App Lock is off (no separate vault key
+    /// exists then). Injected after the unlock prompt (`Some`); wiped on `do_app_lock`
+    /// (`None`) so a locked app cannot read the identity even from a memory snapshot.
+    /// On desktop it stays `None` (passthrough).
+    pub fn set_vault_key(&self, vault_key: Option<[u8; 32]>) {
+        self.vault_seal.set_key(vault_key);
+    }
+
+    /// Whether a master key is currently in memory (i.e. a real metadata envelope can
+    /// be produced right now). Delegates to [`Seal::has_key`]: `false` on desktop
     /// (passthrough) and while the app-launch lock holds the key wiped. The
-    /// `m0004` app-config split gates its sealed write on this (combined with the
-    /// app-lock feature flag) so it never writes plaintext where an envelope is
-    /// expected, and never defers on desktop.
+    /// `m0004`/`m0005`/`m0006` metadata migrations gate their sealed `app.json` write
+    /// on this so they never write plaintext where an envelope is expected, and never
+    /// defer on desktop.
     #[must_use]
     pub fn has_master_key(&self) -> bool {
-        // R064 bridge: both seals share the same key, so the master seal's state
-        // represents the whole. Gates the `m0004`/`m0005`/`m0006` Pending defers.
         self.master_seal.has_key()
+    }
+
+    /// Whether a vault key is currently in memory — i.e. a real `identity` /
+    /// `app_id_pass` envelope can be produced. The m0007 vault-key migration gates on
+    /// this (analogous to how the metadata migrations gate on `has_master_key`).
+    /// `false` on desktop (passthrough) and while the app-launch lock holds the vault
+    /// key wiped. While the app shell bridges vault = master, this tracks the master.
+    #[must_use]
+    pub fn has_vault_key(&self) -> bool {
+        self.vault_seal.has_key()
     }
 
     /// Get the config directory used by this instance.

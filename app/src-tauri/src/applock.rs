@@ -239,7 +239,9 @@ pub(crate) async fn disable_biometric_app_lock(
     ks.store(&b64).await?;
     ks.delete_biometric().await?;
     if let Some(key) = decode_master_key(&b64) {
+        // R064 bridge: vault == master until the keys split.
         state.store.set_master_key(Some(key));
+        state.store.set_vault_key(Some(key));
     }
     state.app_config.set_biometric_app_lock(false).await?;
     // The identity-auto-unlock opt-in is meaningless without the gate (app_unlock
@@ -375,7 +377,9 @@ pub(crate) async fn app_unlock(
     );
     let key = decode_master_key(&b64)
         .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;
+    // R064 bridge: vault == master until the keys split.
     state.store.set_master_key(Some(key));
+    state.store.set_vault_key(Some(key));
     log::info!("app-lock: master key retrieved");
     // Copy the app-scoped behavior prefs out of a pre-split repo.json into
     // app.json BEFORE anything reads them — the first unlock, and the cache
@@ -530,7 +534,9 @@ pub(crate) fn do_app_lock<R: Runtime>(
     reason: AppLockReason,
 ) {
     log::info!("app-lock: lock ({reason:?})");
+    // R064 bridge: wipe both seals until the vault key is split off.
     store.set_master_key(None);
+    store.set_vault_key(None);
     store.lock();
     app_locked.store(true, Ordering::SeqCst);
     emit_app_lock_state(app, enabled, true, Some(reason));

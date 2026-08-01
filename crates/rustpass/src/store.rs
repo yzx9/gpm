@@ -500,6 +500,11 @@ impl Store {
         self.config.set_master_key(master_key);
     }
 
+    /// Delegate for [`Config::set_vault_key`].
+    pub fn set_vault_key(&self, vault_key: Option<[u8; 32]>) {
+        self.config.set_vault_key(vault_key);
+    }
+
     /// One-time migration: wrap any plaintext config files in the seal
     /// envelope. No-op on desktop (no master key) and for already-wrapped
     /// files. Safe to call on every startup.
@@ -2094,6 +2099,12 @@ impl Store {
     #[must_use]
     pub fn has_master_key(&self) -> bool {
         self.config.has_master_key()
+    }
+
+    /// Whether a vault key is in memory. See [`Config::has_vault_key`].
+    #[must_use]
+    pub fn has_vault_key(&self) -> bool {
+        self.config.has_vault_key()
     }
 
     /// Seal a serialized behavior config into the app-behavior slot. See
