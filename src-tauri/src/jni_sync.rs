@@ -160,7 +160,11 @@ mod jni {
     ///
     /// # Safety
     /// JNI surface — called from Kotlin with valid string arguments.
-    #[no_mangle]
+    // JNI FFI entry: the `unsafe(no_mangle)` attribute is intrinsic to exporting
+    // a JVM-callable symbol (edition 2024 requires the `unsafe(...)` wrapper).
+    // The function body itself is safe Rust.
+    #[allow(unsafe_code)]
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_xyz_yzx9_gpm_backgroundsync_SyncWorker_nativeSync(
         mut env: JNIEnv,
         _class: JClass,
