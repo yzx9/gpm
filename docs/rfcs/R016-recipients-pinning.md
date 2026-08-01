@@ -2,7 +2,7 @@
 
 **Priority:** P2
 **Status:** Draft
-**Phase:** Next
+**Phase:** Future
 
 ## What
 
@@ -28,4 +28,21 @@ gpm now encrypts (in-app secret creation), so the encrypt-to-attacker surface is
 
 ## Depends on / Supersedes
 
-Composes with `0009-gpg-signature-verification.md` (independent file-level check on top of commit-level verification); does not duplicate it.
+Deferred until `R036-gpg-crypto-backend` lands and gpm grows a recipients-
+management flow. The pin is only worth building once a secret can be encrypted
+to a key the user did not vet — i.e. multi-recipient / team stores. gpm already
+encrypts to every entry in the recipients file, so the attack surface is real
+today for any team store; but the team stores gpm will actually open are
+predominantly GPG (the norm in gopass team/enterprise setups, per R036), and
+unreadable until R036 ships. Sequencing after R036 also dodges rework: R036
+makes the recipients file a per-backend property — exactly what the pin hashes.
+
+Separately, gpm has no recipients-management flow (no add / remove /
+acknowledge). The acknowledge half of this design has no home until that flow
+exists; the pin-and-block half could ship first, but the feature is incomplete
+without it. This is sequencing, not a design change — the RFC stands, it is
+just not next.
+
+Composes with the shipped commit-signature-verification feature (formerly
+RFC 0009, now in code and the SECURITY.md threat model): an independent
+file-level check on top of commit-level verification, not a duplicate.
