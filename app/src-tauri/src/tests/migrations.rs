@@ -480,10 +480,12 @@ async fn m0005_completes_when_master_key_injected() {
     );
     assert_eq!(state.app_config.get_pref().schema_version, 4);
 
-    // Inject the master key (mirrors app_unlock's set_master_key). app_lock_enabled
-    // stays true — the corrected guard must still proceed.
+    // Inject the master key (mirrors app_unlock, which bridges both setters while
+    // the keys aren't split). app_lock_enabled stays true — the corrected guard
+    // must still proceed.
     let key = rustpass::seal::generate_master_key().unwrap();
     state.store.set_master_key(Some(key));
+    state.store.set_vault_key(Some(key));
     run_app_migrations(&state).await;
 
     // Completed: app.json is now a sealed envelope, schema advanced to target.

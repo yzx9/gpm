@@ -149,26 +149,43 @@ pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
     bytes.try_into().ok()
 }
 
-/// Fetch the sealed seal master key, generating + sealing one on first run.
+/// Fetch the sealed master key if present — **retrieve-only, never generates**.
 ///
-/// Returns `None` on desktop (no Keystore) or if the Keystore is unavailable /
-/// errors — in which case seal encryption degrades to plaintext passthrough
-/// (logged, non-fatal). A freshly generated key that cannot be sealed is
-/// discarded (`None`) rather than used unpersisted, so it can never orphan
-/// later envelopes behind a key the next run won't have.
-async fn master_key_from<R: tauri::Runtime>(
+/// Returns `None` on desktop (no Keystore), if the Keystore is unavailable, or if no
+/// key is sealed yet. Crucially this does NOT generate on absent, so it is safe to call
+/// on the upgrader path (the auth-free alias is absent pre-m0007) without minting a new
+/// master that would orphan every existing envelope. First-run provisioning is
+/// [`provision_master`]'s job, called explicitly by [`startup_master_key`].
+async fn retrieve_master_or_none<R: tauri::Runtime>(
     ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
 ) -> Option<[u8; 32]> {
     if !ks.is_available().await.unwrap_or(false) {
         return None;
     }
-    if let Some(b64) = ks.retrieve().await.unwrap_or(None) {
-        return decode_master_key(&b64);
+    let b64 = ks.retrieve().await.unwrap_or(None)?;
+    decode_master_key(&b64)
+}
+
+/// Generate + seal a fresh master key (first-run provisioning).
+///
+/// Returns `None` on desktop (no Keystore) or if generation/sealing fails. A key that
+/// cannot be sealed is discarded rather than used unpersisted, so it can never orphan
+/// later envelopes behind a key the next run won't have.
+async fn provision_master<R: tauri::Runtime>(
+    ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
+) -> Option<[u8; 32]> {
+    if !ks.is_available().await.unwrap_or(false) {
+        return None;
     }
-    // No sealed key yet: generate + seal a fresh master key.
+    // Never overwrite an existing entry: a present entry (even a malformed one)
+    // may have envelopes sealed under it, so minting a fresh key would orphan
+    // them. Degrade to passthrough instead — this restores the pre-split self-heal
+    // (a garbled decode used to return None without touching the entry).
+    if ks.retrieve().await.unwrap_or(None).is_some() {
+        return None;
+    }
     let key = rustpass::seal::generate_master_key().ok()?;
-    // Seal before adopting — an unpersisted key would orphan future envelopes
-    // on the next run.
+    // Seal before adopting — an unpersisted key would orphan future envelopes.
     ks.store(&B64.encode(key)).await.ok()?;
     Some(key)
 }
@@ -186,7 +203,14 @@ async fn startup_master_key<R: tauri::Runtime>(
     if ks.has_stored_biometric().await.unwrap_or(false) {
         (None, true)
     } else {
-        (master_key_from(ks).await, false)
+        // Auth-free path: retrieve the sealed master, provisioning on first run.
+        // retrieve_master_or_none is safe on the upgrader path (no generate-on-absent);
+        // provision_master is the explicit first-run generate+store (None on desktop).
+        let key = match retrieve_master_or_none(ks).await {
+            Some(k) => Some(k),
+            None => provision_master(ks).await,
+        };
+        (key, false)
     }
 }
 
