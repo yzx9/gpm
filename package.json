@@ -1,44 +1,20 @@
 {
-  "name": "gpm",
+  "name": "gpm-monorepo",
   "private": true,
-  "version": "0.14.2",
   "type": "module",
-  "author": "Zexin Yuan <gpm@yzx9.xyz> (https://github.com/yzx9)",
-  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.11.0",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "tauri": "tauri"
-  },
-  "dependencies": {
-    "@lucide/vue": "^1.23.0",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-clipboard-manager": "^2",
-    "@tauri-apps/plugin-notification": "^2.3.3",
-    "@tauri-apps/plugin-opener": "^2",
-    "vue": "^3.5.13",
-    "vue-i18n": "^11.4.6",
-    "vue-router": "^4.5.0"
+    "dev": "pnpm -C app dev",
+    "build": "pnpm -C app build",
+    "test": "pnpm -C app test",
+    "tauri": "pnpm -C app tauri",
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check ."
   },
   "devDependencies": {
-    "@intlify/unplugin-vue-i18n": "^11.2.4",
-    "@tailwindcss/vite": "^4.3.0",
-    "@tauri-apps/cli": "^2",
-    "@vitejs/plugin-vue": "^5.2.1",
-    "@vue/test-utils": "^2.4.11",
-    "jsdom": "^29.1.1",
     "prettier": "^3.9.4",
-    "prettier-plugin-organize-imports": "^4.3.0",
-    "tailwindcss": "^4.3.0",
-    "typescript": "~5.6.2",
-    "vite": "^6.0.3",
-    "vitest": "^4.1.8",
-    "vue-tsc": "^2.1.10"
+    "prettier-plugin-organize-imports": "^4.3.0"
   },
-  "packageManager": "pnpm@11.11.0",
   "engines": {
     "node": ">=22"
   }

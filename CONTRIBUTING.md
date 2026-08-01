@@ -40,7 +40,7 @@ from drifting into synonyms and prose.
 **Code-area scopes** — when the change is cross-feature / internal /
 infrastructural and maps to a part of the tree:
 
-`rustpass` · `app` (`src-tauri/`) · `frontend` (`src/`) · `android` · `plugin` (`tauri-plugin-*`) · `ci` · `build` · `deps`
+`rustpass` (`crates/rustpass/`) · `app` (`app/src-tauri/`) · `frontend` (`app/src/`) · `android` · `plugin` (`crates/tauri-plugin-*`) · `ci` · `build` · `deps`
 
 ### Choosing a scope
 

@@ -193,7 +193,9 @@ function* walk(dir) {
   }
 }
 
-const localesDir = fileURLToPath(new URL("../src/locales", import.meta.url));
+const localesDir = fileURLToPath(
+  new URL("../app/src/locales", import.meta.url),
+);
 const files = [...walk(localesDir)].sort();
 
 let failed = 0;

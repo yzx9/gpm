@@ -57,11 +57,11 @@ let
   # Generated / volatile paths the write-hooks must not touch. prettier also
   # honors .prettierignore; this covers the whitespace hooks and mirrors it.
   formatExcludes = [
-    "^src-tauri/gen/android/"
+    "^app/src-tauri/gen/android/"
     "^pnpm-lock\\.yaml$"
     "^Cargo\\.lock$"
-    "^rustpass/data/cacert\\.pem$"
-    "^dist/"
+    "^crates/rustpass/data/cacert\\.pem$"
+    "^app/dist/"
     "^\\.agents/skills/"
   ];
 

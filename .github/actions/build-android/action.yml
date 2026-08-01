@@ -26,7 +26,7 @@ runs:
       if: inputs.build_type == 'release'
       shell: bash
       run: |
-        cd src-tauri/gen/android
+        cd app/src-tauri/gen/android
         echo "keyAlias=$ANDROID_KEY_ALIAS" > keystore.properties
         echo "password=$ANDROID_KEY_PASSWORD" >> keystore.properties
         base64 -d <<< "$ANDROID_KEYSTORE_BASE64" > "$RUNNER_TEMP/keystore.jks"
@@ -43,15 +43,15 @@ runs:
         pnpm install --frozen-lockfile
         sh scripts/gen-icons.sh
         if [ "$SPLIT" = "true" ]; then
-          pnpm tauri android build --apk --split-per-abi $DEBUG_FLAG
-          pnpm tauri android build --apk $DEBUG_FLAG
+          pnpm -C app tauri android build --apk --split-per-abi $DEBUG_FLAG
+          pnpm -C app tauri android build --apk $DEBUG_FLAG
         else
-          pnpm tauri android build --apk $DEBUG_FLAG $TARGET
+          pnpm -C app tauri android build --apk $DEBUG_FLAG $TARGET
         fi
 
     - name: Upload APKs
       uses: actions/upload-artifact@v4
       with:
         name: apk-${{ inputs.build_type }}
-        path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+        path: app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
         retention-days: 5

@@ -50,7 +50,7 @@ jobs:
   # present — and that file is gitignored, generated only by `tauri android
   # build`. So a single-ABI debug build is done first purely to produce it; the
   # unit tests then run on the configured project. A guard first verifies every
-  # local path plugin in src-tauri/Cargo.toml is included, so a stale generation
+  # local path plugin in app/src-tauri/Cargo.toml is included, so a stale generation
   # can't silently skip a plugin's tests.
   android:
     runs-on: ubuntu-latest
@@ -73,5 +73,5 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           sh scripts/gen-icons.sh
-          pnpm tauri android build --debug --target aarch64
+          pnpm -C app tauri android build --debug --target aarch64
           just test-plugin

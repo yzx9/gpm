@@ -112,6 +112,15 @@ settings:
 importers:
 
   .:
+    devDependencies:
+      prettier:
+        specifier: ^3.9.4
+        version: 3.9.4
+      prettier-plugin-organize-imports:
+        specifier: ^4.3.0
+        version: 4.3.0(prettier@3.9.4)(typescript@5.6.3)(vue-tsc@2.2.12(typescript@5.6.3))
+
+  app:
     dependencies:
       '@lucide/vue':
         specifier: ^1.23.0
@@ -156,12 +165,6 @@ importers:
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1
-      prettier:
-        specifier: ^3.9.4
-        version: 3.9.4
-      prettier-plugin-organize-imports:
-        specifier: ^4.3.0
-        version: 4.3.0(prettier@3.9.4)(typescript@5.6.3)(vue-tsc@2.2.12(typescript@5.6.3))
       tailwindcss:
         specifier: ^4.3.0
         version: 4.3.0

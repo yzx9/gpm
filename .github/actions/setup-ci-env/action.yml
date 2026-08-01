@@ -64,6 +64,6 @@ runs:
         path: |
           ~/.gradle/caches
           ~/.gradle/wrapper
-        key: java-${{ runner.os }}-${{ hashFiles('package.json', 'src-tauri/Cargo.toml', 'Cargo.lock') }}
+        key: java-${{ runner.os }}-${{ hashFiles('app/package.json', 'app/src-tauri/Cargo.toml', 'Cargo.lock') }}
         restore-keys: |
           java-${{ runner.os }}-

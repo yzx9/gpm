@@ -17,22 +17,22 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-safe-area = { path = "../tauri-plugin-safe-area" }
-tauri-plugin-biometric-keystore = { path = "../tauri-plugin-biometric-keystore" }
-tauri-plugin-secure-keystore = { path = "../tauri-plugin-secure-keystore" }
-tauri-plugin-file-picker = { path = "../tauri-plugin-file-picker" }
-tauri-plugin-screen-secure = { path = "../tauri-plugin-screen-secure" }
-tauri-plugin-clipboard-notify = { path = "../tauri-plugin-clipboard-notify" }
-tauri-plugin-background-sync = { path = "../tauri-plugin-background-sync" }
-tauri-plugin-device-info = { path = "../tauri-plugin-device-info" }
-tauri-plugin-file-save = { path = "../tauri-plugin-file-save" }
+tauri-plugin-safe-area = { path = "../../crates/tauri-plugin-safe-area" }
+tauri-plugin-biometric-keystore = { path = "../../crates/tauri-plugin-biometric-keystore" }
+tauri-plugin-secure-keystore = { path = "../../crates/tauri-plugin-secure-keystore" }
+tauri-plugin-file-picker = { path = "../../crates/tauri-plugin-file-picker" }
+tauri-plugin-screen-secure = { path = "../../crates/tauri-plugin-screen-secure" }
+tauri-plugin-clipboard-notify = { path = "../../crates/tauri-plugin-clipboard-notify" }
+tauri-plugin-background-sync = { path = "../../crates/tauri-plugin-background-sync" }
+tauri-plugin-device-info = { path = "../../crates/tauri-plugin-device-info" }
+tauri-plugin-file-save = { path = "../../crates/tauri-plugin-file-save" }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2"
 # Pure-Rust deflate (miniz_oxide): the default features pull C -sys crates
 # (bzip2/lzma/zstd/xz) that break the Android NDK cross-build. Used only by the
 # diagnostics-export bundle assembler.
 zip = { version = "2", default-features = false, features = ["deflate"] }
-rustpass = { path = "../rustpass" }
+rustpass = { path = "../../crates/rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 zeroize = { workspace = true }

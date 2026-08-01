@@ -319,18 +319,44 @@ export function scanNpm(root) {
   return packages;
 }
 
+/** Scan the npm dependency trees of every workspace package — the workspace
+ *  root (formatting toolchain: prettier + its plugin) AND the frontend app —
+ *  and dedupe by name@version. Scanning both keeps root-only dev tooling in the
+ *  attribution inventory alongside the app's deps: prettier is a peerDep of
+ *  prettier-plugin-organize-imports, which the per-package BFS never walks, so
+ *  it must be seeded as a direct root devDep (see scanNpm). */
+export function scanNpmAll(root, frontendDir) {
+  const seen = new Set();
+  const packages = [];
+  for (const dir of [root, frontendDir]) {
+    for (const pkg of scanNpm(dir)) {
+      const key = `${pkg.name}@${pkg.version}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      packages.push(pkg);
+    }
+  }
+  return packages;
+}
+
 /**
  * Generate the license inventory and write it to `outPath`.
  *
  * @param {Object} [opts]
- * @param {string} [opts.root]   Repo root (defaults to the parent of scripts/).
- * @param {string} [opts.out]    Output path (default <root>/public/licenses.json).
- * @param {boolean} [opts.force] Write even when the output looks fresh.
+ * @param {string} [opts.root]        Repo root (defaults to the parent of scripts/).
+ * @param {string} [opts.frontendDir] Frontend dir holding package.json / node_modules / public (default <root>/app).
+ * @param {string} [opts.out]         Output path (default <frontendDir>/public/licenses.json).
+ * @param {boolean} [opts.force]      Write even when the output looks fresh.
  * @returns {{ wrote: boolean, path: string, data: LicensesData }}
  */
 export function generateLicenses(opts = {}) {
   const root = resolve(opts.root ?? join(__dirname, ".."));
-  const out = resolve(opts.out ?? join(root, "public", "licenses.json"));
+  // After the app/+crates/ reorg the frontend manifest, node_modules, and
+  // public/ live under app/, while Cargo.lock and cargo metadata stay at the
+  // workspace root. Route the npm scan + output through frontendDir; leave the
+  // cargo scan on root.
+  const frontendDir = resolve(opts.frontendDir ?? join(root, "app"));
+  const out = resolve(opts.out ?? join(frontendDir, "public", "licenses.json"));
   // Skip work when fresh unless forced: the inventory is a pure function of
   // Cargo.lock + package.json + the installed node_modules, so regenerate only
   // when any of those is newer than the output. (pnpm-lock.yaml is included so
@@ -339,15 +365,15 @@ export function generateLicenses(opts = {}) {
   if (!opts.force && existsSync(out)) {
     const outMtime = statSync(out).mtimeMs;
     const sources = [
-      "Cargo.lock",
-      "package.json",
-      "pnpm-lock.yaml",
-      "node_modules",
+      [root, "Cargo.lock"],
+      [root, "pnpm-lock.yaml"],
+      [frontendDir, "package.json"],
+      [frontendDir, "node_modules"],
     ];
     const newest = Math.max(
       0,
-      ...sources.map((s) =>
-        existsSync(join(root, s)) ? statSync(join(root, s)).mtimeMs : 0,
+      ...sources.map(([base, s]) =>
+        existsSync(join(base, s)) ? statSync(join(base, s)).mtimeMs : 0,
       ),
     );
     if (outMtime >= newest) {
@@ -368,7 +394,7 @@ export function generateLicenses(opts = {}) {
 
   const rust = scanRust(root);
   const rustPackages = rust.ok ? rust.packages : scanRustFromLock(root);
-  const npmPackages = scanNpm(root);
+  const npmPackages = scanNpmAll(root, frontendDir);
 
   const packages = [...rustPackages, ...npmPackages].sort((a, b) => {
     if (a.ecosystem !== b.ecosystem) return a.ecosystem < b.ecosystem ? -1 : 1;

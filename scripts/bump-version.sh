@@ -25,9 +25,9 @@ if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-CURRENT_VERSION=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$ROOT/src-tauri/tauri.conf.json")
+CURRENT_VERSION=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$ROOT/app/src-tauri/tauri.conf.json")
 if [[ -z "$CURRENT_VERSION" ]]; then
-  echo "error: could not read current version from src-tauri/tauri.conf.json" >&2
+  echo "error: could not read current version from app/src-tauri/tauri.conf.json" >&2
   exit 1
 fi
 
@@ -53,11 +53,11 @@ fi
 cd "$ROOT" && cargo check 2>&1
 
 # 3. package.json — also syncs pnpm-lock.yaml if needed
-cd "$ROOT" && pnpm version --no-git-checks --no-git-tag-version "$NEW_VERSION"
+cd "$ROOT/app" && pnpm version --no-git-checks --no-git-tag-version "$NEW_VERSION"
 
 # 4. src-tauri/tauri.conf.json
 "${_sed_i[@]}" "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" \
-  "$ROOT/src-tauri/tauri.conf.json"
+  "$ROOT/app/src-tauri/tauri.conf.json"
 
 # 5. CHANGELOG.md — insert new version header after [Unreleased]
 "${_sed_i[@]}" "/^## \[Unreleased\]$/a\\
@@ -74,4 +74,4 @@ cd "$ROOT" && pnpm version --no-git-checks --no-git-tag-version "$NEW_VERSION"
 [v${NEW_VERSION}]: https://github.com/yzx9/gpm/compare/v${CURRENT_VERSION}...v${NEW_VERSION}
 " "$ROOT/CHANGELOG.md"
 
-echo "Done. Updated: Cargo.toml, Cargo.lock, package.json, tauri.conf.json, CHANGELOG.md"
+echo "Done. Updated: Cargo.toml, Cargo.lock, app/package.json, app/src-tauri/tauri.conf.json, CHANGELOG.md"

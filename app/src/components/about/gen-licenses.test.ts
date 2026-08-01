@@ -3,29 +3,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeAll, describe, expect, it } from "vitest";
+// @ts-expect-error node:path is a nodejs module (project ships no @types/node)
+import { resolve } from "node:path";
 // @ts-expect-error local .mjs build script ships no type declarations
-import { scanNpm } from "../../../scripts/gen-licenses.mjs";
+import { scanNpmAll } from "../../../../scripts/gen-licenses.mjs";
 
-// Repo root. `pnpm test` runs vitest with cwd at the package root (vitest's
-// default root), so process.cwd() is the worktree root where package.json +
-// node_modules live. Needs a real node_modules — `pnpm install` first in a
-// fresh worktree (the whole FE suite already requires it).
+// scanNpmAll covers BOTH workspace packages: the frontend app (app/, where
+// vitest runs via `pnpm -C app test`) and the workspace root (where the
+// formatting toolchain — prettier + prettier-plugin-organize-imports — lives as
+// devDeps). Needs a real node_modules — `pnpm install` first in a fresh worktree
+// (the whole FE suite already requires it).
 // @ts-expect-error process is a nodejs global (project ships no @types/node)
-const root = process.cwd();
+const appDir = process.cwd();
+const root = resolve(appDir, ".."); // workspace root
 
-// scanNpm is a few-hundred-package BFS; run it once for the whole file. The
-// import is untyped (local .mjs), so cast the entry shape we rely on.
+// A few-hundred-package BFS; run it once for the whole file. The import is
+// untyped (local .mjs), so cast the entry shape we rely on.
 let pkgs: { name: string; version: string }[] = [];
 beforeAll(() => {
-  pkgs = scanNpm(root) as { name: string; version: string }[];
+  pkgs = scanNpmAll(root, appDir) as { name: string; version: string }[];
 });
 
 describe("gen-licenses scanNpm", () => {
-  it("includes the root devDependencies the runtime-only scan omitted", () => {
+  it("attributes dev tooling from both the workspace root and the app", () => {
     const names = pkgs.map((p) => p.name);
-    // Dev tooling that MUST now be attributed. prettier is only reachable
-    // because it is a direct root devDep — it's a peerDep of
-    // prettier-plugin-organize-imports, and the BFS does not walk peers.
+    // scanNpmAll seeds from BOTH dependencies and devDependencies across both
+    // workspace packages, so build/test tooling is attributed despite not
+    // shipping. prettier lives at the workspace ROOT (not under app/) — a
+    // peerDep of prettier-plugin-organize-imports that the BFS never walks, so
+    // it must be seeded as a direct root devDep; scanning the root keeps it in
+    // the inventory.
     for (const dep of [
       "vite",
       "vitest",

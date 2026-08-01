@@ -95,7 +95,7 @@ export bundle — full log plus a redacted view of the repository config and
 device info, written off-device on demand to a location the user picks — is that
 separate, more-sensitive artifact: it is gated by an explicit pre-export
 confirmation and assembled only from already-redacted sources, so no secret is
-read into the bundling path; see `src-tauri/src/diagnostics_export.rs`.)
+read into the bundling path; see `app/src-tauri/src/diagnostics_export.rs`.)
 
 ## Approaches not adopted
 

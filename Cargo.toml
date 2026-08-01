@@ -1,18 +1,8 @@
 [workspace]
 resolver = "2"
-members = [
-  "rustpass",
-  "src-tauri",
-  "tauri-plugin-safe-area",
-  "tauri-plugin-biometric-keystore",
-  "tauri-plugin-secure-keystore",
-  "tauri-plugin-file-picker",
-  "tauri-plugin-screen-secure",
-  "tauri-plugin-clipboard-notify",
-  "tauri-plugin-device-info",
-  "tauri-plugin-file-save",
-  "tauri-plugin-background-sync",
-]
+# `crates/*` globs rustpass + every tauri-plugin-*; app/src-tauri is listed
+# explicitly because app/ also holds the non-crate Vue frontend.
+members = ["crates/*", "app/src-tauri"]
 
 [workspace.package]
 version = "0.14.2"

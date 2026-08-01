@@ -100,12 +100,12 @@ just android-install-release # Build + install release APK to connected device
 If you don't want to use `just`, you can see the individual commands in `justfile` and run them
 manually.
 
-Android builds require launcher icons in `src-tauri/gen/android/app/src/main/res/mipmap-*/`, which
+Android builds require launcher icons in `app/src-tauri/gen/android/app/src/main/res/mipmap-*/`, which
 are not tracked in git (they are regenerated on each build). If you use `just`, this is handled
-automatically. If you run `pnpm tauri android build` directly, generate icons first:
+automatically. If you run `pnpm -C app tauri android build` directly, generate icons first:
 
 ```bash
-pnpm tauri icon assets/app-icon.png
+pnpm -C app tauri icon assets/app-icon.png
 ```
 
 </details>
@@ -147,25 +147,25 @@ Key details:
 - Gated behind `pkgs.stdenv.isDarwin` — Linux hosts are unaffected because the system `ar` already
   produces GNU-format archives
 
-**Files involved:** `flake.nix` (shellHook), `src-tauri/Cargo.toml` (`git2` with `vendored-openssl` +
+**Files involved:** `flake.nix` (shellHook), `app/src-tauri/Cargo.toml` (`git2` with `vendored-openssl` +
 `vendored-libgit2`)
 
 ### Android: HTTPS git certificate verification
 
 On Android the vendored OpenSSL is built `no-stdio`, so HTTPS git would fail certificate
 verification (it can't read the system CA store or a CA file). gpm embeds Mozilla's root bundle
-(`rustpass/data/cacert.pem`) and loads it into libgit2's trust store from memory — Android-only,
+(`crates/rustpass/data/cacert.pem`) and loads it into libgit2's trust store from memory — Android-only,
 lazily before the first HTTPS op, scheme-gated so SSH / local-only repos are untouched. Desktop is
 unaffected. The root cause (`no-stdio` → `BIO_new_file` compiled out → load via
-`GIT_OPT_ADD_SSL_X509_CERT`) is documented in `rustpass/src/git.rs`.
+`GIT_OPT_ADD_SSL_X509_CERT`) is documented in `crates/rustpass/src/git.rs`.
 
 **Refresh the bundle every release** so the trusted roots track Mozilla's trust decisions (root
 additions/distrusts):
 
 ```bash
-just refresh-ca   # re-downloads rustpass/data/cacert.pem from https://curl.se/ca/cacert.pem
+just refresh-ca   # re-downloads crates/rustpass/data/cacert.pem from https://curl.se/ca/cacert.pem
 just test         # the embedded_ca_bundle_parses_cleanly test guards against a corrupt bundle
-git commit rustpass/data/cacert.pem
+git commit crates/rustpass/data/cacert.pem
 ```
 
 **Known limitation — self-hosted servers behind a private/enterprise CA:** this setup trusts only
@@ -203,7 +203,7 @@ workflow, which builds a signed APK and publishes it as a GitHub Release.
      -keyalg RSA -keysize 2048 -validity 10000 -alias upload
    ```
 
-2. **Create `src-tauri/gen/android/keystore.properties`** (gitignored):
+2. **Create `app/src-tauri/gen/android/keystore.properties`** (gitignored):
 
    ```properties
    keyAlias=upload

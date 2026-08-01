@@ -9,7 +9,7 @@ import { defineConfig } from "vite";
 // @ts-expect-error node:url is a nodejs module (this project ships no @types/node)
 import { fileURLToPath, URL } from "node:url";
 // @ts-expect-error local .mjs plugin (ships no type declarations)
-import { licensesPlugin } from "./scripts/vite-plugin-licenses.mjs";
+import { licensesPlugin } from "../scripts/vite-plugin-licenses.mjs";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
