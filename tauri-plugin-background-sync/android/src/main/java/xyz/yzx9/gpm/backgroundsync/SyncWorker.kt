@@ -29,6 +29,8 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
 
         @JvmStatic
         external fun nativeSync(configDir: String, masterKeyB64: String): String
+
+        private const val MAX_ATTEMPTS = 3
     }
 
     override suspend fun doWork(): Result {
@@ -73,9 +75,5 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
         return processes.any {
             it.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
         }
-    }
-
-    private companion object {
-        const val MAX_ATTEMPTS = 3
     }
 }
