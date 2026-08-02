@@ -462,4 +462,96 @@ done
             );
         }
     }
+
+    /// `gopass fscopy <from> <to>`: upload a real file into the store as a
+    /// base64 attachment — gopass's binary write path, which runs the bytes
+    /// through `secFromBytes` (Content-Disposition + Content-Transfer-Encoding:
+    /// Base64 + base64 body). The write encrypts only to the recipients file, so
+    /// it needs no identity and never reaches the mock pinentry. The source
+    /// file's basename becomes the attachment's Content-Disposition filename.
+    fn gopass_fscopy(home: &Path, from: &Path, to: &str) {
+        let out = gopass(home, &["fscopy", from.to_str().unwrap(), to])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "gopass fscopy {from:?} → {to:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// **Forward attachment interop (gopass writes a binary attachment → gpm
+    /// decodes it byte-identically):** a file uploaded through gopass's real
+    /// binary write path (`gopass fscopy` → `secFromBytes`) is read back by
+    /// gpm's attachment decoder. Pins that gpm interprets exactly what gopass
+    /// produced — the gap R053 deferred to the attachment work. Every byte
+    /// value, a PNG signature, and a multi-KB payload stress the base64 decode.
+    #[tokio::test]
+    async fn gpm_decodes_attachment_written_by_real_gopass() {
+        if !gopass_present() {
+            eprintln!("skipping gopass interop test: `gopass` not on PATH");
+            return;
+        }
+
+        let (identity, recipient) = generate_test_keypair();
+        let (home, store_dir) = provision_gopass_store(&recipient);
+
+        // gopass fscopy uploads a file as a base64 attachment. The source file's
+        // basename becomes the Content-Disposition filename (secFromBytes), so
+        // each case also pins filename recovery, not just the bytes.
+        let all_bytes: Vec<u8> = (0u8..=255).collect();
+        let png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let big: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
+        let cases: &[(&str, &[u8])] = &[
+            ("all-bytes.bin", &all_bytes),
+            ("photo.png", &png),
+            ("4kb-blob.dat", &big),
+        ];
+        let work = tempfile::tempdir().unwrap();
+        for (i, &(fname, bytes)) in cases.iter().enumerate() {
+            let path = work.path().join(fname);
+            std::fs::write(&path, bytes).unwrap();
+            gopass_fscopy(home.path(), &path, &format!("att/{i}"));
+        }
+        commit_worktree(&store_dir);
+
+        // gpm clones the gopass store and decrypts with the identity whose
+        // recipient gopass encrypted to.
+        let config_dir = tempfile::tempdir().unwrap();
+        let store = Store::new(config_dir.path().to_path_buf(), None);
+        store
+            .configure(
+                store_dir.to_str().unwrap(),
+                None,
+                None,
+                None,
+                &identity,
+                None,
+            )
+            .await
+            .expect("gpm clones and configures the gopass store");
+
+        // The load-bearing interop assertion: gpm's attachment decoder yields
+        // exactly the bytes gopass uploaded, and recovers the original filename.
+        for (i, &(fname, bytes)) in cases.iter().enumerate() {
+            let entry = format!("att/{i}");
+            let secret = store
+                .get(&entry)
+                .await
+                .expect("gpm decrypts the gopass-written attachment entry");
+            let attachment = rustpass::attachment::extract(secret.body())
+                .expect("attachment body decodes")
+                .expect("the entry is recognized as an attachment");
+            assert_eq!(
+                attachment.bytes(),
+                bytes,
+                "{entry}: gpm-decoded bytes must match the file gopass uploaded"
+            );
+            assert_eq!(
+                attachment.filename(),
+                Some(fname),
+                "{entry}: filename must be the uploaded file's basename"
+            );
+        }
+    }
 }

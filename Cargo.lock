@@ -4633,6 +4633,7 @@ dependencies = [
  "aes-gcm",
  "age",
  "async-trait",
+ "base64 0.22.1",
  "bech32",
  "foreign-types 0.3.2",
  "fs2",

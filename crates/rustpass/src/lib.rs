@@ -43,6 +43,8 @@
     clippy::pedantic
 )]
 
+/// gopass binary attachment detection + base64 decode (gopass `internal/action/binary`).
+pub mod attachment;
 /// Configuration and identity persistence.
 pub mod config;
 /// Age decryption backend.
@@ -79,6 +81,7 @@ pub mod template;
 pub mod totp;
 
 // Re-export core types at crate root (gopass-aligned)
+pub use attachment::{Attachment, AttachmentMeta, has_attachment, metadata};
 pub use config::{Config, LockMode, RepoConfig};
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
