@@ -23,6 +23,15 @@ jobs:
 
       - name: Run backend tests
         shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
+        # DIAGNOSTIC: every backend run restores a full-match rust-cache target/
+        # yet cargo recompiles all ~510 crates (0 Fresh). The fingerprint trace
+        # prints "fingerprint error for <crate> ... .fingerprint/<crate>-<HASH>"
+        # so the mismatched/missing HASH reveals whether restored fingerprints
+        # drift (UnitHash) or never landed (restore/cleanup). Scoped to this
+        # step only, so it never enters the rust-cache key (computed in the
+        # setup step) — the cache still full-matches, isolating the cause.
+        env:
+          CARGO_LOG: cargo::core::compiler::fingerprint=trace
         run: |
           pnpm install --frozen-lockfile
           just test-be
