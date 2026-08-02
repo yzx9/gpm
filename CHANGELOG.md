@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The Settings list drops the one-line summaries that used to sit next to each category — each category's own page already shows the detail, so the summaries only added clutter and often got cut off. Only About still shows the installed version; everything else is now just the label and arrow, and the Logs row's arrow lines up with the others again.
 
+### Fixed
+
+- In the Lock & Identity passphrase prompts (set, change, enable biometric, and enable identity auto-unlock), the action button now uses the accent color and matches the Cancel button's width — previously it looked the same as Cancel and stretched wider, making the two hard to tell apart.
+
 ## [v0.15.0] - 2026-08-01
 
 ### Added

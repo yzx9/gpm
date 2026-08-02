@@ -831,15 +831,17 @@ onMounted(() => {
         v-model="ppAck"
         class="mb-3"
       />
-      <div class="flex gap-2 justify-end">
+      <div class="flex gap-2">
         <BaseButton
           variant="secondary"
+          class="flex-1"
           :disabled="passphraseLoading"
           @click="closePassphraseModal"
           >{{ t("common.button.cancel") }}</BaseButton
         >
         <BaseButton
-          variant="action"
+          variant="primary"
+          class="flex-1"
           :loading="passphraseLoading"
           :disabled="ppSubmitDisabled"
           @click="onPassphraseSubmit"
