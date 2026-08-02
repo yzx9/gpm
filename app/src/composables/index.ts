@@ -10,6 +10,7 @@ export * from "./useCommitSignature";
 export * from "./useDiagnosticsExport";
 export * from "./useDialog";
 export * from "./useDivergence";
+export * from "./useEntryConflict";
 export * from "./useForegroundSync";
 export * from "./useLockActivity";
 export * from "./useLockState";
