@@ -49,14 +49,14 @@ The decision rests on five assumptions, recorded so any of them can be revisited
 
 ## Scope Constraints
 
-| Constraint      | Decision                                          | Rationale                                                |
-| --------------- | ------------------------------------------------- | -------------------------------------------------------- |
-| Read-only MVP   | Clone, pull, list, search, decrypt, copy only     | Ship narrow, get feedback, then expand                   |
-| Age-only        | No `.gpg`, no GPG, no gopass mounts               | Age is simpler, growing user base, avoids GPG complexity |
-| No cloud sync   | Git is the only sync mechanism                    | No third-party servers, no analytics                     |
-| Single identity | One age identity, tried against every `.age` file | No `.age-recipients` parsing needed for MVP              |
-| Single repo     | One repo + one identity, re-setup to change       | Settings page and multi-repo are post-MVP                |
-| HTTPS-only git  | PAT for authentication                            | SSH requires libssh2 NDK cross-compilation (post-MVP)    |
+|Constraint|Decision|Rationale|
+|-|-|-|
+|Read-only MVP|Clone, pull, list, search, decrypt, copy only|Ship narrow, get feedback, then expand|
+|Age-only|No `.gpg`, no GPG, no gopass mounts|Age is simpler, growing user base, avoids GPG complexity|
+|No cloud sync|Git is the only sync mechanism|No third-party servers, no analytics|
+|Single identity|One age identity, tried against every `.age` file|No `.age-recipients` parsing needed for MVP|
+|Single repo|One repo + one identity, re-setup to change|Settings page and multi-repo are post-MVP|
+|HTTPS-only git|PAT for authentication|SSH requires libssh2 NDK cross-compilation (post-MVP)|
 
 ## Security Architecture
 
@@ -66,10 +66,10 @@ The decision rests on five assumptions, recorded so any of them can be revisited
 
 Two operations handle decrypted passwords, with different trust boundary profiles:
 
-| Operation                   | Password crosses IPC?                                 | Trust boundaries touched                 | Usage frequency |
-| --------------------------- | ----------------------------------------------------- | ---------------------------------------- | --------------- |
-| `copy_password` (primary)   | **No** — Rust decrypt → clipboard → zeroize           | Rust memory → Kotlin → Android clipboard | ~90% of usage   |
-| `show_password` (secondary) | **Yes** — `SensitiveContent` with `Zeroizing<String>` | Rust memory → IPC → WebView JS heap      | ~10% of usage   |
+|Operation|Password crosses IPC?|Trust boundaries touched|Usage frequency|
+|-|-|-|-|
+|`copy_password` (primary)|**No** — Rust decrypt → clipboard → zeroize|Rust memory → Kotlin → Android clipboard|~90% of usage|
+|`show_password` (secondary)|**Yes** — `SensitiveContent` with `Zeroizing<String>`|Rust memory → IPC → WebView JS heap|~10% of usage|
 
 The primary operation keeps the password entirely within Rust memory (zeroizable) → Kotlin (ByteArray zeroizable) → Android clipboard (30s overwrite). The JS heap is never involved.
 

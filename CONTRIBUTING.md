@@ -26,16 +26,16 @@ from drifting into synonyms and prose.
 **Feature scopes** — one per product capability, sourced from
 `docs/specs/*/prd.md` frontmatter (`scope: <token>`):
 
-| Spec                     | scope      |
-| ------------------------ | ---------- |
-| 001 Entry Access         | `entries`  |
-| 002 Secret Management    | `secrets`  |
-| 003 age Encryption       | `age`      |
-| 004 GPG Encryption       | `gpg`      |
-| 005 Git Storage & Sync   | `git`      |
-| 006 Identities & Trust   | `id`       |
-| 007 App Lock & Auto-lock | `lock`     |
-| 008 Android Autofill     | `autofill` |
+|Spec|scope|
+|-|-|
+|001 Entry Access|`entries`|
+|002 Secret Management|`secrets`|
+|003 age Encryption|`age`|
+|004 GPG Encryption|`gpg`|
+|005 Git Storage & Sync|`git`|
+|006 Identities & Trust|`id`|
+|007 App Lock & Auto-lock|`lock`|
+|008 Android Autofill|`autofill`|
 
 **Code-area scopes** — when the change is cross-feature / internal /
 infrastructural and maps to a part of the tree:

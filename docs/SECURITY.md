@@ -38,14 +38,14 @@ These are explicit non-goals, not gaps to be closed.
 
 ## System-wide measures
 
-| Measure                  | Detail                                                                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Zeroizing memory         | Rust `Secret` wraps `Zeroizing<String>`; content wiped on drop                                                                                |
-| Safe Debug output        | Custom `Debug` impl shows `[REDACTED]`, never actual secrets                                                                                  |
-| Error sanitization       | Error messages contain only codes and generic descriptions                                                                                    |
-| Path traversal guard     | Resolved paths validated to stay within repository; symlink escape detection                                                                  |
-| Content Security Policy  | CSP restricts `script-src`, `connect-src` to `self` and IPC only                                                                              |
-| WebView script integrity | Secrets render as text (Vue-escaped), never as executable HTML (`v-html`/`innerHTML`); the only script in the WebView is the app's own bundle |
+|Measure|Detail|
+|-|-|
+|Zeroizing memory|Rust `Secret` wraps `Zeroizing<String>`; content wiped on drop|
+|Safe Debug output|Custom `Debug` impl shows `[REDACTED]`, never actual secrets|
+|Error sanitization|Error messages contain only codes and generic descriptions|
+|Path traversal guard|Resolved paths validated to stay within repository; symlink escape detection|
+|Content Security Policy|CSP restricts `script-src`, `connect-src` to `self` and IPC only|
+|WebView script integrity|Secrets render as text (Vue-escaped), never as executable HTML (`v-html`/`innerHTML`); the only script in the WebView is the app's own bundle|
 
 ## Cross-cutting runtime limitations
 
@@ -99,9 +99,9 @@ read into the bundling path; see `app/src-tauri/src/diagnostics_export.rs`.)
 
 ## Approaches not adopted
 
-| Approach                        | Why not                                                                                                                                                                                    |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Tauri Isolation Pattern         | Encrypts the frontend→Rust IPC direction (protects against a malicious frontend calling Rust commands), not the Rust→frontend response. CSP is a more direct defense for our threat model. |
-| Custom IPC encryption layer     | Both ends run in the same process — the decryption key would be in the same process. Security theater.                                                                                     |
-| Canvas-based password rendering | Would avoid DOM text nodes, but accessibility services can OCR rendered content. Extreme complexity for marginal gain.                                                                     |
-| JavaScript memory overwriting   | V8 strings are immutable; overwriting creates a new string and reassigns the reference, leaving the original on the heap until GC. Security theater.                                       |
+|Approach|Why not|
+|-|-|
+|Tauri Isolation Pattern|Encrypts the frontend→Rust IPC direction (protects against a malicious frontend calling Rust commands), not the Rust→frontend response. CSP is a more direct defense for our threat model.|
+|Custom IPC encryption layer|Both ends run in the same process — the decryption key would be in the same process. Security theater.|
+|Canvas-based password rendering|Would avoid DOM text nodes, but accessibility services can OCR rendered content. Extreme complexity for marginal gain.|
+|JavaScript memory overwriting|V8 strings are immutable; overwriting creates a new string and reassigns the reference, leaving the original on the heap until GC. Security theater.|

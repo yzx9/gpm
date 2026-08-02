@@ -17,5 +17,8 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "prettier-plugin-compact-markdown-table": "^0.1.0"
   }
 }

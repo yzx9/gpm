@@ -50,12 +50,12 @@ But introduces:
 
 ## Security Model Comparison
 
-| Aspect                   | gpm (Rust)                         | gopass (Go)                          |
-| ------------------------ | ---------------------------------- | ------------------------------------ |
-| Password memory clearing | `Zeroizing<String>` on Drop        | None — relies on Go GC               |
-| Identity key clearing    | Zeroized per-decrypt call          | Not implemented                      |
-| Threat model             | Includes local attacker mitigation | Explicitly excludes local attackers¹ |
-| Auditability             | All code in repository             | External dependency (black box)      |
+|Aspect|gpm (Rust)|gopass (Go)|
+|-|-|-|
+|Password memory clearing|`Zeroizing<String>` on Drop|None — relies on Go GC|
+|Identity key clearing|Zeroized per-decrypt call|Not implemented|
+|Threat model|Includes local attacker mitigation|Explicitly excludes local attackers¹|
+|Auditability|All code in repository|External dependency (black box)|
 
 ¹ gopass `docs/security.md`: "The threat model of gopass assumes there are no attackers on your local machine."
 

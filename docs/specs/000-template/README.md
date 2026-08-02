@@ -10,13 +10,13 @@ cp -r docs/specs/000-template docs/specs/<NNN>-<slug>
 
 ## Files
 
-| File                    | Required? | Purpose                                                                  | Lifecycle |
-| ----------------------- | --------- | ------------------------------------------------------------------------ | --------- |
-| `prd.md`                | **Yes**   | Product requirements: functional + non-functional + user characteristics | Living    |
-| `design.md`             | No        | Technical design & rationale ("why this approach")                       | Snapshot  |
-| `security.md`           | No        | Feature-level threat model (crypto / identity / lock / sync)             | Living    |
-| `research.md`           | No        | Spike / investigation notes                                              | Snapshot  |
-| `mockups/`, `diagrams/` | No        | Wireframes / flow diagrams (add as needed)                               | Snapshot  |
+|File|Required?|Purpose|Lifecycle|
+|-|-|-|-|
+|`prd.md`|**Yes**|Product requirements: functional + non-functional + user characteristics|Living|
+|`design.md`|No|Technical design & rationale ("why this approach")|Snapshot|
+|`security.md`|No|Feature-level threat model (crypto / identity / lock / sync)|Living|
+|`research.md`|No|Spike / investigation notes|Snapshot|
+|`mockups/`, `diagrams/`|No|Wireframes / flow diagrams (add as needed)|Snapshot|
 
 ## Rules of thumb
 
