@@ -89,20 +89,6 @@ fn build_manifest(app_locked: bool, repo_status: &str, entry_names: &[&str]) -> 
     )
 }
 
-/// Single-flight flag: at most one `export_diagnostics` runs at a time. Two
-/// overlapping exports would collide on the shared staged temp file and on the
-/// file-save plugin's per-instance path field.
-static EXPORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Releases the single-flight flag on drop — covers every return path, `?`
-/// short-circuits, and panics.
-struct ExportGuard;
-impl Drop for ExportGuard {
-    fn drop(&mut self) {
-        EXPORTING.store(false, Ordering::SeqCst);
-    }
-}
-
 /// Export a diagnostics bundle (zip) to a user-chosen location via the system
 /// save dialog (SAF `ACTION_CREATE_DOCUMENT` on Android, a native dialog on
 /// desktop). The bundle bytes never enter the `WebView`. Returns [`ErrorCode::Cancelled`]
@@ -122,15 +108,10 @@ pub(crate) async fn export_diagnostics(
 ) -> Result<(), Error> {
     // Single-flight: reject a second concurrent export. The frontend disables
     // the button mid-export, but a server-side guard is cheap defense-in-depth
-    // against a non-UI caller (and against the shared-temp-file / plugin-path
-    // races two overlapping exports would otherwise hit).
-    if EXPORTING.swap(true, Ordering::SeqCst) {
-        return Err(Error::new(
-            ErrorCode::StoreError,
-            "diagnostics export already in progress",
-        ));
-    }
-    let _export_guard = ExportGuard;
+    // against a non-UI caller — and it now shares the single slot with
+    // `export_attachment`, since both drive the file-save plugin's one pending
+    // SAF picker (a concurrent pair would otherwise clobber its pendingTempPath).
+    let _export_guard = crate::export_guard::FileSaveGuard::acquire()?;
 
     let app_locked = state.app_locked.load(Ordering::SeqCst);
 

@@ -17,6 +17,7 @@
 use std::fmt;
 
 use base64::Engine as _;
+use serde::Serialize;
 use zeroize::Zeroizing;
 
 use crate::error::{Error, ErrorCode};
@@ -66,17 +67,19 @@ impl fmt::Debug for Attachment {
 /// Cheap attachment metadata for display, without decoding the payload. `size`
 /// is the *decoded* length, computed from the base64 length formula (exact for
 /// valid standard base64); [`extract`] is authoritative on export.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AttachmentMeta {
     filename: Option<String>,
     size: u64,
 }
 
 impl AttachmentMeta {
+    /// The attachment's suggested filename from `Content-Disposition`, if any.
     #[must_use]
     pub fn filename(&self) -> Option<&str> {
         self.filename.as_deref()
     }
+    /// The decoded byte count (computed from the base64 length, no decode).
     #[must_use]
     pub fn size(&self) -> u64 {
         self.size
@@ -175,7 +178,7 @@ fn attachment_payload(body: &str) -> Option<String> {
 /// `WebView`.
 fn kv_value<'a>(body: &'a str, key: &str) -> Option<&'a str> {
     for line in body.lines() {
-        let Some((k, v)) = line.split_once(": ") else {
+        let Some((k, v)) = line.split_once(KV_SEP) else {
             continue;
         };
         if k.eq_ignore_ascii_case(key) {

@@ -35,6 +35,7 @@ mod biometric;
 mod clipboard;
 mod config;
 mod diagnostics_export;
+mod export_guard;
 mod generator;
 mod git;
 mod identity;
@@ -441,6 +442,9 @@ pub fn run() {
             #[cfg(target_os = "android")]
             let cadence = state.app_config.background_sync();
             app.manage(state);
+            // Best-effort: clear any attachment stage stranded by a hard-killed
+            // prior export (StageGuard's Drop runs on panic/cancel, not SIGKILL).
+            read::sweep_attachment_stage(app.handle());
             #[cfg(target_os = "android")]
             {
                 let handle = app.handle().clone();
@@ -480,7 +484,8 @@ pub fn run() {
             read::copy_password,
             read::show_password,
             read::copy_totp,
-            read::has_totp,
+            read::entry_probe,
+            read::export_attachment,
             clipboard::copy_generated_password,
             clipboard::are_clipboard_notifications_enabled,
             clipboard::request_clipboard_notifications_permission,

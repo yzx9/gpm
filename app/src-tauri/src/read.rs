@@ -7,9 +7,12 @@
 
 use std::fmt;
 
-use rustpass::{Entry, Error, RankedPage};
+use std::path::Path;
+
+use rustpass::{AttachmentMeta, Entry, Error, ErrorCode, RankedPage};
 use serde::Serialize;
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
+use tauri_plugin_file_save::FileSaveExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -30,6 +33,10 @@ pub(crate) struct CopyResult {
     /// TOTP seed, so the UI can show/hide the 2FA affordance without a second
     /// read. No secret data.
     has_totp: bool,
+    /// A free byproduct of this decrypt: whether the entry's body is a binary
+    /// attachment, so the UI can switch to the Export affordance without a
+    /// second read. No secret data.
+    has_attachment: bool,
 }
 
 /// Returned by `copy_totp`. Like [`CopyResult`] but distinguishes "copied a
@@ -52,6 +59,11 @@ pub(crate) struct SensitiveContent {
     /// TOTP seed, so the UI can show/hide the 2FA affordance without a second
     /// read. Not itself secret.
     pub(crate) has_totp: bool,
+    /// A free byproduct of this decrypt: when `Some`, the entry is a binary
+    /// attachment — the UI hides the (empty/base64) password + notes block and
+    /// shows Export + this metadata instead. `notes` is cleared in that case so
+    /// the base64 body never reaches the `WebView`. Not itself secret.
+    pub(crate) attachment: Option<AttachmentMeta>,
 }
 
 /// Redacts secrets — mirrors `rustpass::Secret` so `Debug` never leaks plaintext.
@@ -60,8 +72,28 @@ impl fmt::Debug for SensitiveContent {
         f.debug_struct("SensitiveContent")
             .field("password", &"[REDACTED]")
             .field("notes", &"[REDACTED]")
+            .field("has_totp", &self.has_totp)
+            .field("attachment", &self.attachment)
             .finish()
     }
+}
+
+/// Returned by `entry_probe` — one decrypt gives both the 2FA-presence signal
+/// and attachment metadata, halving the decrypts vs two separate probes.
+/// `None` when the identity is encrypted + not cached (the probe never prompts).
+/// No secret data.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct EntryProbe {
+    pub(crate) has_totp: bool,
+    pub(crate) attachment: Option<AttachmentMeta>,
+}
+
+/// Returned by `export_attachment` — no secret data. `exported == false` means
+/// the entry holds no modern attachment (nothing staged, no dialog shown).
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AttachmentExportResult {
+    pub(crate) exported: bool,
+    pub(crate) entry_name: String,
 }
 
 /// One page of entries delivered to the `WebView` — a slice of the ranked set
@@ -163,6 +195,20 @@ pub(crate) async fn copy_password(
     reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
+    let body = secret.body();
+    let has_totp = rustpass::totp::has_totp(body);
+    let has_attachment = rustpass::has_attachment(body);
+    if has_attachment {
+        // An attachment has no password — don't clobber the clipboard with empty
+        // for the auto-clear window. The UI offers Export instead.
+        return Ok(CopyResult {
+            success: true,
+            entry_name,
+            cleared_after_secs: 0,
+            has_totp,
+            has_attachment,
+        });
+    }
 
     // Clipboard write + cancellable auto-clear + sticky notification, shared
     // with `copy_totp` via the helper. The password never reaches the WebView —
@@ -180,7 +226,8 @@ pub(crate) async fn copy_password(
         success: true,
         entry_name,
         cleared_after_secs,
-        has_totp: rustpass::totp::has_totp(secret.body()),
+        has_totp,
+        has_attachment,
     })
 }
 
@@ -202,10 +249,20 @@ pub(crate) async fn show_password_core<R: Runtime>(
     let secret = secret.inspect_err(|e| {
         log::warn!("show failed: {}: {e}", entry_path.trim_end_matches(".age"));
     })?;
+    let body = secret.body();
+    let attachment = rustpass::metadata(body);
     Ok(SensitiveContent {
         password: Zeroizing::new(secret.password().to_string()),
-        notes: Zeroizing::new(secret.body().to_string()),
-        has_totp: rustpass::totp::has_totp(secret.body()),
+        // For an attachment the body is the attribute lines + a base64 wall;
+        // clear it so the blob never reaches the WebView — the metadata +
+        // Export carry the entry instead.
+        notes: if attachment.is_some() {
+            Zeroizing::new(String::new())
+        } else {
+            Zeroizing::new(body.to_string())
+        },
+        has_totp: rustpass::totp::has_totp(body),
+        attachment,
     })
 }
 
@@ -272,27 +329,24 @@ pub(crate) async fn copy_totp(
     })
 }
 
-/// Whether `entry_path`'s body carries a TOTP seed — a probe that **never
-/// triggers an unlock**. The only "would need a prompt" outcome is an encrypted
-/// identity that is not cached: `Store::get` then fails with
+/// One-shot entry probe — **never triggers an unlock**. A single decrypt
+/// returns both whether the body carries a TOTP seed and whether it is a binary
+/// attachment (with metadata), so the detail view settles both affordances from
+/// one read instead of two. The only "would need a prompt" outcome is an
+/// encrypted identity that is not cached: `Store::get` then fails with
 /// `IDENTITY_ENCRYPTED`, and we return `Ok(None)` ("unknown") instead of
-/// prompting. Every other path decrypted without a prompt — a plaintext
-/// identity read straight from disk, or a cached session identity — so the
-/// probe is free and returns `Some(bool)`. No seed crosses IPC. Mirrors the
-/// read commands' lock-timer reset + Immediate wipe on the decrypt path, so
-/// under Idle this counts as the user activity it is (the user opened the
-/// entry); the not-cached branch touches no timers (no access happened).
+/// prompting. Mirrors the read commands' lock-timer reset + Immediate wipe on
+/// the decrypt path; the not-cached branch touches no timers (no access).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn has_totp(
+pub(crate) async fn entry_probe(
     state: State<'_, AppState>,
     app: AppHandle,
     entry_path: String,
-) -> Result<Option<bool>, Error> {
+) -> Result<Option<EntryProbe>, Error> {
     let secret = state.store.get(&entry_path).await;
     // Encrypted + not cached ⇒ would need an unlock prompt. Signal "unknown"
-    // and never prompt. (The frontend already gates on the cached flag; this is
-    // the race-safe authority.)
+    // and never prompt.
     let secret = match secret {
         Err(e) if e.code == "IDENTITY_ENCRYPTED" => return Ok(None),
         s => s,
@@ -300,8 +354,181 @@ pub(crate) async fn has_totp(
     reset_lock_timer(&state, &app);
     reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
-    let secret = secret.inspect_err(|e| log::warn!("has-totp failed: {entry_path}: {e}"))?;
-    Ok(Some(rustpass::totp::has_totp(secret.body())))
+    let secret = secret.inspect_err(|e| log::warn!("entry-probe failed: {entry_path}: {e}"))?;
+    let body = secret.body();
+    Ok(Some(EntryProbe {
+        has_totp: rustpass::totp::has_totp(body),
+        attachment: rustpass::metadata(body),
+    }))
+}
+
+/// Detect a binary attachment and export its decoded bytes to a user-chosen
+/// file — decrypt → base64-decode → stage → save. The decoded bytes never reach
+/// the `WebView`; only this non-secret result crosses IPC. `exported == false`
+/// means the entry holds no modern attachment. Mirrors `copy_password`'s
+/// decrypt-first + Immediate-wipe-on-both-paths lifecycle.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn export_attachment(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    entry_path: String,
+) -> Result<AttachmentExportResult, Error> {
+    export_attachment_core(&state, &app, &entry_path).await
+}
+
+/// Runtime-generic core of [`export_attachment`], so in-crate tests can drive it
+/// against the mock runtime. See [`export_attachment`] for the contract.
+pub(crate) async fn export_attachment_core<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    entry_path: &str,
+) -> Result<AttachmentExportResult, Error> {
+    let entry_name = entry_path.trim_end_matches(".age").to_string();
+    log::info!("export-attachment: {entry_name}");
+
+    // Single-flight first: the Android save plugin tracks one pending picker,
+    // so acquire the slot before paying for decrypt + decode — a losing
+    // concurrent export fails fast with REPO_BUSY instead of churning the
+    // identity cache for nothing.
+    let _guard = crate::export_guard::FileSaveGuard::acquire()?;
+
+    // Decrypt first so a FAILED read still counts as a secret access: under
+    // Immediate we reset the timer + wipe on both paths (an errored op must not
+    // leave the identity cached with no idle timer to eventually clear it).
+    let secret = state.store.get(entry_path).await;
+    reset_lock_timer(state, app);
+    reset_gate_idle_timer(state, app);
+    maybe_soft_wipe(state, app).await;
+    let secret =
+        secret.inspect_err(|e| log::warn!("export-attachment failed: {entry_name}: {e}"))?;
+
+    // Detect + decode. Bytes never reach the WebView.
+    let Some(attachment) = rustpass::attachment::extract(secret.body())? else {
+        return Ok(AttachmentExportResult {
+            exported: false,
+            entry_name,
+        });
+    };
+
+    // Stage the decoded bytes, then hand the path to the save plugin; the
+    // StageGuard wipes the stage on drop regardless of outcome (incl. panic).
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("cache dir unavailable: {e}")))?;
+    let temp_path = cache_dir.join(STAGE_FILENAME);
+    let _stage = StageGuard::new(&temp_path);
+    tokio::fs::write(&temp_path, attachment.bytes())
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::IoError,
+                format!("failed to stage attachment: {e}"),
+            )
+        })?;
+    // The stage holds decrypted bytes; 0600 keeps a stage stranded by a hard
+    // kill readable only by the app/user during the window before the
+    // next-launch `sweep_attachment_stage` wipes it. Best-effort: a perms
+    // failure is unusual and not worth aborting the export over.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600))
+        {
+            log::warn!("export-attachment: stage perms 0600 failed: {e}");
+        }
+    }
+
+    let suggested = sanitize_save_name(attachment.filename(), &entry_name);
+    let save_result = app
+        .file_save()
+        .save(
+            suggested,
+            temp_path.clone(),
+            "application/octet-stream".to_string(),
+        )
+        .await;
+    map_save_result(save_result)?;
+
+    Ok(AttachmentExportResult {
+        exported: true,
+        entry_name,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Attachment-export helpers (pure / unit-testable without the save dialog)
+// ---------------------------------------------------------------------------
+
+/// Filename used for the staged decoded attachment in the app cache dir.
+const STAGE_FILENAME: &str = "gpm-attachment.bin";
+
+/// Strip path separators from `filename` (the `Content-Disposition` value) or
+/// fall back to `entry_name`'s basename, mirroring gopass's `filepath.Base`. The
+/// save dialog must never receive a name carrying a path separator — an entry
+/// path like `servers/prod` would otherwise break the suggested name.
+#[must_use]
+pub(crate) fn sanitize_save_name(filename: Option<&str>, entry_name: &str) -> String {
+    let raw = filename.unwrap_or(entry_name);
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or(raw);
+    let clean: String = base
+        .chars()
+        .filter(|c| !is_path_sep(*c) && *c != '\0')
+        .collect();
+    if clean.is_empty() {
+        "attachment.bin".to_string()
+    } else {
+        clean
+    }
+}
+
+/// A path separator on either platform (`/` Unix/Android, `\` Windows).
+fn is_path_sep(c: char) -> bool {
+    c == '/' || c == '\\'
+}
+
+/// Translate a file-save plugin result into the app error model: `CANCELLED` is
+/// a soft cancel (the user dismissed the picker), everything else is a real
+/// failure.
+fn map_save_result(result: Result<(), tauri_plugin_file_save::FileSaveError>) -> Result<(), Error> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) if e.code == "CANCELLED" => Err(Error::new(ErrorCode::Cancelled, "Save cancelled")),
+        Err(e) => Err(Error::new(
+            ErrorCode::StoreError,
+            format!("attachment export failed: {}", e.message),
+        )),
+    }
+}
+
+/// Wipes the staged decoded attachment on drop (best-effort, sync so it works
+/// under panic). Constructed before the stage write so a failure between write
+/// and save still cleans up.
+struct StageGuard<'a> {
+    path: &'a Path,
+}
+impl<'a> StageGuard<'a> {
+    fn new(path: &'a Path) -> Self {
+        let _ = std::fs::remove_file(path); // best-effort wipe of a stranded prior stage
+        Self { path }
+    }
+}
+impl Drop for StageGuard<'_> {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.path);
+    }
+}
+
+/// Best-effort removal of a stranded attachment stage from a prior run killed
+/// mid-export (`StageGuard`'s Drop runs on panic/cancel but not on SIGKILL).
+/// Called once at app startup so a hard-killed export doesn't leave decrypted
+/// bytes sitting in `app_cache_dir` until the next export overwrites them.
+pub(crate) fn sweep_attachment_stage<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(cache_dir) = app.path().app_cache_dir() else {
+        return;
+    };
+    let _ = std::fs::remove_file(cache_dir.join(STAGE_FILENAME));
 }
 
 #[cfg(test)]
@@ -378,10 +605,11 @@ mod tests {
             password: Zeroizing::new("hunter2".to_string()),
             notes: Zeroizing::new("username: alice".to_string()),
             has_totp: true,
+            attachment: None,
         };
         assert_eq!(
             serde_json::to_string(&content).expect("serialize"),
-            r#"{"password":"hunter2","notes":"username: alice","has_totp":true}"#
+            r#"{"password":"hunter2","notes":"username: alice","has_totp":true,"attachment":null}"#
         );
         assert!(!format!("{content:?}").contains("hunter2"));
     }
@@ -405,6 +633,84 @@ mod tests {
         assert_eq!(
             clipboard_clear_plan(u64::from(u32::MAX) + 1),
             (true, u32::MAX)
+        );
+    }
+
+    // ---- attachment-export pure helpers ----
+
+    #[test]
+    fn sanitize_save_name_uses_header_filename() {
+        assert_eq!(
+            sanitize_save_name(Some("photo.png"), "ignored"),
+            "photo.png"
+        );
+    }
+
+    #[test]
+    fn sanitize_save_name_strips_path_separators() {
+        // gopass writes filepath.Base (no separators), but a hand-crafted store
+        // could carry them — strip so the save dialog never gets a path.
+        assert_eq!(sanitize_save_name(Some("../evil.png"), "x"), "evil.png");
+        assert_eq!(sanitize_save_name(Some("a/b/c.bin"), "x"), "c.bin");
+    }
+
+    #[test]
+    fn sanitize_save_name_falls_back_to_entry_basename() {
+        // No Content-Disposition filename → entry name's basename.
+        assert_eq!(sanitize_save_name(None, "servers/prod"), "prod");
+        assert_eq!(sanitize_save_name(None, "top"), "top");
+    }
+
+    #[test]
+    fn sanitize_save_name_final_fallback_when_empty() {
+        assert_eq!(sanitize_save_name(Some(""), ""), "attachment.bin");
+        assert_eq!(sanitize_save_name(None, ""), "attachment.bin");
+    }
+
+    #[test]
+    fn map_save_result_categorizes_outcomes() {
+        use tauri_plugin_file_save::FileSaveError;
+        assert!(map_save_result(Ok(())).is_ok());
+        let cancelled = map_save_result(Err(FileSaveError {
+            code: "CANCELLED".into(),
+            message: "dismissed".into(),
+        }));
+        assert_eq!(cancelled.unwrap_err().code, "CANCELLED");
+        let failed = map_save_result(Err(FileSaveError {
+            code: "IO_ERROR".into(),
+            message: "disk full".into(),
+        }));
+        assert_eq!(failed.unwrap_err().code, "STORE_ERROR");
+    }
+
+    // ---- StageGuard wipes the staged decoded bytes (security-load-bearing) ----
+
+    #[test]
+    fn stage_guard_wipes_staged_file_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gpm-attachment.bin");
+        {
+            let _guard = StageGuard::new(&path);
+            // Simulate the stage write that happens after construction.
+            std::fs::write(&path, b"decoded bytes").unwrap();
+            assert!(path.exists(), "stage exists while guard is held");
+        }
+        assert!(!path.exists(), "StageGuard::drop must wipe the staged file");
+    }
+
+    #[test]
+    fn stage_guard_wipes_on_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gpm-attachment.bin");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = StageGuard::new(&path);
+            std::fs::write(&path, b"decoded bytes").unwrap();
+            panic!("simulated mid-export panic");
+        }));
+        assert!(result.is_err(), "the panic should propagate");
+        assert!(
+            !path.exists(),
+            "StageGuard::drop must wipe the staged file even on panic"
         );
     }
 }
