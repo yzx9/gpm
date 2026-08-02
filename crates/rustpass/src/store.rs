@@ -1110,6 +1110,45 @@ impl Store {
         Secret::parse(&decrypted)
     }
 
+    /// Decrypt entry `name` AND capture its blob oid at HEAD, both from the SAME
+    /// HEAD commit-tree snapshot (atomic) — the read-time base version for
+    /// base-version-aware edit (RFC R026). Errors propagate (fail-closed): if the
+    /// oid cannot be captured the read fails with a clear error rather than
+    /// silently downgrading to an unprotected base. Use [`Store::get`] when the
+    /// oid is not needed.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::EntryNotFound`] if the entry is absent at HEAD (fail-closed),
+    /// [`ErrorCode::NoRepo`] if no repo is found, or a git/crypto error.
+    pub async fn get_with_oid(&self, name: &str) -> Result<(Secret, String), Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path);
+        let passfile = passfile_rel(name, self.secret_ext()?);
+        let (encrypted, oid) = self.storage()?.get_with_oid(repo_path, &passfile).await?;
+        let identity_bytes = self.get_identity_bytes().await?;
+        let crypto = self.crypto()?;
+        let decrypted = crypto.decrypt(&encrypted, &identity_bytes).await?;
+        let secret = Secret::parse(&decrypted)?;
+        Ok((secret, oid))
+    }
+
+    /// Blob oid of entry `name` at HEAD, or `None` if absent. Cheap, non-secret,
+    /// needs no identity/decrypt — used by the delete base-version capture on the
+    /// detail page (decoupled from reveal, so delete-without-reveal is still
+    /// protected) and available for the orchestrator's pre-write check.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::NoRepo`] if no repo is found, or a git error. Returns
+    /// `Ok(None)` (not an error) when the entry is absent at HEAD.
+    pub async fn entry_oid(&self, name: &str) -> Result<Option<String>, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path);
+        let passfile = passfile_rel(name, self.secret_ext()?);
+        self.storage()?.entry_oid(repo_path, &passfile).await
+    }
+
     /// Encrypt and write a secret to the store, then commit **locally** (no
     /// sync, no push).
     ///

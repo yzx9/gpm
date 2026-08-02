@@ -360,6 +360,91 @@ impl StorageBackend for GitStorage {
         spawn_blocking(move || history::blob_at_commit_at(&repo_path, &commit_oid, &passfile))
             .await?
     }
+
+    async fn entry_oid(&self, repo_path: &Path, rel_path: &str) -> Result<Option<String>, Error> {
+        ensure_within_repo(rel_path)?;
+        let repo_path = repo_path.to_path_buf();
+        let rel = rel_path.to_string();
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)
+                .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+            let tree = head_tree(&repo)?;
+            // None when the entry is absent at HEAD (a teammate deleted it) OR is
+            // not a blob — a subtree/gitlink planted at <name>.age must NOT be
+            // returned as a blob base-version, or the orchestrator's oid compare
+            // would span object types and subvert the conflict check (R026).
+            Ok(tree
+                .get_path(Path::new(&rel))
+                .ok()
+                .filter(|e| e.kind() == Some(git2::ObjectType::Blob))
+                .map(|e| e.id().to_string()))
+        })
+        .await?
+    }
+
+    async fn get_with_oid(
+        &self,
+        repo_path: &Path,
+        rel_path: &str,
+    ) -> Result<(Vec<u8>, String), Error> {
+        ensure_within_repo(rel_path)?;
+        let repo_path = repo_path.to_path_buf();
+        let rel = rel_path.to_string();
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&repo_path)
+                .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+            let tree = head_tree(&repo)?;
+            let entry = tree.get_path(Path::new(&rel)).map_err(|_| {
+                // Fail-closed: never pair bytes with a missing/stale oid. The read
+                // path surfaces this as a clear error rather than downgrading to
+                // an unprotected base version (RFC R026, codex #1+#2).
+                Error::new(
+                    ErrorCode::EntryNotFound,
+                    format!("Entry not found at HEAD: {rel}"),
+                )
+            })?;
+            // Only a Blob is a secret entry. A subtree/gitlink at <name>.age is
+            // not — surface EntryNotFound (the documented fail-closed contract)
+            // rather than letting find_blob fail as a generic StoreError.
+            if entry.kind() != Some(git2::ObjectType::Blob) {
+                return Err(Error::new(
+                    ErrorCode::EntryNotFound,
+                    format!("Not a secret blob at HEAD: {rel}"),
+                ));
+            }
+            let oid = entry.id();
+            // Read the blob content from the SAME tree snapshot (not the worktree)
+            // so the bytes and the oid cannot diverge under a concurrent pull.
+            let bytes = repo
+                .find_blob(oid)
+                .map_err(|e| {
+                    Error::new(ErrorCode::StoreError, format!("Failed to read blob: {e}"))
+                })?
+                .content()
+                .to_vec();
+            Ok((bytes, oid.to_string()))
+        })
+        .await?
+    }
+}
+
+/// Resolve HEAD to its commit tree — the shared prelude of [`GitStorage::entry_oid`]
+/// and [`GitStorage::get_with_oid`]. Both read from the committed state (not the
+/// worktree) so the base-version they capture/compare is measured against HEAD.
+/// Uses `find_tree(commit.tree_id())` rather than `commit.tree()` so the returned
+/// tree borrows the repository directly (not the local commit) and can outlive it.
+fn head_tree(repo: &git2::Repository) -> Result<git2::Tree<'_>, Error> {
+    let head = repo
+        .head()
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Failed to read HEAD: {e}")))?
+        .target()
+        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit"))?;
+    let tree_id = repo
+        .find_commit(head)
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Failed to read HEAD commit: {e}")))?
+        .tree_id();
+    repo.find_tree(tree_id)
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Failed to read HEAD tree: {e}")))
 }
 
 #[cfg(test)]
@@ -574,5 +659,109 @@ mod tests {
         let view = RepoFiles::new(&storage, dir.path());
         let v: &dyn RepoFileView = &view;
         assert_eq!(v.read(".age-recipients").await.unwrap(), b"age1abc\n");
+    }
+
+    /// R026 read primitive: `get_with_oid` on an absent path returns
+    /// `EntryNotFound` (fail-closed) — never `Ok` with empty bytes that the
+    /// orchestrator would pair with a stale oid and silently downgrade an
+    /// edit/delete to an unprotected base version.
+    #[tokio::test]
+    async fn get_with_oid_returns_entry_not_found_for_absent_path() {
+        use crate::storage::git::test_support::{create_empty_commit, test_signature};
+        let dir = tempfile::tempdir().unwrap();
+        // `get_with_oid` reads from the HEAD tree, so the repo needs an initial
+        // commit (an empty tree suffices — the absent path is what we test).
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let _oid = create_empty_commit(&repo, &test_signature());
+        drop(repo);
+
+        let storage = GitStorage;
+        let err = storage
+            .get_with_oid(dir.path(), "missing.age")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+    }
+
+    /// R026 read primitive: `get_with_oid` returns the SAME oid as `entry_oid`
+    /// for a present blob (the orchestrator compares them byte-for-byte), plus
+    /// the blob bytes from the SAME HEAD-tree snapshot (no worktree read).
+    #[tokio::test]
+    async fn get_with_oid_matches_entry_oid_for_present_blob() {
+        use crate::storage::git::test_support::test_signature;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        storage
+            .set(dir.path(), "entry.age", b"ciphertext-bytes")
+            .await
+            .unwrap();
+        // Commit so HEAD's tree carries `entry.age` at a real blob oid.
+        {
+            let repo = git2::Repository::init(dir.path()).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("entry.age")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = test_signature();
+            repo.commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[])
+                .unwrap();
+            drop(tree);
+            drop(index);
+            drop(repo);
+        }
+
+        let oid = storage
+            .entry_oid(dir.path(), "entry.age")
+            .await
+            .unwrap()
+            .expect("present at HEAD");
+        let (bytes, oid_from_get) = storage
+            .get_with_oid(dir.path(), "entry.age")
+            .await
+            .expect("get_with_oid");
+        assert_eq!(oid_from_get, oid, "oids must match");
+        assert_eq!(bytes, b"ciphertext-bytes");
+    }
+
+    /// R026 read primitive: a subtree planted at `<name>.age` is NOT a secret
+    /// blob. `entry_oid` returns `None` (the base-version guard skips it) and
+    /// `get_with_oid` returns `EntryNotFound` (the fail-closed blob-kind guard)
+    /// — rather than pairing bytes with a tree oid and subverting the conflict
+    /// check.
+    #[tokio::test]
+    async fn entry_oid_none_and_get_with_oid_not_found_for_subtree() {
+        use crate::storage::git::test_support::test_signature;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = GitStorage;
+        // Plant "entry.age" as a directory with a file inside, so the HEAD-tree
+        // entry at "entry.age" is a Tree, not a Blob.
+        std::fs::create_dir(dir.path().join("entry.age")).unwrap();
+        std::fs::write(dir.path().join("entry.age").join("child"), b"x").unwrap();
+        {
+            let repo = git2::Repository::init(dir.path()).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("entry.age/child")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = test_signature();
+            repo.commit(Some("HEAD"), &sig, &sig, "seed subtree", &tree, &[])
+                .unwrap();
+            drop(tree);
+            drop(index);
+            drop(repo);
+        }
+
+        let oid = storage.entry_oid(dir.path(), "entry.age").await.unwrap();
+        assert!(oid.is_none(), "subtree at <name>.age → None (fail-closed)");
+        let err = storage
+            .get_with_oid(dir.path(), "entry.age")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code, "ENTRY_NOT_FOUND",
+            "subtree at <name>.age → EntryNotFound (fail-closed blob-kind guard)"
+        );
     }
 }

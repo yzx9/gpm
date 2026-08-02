@@ -613,6 +613,24 @@ pub trait StorageBackend: Send + Sync {
         passfile: &str,
         commit_oid: &str,
     ) -> Result<Option<Vec<u8>>, Error>;
+
+    /// Blob oid of `rel_path` at HEAD, or `None` if absent at HEAD. Used to
+    /// capture the read-time base version for base-version-aware edit/delete
+    /// (RFC R026) and for the orchestrator's pre-write check.
+    async fn entry_oid(&self, repo_path: &Path, rel_path: &str) -> Result<Option<String>, Error>;
+
+    /// The ciphertext bytes of `rel_path` AND its blob oid, both read from the
+    /// SAME HEAD commit-tree snapshot — atomic, so a concurrent pull cannot pair
+    /// bytes from one repo state with an oid from another. Errors
+    /// ([`ErrorCode::EntryNotFound`]) when the path is absent at HEAD (fail-closed
+    /// — the read path never pairs bytes with a stale/missing oid). Used by the
+    /// reveal/edit read path so the captured base oid is tied to exactly the bytes
+    /// the user saw (RFC R026).
+    async fn get_with_oid(
+        &self,
+        repo_path: &Path,
+        rel_path: &str,
+    ) -> Result<(Vec<u8>, String), Error>;
 }
 
 /// Read-only view of repo working-tree files, bound to a specific `repo_path`.
@@ -832,20 +850,27 @@ pub struct CommitIdentity {
 /// Outcome of a write attempt.
 ///
 /// Writes run through [`crate::store::Store::autosync_write`] (pull → write →
-/// push). A normal save returns [`WriteOutcome::Written`]. Two non-terminal
-/// outcomes surface a modal instead of a generic error:
+/// push). A normal save returns [`WriteOutcome::Written`]. Non-terminal outcomes
+/// surface a modal instead of a generic error:
 /// - [`WriteOutcome::NeedsDivergenceResolve`] — the push was rejected because
 ///   the remote moved during the write (a race); the carried [`SyncDivergence`]
 ///   lets the UI show the resolve modal without a second round-trip.
 /// - [`WriteOutcome::AuthenticityBlocked`] — the pre-write pull was refused
 ///   under Enforce signature verification (HEAD did not advance); the carried
 ///   [`AuthenticityResult`] reuses the pull path's block-issue UI.
+/// - [`WriteOutcome::EntryConflict`] — a base-version-aware edit/delete found
+///   the entry changed on the remote since the read (RFC R026). No local write
+///   was made; the caller resolves via
+///   [`crate::store::Store::resolve_entry_conflict`]. Carries no plaintext.
+/// - [`WriteOutcome::NoChange`] — a delete discovered the entry was already
+///   absent at HEAD (a teammate deleted it); nothing was committed. Distinct
+///   from [`WriteOutcome::Written`] so the UI toasts "already removed" rather
+///   than claiming a commit.
 ///
-/// **Limitation:**
-/// this only catches the push-rejection *race*. A write built on a stale read
-/// can still fast-forward over a newer remote change and push cleanly — no
-/// modal — silently overwriting it (recoverable in git history). That limitation
-/// is surfaced to the user in Settings, not per-write.
+/// The stale-read silent clobber (a write built on a stale snapshot
+/// fast-forwarding over a newer remote change) is caught for edit/delete under
+/// AutoSync-ON by [`WriteOutcome::EntryConflict`]; under AutoSync-OFF it still
+/// surfaces as a repo-level divergence at the next manual Sync.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WriteOutcome {
@@ -872,6 +897,62 @@ pub enum WriteOutcome {
         /// the write (during the pull phase — nothing committed).
         committed: bool,
     },
+    /// A base-version-aware edit/delete refused the write: the entry's current
+    /// blob oid at HEAD (after the pre-write pull) differs from the base oid the
+    /// caller captured at read time, so the edit was built on a stale snapshot
+    /// (RFC R026). No local write was made. The caller resolves via
+    /// [`crate::store::Store::resolve_entry_conflict`] using the carried tip.
+    /// Carries no plaintext — the edited body stays in the caller's form.
+    EntryConflict {
+        /// The entry name being edited/deleted (without `.age`).
+        name: String,
+        /// The blob oid the edit was built against (the read-time base).
+        base_oid: String,
+        /// The entry's current blob oid at HEAD, or `None` if a teammate deleted
+        /// it (the resurrection case). Equal to `base_oid` would not have fired.
+        current_oid: Option<String>,
+        /// The post-pull HEAD (== remote tip the conflict was detected against).
+        /// Passed back to `resolve_entry_conflict` as a TOCTOU guard.
+        remote_tip: String,
+        /// Whether this conflict is an edit or a delete (the resolve payload and
+        /// keep-mine semantics differ). Named `op` because the enum's serde tag
+        /// is already `kind`.
+        op: ExpectedKind,
+    },
+    /// A delete found the entry already absent at HEAD (a teammate deleted it):
+    /// nothing was committed. Distinct from [`WriteOutcome::Written`] so the UI
+    /// can toast "already removed" instead of claiming a delete commit.
+    NoChange {
+        /// Short hash (7 chars) of the current (unchanged) HEAD.
+        head: String,
+    },
+}
+
+/// Whether a base-version-aware write is an edit or a delete (the orchestrator
+/// check and resolve semantics differ between the two). Crosses IPC as part of
+/// [`WriteOutcome::EntryConflict`] and the resolve command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpectedKind {
+    /// Edit an existing entry in place.
+    Edit,
+    /// Delete an existing entry.
+    Delete,
+}
+
+/// How to resolve a [`WriteOutcome::EntryConflict`] (the user's per-entry
+/// choice). "Cancel" is client-side — the frontend simply doesn't call
+/// [`crate::store::Store::resolve_entry_conflict`] — so it is absent here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryConflictChoice {
+    /// Overwrite/remove the remote version with the caller's edited body (an
+    /// informed overwrite, not silent). For an edit the caller re-sends the
+    /// edited plaintext; for a delete no plaintext is needed.
+    KeepMine,
+    /// Adopt the teammate's version as-is. Local HEAD is already at the reviewed
+    /// tip, so this is a TOCTOU-guarded no-op that confirms the tip and reloads.
+    KeepTheirs,
 }
 
 /// How to resolve a [`SyncOutcome::Diverged`] (the user's choice). "Cancel" is
