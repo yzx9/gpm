@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.15.1] - 2026-08-02
+
 ### Changed
 
 - The diagnostic log now opens with the app's version and build (so a bug report is never ambiguous about what was running) and records each time the app returns to the foreground, loses or regains window focus, or exits — giving a clearer picture of what the app was doing when you attach the log.
@@ -378,7 +380,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.15.1...HEAD
+[v0.15.1]: https://github.com/yzx9/gpm/compare/v0.15.0...v0.15.1
 [v0.15.0]: https://github.com/yzx9/gpm/compare/v0.14.2...v0.15.0
 [v0.14.2]: https://github.com/yzx9/gpm/compare/v0.14.1...v0.14.2
 [v0.14.1]: https://github.com/yzx9/gpm/compare/v0.14.0...v0.14.1
