@@ -56,6 +56,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "some notes",
+        has_totp: false,
+        attachment: null,
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -70,6 +72,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "some notes",
+        has_totp: false,
+        attachment: null,
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -80,7 +84,12 @@ describe("EntryDetailPage", () => {
     });
 
     it("ticks the auto-clear countdown down each second", async () => {
-      vi.mocked(invoke).mockResolvedValue({ password: "s3cret", notes: "" });
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "",
+        has_totp: false,
+        attachment: null,
+      });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
       await flushPromises();
@@ -95,7 +104,12 @@ describe("EntryDetailPage", () => {
     });
 
     it("clamps the countdown at 1s and never shows 0s before the wipe", async () => {
-      vi.mocked(invoke).mockResolvedValue({ password: "s3cret", notes: "" });
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "",
+        has_totp: false,
+        attachment: null,
+      });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
       await flushPromises();
@@ -115,7 +129,12 @@ describe("EntryDetailPage", () => {
     });
 
     it("resets the countdown when the view-clear setting changes mid-reveal", async () => {
-      vi.mocked(invoke).mockResolvedValue({ password: "s3cret", notes: "" });
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "",
+        has_totp: false,
+        attachment: null,
+      });
       const { wrapper, securitySettings } = mountWithApp(EntryDetailPage);
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
       await flushPromises();
@@ -145,6 +164,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "some notes",
+        has_totp: false,
+        attachment: null,
       });
       const wrapper = mountPage();
       // First click reveals.
@@ -170,6 +191,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "notes",
+        has_totp: false,
+        attachment: null,
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -239,6 +262,7 @@ describe("EntryDetailPage", () => {
         password: string;
         notes: string;
         has_totp: boolean;
+        attachment: null;
       }) => void;
       vi.mocked(invoke).mockImplementation((cmd: string) => {
         if (cmd === "plugin:screen-secure|set_secure") return Promise.resolve();
@@ -257,7 +281,12 @@ describe("EntryDetailPage", () => {
       await flushPromises();
 
       // The decrypt resolves late — must NOT render into the leaving page.
-      resolveShow({ password: "late-secret", notes: "", has_totp: false });
+      resolveShow({
+        password: "late-secret",
+        notes: "",
+        has_totp: false,
+        attachment: null,
+      });
       await flushPromises();
 
       expect(wrapper.text()).not.toContain("late-secret");
@@ -269,6 +298,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         entry_name: "prod",
         cleared_after_secs: 45,
+        has_totp: false,
+        has_attachment: false,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper
@@ -311,15 +342,23 @@ describe("EntryDetailPage", () => {
       // queue drifts and only passes via a sibling test's leaked default.
       vi.mocked(invoke).mockImplementation((cmd: string) => {
         switch (cmd) {
-          case "has_totp":
+          case "entry_probe":
+            return Promise.resolve({ has_totp: true, attachment: null });
           case "are_clipboard_notifications_enabled":
             return Promise.resolve(true);
           case "show_password":
-            return Promise.resolve({ password: "s3cret", notes: "" });
+            return Promise.resolve({
+              password: "s3cret",
+              notes: "",
+              has_totp: false,
+              attachment: null,
+            });
           case "copy_password":
             return Promise.resolve({
               entry_name: "prod",
               cleared_after_secs: 45,
+              has_totp: false,
+              has_attachment: false,
             });
           default:
             return Promise.resolve(undefined);
@@ -345,6 +384,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         entry_name: "prod",
         cleared_after_secs: 45,
+        has_totp: false,
+        has_attachment: false,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
       await wrapper
@@ -433,6 +474,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "notes",
+        has_totp: false,
+        attachment: null,
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -453,6 +496,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "notes",
+        has_totp: false,
+        attachment: null,
       });
       // The modal keeps the page mounted, so a lock transition must wipe in place.
       const { wrapper, lock } = mountWithApp(EntryDetailPage);
@@ -473,6 +518,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "",
+        has_totp: false,
+        attachment: null,
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -489,6 +536,8 @@ describe("EntryDetailPage", () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",
         notes: "",
+        has_totp: false,
+        attachment: null,
       });
       const wrapper = mountPage();
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
@@ -541,7 +590,7 @@ describe("EntryDetailPage", () => {
       // First queued response is the mount-time `has_totp` probe (identity is
       // cached by default); the next two are the delete + its resolve.
       vi.mocked(invoke)
-        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce({ has_totp: false, attachment: null })
         .mockResolvedValueOnce({
           kind: "needs_divergence_resolve",
           local_ahead: 1,
@@ -641,14 +690,19 @@ describe("EntryDetailPage", () => {
     const totpBtn = () => 'button[aria-label="Copy 2FA code to clipboard"]';
 
     it("shows the button when the entry has a seed (identity cached → free probe)", async () => {
-      vi.mocked(invoke).mockResolvedValue(true); // has_totp probe → seed present
+      // entry_probe → seed present, no attachment.
+      vi.mocked(invoke).mockResolvedValue({ has_totp: true, attachment: null });
       const wrapper = mountPage();
       await flushPromises();
       expect(wrapper.find(totpBtn()).exists()).toBe(true);
     });
 
     it("hides the button when the entry has no seed (identity cached → free probe)", async () => {
-      vi.mocked(invoke).mockResolvedValue(false); // has_totp probe → no seed
+      // entry_probe → no seed, no attachment.
+      vi.mocked(invoke).mockResolvedValue({
+        has_totp: false,
+        attachment: null,
+      });
       const wrapper = mountPage();
       await flushPromises();
       expect(wrapper.find(totpBtn()).exists()).toBe(false);
@@ -662,6 +716,65 @@ describe("EntryDetailPage", () => {
       await flushPromises();
       expect(wrapper.find(totpBtn()).exists()).toBe(true);
       expect(invoke).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("attachment entry", () => {
+    it("hides Copy/Show and shows Export + metadata + locked Edit for a confirmed attachment", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        has_totp: false,
+        attachment: { filename: "photo.png", size: 1234 },
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Copy/Show are dead for an attachment (empty password, base64 body).
+      expect(
+        wrapper
+          .find('button[aria-label="Copy password to clipboard"]')
+          .exists(),
+      ).toBe(false);
+      expect(wrapper.find('button[aria-label="Show password"]').exists()).toBe(
+        false,
+      );
+      // Export is the primary action; the metadata caption shows the filename.
+      expect(
+        wrapper
+          .find('button[aria-label="Export attachment to a file"]')
+          .exists(),
+      ).toBe(true);
+      expect(wrapper.text()).toContain("photo.png");
+      // Edit is locked with the attachment hint.
+      expect(
+        wrapper
+          .find('button[aria-label="Edit servers/prod"]')
+          .attributes("disabled"),
+      ).toBeDefined();
+      expect(wrapper.text()).toContain("Attachments can't be edited yet");
+    });
+
+    it("swallows a dismissed save picker (CANCELLED) with no error UI", async () => {
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "entry_probe")
+          return Promise.resolve({
+            has_totp: false,
+            attachment: { filename: "x.bin", size: 1 },
+          });
+        if (cmd === "export_attachment")
+          return Promise.reject({
+            code: "CANCELLED",
+            message: "Save cancelled",
+          });
+        return Promise.resolve(undefined);
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper
+        .find('button[aria-label="Export attachment to a file"]')
+        .trigger("click");
+      await flushPromises();
+      // A dismissed picker is a silent cancel, not an error.
+      expect(wrapper.find("[role='alert']").exists()).toBe(false);
     });
   });
 });

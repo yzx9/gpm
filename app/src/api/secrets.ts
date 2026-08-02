@@ -38,6 +38,8 @@ export interface CopyResult {
   /** Free byproduct of the decrypt: whether the entry's body carries a TOTP
    *  seed, so the UI can show/hide the 2FA button without a second read. */
   has_totp: boolean;
+  /** Free byproduct of the decrypt: whether the entry is a binary attachment. */
+  has_attachment: boolean;
 }
 
 /** Result of `copy_totp`: `copied` is `false` when the entry has no TOTP seed
@@ -48,6 +50,12 @@ export interface TotpCopyResult {
   cleared_after_secs: number;
 }
 
+/** Metadata for a binary attachment (non-secret): filename + decoded size. */
+export interface AttachmentMeta {
+  filename: string | null;
+  size: number;
+}
+
 /** Decrypted secret content (password first line, notes the rest). */
 export interface SensitiveContent {
   password: string;
@@ -55,6 +63,24 @@ export interface SensitiveContent {
   /** Free byproduct of the decrypt: whether the entry's body carries a TOTP
    *  seed, so the UI can show/hide the 2FA button without a second read. */
   has_totp: boolean;
+  /** When set, the entry is a binary attachment: `notes` is empty (the base64
+   *  body never crosses IPC) and the UI shows Export + this metadata instead. */
+  attachment: AttachmentMeta | null;
+}
+
+/** One-shot entry probe: one decrypt returns both the 2FA-presence signal and
+ *  attachment metadata so the detail view settles both affordances from one
+ *  read. `null` when the identity is not cached (the probe never prompts). */
+export interface EntryProbe {
+  has_totp: boolean;
+  attachment: AttachmentMeta | null;
+}
+
+/** Result of `export_attachment`. `exported` is `false` when the entry holds no
+ *  modern attachment (nothing staged, no dialog). No secret data. */
+export interface AttachmentExportResult {
+  exported: boolean;
+  entry_name: string;
 }
 
 /** One input field of a create preset (mirrors `rustpass::template::PresetField`). */
@@ -141,12 +167,23 @@ export async function copyTotp(
   return invoke<TotpCopyResult>("copy_totp", { entryPath, notifyText: notify });
 }
 
-/** Whether the entry's body carries a TOTP seed — a **cache-only** probe that
- *  never triggers an unlock: returns `null` when the identity is not currently
- *  cached, so the caller can fall back to showing the 2FA button until the user
- *  performs an authenticated action. Never returns the seed. */
-export async function hasTotp(entryPath: string): Promise<boolean | null> {
-  return invoke<boolean | null>("has_totp", { entryPath });
+/** One-shot **cache-only** probe (never triggers an unlock): returns both the
+ *  2FA-presence signal and attachment metadata from a single decrypt, or `null`
+ *  when the identity is not currently cached. Never returns secret data. */
+export async function entryProbe(
+  entryPath: string,
+): Promise<EntryProbe | null> {
+  return invoke<EntryProbe | null>("entry_probe", { entryPath });
+}
+
+/** Detect a binary attachment and export its decoded bytes to a user-chosen
+ *  file. `exported` is `false` when the entry has no attachment. Rejects with
+ *  `CANCELLED` (dismissed picker), `REPO_BUSY` (another export in progress), or
+ *  a real error. Decoded bytes never reach the WebView. */
+export async function exportAttachment(
+  entryPath: string,
+): Promise<AttachmentExportResult> {
+  return invoke<AttachmentExportResult>("export_attachment", { entryPath });
 }
 
 /** Decrypt + return the entry's content for in-app reveal. */

@@ -64,6 +64,9 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const decryptError = ref(false);
+// Set when the entry is a binary attachment — can't be round-tripped through
+// the text editor without destroying it, so editing is blocked at the source.
+const isAttachment = ref(false);
 const { cancelling, cancelSave } = useCancellableSave();
 
 // R031: the edit form shows decrypted plaintext, so hold a screen-capture claim
@@ -120,6 +123,7 @@ const editBody = computed(() =>
 const canSave = computed(
   () =>
     !saving.value &&
+    !isAttachment.value &&
     editBody.value.trim() !== "" &&
     editBody.value !== loadedBody.value,
 );
@@ -139,6 +143,14 @@ async function loadBody() {
     if (myToken !== loadToken) return;
     if (!claimed) {
       error.value = t("common.toast.secureScreenFailed");
+      return;
+    }
+    if (claimed.attachment) {
+      // An attachment can't be edited as text without destroying it (a
+      // byte-compatible write is deferred — R067). Block at the source — covers the
+      // detail page's pre-probe window and direct /edit deep-links alike.
+      isAttachment.value = true;
+      error.value = t("entry.attachmentEditDisabledHint");
       return;
     }
     editPassword.value = claimed.password ?? "";

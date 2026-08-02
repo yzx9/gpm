@@ -75,4 +75,30 @@ describe("EntryEditPage", () => {
     });
     expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
   });
+
+  it("blocks editing for a binary attachment (hint, disabled save, no base64 body)", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "show_password")
+        return Promise.resolve({
+          password: "",
+          notes: "",
+          has_totp: false,
+          attachment: { filename: "x.bin", size: 10 },
+        });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(EntryEditPage).wrapper;
+    await flushPromises();
+
+    // loadBody detected the attachment, set the hint, and early-returned.
+    expect(w.text()).toContain("Attachments can't be edited yet");
+    // canSave is false for an attachment — Save stays disabled.
+    expect(
+      w.find('button[type="submit"]').attributes("disabled"),
+    ).toBeDefined();
+    // The base64 body never reached the editor textarea.
+    expect((w.find("textarea").element as HTMLTextAreaElement).value).toBe("");
+    // And no edit_secret write was attempted.
+    expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
+  });
 });

@@ -8,9 +8,11 @@ import {
   copyTotp as copyTotpCmd,
   deleteSecret as deleteSecretCmd,
   ensureClipboardNotifyPermission,
-  hasTotp as hasTotpCmd,
+  entryProbe as entryProbeCmd,
+  exportAttachment as exportAttachmentCmd,
   showPassword as showPasswordCmd,
   type AppError,
+  type AttachmentMeta,
   type DivergenceChoice,
   type PullResult,
 } from "@/api";
@@ -33,7 +35,7 @@ import {
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
-import { Clock, Copy, Eye } from "@lucide/vue";
+import { Clock, Copy, Download, Eye, Paperclip } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
@@ -73,40 +75,69 @@ const decryptError = ref(false);
 const deleting = ref(false);
 const { cancelling, cancelSave } = useCancellableSave();
 
-// 2FA affordance visibility. `null` = unknown (not yet probed): show the button
-// as a fallback so the user can always try; `true`/`false` once we know. The
-// probe runs only when the identity is already cached — so it never triggers an
-// unlock. Under a per-op lock the button stays as the fallback until the first
-// copy/show on this entry reports the truth back.
+// Entry affordance signals, all tri-state: `null` = unknown (not yet probed /
+// identity not cached), `true`/`false` once we know. The probe runs only when
+// the identity is already cached — so it never triggers an unlock. Under a
+// per-op lock the buttons stay as fallbacks until the first copy/show/export on
+// this entry reports the truth back via its result.
 const showTotp = ref<boolean | null>(null);
-const totpProbing = ref(false);
+const showAttachment = ref<boolean | null>(null);
+const attachmentMeta = ref<AttachmentMeta | null>(null);
+const probing = ref(false);
+
+// A confirmed attachment restructures the page: the password actions are dead
+// (empty password, base64 body), so Export becomes the primary affordance and
+// Edit locks. While attachment status is unknown (locked), the password actions
+// stay visible as the familiar fallback and Export also shows so the attachment
+// stays discoverable; once confirmed either way the layout collapses to the
+// relevant set.
+const isAttachment = computed(() => showAttachment.value === true);
+const passwordActionsVisible = computed(() => !isAttachment.value);
+const exportButtonVisible = computed(() => showAttachment.value !== false);
+const editDisabled = computed(() => isAttachment.value);
 const totpButtonVisible = computed(() => {
+  if (isAttachment.value) return false; // attachments carry no TOTP
   if (showTotp.value === false) return false;
-  // While a free (cached) probe is in flight, hold the button to avoid a
-  // show→hide flash; once it resolves, `showTotp` drives visibility.
-  return !totpProbing.value;
+  // Hold the button while a free (cached) probe is in flight to avoid a flash.
+  return !probing.value;
 });
 
-async function probeTotp() {
-  if (!identityCached.value || showTotp.value !== null || totpProbing.value) {
+async function probeEntry() {
+  if (!identityCached.value || showAttachment.value !== null || probing.value) {
     return;
   }
-  totpProbing.value = true;
+  probing.value = true;
   try {
-    const has = await hasTotpCmd(entryPath);
-    if (has !== null) showTotp.value = has;
+    const probe = await entryProbeCmd(entryPath);
+    if (probe !== null) {
+      showTotp.value = probe.has_totp;
+      showAttachment.value = probe.attachment !== null;
+      attachmentMeta.value = probe.attachment;
+    }
   } catch (e) {
-    // Probe failed (rare) — leave unknown; the button stays as the fallback.
-    console.debug("[entry-detail] probe-totp failed", e);
+    // Probe failed (rare) — leave unknown; buttons stay as fallbacks.
+    console.debug("[entry-detail] probe failed", e);
   } finally {
-    totpProbing.value = false;
+    probing.value = false;
   }
 }
 
-// Probe on open when the identity is cached (free — no unlock). When it isn't
-// (a per-op lock, or before the first unlock), the button stays as the fallback
-// until the first copy/show on this entry reports the truth back via its result.
-onMounted(probeTotp);
+// Probe on open when the identity is cached (free — no unlock). When it isn't,
+// the buttons stay as fallbacks until the first action reports the truth back.
+onMounted(probeEntry);
+
+// Humanize a byte count for the attachment metadata caption (B/KB/MB/GB).
+function humanizeSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
 
 // Delete divergence (the edit flow now lives on /edit/:path, which has its own
 // useDivergence instance).
@@ -159,6 +190,8 @@ async function showPassword() {
     }
     reveal(claimed);
     showTotp.value = claimed.has_totp;
+    showAttachment.value = claimed.attachment !== null;
+    attachmentMeta.value = claimed.attachment;
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
@@ -179,7 +212,13 @@ async function copyPassword() {
       copyPasswordCmd(entryPath, clipboardNotifyText()),
     );
     showTotp.value = result.has_totp;
+    showAttachment.value = result.has_attachment;
     clear();
+    if (result.has_attachment) {
+      // Backend skipped the clipboard write (no password on an attachment).
+      toast.info(t("entry.attachmentCopyBlocked"));
+      return;
+    }
     toast.success(
       t("entry.copied", {
         name: result.entry_name,
@@ -221,6 +260,38 @@ async function copyTotp() {
     const appError = e as AppError;
     error.value = appError?.message || t("common.toast.copyFailed");
     console.error("[entry-detail] copy totp failed", e);
+  }
+}
+
+async function exportAttachment() {
+  error.value = "";
+  decryptError.value = false;
+  loading.value = true;
+  try {
+    const result = await runWithAuth(() => exportAttachmentCmd(entryPath));
+    if (!result.exported) {
+      // The entry holds no attachment (the button was a fallback) — settle the
+      // signal and tell the user; no file was written.
+      showAttachment.value = false;
+      attachmentMeta.value = null;
+      toast.info(t("entry.noAttachment"));
+      return;
+    }
+    showAttachment.value = true;
+    toast.success(t("entry.attachmentExported", { name: result.entry_name }));
+  } catch (e) {
+    if (isAuthCancelled(e)) return;
+    const appError = e as AppError;
+    // Dismissed save picker, or a second export already in flight — silent/benign.
+    if (appError?.code === "CANCELLED") return;
+    if (appError?.code === "REPO_BUSY") {
+      toast.info(t("entry.attachmentExportBusy"));
+      return;
+    }
+    error.value = appError?.message || t("entry.attachmentExportFailed");
+    console.error("[entry-detail] export attachment failed", e);
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -313,7 +384,7 @@ function handleKeydown(e: KeyboardEvent) {
       </span>
     </BaseAlert>
 
-    <div class="flex gap-3 mb-6">
+    <div v-if="passwordActionsVisible" class="flex gap-3 mb-6">
       <BaseButton
         variant="primary"
         class="flex-1"
@@ -337,6 +408,34 @@ function handleKeydown(e: KeyboardEvent) {
       </BaseButton>
     </div>
 
+    <!-- Attachment: metadata caption + Export. For a confirmed attachment
+         Export is the primary action (Copy/Show are hidden — empty password,
+         base64 body); while status is unknown Export also shows so the entry
+         stays discoverable when locked. -->
+    <div
+      v-if="isAttachment && attachmentMeta"
+      class="mb-3 text-sm text-muted flex items-center gap-1"
+    >
+      <BaseIcon :icon="Paperclip" />
+      <span>{{
+        t("entry.attachmentMeta", {
+          name: attachmentMeta.filename ?? entryName,
+          size: humanizeSize(attachmentMeta.size),
+        })
+      }}</span>
+    </div>
+    <BaseButton
+      v-if="exportButtonVisible"
+      :variant="isAttachment ? 'primary' : 'outline'"
+      block
+      class="mb-3"
+      :disabled="loading || deleting"
+      :aria-label="t('entry.exportAttachmentAria')"
+      @click="exportAttachment"
+    >
+      <BaseIcon :icon="Download" /> {{ t("entry.exportAttachmentLabel") }}
+    </BaseButton>
+
     <BaseButton
       v-if="totpButtonVisible"
       variant="outline"
@@ -353,12 +452,15 @@ function handleKeydown(e: KeyboardEvent) {
       variant="outline"
       block
       class="mb-3"
-      :disabled="loading || deleting"
+      :disabled="loading || deleting || editDisabled"
       :aria-label="t('entry.editAria', { name: entryName })"
       @click="editEntry"
     >
       {{ t("entry.editLabel") }}
     </BaseButton>
+    <p v-if="editDisabled" class="text-center text-xs text-muted mb-3">
+      {{ t("entry.attachmentEditDisabledHint") }}
+    </p>
 
     <div class="flex gap-3 mb-6">
       <BaseButton
@@ -392,7 +494,7 @@ function handleKeydown(e: KeyboardEvent) {
     </div>
 
     <div
-      v-if="revealed && password !== null"
+      v-if="revealed && password !== null && !isAttachment"
       class="bg-surface rounded-lg p-4 shadow-[0_1px_6px_rgba(0,0,0,0.06)]"
     >
       <div class="mb-4">
