@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Syncing no longer writes the pulled commits' messages, author identities (name and email), or signer key fingerprints to the diagnostics log — those fields are redacted before they can reach a log line. The log is mirrored to Android logcat and shipped inside an exported diagnostics bundle, so this keeps your commit messages and git identity out of both.
 - In the Lock & Identity passphrase prompts (set, change, enable biometric, and enable identity auto-unlock), the action button now uses the accent color and matches the Cancel button's width — previously it looked the same as Cancel and stretched wider, making the two hard to tell apart.
 - The headers on the Settings pages no longer carry an icon next to the title, so they read like the rest of the app's headers.
 

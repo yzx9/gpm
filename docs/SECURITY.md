@@ -70,9 +70,9 @@ clone/pull/push/sync, decrypt/copy/show, create/edit/delete, setup, identity
 and app-lock transitions, biometric, and authenticity verification. The
 governing rule is **never log a secret**: only entry names and operation
 outcomes (plus the already-sanitized error codes) are ever recorded. Decrypted
-content, passphrases, identity material, and the at-rest master key never reach
-the logger, and credential-bearing configuration types redact their secret
-fields before any debug formatting.
+content, passphrases, identity material, commit messages and the at-rest master
+key never reach the logger, and credential-bearing configuration types redact
+their secret fields before any debug formatting.
 
 **Logs are unencrypted by construction, not by encryption.** Given that rule,
 nothing worth protecting reaches a log line. And an attacker who can read the

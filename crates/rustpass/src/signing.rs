@@ -47,7 +47,7 @@ use crate::error::{Error, ErrorCode};
 /// Severity ordering (drives the indicator colour and Enforce blocking) is:
 /// `Verified < UnsupportedFormat < Unsigned < UntrustedKey < BadSignature`,
 /// with `Unknown` treated as a (fail-closed) soft issue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CommitSigStatus {
     /// Signed and the key is in the trusted set.
@@ -86,6 +86,31 @@ pub enum CommitSigStatus {
     /// Could not classify (corrupt object, read error, unparseable armor).
     /// Surfaced as an unknown problem.
     Unknown,
+}
+
+impl std::fmt::Debug for CommitSigStatus {
+    // Redacts the signer key fingerprint (`signer_fp`) — identity material that
+    // must never reach a log/panic/assert message (SECURITY.md § Diagnostics
+    // logging). Only the verification outcome kind is surfaced; the `format`
+    // tag of `UnsupportedFormat` is kept (it names a non-secret format string).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Verified { .. } => f.debug_tuple("Verified").field(&"[REDACTED]").finish(),
+            Self::UntrustedKey { .. } => {
+                f.debug_tuple("UntrustedKey").field(&"[REDACTED]").finish()
+            }
+            Self::UnverifiedSignature { .. } => f
+                .debug_tuple("UnverifiedSignature")
+                .field(&"[REDACTED]")
+                .finish(),
+            Self::Unsigned => write!(f, "Unsigned"),
+            Self::BadSignature => write!(f, "BadSignature"),
+            Self::UnsupportedFormat { format } => {
+                f.debug_tuple("UnsupportedFormat").field(format).finish()
+            }
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
 }
 
 impl CommitSigStatus {
@@ -237,7 +262,7 @@ impl AuthenticityConfig {
 }
 
 /// A commit's metadata + verification status (used by sync results & history).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitSigInfo {
     /// Full commit hash.
     pub hash: String,
@@ -253,6 +278,29 @@ pub struct CommitSigInfo {
     pub status: CommitSigStatus,
     /// Whether this status matches a recorded [`IgnoredIssue`] (UI dims it).
     pub ignored: bool,
+}
+
+impl std::fmt::Debug for CommitSigInfo {
+    // Redacts `author` (a git `Name <email>` — PII) and `subject` (the commit
+    // message first line; gopass-format `Save secret <entry-path>: …`, which
+    // would enumerate secret names in bulk). Keeps structural identity —
+    // `hash`, `short_hash`, `date`, `ignored`, and the status kind — so a Debug
+    // dump can identify *which* commit without revealing what it changed or who
+    // made it. `status` delegates to [`CommitSigStatus`]'s redacting Debug, so
+    // the containers that embed this (`AuthenticityResult`, `SyncResult`,
+    // `SyncOutcome`) are safe transitively via their derived Debug. SECURITY.md
+    // § Diagnostics logging: identity material never reaches the logger.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommitSigInfo")
+            .field("hash", &self.hash)
+            .field("short_hash", &self.short_hash)
+            .field("author", &"[REDACTED]")
+            .field("date", &self.date)
+            .field("subject", &"[REDACTED]")
+            .field("status", &self.status)
+            .field("ignored", &self.ignored)
+            .finish()
+    }
 }
 
 /// One page of commit signatures for the `/history` list: a slice of up to
@@ -879,6 +927,88 @@ mod tests {
     use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
 
     use super::*;
+
+    // ── Debug redaction (SECURITY.md § Diagnostics logging) ──────────────
+
+    #[test]
+    fn commit_sig_info_debug_redacts_author_subject_and_fingerprint() {
+        let info = CommitSigInfo {
+            hash: "deadbeefdeadbeef".to_string(),
+            short_hash: "deadbee".to_string(),
+            author: "CANARY_NAME <canary@example.com>".to_string(),
+            date: "2026-07-30T17:15:29+08:00".to_string(),
+            subject: "Save secret CANARY/entry: Edited".to_string(),
+            status: CommitSigStatus::Verified {
+                signer_fp: "SHA256:CANARY_FP".to_string(),
+            },
+            ignored: false,
+        };
+        let out = format!("{info:?}");
+
+        // Structural identity is preserved — enough to identify the commit.
+        assert!(out.contains("deadbee"), "short_hash kept: {out}");
+        assert!(out.contains("2026-07-30"), "date kept: {out}");
+        assert!(out.contains("Verified"), "status kind kept: {out}");
+        assert!(out.contains("[REDACTED]"), "must mark redactions: {out}");
+
+        // Identity / secret-bearing content must never reach Debug.
+        for canary in [
+            "CANARY_NAME",
+            "canary@example.com",
+            "CANARY/entry",
+            "SHA256:CANARY_FP",
+        ] {
+            assert!(!out.contains(canary), "Debug leaked `{canary}`: {out}");
+        }
+    }
+
+    #[test]
+    fn commit_sig_status_debug_redacts_fingerprints() {
+        // Every variant that carries a signer fingerprint redacts it, keeping
+        // only the verification-outcome kind.
+        let fingerprinted = [
+            CommitSigStatus::Verified {
+                signer_fp: "SHA256:CANARY_FP".to_string(),
+            },
+            CommitSigStatus::UntrustedKey {
+                signer_fp: "SHA256:CANARY_FP".to_string(),
+            },
+            CommitSigStatus::UnverifiedSignature {
+                signer_fp: "SHA256:CANARY_FP".to_string(),
+            },
+        ];
+        for status in fingerprinted {
+            let out = format!("{status:?}");
+            assert!(out.contains("[REDACTED]"), "fp redacted: {out}");
+            assert!(!out.contains("CANARY_FP"), "fingerprint leaked: {out}");
+        }
+        assert!(
+            format!(
+                "{:?}",
+                CommitSigStatus::Verified {
+                    signer_fp: "x".to_string()
+                }
+            )
+            .contains("Verified")
+        );
+
+        // Non-fingerprint variants render their kind (and the format tag) only.
+        assert_eq!(format!("{:?}", CommitSigStatus::Unsigned), "Unsigned");
+        assert_eq!(
+            format!("{:?}", CommitSigStatus::BadSignature),
+            "BadSignature"
+        );
+        assert_eq!(format!("{:?}", CommitSigStatus::Unknown), "Unknown");
+        assert_eq!(
+            format!(
+                "{:?}",
+                CommitSigStatus::UnsupportedFormat {
+                    format: "gpg".to_string()
+                }
+            ),
+            "UnsupportedFormat(\"gpg\")"
+        );
+    }
 
     // ── git fixture helpers ───────────────────────────────────────────────
 
