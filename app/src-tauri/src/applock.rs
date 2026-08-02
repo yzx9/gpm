@@ -194,7 +194,12 @@ pub(crate) async fn enable_biometric_app_lock(
 
     // Seal behind biometric FIRST (prompt). If the user cancels, the auth-free
     // key is untouched — no bricking.
-    ks.store_biometric(&b64, prompt_text.as_ref()).await?;
+    ks.store_biometric(
+        &b64,
+        tauri_plugin_secure_keystore::BiometricSlot::Legacy,
+        prompt_text.as_ref(),
+    )
+    .await?;
     // Only now drop the auth-free copy and persist the flag.
     ks.delete().await?;
     state.app_config.set_biometric_app_lock(true).await?;
@@ -226,9 +231,12 @@ pub(crate) async fn disable_biometric_app_lock(
     let ks = app.secure_keystore();
     // Retrieve the master key from the biometric store (prompt DECRYPT).
     let b64 = Zeroizing::new(
-        ks.retrieve_biometric(prompt_text.as_ref())
-            .await?
-            .ok_or_else(|| AppLockError::failed("No biometric master key to migrate back"))?,
+        ks.retrieve_biometric(
+            tauri_plugin_secure_keystore::BiometricSlot::Legacy,
+            prompt_text.as_ref(),
+        )
+        .await?
+        .ok_or_else(|| AppLockError::failed("No biometric master key to migrate back"))?,
     );
     // Re-seal into the auth-free store (non-prompting), then drop the biometric
     // copy. The Store's in-memory master key may have been wiped by a prior
@@ -237,7 +245,8 @@ pub(crate) async fn disable_biometric_app_lock(
     // seals `repo.json` via Seal::unseal and would fail with
     // `SealKeyUnavailable` if the key were still absent.
     ks.store(&b64).await?;
-    ks.delete_biometric().await?;
+    ks.delete_biometric(tauri_plugin_secure_keystore::BiometricSlot::Legacy)
+        .await?;
     if let Some(key) = decode_master_key(&b64) {
         // R064 bridge: vault == master until the keys split.
         state.store.set_master_key(Some(key));
@@ -366,14 +375,17 @@ pub(crate) async fn app_unlock(
     }
     let ks = app.secure_keystore();
     let b64 = Zeroizing::new(
-        ks.retrieve_biometric(prompt_text.as_ref())
-            .await
-            .map_err(|e| {
-                let ae: AppLockError = e.into();
-                log::warn!("app-lock: unlock failed: {ae}");
-                ae
-            })?
-            .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
+        ks.retrieve_biometric(
+            tauri_plugin_secure_keystore::BiometricSlot::Legacy,
+            prompt_text.as_ref(),
+        )
+        .await
+        .map_err(|e| {
+            let ae: AppLockError = e.into();
+            log::warn!("app-lock: unlock failed: {ae}");
+            ae
+        })?
+        .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
     );
     let key = decode_master_key(&b64)
         .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;

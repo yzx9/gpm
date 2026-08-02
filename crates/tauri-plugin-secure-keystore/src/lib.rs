@@ -129,6 +129,31 @@ pub struct PromptText {
     pub negative: Option<String>,
 }
 
+/// Which biometric-gated Keystore alias a biometric command targets (R064
+/// master/vault key split). Serialized to the Kotlin command as `"vault"` /
+/// `"legacy"`.
+///
+/// - [`BiometricSlot::Vault`] — `gpm_vault_key`: seals `identity` +
+///   `app_id_pass` when App Lock is ON (the distinct biometric vault key).
+/// - [`BiometricSlot::Legacy`] — `gpm_master_key_biometric`: held the master
+///   under App Lock pre-R064; m0007 relocates it to the auth-free master and
+///   deletes this alias.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BiometricSlot {
+    Vault,
+    Legacy,
+}
+
+impl BiometricSlot {
+    /// The string the Kotlin `BiometricSlot.fromString` parses.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Vault => "vault",
+            Self::Legacy => "legacy",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Handle (cfg-gated: real on Android, stub elsewhere)
 // ---------------------------------------------------------------------------
@@ -236,11 +261,13 @@ impl<R: Runtime> SecureKeystore<R> {
     pub async fn store_biometric(
         &self,
         key_b64: &str,
+        slot: BiometricSlot,
         prompt: Option<&PromptText>,
     ) -> Result<(), SecureKeystoreError> {
         #[derive(Serialize)]
         struct Payload<'a> {
             key: &'a str,
+            slot: &'a str,
             title: Option<&'a str>,
             subtitle: Option<&'a str>,
             negative: Option<&'a str>,
@@ -250,6 +277,7 @@ impl<R: Runtime> SecureKeystore<R> {
                 "storeBiometric",
                 Payload {
                     key: key_b64,
+                    slot: slot.as_str(),
                     title: prompt.and_then(|p| p.title.as_deref()),
                     subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
                     negative: prompt.and_then(|p| p.negative.as_deref()),
@@ -266,6 +294,7 @@ impl<R: Runtime> SecureKeystore<R> {
     /// prompt text.
     pub async fn retrieve_biometric(
         &self,
+        slot: BiometricSlot,
         prompt: Option<&PromptText>,
     ) -> Result<Option<String>, SecureKeystoreError> {
         #[derive(Deserialize)]
@@ -275,6 +304,7 @@ impl<R: Runtime> SecureKeystore<R> {
         }
         #[derive(Serialize)]
         struct Payload<'a> {
+            slot: &'a str,
             title: Option<&'a str>,
             subtitle: Option<&'a str>,
             negative: Option<&'a str>,
@@ -284,6 +314,7 @@ impl<R: Runtime> SecureKeystore<R> {
             .run_mobile_plugin_async::<Resp>(
                 "retrieveBiometric",
                 Payload {
+                    slot: slot.as_str(),
                     title: prompt.and_then(|p| p.title.as_deref()),
                     subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
                     negative: prompt.and_then(|p| p.negative.as_deref()),
@@ -294,12 +325,22 @@ impl<R: Runtime> SecureKeystore<R> {
         Ok(if r.stored { r.key } else { None })
     }
 
-    /// Delete the biometric-gated Keystore key and ciphertext (best-effort).
-    /// Used when disabling the app-lock (after the master key is migrated back
-    /// to the auth-free store).
-    pub async fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
+    /// Delete the biometric-gated Keystore key and ciphertext for `slot`
+    /// (best-effort). Used when disabling the app-lock (after the master key is
+    /// migrated back to the auth-free store) and by m0007 (to drop the legacy
+    /// alias after relocating its master to the auth-free store).
+    pub async fn delete_biometric(&self, slot: BiometricSlot) -> Result<(), SecureKeystoreError> {
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            slot: &'a str,
+        }
         self.0
-            .run_mobile_plugin_async::<()>("deleteBiometric", ())
+            .run_mobile_plugin_async::<()>(
+                "deleteBiometric",
+                Payload {
+                    slot: slot.as_str(),
+                },
+            )
             .await
             .map_err(map_invoke_err)
     }
@@ -341,6 +382,7 @@ impl<R: Runtime> SecureKeystore<R> {
     pub async fn store_biometric(
         &self,
         _key_b64: &str,
+        _slot: BiometricSlot,
         _prompt: Option<&PromptText>,
     ) -> Result<(), SecureKeystoreError> {
         Err(SecureKeystoreError::unavailable())
@@ -349,13 +391,14 @@ impl<R: Runtime> SecureKeystore<R> {
     /// Inert: nothing is ever stored.
     pub async fn retrieve_biometric(
         &self,
+        _slot: BiometricSlot,
         _prompt: Option<&PromptText>,
     ) -> Result<Option<String>, SecureKeystoreError> {
         Ok(None)
     }
 
     /// Inert: nothing to delete.
-    pub async fn delete_biometric(&self) -> Result<(), SecureKeystoreError> {
+    pub async fn delete_biometric(&self, _slot: BiometricSlot) -> Result<(), SecureKeystoreError> {
         Ok(())
     }
 }

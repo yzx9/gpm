@@ -650,15 +650,11 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     /** Delete the biometric Keystore key + ciphertext for [slot] (best-effort).
      *
-     *  R064: hardcoded to [BiometricSlot.LEGACY] for now — the Rust handle still
-     *  sends a `()` payload, and parsing a [DeleteBiometricArgs] on null data
-     *  would NPE. Chunk 5 threads `slot` through once the Rust `delete_biometric`
-     *  sends it; `storeBiometric`/`retrieveBiometric` take a slot today because
-     *  they already parse a JSON-object payload (an absent nullable `slot` field
-     *  defaults to legacy via [BiometricSlot.fromString]). */
+     *  R064: `slot` selects vault (`gpm_vault_key`) vs legacy
+     *  (`gpm_master_key_biometric`); defaults to legacy. */
     @Command
     fun deleteBiometric(invoke: Invoke) {
-        val slot = BiometricSlot.LEGACY
+        val slot = BiometricSlot.fromString(invoke.parseArgs(DeleteBiometricArgs::class.java).slot)
         try {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
             if (keyStore.containsAlias(slot.alias)) {
