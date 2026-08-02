@@ -86,6 +86,11 @@ pub(crate) struct SensitiveContent {
     /// When `Some`, the entry cannot be safely text-edited (e.g. non-UTF-8
     /// content) and the UI disables Edit with a reason-specific hint. Not secret.
     pub(crate) edit_blocked: Option<EditBlockReason>,
+    /// The blob oid (base version) captured atomically with this decrypt — the
+    /// R026 base-version the edit screen sends back as `base_oid` to guard a save
+    /// against a stale snapshot. Non-secret; `None` only if a producer doesn't
+    /// capture one (`show_password` always does, via `get_with_oid`).
+    pub(crate) version: Option<String>,
 }
 
 /// Redacts secrets — mirrors `rustpass::Secret` so `Debug` never leaks plaintext.
@@ -97,6 +102,7 @@ impl fmt::Debug for SensitiveContent {
             .field("has_totp", &self.has_totp)
             .field("attachment", &self.attachment)
             .field("edit_blocked", &self.edit_blocked)
+            .field("version", &self.version)
             .finish()
     }
 }
@@ -279,11 +285,11 @@ pub(crate) async fn show_password_core<R: Runtime>(
     entry_path: &str,
 ) -> Result<SensitiveContent, Error> {
     log::info!("show: {}", entry_path.trim_end_matches(".age"));
-    let secret = state.store.get(entry_path).await;
+    let read = state.store.get_with_oid(entry_path).await;
     reset_lock_timer(state, app);
     reset_gate_idle_timer(state, app);
     maybe_soft_wipe(state, app).await;
-    let secret = secret.inspect_err(|e| {
+    let (secret, oid) = read.inspect_err(|e| {
         log::warn!("show failed: {}: {e}", entry_path.trim_end_matches(".age"));
     })?;
     let body = secret.body();
@@ -309,6 +315,7 @@ pub(crate) async fn show_password_core<R: Runtime>(
             Some(EditBlockReason::NonUtf8)
         },
         attachment,
+        version: Some(oid),
     })
 }
 
@@ -322,6 +329,19 @@ pub(crate) async fn show_password(
     entry_path: String,
 ) -> Result<SensitiveContent, Error> {
     show_password_core(&state, &app, &entry_path).await
+}
+
+/// Blob oid (base version) of `entry` at HEAD, or `null` if absent — the R026
+/// base-version capture for a base-version-aware delete, fetched on the detail
+/// page mount so a delete-without-reveal is still protected. Non-secret: no
+/// identity, no decrypt.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn entry_oid(
+    state: State<'_, AppState>,
+    entry_path: String,
+) -> Result<Option<String>, Error> {
+    state.store.entry_oid(&entry_path).await
 }
 
 /// Decrypt the entry, compute its TOTP code in Rust, and copy it to the
@@ -656,10 +676,11 @@ mod tests {
             has_totp: true,
             attachment: None,
             edit_blocked: None,
+            version: None,
         };
         assert_eq!(
             serde_json::to_string(&content).expect("serialize"),
-            r#"{"password":"hunter2","notes":"username: alice","has_totp":true,"attachment":null,"edit_blocked":null}"#
+            r#"{"password":"hunter2","notes":"username: alice","has_totp":true,"attachment":null,"edit_blocked":null,"version":null}"#
         );
         assert!(!format!("{content:?}").contains("hunter2"));
     }

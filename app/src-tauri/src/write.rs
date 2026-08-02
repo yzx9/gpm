@@ -18,18 +18,23 @@
 //! normal save, [`WriteOutcome::NeedsDivergenceResolve`] when the push was
 //! rejected (a race — the remote moved during the write; the carried
 //! `SyncDivergence` lets the UI show the resolve modal without a second
-//! round-trip), or [`WriteOutcome::AuthenticityBlocked`] when the pre-write pull
-//! was refused under Enforce signature verification. The frontend's shared
-//! divergence modal routes a `NeedsDivergenceResolve` to [`resolve_sync_divergence`].
+//! round-trip), [`WriteOutcome::AuthenticityBlocked`] when the pre-write pull
+//! was refused under Enforce signature verification, or
+//! [`WriteOutcome::EntryConflict`] / [`WriteOutcome::NoChange`] when a
+//! base-version-aware edit/delete refused a stale write (R026). The frontend's
+//! divergence modal routes a `NeedsDivergenceResolve` to
+//! [`resolve_sync_divergence`]; an `EntryConflict` routes to
+//! [`resolve_entry_conflict`].
 //!
 //! ## Immediate-mode wipe
 //!
 //! `do_save`/`delete_secret` reset the auto-lock timer on every attempt, but
 //! wipe the identity only on **terminal** outcomes — a `NeedsDivergenceResolve`
-//! still needs the cached identity for a keep-mine resolve (`resolve_keep_mine`
-//! re-encrypts local blobs), so wiping it before the user picks would force a
-//! second unlock. The deferred wipe runs in [`resolve_sync_divergence`] once the
-//! resolve settles.
+//! or `EntryConflict` still needs the cached identity for a keep-mine resolve
+//! (`resolve_keep_mine` re-encrypts local blobs; a keep-mine edit re-encrypts the
+//! caller's body), so wiping before the user picks would force a second unlock.
+//! The deferred wipe runs in [`resolve_sync_divergence`] /
+//! [`resolve_entry_conflict`] once the resolve settles.
 //!
 //! [`Store::autosync_write`]: rustpass::Store::autosync_write
 
@@ -41,7 +46,8 @@ use std::time::Duration;
 
 use rustpass::template::{self, CreatePreset};
 use rustpass::{
-    DivergenceChoice, Error, ErrorCode, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
+    DivergenceChoice, EntryConflictChoice, Error, ErrorCode, ExpectedEntry, ExpectedKind,
+    SyncOutcome, SyncResult, WriteOutcome, WriteResult,
 };
 use tauri::{AppHandle, Emitter, Runtime, State};
 
@@ -63,6 +69,7 @@ const BACKGROUND_SYNC_DEADLINE_SECS: u64 = 30;
 async fn autosync_write_command<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    expected: Option<ExpectedEntry>,
     local_write: F,
 ) -> Result<WriteOutcome, Error>
 where
@@ -75,7 +82,7 @@ where
         let store = store.clone();
         async move {
             store
-                .autosync_write(&slot, Some(cancel), None, local_write)
+                .autosync_write(&slot, Some(cancel), expected, local_write)
                 .await
         }
     })
@@ -90,6 +97,7 @@ where
 async fn do_save<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    expected: Option<ExpectedEntry>,
     local_write: F,
 ) -> Result<WriteOutcome, Error>
 where
@@ -101,13 +109,17 @@ where
     // Immediate we reset the timer + wipe on the terminal paths (an errored save
     // must not leave the identity cached with no idle timer to eventually clear
     // it).
-    let outcome = autosync_write_command(state, app, local_write).await;
+    let outcome = autosync_write_command(state, app, expected, local_write).await;
     reset_lock_timer(state, app);
     reset_gate_idle_timer(state, app);
     // D3: a NeedsDivergenceResolve still needs the cached identity for a keep-mine
-    // resolve, so defer the wipe to resolve_sync_divergence. Every other outcome
-    // (Written / AuthenticityBlocked / Err) is terminal — wipe now.
-    if !matches!(&outcome, Ok(WriteOutcome::NeedsDivergenceResolve(_))) {
+    // resolve, so defer the wipe to resolve_sync_divergence; an EntryConflict
+    // (R026) likewise keeps it cached for a keep-mine edit resolve. Every other
+    // outcome (Written / AuthenticityBlocked / Err) is terminal — wipe now.
+    if !matches!(
+        &outcome,
+        Ok(WriteOutcome::NeedsDivergenceResolve(_) | WriteOutcome::EntryConflict { .. })
+    ) {
         maybe_soft_wipe(state, app).await;
     }
     outcome
@@ -157,7 +169,7 @@ pub(crate) async fn create_secret(
     log::info!("create: {name}");
     let store = state.store.clone();
     let body = content.into_bytes();
-    do_save(&state, &app, move || {
+    do_save(&state, &app, None, move || {
         let store = store.clone();
         async move { store.create(&name, &body).await }
     })
@@ -192,7 +204,7 @@ pub(crate) async fn create_from_preset_secret(
     log::info!("create: {name} (preset {preset_id})");
     let body = template::preset_body(preset, &fields_ref)?;
     let store = state.store.clone();
-    do_save(&state, &app, move || {
+    do_save(&state, &app, None, move || {
         let store = store.clone();
         async move { store.create(&name, &body).await }
     })
@@ -211,10 +223,16 @@ pub(crate) async fn delete_secret(
     state: State<'_, AppState>,
     app: AppHandle,
     name: String,
+    base_oid: Option<String>,
 ) -> Result<WriteOutcome, Error> {
     log::info!("delete: {name}");
+    let expected = base_oid.map(|base_oid| ExpectedEntry {
+        name: name.clone(),
+        base_oid,
+        kind: ExpectedKind::Delete,
+    });
     let store = state.store.clone();
-    let outcome = autosync_write_command(&state, &app, move || {
+    let outcome = autosync_write_command(&state, &app, expected, move || {
         let store = store.clone();
         async move { store.delete(&name).await }
     })
@@ -241,11 +259,17 @@ pub(crate) async fn edit_secret(
     app: AppHandle,
     name: String,
     content: String,
+    base_oid: Option<String>,
 ) -> Result<WriteOutcome, Error> {
     log::info!("edit: {name}");
+    let expected = base_oid.map(|base_oid| ExpectedEntry {
+        name: name.clone(),
+        base_oid,
+        kind: ExpectedKind::Edit,
+    });
     let store = state.store.clone();
     let body = content.into_bytes();
-    do_save(&state, &app, move || {
+    do_save(&state, &app, expected, move || {
         let store = store.clone();
         async move { store.update(&name, &body).await }
     })
@@ -421,6 +445,48 @@ pub(crate) async fn resolve_sync_divergence(
     // D3: terminal step for a deferred save-divergence — do the wipe the save
     // path skipped (no-op under Idle/Never; under Immediate it clears the
     // identity kept alive across the modal for keep-mine).
+    maybe_soft_wipe(&state, &app).await;
+    result
+}
+
+/// Resolve a per-entry edit/delete conflict (R026 [`WriteOutcome::EntryConflict`])
+/// by the user's `choice` against the reviewed remote tip (`expected_remote_oid`).
+/// Mirrors [`resolve_sync_divergence`]: resets the auto-lock timers and runs the
+/// terminal Immediate-mode wipe the save path deferred so a keep-mine edit resolve
+/// could reuse the cached identity. "Cancel" is client-side — the frontend reuses
+/// [`discard_divergence`].
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn resolve_entry_conflict(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    name: String,
+    content: Option<String>,
+    expected_remote_oid: String,
+    op: ExpectedKind,
+    choice: EntryConflictChoice,
+) -> Result<SyncResult, Error> {
+    log::info!("entry-resolve: {name} {op:?} {choice:?}");
+    let store = state.store.clone();
+    let content_bytes = content.map(String::into_bytes);
+    let result =
+        crate::git::run_cancellable(&state, app.clone(), move |cancel, _tx, slot| async move {
+            store
+                .resolve_entry_conflict(
+                    &slot,
+                    &name,
+                    content_bytes.as_deref(),
+                    &expected_remote_oid,
+                    op,
+                    choice,
+                    Some(cancel),
+                )
+                .await
+        })
+        .await
+        .inspect_err(|e| log::warn!("entry-resolve failed: {e}"));
+    reset_lock_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
     result
 }
