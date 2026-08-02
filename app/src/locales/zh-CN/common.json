@@ -122,5 +122,8 @@
   "sync": {
     "attentionBadge": "同步需要处理",
     "attentionHint": "本地与远端存在分歧 —— 点击前往列表处理"
+  },
+  "relativeTime": {
+    "justNow": "刚刚"
   }
 }

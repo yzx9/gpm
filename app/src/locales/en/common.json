@@ -122,5 +122,8 @@
   "sync": {
     "attentionBadge": "Sync needs review",
     "attentionHint": "Local and remote diverged — tap to review on the list"
+  },
+  "relativeTime": {
+    "justNow": "just now"
   }
 }

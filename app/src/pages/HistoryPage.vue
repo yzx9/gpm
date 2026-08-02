@@ -19,9 +19,9 @@ import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import {
   isSignatureIgnorable,
   signatureSignerFp,
+  useRelativeTime,
   useToast,
 } from "@/composables";
-import { formatRelativeTime } from "@/utils/format";
 import {
   GitCommitHorizontal,
   History,
@@ -34,7 +34,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
+const { formatRelativeTime } = useRelativeTime();
 const router = useRouter();
 const { toast } = useToast();
 
@@ -266,7 +267,7 @@ onBeforeUnmount(() => {
             <span class="truncate min-w-0">{{ commit.author }}</span>
             <span aria-hidden="true" class="shrink-0">·</span>
             <span class="shrink-0">{{
-              formatRelativeTime(relativeNow, Date.parse(commit.date), locale)
+              formatRelativeTime(relativeNow, Date.parse(commit.date))
             }}</span>
           </div>
         </div>

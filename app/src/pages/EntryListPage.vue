@@ -41,9 +41,9 @@ import {
   useCommitSignature,
   useLockState,
   usePullToRefresh,
+  useRelativeTime,
   useToast,
 } from "@/composables";
-import { formatRelativeTime } from "@/utils/format";
 import type { LucideIcon } from "@lucide/vue";
 import {
   ChevronRight,
@@ -74,7 +74,8 @@ const router = useRouter();
 const { runWithAuth, overlayUp } = useLockState();
 const { appLocked } = useAppLockState();
 const { toast } = useToast();
-const { t, locale } = useI18n();
+const { t } = useI18n();
+const { formatRelativeTime } = useRelativeTime();
 const { signatureLabel } = useCommitSignature();
 
 // Entries are paginated: the WebView holds only the pages the user has loaded,
@@ -167,7 +168,7 @@ const badge = computed<{ icon: LucideIcon; cls: string; title: string }>(() => {
 
 const lastSyncLabel = computed(() => {
   if (!lastSyncTime.value) return null;
-  return formatRelativeTime(now.value, lastSyncTime.value, locale.value);
+  return formatRelativeTime(now.value, lastSyncTime.value);
 });
 
 const remaining = computed(() =>
