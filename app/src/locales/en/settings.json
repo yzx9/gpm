@@ -5,14 +5,9 @@
     "lockAndIdentity": "Lock & Identity",
     "repository": "Repository",
     "security": "Security",
-    "securityHint": "How gpm protects you",
     "permissions": "Permissions & data",
-    "permissionsHint": "What gpm accesses and why",
     "about": "About",
-    "logs": "Logs",
-    "identityEncrypted": "Encrypted",
-    "identityPlaintext": "No passphrase",
-    "identitySsh": "SSH key"
+    "logs": "Logs"
   },
   "language": {
     "title": "Display Language",

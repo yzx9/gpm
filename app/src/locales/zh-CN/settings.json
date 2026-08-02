@@ -5,14 +5,9 @@
     "lockAndIdentity": "锁定与身份",
     "repository": "仓库",
     "security": "安全",
-    "securityHint": "gpm 如何保护你",
     "permissions": "权限与数据",
-    "permissionsHint": "gpm 访问了什么及原因",
     "about": "关于",
-    "logs": "日志",
-    "identityEncrypted": "已加密",
-    "identityPlaintext": "无口令",
-    "identitySsh": "SSH 密钥"
+    "logs": "日志"
   },
   "language": {
     "title": "显示语言",

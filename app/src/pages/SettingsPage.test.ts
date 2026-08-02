@@ -67,10 +67,6 @@ describe("SettingsPage (hub)", () => {
     await flushPromises();
 
     expect(wrapper.findAll(".hub-row")).toHaveLength(7);
-    // The hub loads the summary sources.
-    expect(invoke).toHaveBeenCalledWith("get_app_config");
-    expect(invoke).toHaveBeenCalledWith("get_config");
-    expect(invoke).toHaveBeenCalledWith("get_auth_state");
   });
 
   it("navigates into a category on row click", async () => {
@@ -112,15 +108,5 @@ describe("SettingsPage (hub)", () => {
 
     // navBack falls back to replace when there is no history to pop.
     expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
-  });
-
-  it("shows a repo-host summary on the Repository row", async () => {
-    const wrapper = mountPage();
-    await flushPromises();
-
-    // httpsConfig.url = https://github.com/user/repo.git → github.com/user/repo
-    expect(wrapper.findAll(".hub-row")[2]!.text()).toContain(
-      "github.com/user/repo",
-    );
   });
 });
