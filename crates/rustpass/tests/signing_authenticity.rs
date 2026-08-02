@@ -437,6 +437,77 @@ fn ignored_issue_no_longer_blocks_enforce() {
     assert!(result.authenticity.open_issues.is_empty());
 }
 
+/// R026 resolve — under Enforce, a resolve whose re-fetch hits an unverified
+/// (unsigned) remote commit is refused: it returns Ok with `authenticity.blocked`
+/// and does NOT apply the keep-mine edit (no write past an unverified tip).
+/// Mirrors autosync_write's pull-block; pins the resolve-specific branch.
+#[test]
+fn entry_conflict_resolve_refuses_on_enforce_block() {
+    let (_identity, recipient) = common::generate_test_keypair();
+    let (bare_dir, _initial_clone) =
+        common::create_test_git_repo(vec![("entry.age", b"v1")], &recipient);
+    let (_cfg_dir, store) = store_cloned_from_bare(bare_dir.path());
+
+    // Capture the base oid; advance the entry on the remote. Enforce is OFF, so
+    // the autosync pull accepts the unsigned update → EntryConflict (the guard
+    // refuses before the local write, so no identity is needed).
+    let v1_oid = block_on(store.entry_oid("entry"))
+        .expect("entry_oid")
+        .expect("entry present at v1");
+    common::add_commit_to_bare(
+        bare_dir.path(),
+        vec![("entry.age", b"newer-from-teammate")],
+        &recipient,
+        "remote advances same-name",
+    );
+    let outcome = block_on(store.autosync_write(
+        &common::cancel_slot(),
+        None,
+        Some(rustpass::store::ExpectedEntry {
+            name: "entry".to_string(),
+            base_oid: v1_oid,
+            kind: rustpass::store::ExpectedKind::Edit,
+        }),
+        || async {
+            // Unreachable: the base-version guard refuses before local_write runs.
+            Err(rustpass::Error::new(
+                rustpass::ErrorCode::StoreError,
+                "local_write must not run on a refused conflict",
+            ))
+        },
+    ))
+    .expect("autosync write");
+    let remote_tip = match outcome {
+        rustpass::WriteOutcome::EntryConflict { remote_tip, .. } => remote_tip,
+        other => panic!("expected EntryConflict, got {other:?}"),
+    };
+
+    // Arm Enforce (trusted key) and feed an unsigned commit. The resolve's
+    // re-fetch must refuse it (blocked) and NOT apply the keep-mine edit.
+    let fixture = signing_fixture();
+    block_on(store.add_trusted_key(&fixture.public_key, "Alice")).expect("add trusted");
+    block_on(store.set_verification_mode(VerifyMode::Enforce)).expect("enforce");
+    add_unsigned_commit_to_bare(bare_dir.path(), &recipient, "attacker unsigned");
+
+    let head_before = store_head(&store);
+    let result = block_on(store.resolve_entry_conflict(
+        &common::cancel_slot(),
+        "entry",
+        Some(b"my-edit"),
+        &remote_tip,
+        rustpass::store::ExpectedKind::Edit,
+        rustpass::store::EntryConflictChoice::KeepMine,
+        None,
+    ))
+    .expect("resolve returns Ok (blocked, not error)");
+    assert!(
+        result.authenticity.blocked,
+        "Enforce must block the resolve's re-fetch"
+    );
+    assert!(!result.changed, "HEAD must not advance / edit must not apply on block");
+    assert_eq!(store_head(&store), head_before, "HEAD unchanged on the Enforce block");
+}
+
 /// The local repo path the Store is backed by.
 fn repo_local_path(store: &Store) -> String {
     let repo_config = block_on(store.config()).expect("repo config");

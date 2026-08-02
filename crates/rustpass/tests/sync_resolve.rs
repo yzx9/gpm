@@ -936,6 +936,148 @@ async fn entry_conflict_resolve_toctou_refuses_when_remote_moved() {
     );
 }
 
+/// R026 read primitive: `entry_oid` returns the blob oid for a present entry and
+/// `None` for one absent at HEAD (the signal the delete no-op rule keys on).
+#[tokio::test]
+async fn entry_oid_present_and_absent_at_head() {
+    let (_bare_dir, _cfg, store, _recipient) = store_with_base(vec![("entry.age", b"v1")]).await;
+    let present = store.entry_oid("entry").await.expect("entry_oid");
+    assert!(present.is_some(), "present entry → Some(oid)");
+    let absent = store.entry_oid("missing").await.expect("entry_oid missing");
+    assert!(absent.is_none(), "absent at HEAD → None");
+}
+
+/// R026: a non-stale edit (base oid == current oid) proceeds normally — no
+/// false-positive conflict. The edit lands and pushes.
+#[tokio::test]
+async fn autosync_edit_proceeds_when_base_matches() {
+    let (_bare_dir, _cfg, store, _recipient) = store_with_base(vec![("entry.age", b"v1")]).await;
+    let store = Arc::new(store);
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("present at v1");
+    // No remote change → base == current → the guard passes.
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid,
+                kind: ExpectedKind::Edit,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.set("entry", b"fresh-edit").await }
+            },
+        )
+        .await
+        .expect("autosync edit");
+    assert!(
+        matches!(outcome, rustpass::WriteOutcome::Written(_)),
+        "matching base → Written, got {outcome:?}"
+    );
+    assert_eq!(
+        store.get("entry").await.expect("get").password(),
+        "fresh-edit"
+    );
+}
+
+/// R026: a delete built on a stale snapshot (a teammate advanced the same entry)
+/// is refused as EntryConflict — the teammate's newer version survives.
+#[tokio::test]
+async fn autosync_delete_refuses_when_entry_changed() {
+    let (bare_dir, _cfg, store, recipient) = store_with_base(vec![("entry.age", b"v1")]).await;
+    let store = Arc::new(store);
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("present at v1");
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("entry.age", b"v2-from-teammate")],
+        &recipient,
+        "remote advances same-name",
+    );
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid,
+                kind: ExpectedKind::Delete,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.delete("entry").await }
+            },
+        )
+        .await
+        .expect("autosync delete");
+    match outcome {
+        rustpass::WriteOutcome::EntryConflict {
+            op, current_oid, ..
+        } => {
+            assert_eq!(op, ExpectedKind::Delete);
+            assert!(current_oid.is_some(), "entry still present (v2)");
+        }
+        other => panic!("expected EntryConflict, got {other:?}"),
+    }
+    // The teammate's v2 survived (the stale delete was refused, not clobbered).
+    assert_eq!(
+        store.get("entry").await.expect("get").password(),
+        "v2-from-teammate"
+    );
+}
+
+/// R026: under AutoSync-OFF the base-version guard is skipped by design — a
+/// stale edit still commits locally (Written) and surfaces as a repo-level
+/// divergence at the next manual Sync. Pin the documented limitation.
+#[tokio::test]
+async fn autosync_off_skips_base_check_even_with_expected() {
+    let (bare_dir, _cfg, store, recipient) = store_with_base(vec![("entry.age", b"v1")]).await;
+    let store = Arc::new(store);
+    store.set_autosync(false);
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("present at v1");
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("entry.age", b"v2-from-teammate")],
+        &recipient,
+        "remote advances same-name",
+    );
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid,
+                kind: ExpectedKind::Edit,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.set("entry", b"local-edit").await }
+            },
+        )
+        .await
+        .expect("autosync-off edit");
+    assert!(
+        matches!(outcome, rustpass::WriteOutcome::Written(_)),
+        "autosync-off skips the base check → Written, got {outcome:?}"
+    );
+}
+
 // ── Store::sync_repo — manual pull → push (the Sync button) ──────────────────
 
 /// `sync_repo` publishes unpushed local commits when autosync is off: a local
