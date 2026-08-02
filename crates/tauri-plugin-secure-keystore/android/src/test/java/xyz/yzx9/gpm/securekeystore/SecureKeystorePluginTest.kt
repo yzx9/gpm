@@ -177,4 +177,31 @@ class SecureKeystorePluginTest {
             ),
         )
     }
+
+    // BiometricSlot.fromString (R064) — the slot string the Rust handle sends
+    // maps to the right alias/prefs; unspecified ⇒ LEGACY (the pre-split bridge:
+    // until the app shell threads an explicit slot, the biometric commands keep
+    // targeting the legacy gpm_master_key_biometric alias exactly as before).
+    @Test
+    fun biometricSlot_fromString_vault() {
+        val slot = BiometricSlot.fromString("vault")
+        assertEquals(BiometricSlot.VAULT, slot)
+        assertEquals("gpm_vault_key", slot.alias)
+        assertEquals("gpm_secure_keystoreVault", slot.prefsName)
+    }
+
+    @Test
+    fun biometricSlot_fromString_legacy() {
+        val slot = BiometricSlot.fromString("legacy")
+        assertEquals(BiometricSlot.LEGACY, slot)
+        assertEquals("gpm_master_key_biometric", slot.alias)
+        assertEquals("gpm_secure_keystoreBiometric", slot.prefsName)
+    }
+
+    @Test
+    fun biometricSlot_fromString_unspecifiedDefaultsToLegacy() {
+        assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString(null))
+        assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString(""))
+        assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString("garbage"))
+    }
 }

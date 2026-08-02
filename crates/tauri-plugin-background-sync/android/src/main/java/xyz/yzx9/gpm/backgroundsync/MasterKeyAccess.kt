@@ -11,8 +11,9 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Retrieves the **auth-free** at-rest master key (the one that seals
- * `repo.json` / `identity` / `app.json`) directly from the Android Keystore —
+ * Retrieves the **auth-free** at-rest master key (the one that seals the
+ * metadata — `repo.json` / `app.json`; since R064 the `identity` lives under a
+ * separate `gpm_vault_key`, not this key) directly from the Android Keystore —
  * background-safe, no biometric prompt (the auth-free key has no
  * `setUserAuthenticationRequired`).
  *
@@ -26,7 +27,6 @@ import javax.crypto.spec.GCMParameterSpec
 object MasterKeyAccess {
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS = "gpm_master_key"
-    private const val BIOMETRIC_KEY_ALIAS = "gpm_master_key_biometric"
     private const val PREFS_NAME = "gpm_secure_keystore"
     private const val PREF_CT = "ct"
     private const val PREF_IV = "iv"
@@ -34,14 +34,15 @@ object MasterKeyAccess {
 
     /**
      * The auth-free master key (base64, STANDARD — matches Rust's `decode_master_key`),
-     * or `null` if AppLock is on (the biometric alias exists, auth-free key migrated
-     * away) or the auth-free store is empty/unset. Never prompts.
+     * or `null` if the auth-free store is empty/unset. Never prompts.
+     *
+     * R064: the auth-free `gpm_master_key` is permanent (never deleted on App Lock
+     * toggle), so a background worker retrieves it under App Lock and syncs. The
+     * old "AppLock on ⇒ biometric alias exists ⇒ skip" guard is removed — the
+     * identity now lives under a separate `gpm_vault_key`, not this auth-free key.
      */
     fun loadAuthFree(context: Context): String? {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        // AppLock is on ⇔ the biometric-gated alias exists. A background worker
-        // can't show the prompt, so skip rather than attempt the biometric key.
-        if (keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) return null
         if (!keyStore.containsAlias(KEY_ALIAS)) return null
 
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
