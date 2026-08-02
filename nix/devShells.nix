@@ -139,22 +139,13 @@ let
     export LD_LIBRARY_PATH="${lib.makeLibraryPath linuxDesktopRuntime}:$LD_LIBRARY_PATH"
   '';
 
-  # mkShell derivations have no `.override`, so the local-dev shells extend the
-  # CI shells by transforming the shared *argument* attrset. Both extras are
-  # local-dev only:
-  #   - sccache: machine-global compile cache. Its cache isn't restored in CI and
-  #     rust-cache makes target/ reuse redundant there, so the wrapper is pure
-  #     overhead in `nix develop .#ci-*`.
-  #   - pre-commit hook install: CI never commits, so the hooks would never fire
-  #     — the shellHook install dance is pure overhead in CI too.
-  addLocalDevExtras =
-    args:
-    args
-    // {
-      packages = args.packages ++ [ pkgs.sccache ];
-      RUSTC_WRAPPER = "sccache";
-      shellHook = pre-commit-checks.shellHook + args.shellHook;
-    };
+  # mkShell derivations have no `.override`, so the shells extend the shared
+  # *argument* attrset via transform functions before mkShell:
+  #   - addLocalDevExtras: the pre-commit hook install. CI never commits, so
+  #     the hook would never fire there — local-dev only.
+  addLocalDevExtras = args: {
+    shellHook = pre-commit-checks.shellHook + args.shellHook;
+  };
 
   # `full`-shell args (no sccache, no pre-commit hook): every toolchain the
   # repo touches — the four Android Rust targets, the Android SDK/NDK, JDK,
@@ -170,6 +161,7 @@ let
         cargo-audit
         cargo-release
         cargo-outdated
+        sccache
 
         # Frontend
         nodejs
@@ -202,6 +194,11 @@ let
         ]
         ++ linuxDesktopRuntime
       );
+
+    # sccache caches rustc outputs by content hash, so it is immune to the
+    # cargo-fingerprint drift that defeats rust-cache's target/ reuse under
+    # nix (see .github/actions/setup-ci-env/action.yml).
+    RUSTC_WRAPPER = "sccache";
 
     ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
     ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
@@ -268,21 +265,22 @@ let
     shellHook = linuxDesktopLdHook;
   };
 
-  ciFullShell = pkgs.mkShell fullShellArgs;
-  ciLiteShell = pkgs.mkShell liteShellArgs;
+  # CI shells: sccache pointed at a fixed dir the setup-ci-env action persists
+  # with actions/cache (local dev leaves SCCACHE_DIR unset -> sccache default).
+  ciFullShell = pkgs.mkShell (fullShellArgs // { SCCACHE_DIR = "/tmp/sccache"; });
+  ciLiteShell = pkgs.mkShell (liteShellArgs // { SCCACHE_DIR = "/tmp/sccache"; });
   fullShell = pkgs.mkShell (addLocalDevExtras fullShellArgs);
   liteShell = pkgs.mkShell (addLocalDevExtras liteShellArgs);
 in
 {
-  # CI shells — no sccache and no pre-commit hook install (both are local-dev
-  # only; see addLocalDevExtras for why).
+  # CI shells: sccache (RUSTC_WRAPPER) + SCCACHE_DIR=/tmp/sccache, persisted by
+  # setup-ci-env. No pre-commit hook (CI never commits).
   ci-full = ciFullShell;
   ci-lite = ciLiteShell;
 
-  # Local-dev shells: the CI shell + sccache (machine-global compile cache,
-  # so a fresh worktree reuses compiles from others instead of rebuilding
-  # target/ from scratch) + the pre-commit hook install. `default` (bare
-  # `nix develop`) resolves to `full`.
+  # Local-dev shells: sccache (default ~/.cache/sccache, machine-global so a
+  # fresh worktree reuses compiles from others) + the pre-commit hook install.
+  # `default` (bare `nix develop`) resolves to `full`.
   full = fullShell;
   lite = liteShell;
   default = fullShell;
