@@ -24,7 +24,7 @@
 mod common;
 
 mod tests {
-    use super::common::generate_test_keypair;
+    use super::common::{encrypt_to_recipients, generate_test_keypair};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
@@ -59,7 +59,11 @@ done
             .unwrap_or(false)
     }
 
-    /// Write the mock pinentry into `home/bin` and mark it executable.
+    /// Write the mock pinentry into `home/bin` and mark it executable. Also
+    /// creates an empty `home/gnupg` (mode 0700) so an isolated `GNUPGHOME`
+    /// keeps gopass's pinentry helper off the user's running gpg-agent —
+    /// otherwise gopass routes the age-identity passphrase through the agent's
+    /// TTY-needing pinentry and bypasses our mock.
     fn install_mock_pinentry(home: &Path) {
         let bin = home.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
@@ -68,6 +72,12 @@ done
         let mut perm = std::fs::metadata(&mock).unwrap().permissions();
         perm.set_mode(0o755);
         std::fs::set_permissions(&mock, perm).unwrap();
+
+        let gnupg = home.join("gnupg");
+        std::fs::create_dir_all(&gnupg).unwrap();
+        let mut gperm = std::fs::metadata(&gnupg).unwrap().permissions();
+        gperm.set_mode(0o700);
+        std::fs::set_permissions(&gnupg, gperm).unwrap();
     }
 
     /// Build a `gopass` command fully isolated into `home`: its config and data
@@ -81,6 +91,7 @@ done
         let mut c = Command::new("gopass");
         c.env("GOPASS_CONFIG", home.join("config.yml"));
         c.env("GOPASS_HOMEDIR", home);
+        c.env("GNUPGHOME", home.join("gnupg"));
         c.env("PINENTRY_PASSPHRASE", PIN);
         c.env("PATH", std::env::join_paths(paths).unwrap());
         c.args(args);
@@ -271,6 +282,184 @@ done
             let (pw, body) = expected_password_body(plaintext);
             assert_eq!(secret.password(), pw, "password mismatch for {name}");
             assert_eq!(secret.body(), body, "body mismatch for {name}");
+        }
+    }
+
+    /// Like [`provision_gopass_store`], but captures gopass's own age recipient
+    /// (so a planted file can be encrypted to it for gopass to decrypt) and
+    /// lists BOTH gpm's and gopass's recipients in `.age-recipients`. Returns
+    /// the store dir plus gopass's recipient string.
+    fn provision_gopass_store_with_gopass_recipient(
+        gpm_recipient: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf, String) {
+        let home = tempfile::tempdir().unwrap();
+        install_mock_pinentry(home.path());
+
+        let keygen = gopass(
+            home.path(),
+            &["age", "identities", "keygen", "--password", PIN],
+        )
+        .output()
+        .unwrap();
+        assert!(
+            keygen.status.success(),
+            "gopass age keygen failed: {}",
+            String::from_utf8_lossy(&keygen.stderr)
+        );
+
+        let store_dir = home.path().join("store");
+        let init = gopass(
+            home.path(),
+            &[
+                "--yes",
+                "init",
+                "--crypto",
+                "age",
+                "--storage",
+                "gitfs",
+                "--path",
+                store_dir.to_str().unwrap(),
+            ],
+        )
+        .output()
+        .unwrap();
+        assert!(
+            init.status.success(),
+            "gopass init failed: {}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+
+        // gopass wrote its own recipient during init; capture it before any
+        // rewrite. The holder of the matching identity (gopass) can decrypt a
+        // file encrypted to it, independent of the store's recipients list.
+        let gopass_recipient = std::fs::read_to_string(store_dir.join(".age-recipients"))
+            .unwrap()
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .expect("gopass init wrote a recipient")
+            .trim()
+            .to_owned();
+
+        // List both so either side can decrypt planted files.
+        std::fs::write(
+            store_dir.join(".age-recipients"),
+            format!("{gpm_recipient}\n{gopass_recipient}\n"),
+        )
+        .unwrap();
+
+        (home, store_dir, gopass_recipient)
+    }
+
+    /// Plant `plaintext` (a legacy `GOPASS-SECRET-1.0` blob) at
+    /// `<store>/<name>.age`, encrypted to every recipient in `recipients` so
+    /// both gopass (its own identity) and gpm (its identity) can decrypt it.
+    /// Bypasses gopass's writer, which only emits the modern format — this is
+    /// the only way to get gopass to *read* a legacy entry it never writes.
+    fn plant_legacy_entry(store: &Path, name: &str, plaintext: &[u8], recipients: &[&str]) {
+        let file = store.join(format!("{name}.age"));
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file, encrypt_to_recipients(plaintext, recipients)).unwrap();
+    }
+
+    /// `gopass show <name>`: decrypt through gopass's real parse cascade
+    /// (legacy MIME first), returning the full stdout — password on line 1,
+    /// then the body gopass renders. Asserts gopass succeeded.
+    fn gopass_show(home: &Path, name: &str) -> String {
+        let out = gopass(home, &["show", name]).output().unwrap();
+        assert!(
+            out.status.success(),
+            "gopass show {name:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// **Reverse interop (legacy format → gopass + gpm agree):** a deprecated
+    /// `GOPASS-SECRET-1.0` plaintext is planted — encrypted to both sides, so
+    /// gopass's own identity and gpm's identity can each decrypt it — then read
+    /// by the real `gopass` binary AND by gpm. Both must lift the same password
+    /// out of the `Password:` header and render the same body. Before R054, gpm
+    /// yielded the literal `GOPASS-SECRET-1.0` magic as the password while
+    /// gopass correctly read the header; this test pins that gpm now agrees.
+    #[tokio::test]
+    async fn gpm_and_gopass_agree_on_legacy_gopass_secret_1_0() {
+        if !gopass_present() {
+            eprintln!("skipping gopass interop test: `gopass` not on PATH");
+            return;
+        }
+
+        let (identity, recipient) = generate_test_keypair();
+        let (home, store_dir, gopass_recipient) =
+            provision_gopass_store_with_gopass_recipient(&recipient);
+
+        // One non-Password attribute per case so gopass's attribute sort and
+        // gpm's source-order render can't diverge — the body compare is exact.
+        let cases: &[(&str, &str)] = &[
+            (
+                "legacy/basic",
+                "GOPASS-SECRET-1.0\nPassword: hunter2\nUsername: alice\n\nfree text body",
+            ),
+            (
+                "legacy/password-only",
+                "GOPASS-SECRET-1.0\nPassword: hunter2",
+            ),
+            (
+                "legacy/no-body",
+                "GOPASS-SECRET-1.0\nPassword: hunter2\nUsername: alice",
+            ),
+        ];
+        let recipients: [&str; 2] = [&recipient, &gopass_recipient];
+        for (name, plaintext) in cases {
+            plant_legacy_entry(&store_dir, name, plaintext.as_bytes(), &recipients);
+        }
+        commit_worktree(&store_dir);
+
+        // gpm clones the store and decrypts with its own identity.
+        let config_dir = tempfile::tempdir().unwrap();
+        let store = Store::new(config_dir.path().to_path_buf(), None);
+        store
+            .configure(
+                store_dir.to_str().unwrap(),
+                None,
+                None,
+                None,
+                &identity,
+                None,
+            )
+            .await
+            .expect("gpm clones and configures the gopass store");
+
+        for (name, _plaintext) in cases {
+            // gopass: real binary, full parse cascade (legacy MIME first).
+            let gopass_out = gopass_show(home.path(), name);
+            let (gopass_pw, gopass_body) = expected_password_body(&gopass_out);
+
+            // gpm: our parser on the same plaintext bytes.
+            let secret = store
+                .get(name)
+                .await
+                .expect("gpm decrypts the planted legacy entry");
+
+            // The load-bearing assertion: gpm's password matches gopass's. The
+            // R054 bug was gpm returning the magic string here.
+            assert_eq!(
+                secret.password(),
+                gopass_pw,
+                "{name}: gpm password must match gopass's parse of the same legacy bytes"
+            );
+            assert_eq!(
+                secret.body(),
+                gopass_body,
+                "{name}: gpm body must match gopass's render"
+            );
+            // Guard against regressing back to the magic-as-password bug.
+            assert_ne!(
+                secret.password(),
+                "GOPASS-SECRET-1.0",
+                "{name}: gpm regressed to treating the magic as the password"
+            );
         }
     }
 }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Secrets saved in gopass's older `GOPASS-SECRET-1.0` format (used for a few months in 2020–2021 and still produced by some older stores) now open correctly. gpm used to treat the format's identifying header line as the password, so it showed — and copied — the wrong string; the real password, which that format stores in a `Password:` field, is now used instead. Editing one of these secrets still rewrites it in the current format, exactly as gopass does; gpm never writes the old format.
+
 ### Changed
 
 - The diagnostic log now records the app's own activity — each screen you open, and any operation that fails (a copy, reveal, sync, create, and so on) — alongside the existing backend trace, so a failure leaves a clue in **Settings → Logs** instead of disappearing. A failed copy, for example, used to leave no trace at all; the log now captures what went wrong.

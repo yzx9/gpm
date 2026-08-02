@@ -80,3 +80,161 @@ fn secret_with_gopass_reference() {
     assert_eq!(secret.password(), "gopass://other/entry");
     assert_eq!(secret.body(), "user: alice");
 }
+
+// ---- deprecated GOPASS-SECRET-1.0 format (read-only compat) ----
+//
+// gpm never writes this format; these tests cover reading the deprecated
+// single-part header-block format gopass wrote mid-2020–v1.13 and still reads.
+
+/// Legacy MIME secret: password lifted from the `Password:` header, remaining
+/// headers rendered into the body, free text preserved after the blank line.
+#[test]
+fn secret_legacy_basic() {
+    let secret =
+        Secret::parse(b"GOPASS-SECRET-1.0\nPassword: hunter2\nusername: alice\n\nfree text")
+            .unwrap();
+    assert_eq!(secret.password(), "hunter2");
+    assert_eq!(secret.body(), "username: alice\nfree text");
+}
+
+/// Multiple non-Password headers are rendered in source order.
+#[test]
+fn secret_legacy_multiple_attributes() {
+    let secret =
+        Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nusername: alice\nurl: example.com\n")
+            .unwrap();
+    assert_eq!(secret.password(), "p");
+    assert_eq!(secret.body(), "username: alice\nurl: example.com");
+}
+
+/// No `Password:` header → empty password, other headers still render.
+#[test]
+fn secret_legacy_no_password_header() {
+    let secret = Secret::parse(b"GOPASS-SECRET-1.0\nusername: alice\n\nnotes").unwrap();
+    assert_eq!(secret.password(), "");
+    assert_eq!(secret.body(), "username: alice\nnotes");
+}
+
+/// RFC-822 folded continuation lines are unfolded into the header value.
+#[test]
+fn secret_legacy_folded_continuation() {
+    let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nnote: a\n  b\n\nbody").unwrap();
+    assert_eq!(secret.password(), "p");
+    assert_eq!(secret.body(), "note: a b\nbody");
+}
+
+/// Magic-only file (no headers, no body) → empty password and body.
+#[test]
+fn secret_legacy_magic_only() {
+    let secret = Secret::parse(b"GOPASS-SECRET-1.0").unwrap();
+    assert_eq!(secret.password(), "");
+    assert_eq!(secret.body(), "");
+}
+
+/// Headers with no blank-line terminator: EOF ends the header block, body empty.
+#[test]
+fn secret_legacy_no_body_just_headers() {
+    let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nusername: alice").unwrap();
+    assert_eq!(secret.password(), "p");
+    assert_eq!(secret.body(), "username: alice");
+}
+
+/// CRLF line endings are normalized before the legacy parse.
+#[test]
+fn secret_legacy_crlf_line_endings() {
+    let secret =
+        Secret::parse(b"GOPASS-SECRET-1.0\r\nPassword: hunter2\r\nusername: alice\r\n\r\nbody\r\n")
+            .unwrap();
+    assert_eq!(secret.password(), "hunter2");
+    assert_eq!(secret.body(), "username: alice\nbody");
+}
+
+/// The `Password:` key is matched case-insensitively (lower / UPPER / Mixed).
+#[test]
+fn secret_legacy_password_case_variants() {
+    for key in ["password", "PASSWORD", "PaSsWoRd"] {
+        let input = format!("GOPASS-SECRET-1.0\n{key}: secret-value\n");
+        let s = Secret::parse(input.as_bytes()).unwrap();
+        assert_eq!(s.password(), "secret-value", "key {key}");
+    }
+}
+
+/// A header value containing `:` (e.g. a URL) splits on the first colon only.
+#[test]
+fn secret_legacy_url_value_with_colon() {
+    let secret =
+        Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nurl: https://example.com:8080/path")
+            .unwrap();
+    assert_eq!(secret.password(), "p");
+    assert_eq!(secret.body(), "url: https://example.com:8080/path");
+}
+
+/// A malformed header block (no-colon line / orphan fold) falls back to the
+/// modern text parse, matching gopass's `ParseAKV(in)`: password = the magic.
+#[test]
+fn secret_legacy_lenient_no_colon_becomes_modern_fallback() {
+    let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nno colon here\nmore").unwrap();
+    assert_eq!(secret.password(), "GOPASS-SECRET-1.0");
+    assert_eq!(secret.body(), "Password: p\nno colon here\nmore");
+}
+
+#[test]
+fn secret_legacy_orphan_fold_becomes_modern_fallback() {
+    let secret = Secret::parse(b"GOPASS-SECRET-1.0\n  orphan\nmore").unwrap();
+    assert_eq!(secret.password(), "GOPASS-SECRET-1.0");
+    assert_eq!(secret.body(), "  orphan\nmore");
+}
+
+/// A modern secret whose first line is a real password is NOT misdetected as
+/// legacy.
+#[test]
+fn secret_legacy_modern_password_not_misdetected() {
+    let secret = Secret::parse(b"hunter2\nusername: alice").unwrap();
+    assert_eq!(secret.password(), "hunter2");
+    assert_eq!(secret.body(), "username: alice");
+}
+
+/// gopass parity: a legacy parse reassembled as modern (`pw\nbody`) re-parses
+/// to identical fields — the edit-normalizes-to-modern invariant, in pure Rust.
+#[test]
+fn secret_legacy_normalizes_to_modern_on_reparse() {
+    let s1 = Secret::parse(b"GOPASS-SECRET-1.0\nPassword: hunter2\nusername: alice\n\nfree text")
+        .unwrap();
+    let modern = if s1.body().is_empty() {
+        s1.password().to_string()
+    } else {
+        format!("{}\n{}", s1.password(), s1.body())
+    };
+    let s2 = Secret::parse(modern.as_bytes()).unwrap();
+    assert_eq!(s1.password(), s2.password());
+    assert_eq!(s1.body(), s2.body());
+}
+
+/// gopass parity (D5): an empty-value `Password:` header is not extracted and
+/// stays in the body as `password:`.
+#[test]
+fn secret_legacy_empty_password_value_kept_in_body() {
+    let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword:\nFoo: Bar").unwrap();
+    assert_eq!(secret.password(), "");
+    assert_eq!(secret.body(), "password: \nfoo: Bar");
+}
+
+/// End-to-end TOTP interaction (D7): a legacy `Totp:` header is lowercased into
+/// the body as `totp:`, which gpm's case-sensitive TOTP detector then finds.
+/// Locks the lowercasing→detection chain against the real consumer.
+#[test]
+fn secret_legacy_totp_header_detected_after_render() {
+    // 20-byte / 160-bit base32 secret accepted by totp-rs's ≥128-bit floor.
+    const SEED: &str = "KRSXG5CTMVRXEZLUKN2XAZLSKNSWG4TFOQ";
+    let secret =
+        Secret::parse(format!("GOPASS-SECRET-1.0\nPassword: p\nTotp: {SEED}\n").as_bytes())
+            .unwrap();
+    // The mixed-case `Totp:` header must be rendered lowercased for detection.
+    assert!(
+        secret.body().lines().any(|l| l.starts_with("totp: ")),
+        "body should contain a lowercased `totp:` line: {}",
+        secret.body()
+    );
+    assert!(rustpass::totp::has_totp(secret.body()));
+    assert!(rustpass::totp::extract(secret.body()).unwrap().is_some());
+}

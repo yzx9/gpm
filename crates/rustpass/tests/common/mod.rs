@@ -82,6 +82,27 @@ pub fn encrypt_to_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
     encrypted
 }
 
+/// Encrypt `plaintext` to multiple recipients (age multi-recipient): the holder
+/// of any one matching identity can decrypt. Used by interop tests that plant a
+/// file both gopass (its own identity) and gpm (its identity) must read.
+#[allow(dead_code)]
+pub fn encrypt_to_recipients(plaintext: &[u8], recipient_strs: &[&str]) -> Vec<u8> {
+    let recipients: Vec<Recipient> = recipient_strs
+        .iter()
+        .map(|s| Recipient::from_str(s).unwrap())
+        .collect();
+    let dyn_refs: Vec<&dyn age::Recipient> = recipients
+        .iter()
+        .map(|r| r as &dyn age::Recipient)
+        .collect();
+    let encryptor = age::Encryptor::with_recipients(dyn_refs.iter().copied()).unwrap();
+    let mut encrypted = Vec::new();
+    let mut writer = encryptor.wrap_output(&mut encrypted).unwrap();
+    writer.write_all(plaintext).unwrap();
+    writer.finish().unwrap();
+    encrypted
+}
+
 /// Generate an ed25519 SSH keypair encrypted with `passphrase`, returning
 /// `(private_pem, public_key)`. Used by SSH-identity integration tests.
 #[allow(dead_code)]
