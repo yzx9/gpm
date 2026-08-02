@@ -21,6 +21,28 @@ jobs:
           rust_cache: true
           pnpm_cache: true
 
+      - name: Dump build env + restored fingerprints (diagnostic)
+        # DIAGNOSTIC: the flake.lock hash is in the rust-cache key, yet cargo's
+        # unit hashes drift across runs (0 fingerprint reuse). This dumps, in
+        # the SAME nix shell the build uses, exactly which rustc/cargo/env the
+        # build sees, and what .fingerprint dirs were restored — to tell apart
+        # (a) build using the runner's stray rustup instead of fenix rustc,
+        # (b) cleanup stripping registry fingerprints, (c) an env var outside
+        # the envHash prefixes differing across runs.
+        shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
+        run: |
+          echo "=== which -a rustc cargo rustup ==="
+          which -a rustc cargo rustup 2>/dev/null || true
+          echo "=== rustc -vV ==="
+          rustc -vV || true
+          echo "=== cargo -vV ==="
+          cargo -vV || true
+          echo "=== relevant env (sorted) ==="
+          printenv | sort | grep -iE '^(CC|CXX|CFLAGS|CXXFLAGS|CPPFLAGS|PKG_CONFIG|NIX_|LD_|RUST|CARGO|PATH=|SOURCE_DATE|HOST_)' || true
+          echo "=== restored .fingerprint: count + serde/libc/gpm sample ==="
+          ls target/debug/.fingerprint/ 2>/dev/null | wc -l
+          ls target/debug/.fingerprint/ 2>/dev/null | grep -E '^(serde|libc|cfg-if|gpm|rustpass)' | head -20
+
       - name: Run backend tests
         shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
         # DIAGNOSTIC: every backend run restores a full-match rust-cache target/
