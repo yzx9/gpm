@@ -47,6 +47,25 @@ runs:
         # them through `nix develop` or its `rustc -vV` key probe fails and the
         # cache is never read/written. `.#ci-lite` shares rustc's version with `.#ci-full`.
         cmd-format: nix develop .#ci-lite --accept-flake-config --command {0}
+        # target/ reuse is broken under nix: runner-image drift shifts cargo's
+        # per-crate unit hashes without changing this key, so the cache restores
+        # as a full-match cargo then can't reuse (0 Fresh). sccache (next step)
+        # covers compilation; this now caches only ~/.cargo/registry so deps
+        # aren't re-downloaded/re-extracted each run.
+        cache-targets: "false"
+
+    - name: Cache sccache
+      if: inputs.rust_cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: /tmp/sccache
+        # Unique per run/attempt/job so the cache is saved every run and sccache
+        # keeps self-updating; restore from the most recent prior same-job cache.
+        # sccache is content-addressed, so an older restored cache still helps
+        # (matching entries hit, the rest miss+store and self-prune at 10 GB).
+        key: sccache-${{ runner.os }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          sccache-${{ runner.os }}-${{ github.job }}-
 
     - name: Cache pnpm store
       if: inputs.pnpm_cache == 'true'
