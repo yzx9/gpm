@@ -30,7 +30,7 @@ use common::*;
 use rustpass::GitAuth;
 use rustpass::SyncOutcome;
 use rustpass::crypto;
-use rustpass::store::{DivergenceChoice, Store};
+use rustpass::store::{DivergenceChoice, ExpectedEntry, ExpectedKind, Store};
 
 /// Write an encrypted `.age` entry into the store's working repo as an unpushed
 /// local commit. `plaintext` is encrypted to `recipient` so the store can decrypt
@@ -514,7 +514,7 @@ async fn autosync_off_skips_network() {
 
     let s = store.clone();
     let outcome = store
-        .autosync_write(&cancel_slot(), None, move || {
+        .autosync_write(&cancel_slot(), None, None, move || {
             let s = s.clone();
             async move { s.set("offline-entry", b"local-only").await }
         })
@@ -543,7 +543,7 @@ async fn autosync_on_publishes_via_pull_write_push() {
 
     let s = store.clone();
     let outcome = store
-        .autosync_write(&cancel_slot(), None, move || {
+        .autosync_write(&cancel_slot(), None, None, move || {
             let s = s.clone();
             async move { s.set("published", b"via-orchestrator").await }
         })
@@ -593,7 +593,7 @@ async fn autosync_on_push_rejected_returns_needs_divergence_resolve() {
 
     let s = store.clone();
     let outcome = store
-        .autosync_write(&cancel_slot(), None, move || {
+        .autosync_write(&cancel_slot(), None, None, move || {
             let s = s.clone();
             async move { s.set("new", b"v").await }
         })
@@ -631,11 +631,11 @@ async fn autosync_concurrent_writes_both_land() {
     let slot1 = cancel_slot();
     let slot2 = cancel_slot();
     let (r1, r2) = tokio::join!(
-        store.autosync_write(&slot1, None, move || {
+        store.autosync_write(&slot1, None, None, move || {
             let s = s1.clone();
             async move { s.set("a", b"1").await }
         }),
-        store.autosync_write(&slot2, None, move || {
+        store.autosync_write(&slot2, None, None, move || {
             let s = s2.clone();
             async move { s.set("b", b"2").await }
         }),
@@ -649,14 +649,15 @@ async fn autosync_concurrent_writes_both_land() {
     assert!(bare_head_oid(bare_dir.path()).len() > 7);
 }
 
-/// ⚠️ ACCEPTED LIMITATION (`0026`, pinned here): with autosync on, a stale edit
-/// silently clobbers a teammate's newer same-name change. The orchestrator's
-/// pre-write pull fast-forwards over the remote's newer version, the local write
-/// commits on top, and the push fast-forwards — returning `Ok`, not a conflict.
-/// Base-version-aware edit is the deferred fix. This test pins the clobber so it
-/// can't drift silently.
+/// R026: with autosync on, a base-version-aware edit REFUSES to clobber a
+/// teammate's newer same-name change. The user read v1; a teammate advanced the
+/// same entry to v2; the user saves an edit built on the stale v1. The
+/// orchestrator's pre-write pull fast-forwards local HEAD onto v2, the base-oid
+/// guard sees `current (v2) != base (v1)`, and the write is refused as
+/// `WriteOutcome::EntryConflict` — no commit, no push, the teammate's v2 is
+/// untouched. (Was the pinned silent-clobber regression before R026.)
 #[tokio::test]
-async fn autosync_silently_clobbers_remote_same_name_change() {
+async fn autosync_detects_stale_edit_same_name_change() {
     let (identity, recipient) = generate_test_keypair();
     let (bare_dir, _clone_dir) = create_test_git_repo_with(
         vec![("entry.age", b"v1")],
@@ -676,6 +677,14 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
         .expect("configure");
     let store = Arc::new(store);
 
+    // The base version the user read: v1's blob oid, captured at load time
+    // (mirrors the edit screen pinning SensitiveContent.version).
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("entry present at v1");
+
     // A teammate advances the SAME entry on the remote; the local has no
     // unpushed commit, so there is no divergence — only a behind-local.
     let newer: Vec<u8> = b"newer-from-teammate".to_vec();
@@ -686,30 +695,60 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
         "remote advances same-name",
     );
 
-    // The user, editing from the stale v1 snapshot, saves via the orchestrator.
+    // The user, editing from the stale v1 snapshot, saves via the orchestrator
+    // with the captured base oid.
     let s = store.clone();
     let outcome = store
-        .autosync_write(&cancel_slot(), None, move || {
-            let s = s.clone();
-            async move { s.set("entry", b"stale-edit").await }
-        })
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid.clone(),
+                kind: ExpectedKind::Edit,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.set("entry", b"stale-edit").await }
+            },
+        )
         .await
         .expect("autosync write");
+
+    let current_oid = match outcome {
+        rustpass::WriteOutcome::EntryConflict {
+            name,
+            base_oid,
+            current_oid,
+            op,
+            ..
+        } => {
+            assert_eq!(name, "entry");
+            assert_eq!(base_oid, v1_oid);
+            assert_eq!(op, ExpectedKind::Edit);
+            current_oid
+        }
+        other => panic!("expected EntryConflict, got {other:?}"),
+    };
+    // The guard saw the teammate's v2 (a different oid than the v1 base).
+    assert_ne!(current_oid.as_deref(), Some(v1_oid.as_str()));
     assert!(
-        !written_commit(outcome).is_empty(),
-        "no divergence → fast-forward → Ok Written (the silent clobber)"
+        current_oid.is_some(),
+        "entry still present (v2), not deleted"
     );
 
-    // The teammate's newer version was silently overwritten by the stale edit.
+    // The teammate's v2 is untouched: the pull fast-forwarded local HEAD onto
+    // v2, but the write was refused — nothing committed, nothing pushed.
     assert_eq!(
         store.get("entry").await.expect("get").password(),
-        "stale-edit"
+        "newer-from-teammate",
+        "local HEAD == teammate v2; the stale edit was refused"
     );
     let blob = bare_blob(bare_dir.path(), "entry.age");
     assert_eq!(
         crypto::decrypt_bytes(&blob, identity.as_bytes(), None).unwrap(),
-        b"stale-edit",
-        "remote HEAD has the stale edit, not the teammate's newer version — the clobber"
+        b"newer-from-teammate",
+        "remote HEAD unchanged — the stale edit did NOT clobber the teammate's version"
     );
 }
 

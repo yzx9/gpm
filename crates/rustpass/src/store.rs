@@ -56,8 +56,8 @@ pub const CLEAR_SECS_MAX: u64 = 600;
 // doesn't form a `store ↔ storage` module cycle. Re-exported here for callers
 // that still reach them via `rustpass::store::`.
 pub use crate::storage::{
-    AuthenticityResult, CommitIdentity, DivergenceChoice, SyncDivergence, SyncOutcome, SyncResult,
-    WriteOutcome, WriteResult,
+    AuthenticityResult, CommitIdentity, DivergenceChoice, ExpectedEntry, ExpectedKind,
+    SyncDivergence, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
 };
 // `list_entries` / `resolve_entry_path` were relocated to `storage::git`
 // and are re-exported here so existing integration-test call sites
@@ -1200,6 +1200,10 @@ impl Store {
     /// sync-time divergence surface. Calling `delete` directly is for tests and
     /// the orchestrator only.
     ///
+    /// Like [`set`], the base-version silent-clobber this once risked is guarded
+    /// at the orchestrator ([`Store::autosync_write`], RFC R026); this primitive
+    /// stays local-only (no guard).
+    ///
     /// # Errors
     ///
     /// Returns [`ErrorCode::InvalidEntryName`] for a malformed name,
@@ -1247,6 +1251,16 @@ impl Store {
     /// [`delete`] / [`create`] / [`update`]) — it runs inside the critical
     /// section and must NOT re-acquire [`write_mu`] (those primitives don't).
     ///
+    /// `expected`, when `Some`, carries the entry's blob oid captured at read
+    /// time (RFC R026). After the pre-write pull settles HEAD, the orchestrator
+    /// compares the entry's current oid against `base_oid` and refuses the write
+    /// on mismatch — [`WriteOutcome::EntryConflict`] (edit or delete vs. a changed
+    /// entry, or create vs. a name a teammate took first) /
+    /// [`WriteOutcome::NoChange`] (delete vs. an entry a teammate already removed)
+    /// — instead of silently fast-forwarding over the teammate's change. `None`
+    /// (preset create / no captured base) skips it; a custom create passes `Some`
+    /// for an existence-based guard. The guard runs only under autosync-on.
+    ///
     /// # Errors
     ///
     /// Non-terminal outcomes are returned as [`WriteOutcome`] variants, not
@@ -1260,6 +1274,7 @@ impl Store {
         &self,
         slot: &CancelSlot,
         cancel: Option<CancelToken>,
+        expected: Option<ExpectedEntry>,
         local_write: F,
     ) -> Result<WriteOutcome, Error>
     where
@@ -1295,6 +1310,43 @@ impl Store {
                 return Ok(WriteOutcome::Cancelled { committed: false });
             }
             Err(e) => return Err(e),
+        }
+
+        // Base-version guard (RFC R026): when the caller captured the entry's
+        // blob oid at read time, refuse the write if its current oid at HEAD
+        // (settled onto the remote by the pull above) differs from the base —
+        // the edit was built on a stale snapshot and would silently fast-forward
+        // over a teammate's change. `None` (create/preset/no captured base)
+        // skips the check, preserving the legacy path.
+        if let Some(expected) = expected {
+            let ExpectedEntry {
+                name,
+                base_oid,
+                kind,
+            } = expected;
+            let current = self.entry_oid(&name).await?;
+            // delete vs. an entry a teammate already removed: nothing to commit.
+            // Distinct from `Written` so the UI toasts "already removed", not a
+            // fake delete commit (R026 D7).
+            if matches!(kind, ExpectedKind::Delete) && current.is_none() {
+                let head = self
+                    .current_head_hash()
+                    .await?
+                    .chars()
+                    .take(7)
+                    .collect::<String>();
+                return Ok(WriteOutcome::NoChange { head });
+            }
+            if current.as_deref() != Some(base_oid.as_str()) {
+                let remote_tip = self.current_head_hash().await?;
+                return Ok(WriteOutcome::EntryConflict {
+                    name,
+                    base_oid,
+                    current_oid: current,
+                    remote_tip,
+                    op: kind,
+                });
+            }
         }
 
         // Local write (encrypt + commit), inside the critical section.

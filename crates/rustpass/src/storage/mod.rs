@@ -914,9 +914,9 @@ pub enum WriteOutcome {
         /// The post-pull HEAD (== remote tip the conflict was detected against).
         /// Passed back to `resolve_entry_conflict` as a TOCTOU guard.
         remote_tip: String,
-        /// Whether this conflict is an edit or a delete (the resolve payload and
-        /// keep-mine semantics differ). Named `op` because the enum's serde tag
-        /// is already `kind`.
+        /// Whether this conflict is an edit, a delete, or a create (the resolve
+        /// payload and keep-mine semantics differ). Named `op` because the enum's
+        /// serde tag is already `kind`.
         op: ExpectedKind,
     },
     /// A delete found the entry already absent at HEAD (a teammate deleted it):
@@ -928,9 +928,9 @@ pub enum WriteOutcome {
     },
 }
 
-/// Whether a base-version-aware write is an edit or a delete (the orchestrator
-/// check and resolve semantics differ between the two). Crosses IPC as part of
-/// [`WriteOutcome::EntryConflict`] and the resolve command.
+/// Whether a base-version-aware write is an edit, a delete, or a create (the
+/// orchestrator check and resolve semantics differ between them). Crosses IPC as
+/// part of [`WriteOutcome::EntryConflict`] and the resolve command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectedKind {
@@ -938,6 +938,25 @@ pub enum ExpectedKind {
     Edit,
     /// Delete an existing entry.
     Delete,
+}
+
+/// The base version a caller captured at read time, to guard a subsequent
+/// edit/delete against a stale snapshot (RFC R026). Passed to
+/// [`crate::store::Store::autosync_write`]: when present, the orchestrator
+/// compares the entry's current blob oid at HEAD (after the pre-write pull)
+/// against `base_oid` and refuses the write on mismatch instead of silently
+/// fast-forwarding over a teammate's change. Built in the Tauri command layer
+/// from a `base_oid` captured on the edit/delete screen; `None` leaves the
+/// legacy unprotected path for `create`/preset.
+#[derive(Debug, Clone)]
+pub struct ExpectedEntry {
+    /// The entry name being edited/deleted (without `.age`).
+    pub name: String,
+    /// The blob oid the caller read (the base version the edit was built on).
+    pub base_oid: String,
+    /// Whether this is an edit, a delete, or a create (the orchestrator's
+    /// differentiated rule and the resolve semantics differ between them).
+    pub kind: ExpectedKind,
 }
 
 /// How to resolve a [`WriteOutcome::EntryConflict`] (the user's per-entry

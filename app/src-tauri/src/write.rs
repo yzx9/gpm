@@ -73,7 +73,11 @@ where
     let store = state.store.clone();
     crate::git::run_cancellable(state, app.clone(), move |cancel, _tx, slot| {
         let store = store.clone();
-        async move { store.autosync_write(&slot, Some(cancel), local_write).await }
+        async move {
+            store
+                .autosync_write(&slot, Some(cancel), None, local_write)
+                .await
+        }
     })
     .await
 }
