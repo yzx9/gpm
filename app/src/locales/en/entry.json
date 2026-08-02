@@ -57,5 +57,8 @@
   "keptMine": "✓ Kept mine (commit {head})",
   "remoteChanged": "The remote changed since you reviewed this — rechecking…",
   "resolveFailed": "Could not resolve the divergence",
+  "revertedToTheirs": "✓ Reverted to their version",
+  "conflictKeptTheirs": "✓ Kept their version",
+  "alreadyRemoved": "Already removed elsewhere",
   "checkIdentityHint": "Check your age identity and try again"
 }

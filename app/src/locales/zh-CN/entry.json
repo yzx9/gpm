@@ -57,5 +57,8 @@
   "keptMine": "✓ 已保留本地版本（提交 {head}）",
   "remoteChanged": "自你查看以来远程仓库已更改——正在重新检查……",
   "resolveFailed": "无法解决差异",
+  "revertedToTheirs": "✓ 已还原为对方的版本",
+  "conflictKeptTheirs": "✓ 已保留对方的版本",
+  "alreadyRemoved": "已在别处被删除",
   "checkIdentityHint": "请检查你的 age 身份并重试"
 }

@@ -8,9 +8,11 @@ import {
   showPassword as showPasswordCmd,
   type AppError,
   type DivergenceChoice,
+  type EntryConflictChoice,
   type PullResult,
 } from "@/api";
 import DivergenceModal from "@/components/DivergenceModal.vue";
+import EntryConflictModal from "@/components/EntryConflictModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
@@ -21,6 +23,7 @@ import {
   isAuthCancelled,
   useCancellableSave,
   useDivergence,
+  useEntryConflict,
   useLockState,
   useSecureClaim,
   useToast,
@@ -60,6 +63,9 @@ const editPassword = ref("");
 const editNotes = ref("");
 // The reassembled body captured at load, for the no-op-save dirty-check.
 const loadedBody = ref("");
+// R026: the blob oid captured at load (the base version) — sent back on save so
+// a stale edit surfaces entry_conflict instead of silently clobbering a teammate.
+const baseOid = ref<string | null>(null);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
@@ -97,6 +103,30 @@ const {
     } else {
       toast.success(t("entry.keptMine", { head: result.head }));
     }
+    navBack(router, { name: "entries" });
+  },
+  onPullFfFailed() {
+    toast.info(t("entry.remoteChanged"));
+    navBack(router, { name: "entries" });
+  },
+});
+
+const {
+  conflict: entryConflict,
+  resolving: entryConflictResolving,
+  conflictError: entryConflictError,
+  openConflict,
+  resolveConflict,
+  cancelConflict,
+} = useEntryConflict({
+  resolveFailedKey: "entry.resolveFailed",
+  onResolved(result: PullResult, choice: EntryConflictChoice) {
+    exitEdit();
+    toast.success(
+      choice === "keep_mine"
+        ? t("entry.saved", { commit: result.head })
+        : t("entry.revertedToTheirs"),
+    );
     navBack(router, { name: "entries" });
   },
   onPullFfFailed() {
@@ -167,6 +197,7 @@ async function loadBody() {
     editPassword.value = claimed.password ?? "";
     editNotes.value = claimed.notes ?? "";
     loadedBody.value = reassemble(editPassword.value, editNotes.value);
+    baseOid.value = claimed.version ?? null;
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
@@ -182,6 +213,7 @@ function exitEdit() {
   editPassword.value = "";
   editNotes.value = "";
   loadedBody.value = "";
+  baseOid.value = null;
 }
 
 // Wipe the working plaintext on browser back, unmount, and hard lock so it
@@ -195,11 +227,17 @@ async function onSave() {
   error.value = "";
   decryptError.value = false;
   try {
-    const outcome = await editSecret(entryName, editBody.value);
+    const outcome = await editSecret(entryName, editBody.value, baseOid.value);
     if (outcome.kind === "written") {
       toast.success(t("entry.saved", { commit: outcome.commit }));
       // Back to the read view (the opener) — it remounts and shows fresh content.
       navBack(router, BACK_FALLBACK);
+    } else if (outcome.kind === "entry_conflict") {
+      // R026: the entry changed on the remote since the read — refuse the stale
+      // edit and let the user pick. Stay on the form; the plaintext is preserved.
+      const { kind: _kind, ...payload } = outcome;
+      void _kind;
+      openConflict(payload, editBody.value);
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The edit's push lost a race — surface the divergence. The local edit was
       // committed; adopt discards it, keep pushes it. Stay on the edit form.
@@ -325,6 +363,15 @@ function goBack() {
       :error="divergeError"
       @resolve="resolveDivergence"
       @close="cancelDivergence"
+    />
+
+    <!-- Entry conflict modal (R026 — stale edit refused) -->
+    <EntryConflictModal
+      :conflict="entryConflict"
+      :resolving="entryConflictResolving"
+      :error="entryConflictError"
+      @resolve="resolveConflict"
+      @close="cancelConflict"
     />
   </main>
 </template>

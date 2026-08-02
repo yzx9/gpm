@@ -111,6 +111,7 @@ describe("EntryEditPage", () => {
           has_totp: false,
           attachment: null,
           edit_blocked: "nonUtf8",
+          version: null,
         });
       return Promise.resolve(undefined);
     });
@@ -125,5 +126,65 @@ describe("EntryEditPage", () => {
     ).toBeDefined();
     // No edit_secret write was attempted (the lossy view is never saved back).
     expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
+  });
+
+  it("passes the captured show_password `version` as baseOid on save (R026)", async () => {
+    // The edit screen captures the blob oid atomically with the decrypt and
+    // sends it back as baseOid so a stale edit surfaces entry_conflict
+    // instead of silently clobbering a teammate's change.
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "show_password")
+        return Promise.resolve({
+          password: "s3cret",
+          notes: "note line",
+          edit_blocked: null,
+          version: "oid-cafe",
+        });
+      if (cmd === "edit_secret")
+        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(EntryEditPage).wrapper;
+    await flushPromises();
+    await w.find('input[id="e-password"]').setValue("newpass");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("edit_secret", {
+      name: "servers/prod",
+      content: "newpass\nnote line",
+      baseOid: "oid-cafe",
+    });
+  });
+
+  it("on entry_conflict outcome, surfaces the EntryConflictModal with the entry name", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "show_password")
+        return Promise.resolve({
+          password: "s3cret",
+          notes: "note line",
+          edit_blocked: null,
+          version: "oid-1",
+        });
+      if (cmd === "edit_secret")
+        return Promise.resolve({
+          kind: "entry_conflict",
+          name: "servers/prod",
+          base_oid: "oid-1",
+          current_oid: "oid-2",
+          remote_tip: "tip-3",
+          op: "edit",
+        });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(EntryEditPage).wrapper;
+    await flushPromises();
+    await w.find('input[id="e-password"]').setValue("newpass");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+
+    // The per-entry conflict modal renders with the entry name (R026).
+    expect(w.text()).toContain("This secret changed elsewhere");
+    expect(w.text()).toContain("servers/prod");
   });
 });

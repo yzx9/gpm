@@ -582,15 +582,64 @@ describe("EntryDetailPage", () => {
     // (the "proceed" case); the cancel test overrides it to false.
     const deleteBtn = () => 'button[aria-label="Delete servers/prod"]';
 
-    it("on confirm, invokes delete_secret with the entry name", async () => {
-      vi.mocked(invoke).mockResolvedValue({ commit: "abc1234" });
+    // R026: the detail page probes `entry_oid` on mount so a delete-without-
+    // reveal is still base-version-guarded. The dispatch-by-command mock mirrors
+    // the copyPassword test's caution: an ordered Once queue drifts once any
+    // sibling probe (here the mount-time `has_totp` + `entry_oid`) sneaks in.
+    function mockDelete(opts: {
+      entryOid: string | null;
+      deleteOutcome?: unknown;
+    }) {
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        switch (cmd) {
+          case "has_totp":
+            return Promise.resolve(false);
+          case "entry_oid":
+            return Promise.resolve(opts.entryOid);
+          case "delete_secret":
+            return Promise.resolve(
+              opts.deleteOutcome ?? { kind: "written", commit: "abc1234" },
+            );
+          default:
+            return Promise.resolve(undefined);
+        }
+      });
+    }
+
+    it("on confirm, invokes delete_secret with {name, baseOid} once the entry_oid probe settles", async () => {
+      // Previously this was GREEN FOR THE WRONG REASON: clicking delete before
+      // flushPromises let the mount-time entry_oid probe race the click, so
+      // baseOid was still null at the call site and the assertion {name} only
+      // passed by accident. Flush the probes first so a real oid propagates.
+      mockDelete({ entryOid: "oid-deadbeef" });
       const wrapper = mountPage();
+      await flushPromises(); // mount-time entry_oid + has_totp probes settle
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("delete_secret", {
+        name: "servers/prod",
+        baseOid: "oid-deadbeef",
+      });
+    });
+
+    it("OMITS baseOid when entry_oid returns null (legacy/absent)", async () => {
+      // deleteSecret's API helper spreads `baseOid` only when it is non-null,
+      // so a legacy/absent entry_oid yields the {name}-only legacy payload.
+      mockDelete({ entryOid: null });
+      const wrapper = mountPage();
+      await flushPromises();
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("delete_secret", {
         name: "servers/prod",
       });
+      // Belt-and-suspendences: no baseOid key at all on the arg object.
+      const call = vi
+        .mocked(invoke)
+        .mock.calls.find(([cmd]) => cmd === "delete_secret");
+      expect(call?.[1]).not.toHaveProperty("baseOid");
     });
 
     it("on success, toasts and navigates to the list", async () => {
@@ -610,11 +659,32 @@ describe("EntryDetailPage", () => {
       expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
 
+    it("on no_change outcome, toasts 'Already removed elsewhere' and navigates to the list", async () => {
+      // R026: a teammate already removed it — distinct from `written` so the
+      // toast says "already removed" instead of fabricating a delete commit.
+      mockDelete({
+        entryOid: null,
+        deleteOutcome: { kind: "no_change", head: "abc" },
+      });
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
+      await flushPromises();
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      expect(
+        toast.toasts.value.some((t) =>
+          t.message.includes("Already removed elsewhere"),
+        ),
+      ).toBe(true);
+      expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
+    });
+
     it("on delete divergence, surfaces the shared modal and adopt resolves", async () => {
       // First queued response is the mount-time `has_totp` probe (identity is
       // cached by default); the next two are the delete + its resolve.
       vi.mocked(invoke)
-        .mockResolvedValueOnce({ has_totp: false, attachment: null })
+        .mockResolvedValueOnce({ has_totp: false, attachment: null }) // mount: entry_probe (identity cached)
+        .mockResolvedValueOnce(null) // mount: entry_oid base-version probe (R026)
         .mockResolvedValueOnce({
           kind: "needs_divergence_resolve",
           local_ahead: 1,
@@ -739,7 +809,9 @@ describe("EntryDetailPage", () => {
       const { wrapper } = mountWithApp(EntryDetailPage, { unlocked: false });
       await flushPromises();
       expect(wrapper.find(totpBtn()).exists()).toBe(true);
-      expect(invoke).not.toHaveBeenCalled();
+      // has_totp is identity-gated, so it is NOT probed when uncached; entry_oid
+      // (R026, non-secret) does run on mount — assert the identity probe specifically.
+      expect(invoke).not.toHaveBeenCalledWith("has_totp", expect.anything());
     });
   });
 

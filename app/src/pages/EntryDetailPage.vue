@@ -10,14 +10,18 @@ import {
   ensureClipboardNotifyPermission,
   entryProbe as entryProbeCmd,
   exportAttachment as exportAttachmentCmd,
+  entryOid as entryOidCmd,
   showPassword as showPasswordCmd,
   type AppError,
   type AttachmentMeta,
   type DivergenceChoice,
   type EditBlockReason,
+  type EntryConflictChoice,
+  type EntryConflictOp,
   type PullResult,
 } from "@/api";
 import DivergenceModal from "@/components/DivergenceModal.vue";
+import EntryConflictModal from "@/components/EntryConflictModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
@@ -28,6 +32,7 @@ import {
   useCancellableSave,
   useDialog,
   useDivergence,
+  useEntryConflict,
   useLockState,
   useSecretReveal,
   useSecuritySettings,
@@ -74,6 +79,11 @@ const error = ref("");
 // alongside `error` at the start of every action.
 const decryptError = ref(false);
 const deleting = ref(false);
+// R026: the blob oid probed on mount (the base version) — sent on delete so a
+// stale delete surfaces entry_conflict instead of silently removing a teammate's
+// newer version. Non-secret; decoupled from reveal (delete-without-reveal is
+// still protected — D3).
+const baseOid = ref<string | null>(null);
 const { cancelling, cancelSave } = useCancellableSave();
 
 // Entry affordance signals, all tri-state: `null` = unknown (not yet probed /
@@ -145,6 +155,18 @@ function humanizeSize(bytes: number): string {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
 }
 
+// R026: capture the entry's base version on mount for a base-version-aware
+// delete. Non-secret (no identity, no decrypt), so it runs unconditionally — a
+// delete-without-reveal stays protected (D3).
+async function probeVersion() {
+  try {
+    baseOid.value = await entryOidCmd(entryPath);
+  } catch {
+    // Probe failed (rare) — leave null (legacy unprotected delete path).
+  }
+}
+onMounted(probeVersion);
+
 // Delete divergence (the edit flow now lives on /edit/:path, which has its own
 // useDivergence instance).
 const {
@@ -161,6 +183,36 @@ const {
       toast.info(t("entry.adoptedRemote"));
     } else {
       toast.success(t("entry.keptMine", { head: result.head }));
+    }
+    navBack(router, { name: "entries" });
+  },
+  onPullFfFailed() {
+    toast.info(t("entry.remoteChanged"));
+    navBack(router, { name: "entries" });
+  },
+});
+
+const {
+  conflict: entryConflict,
+  resolving: entryConflictResolving,
+  conflictError: entryConflictError,
+  openConflict,
+  resolveConflict,
+  cancelConflict,
+} = useEntryConflict({
+  resolveFailedKey: "entry.resolveFailed",
+  onResolved(
+    result: PullResult,
+    choice: EntryConflictChoice,
+    op: EntryConflictOp,
+  ) {
+    if (op === "delete") {
+      if (choice === "keep_mine") {
+        clear();
+        toast.success(t("entry.deleted", { commit: result.head }));
+      } else {
+        toast.info(t("entry.conflictKeptTheirs"));
+      }
     }
     navBack(router, { name: "entries" });
   },
@@ -319,13 +371,25 @@ async function deleteSecret() {
   error.value = "";
   decryptError.value = false;
   try {
-    const outcome = await deleteSecretCmd(entryName);
+    const outcome = await deleteSecretCmd(entryName, baseOid.value);
     if (outcome.kind === "written") {
       clear();
       toast.success(t("entry.deleted", { commit: outcome.commit }));
       // Pop to entries (the opener). The deleted-entry page becomes forward
       // history, which Android system back can't reopen.
       navBack(router, { name: "entries" });
+    } else if (outcome.kind === "no_change") {
+      // R026: a teammate already removed it — nothing to commit (D7). Distinct
+      // from `written` so we toast "already removed", not a fake delete commit.
+      clear();
+      toast.info(t("entry.alreadyRemoved"));
+      navBack(router, { name: "entries" });
+    } else if (outcome.kind === "entry_conflict") {
+      // R026: the entry changed on the remote since the read — refuse the stale
+      // delete and let the user pick. No plaintext to carry (delete).
+      const { kind: _kind, ...payload } = outcome;
+      void _kind;
+      openConflict(payload, null);
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The delete's push lost a race — surface the divergence. The local delete
       // was committed; adopt discards it (entry returns), keep pushes it.
@@ -570,6 +634,15 @@ function handleKeydown(e: KeyboardEvent) {
       :error="divergeError"
       @resolve="resolveDivergence"
       @close="cancelDivergence"
+    />
+
+    <!-- Entry conflict modal (R026 — stale delete refused) -->
+    <EntryConflictModal
+      :conflict="entryConflict"
+      :resolving="entryConflictResolving"
+      :error="entryConflictError"
+      @resolve="resolveConflict"
+      @close="cancelConflict"
     />
 
     <!-- Full repository path, shown as quiet footer metadata -->
