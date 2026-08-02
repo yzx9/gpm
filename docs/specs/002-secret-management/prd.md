@@ -76,9 +76,12 @@ overwrite.
 ### Reliability
 
 - Conflicts are recoverable; no data is lost.
-- **Known limitation:** a save built on a stale read can silently overwrite a
-  newer remote version, and a push in progress can't be cancelled — the mechanism lives
-  in 005.
+- Under **Auto-sync on**, a stale read no longer silently overwrites a newer
+  remote change: editing or deleting a secret another device changed since you
+  opened it surfaces a per-entry choice (keep your version or theirs), and a
+  delete a teammate already did is recognized rather than claiming a commit.
+  Under **Auto-sync off** this still defers to a manual-Sync divergence. (A push
+  in progress can't be cancelled — the mechanism lives in 005.)
 
 ## 5. Open Questions & Key Decisions
 

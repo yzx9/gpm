@@ -1163,11 +1163,10 @@ impl Store {
     /// divergence surface; calling `set` directly skips that serialization, so
     /// it is for tests and the orchestrator only.
     ///
-    /// **Limitation:**
-    /// with no base-version check, a write built on a prior read can silently
-    /// overwrite a teammate's newer same-name change. Decoupling does not fix
-    /// this; `autosync_write`'s pre-write pull can fast-forward over the remote
-    /// change before this local write commits on top.
+    /// The base-version silent-clobber this once risked is guarded at the
+    /// orchestrator: [`Store::autosync_write`] refuses a stale edit/delete via a
+    /// base-oid check (RFC R026). This primitive stays local-only (no guard) —
+    /// call it directly only in tests or inside the orchestrator.
     ///
     /// # Errors
     ///
@@ -1376,8 +1375,9 @@ impl Store {
     /// (templates shape new secrets, not mutations).
     ///
     /// The existence gate is a **local typo guard**; it is not a remote-state
-    /// invariant. Edit inherits [`set`]'s base-version limitation (see its docs):
-    /// a newer same-name remote change can be overwritten silently.
+    /// invariant. Edit inherits [`set`]'s base-version story (see its docs): the
+    /// silent-clobber is guarded at the orchestrator ([`Store::autosync_write`],
+    /// RFC R026), not in this local-only primitive.
     ///
     /// # Errors
     ///
