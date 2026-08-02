@@ -30,7 +30,7 @@ use common::*;
 use rustpass::GitAuth;
 use rustpass::SyncOutcome;
 use rustpass::crypto;
-use rustpass::store::{DivergenceChoice, ExpectedEntry, ExpectedKind, Store};
+use rustpass::store::{DivergenceChoice, EntryConflictChoice, ExpectedEntry, ExpectedKind, Store};
 
 /// Write an encrypted `.age` entry into the store's working repo as an unpushed
 /// local commit. `plaintext` is encrypted to `recipient` so the store can decrypt
@@ -749,6 +749,190 @@ async fn autosync_detects_stale_edit_same_name_change() {
         crypto::decrypt_bytes(&blob, identity.as_bytes(), None).unwrap(),
         b"newer-from-teammate",
         "remote HEAD unchanged — the stale edit did NOT clobber the teammate's version"
+    );
+}
+
+/// Set up the R026 stale-edit conflict for the resolve tests: a store at v1 with
+/// its base oid captured, a teammate advancing "entry" to v2, and the user's
+/// stale-v1 edit refused as `EntryConflict`. Returns the store + the tempdirs
+/// that must outlive it + the identity/recipient (for decrypt + further remote
+/// commits) + the conflict's reviewed `remote_tip` to hand to
+/// `resolve_entry_conflict`.
+async fn stale_edit_conflict() -> (
+    Arc<Store>,
+    tempfile::TempDir,
+    tempfile::TempDir,
+    String,
+    String,
+    String,
+) {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo_with(
+        vec![("entry.age", b"v1")],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
+        &recipient,
+    );
+    let config_dir = tempfile::tempdir().expect("config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("utf-8"),
+            None,
+            None,
+            None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure");
+    let store = Arc::new(store);
+
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("entry present at v1");
+
+    let newer = b"newer-from-teammate".to_vec();
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("entry.age", newer.as_slice())],
+        &recipient,
+        "remote advances same-name",
+    );
+
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid,
+                kind: ExpectedKind::Edit,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.set("entry", b"stale-edit").await }
+            },
+        )
+        .await
+        .expect("autosync write");
+
+    let remote_tip = match outcome {
+        rustpass::WriteOutcome::EntryConflict { remote_tip, .. } => remote_tip,
+        other => panic!("expected EntryConflict, got {other:?}"),
+    };
+    (store, bare_dir, config_dir, identity, recipient, remote_tip)
+}
+
+/// R026 resolve — keep-mine (edit): re-sending the edited plaintext overwrites the
+/// teammate's version on the remote and pushes; the bare tip advances to the
+/// keep-mine commit.
+#[tokio::test]
+async fn entry_conflict_keep_mine_edit_overwrites_and_pushes() {
+    let (store, bare_dir, _config_dir, identity, _recipient, remote_tip) =
+        stale_edit_conflict().await;
+
+    let result = store
+        .resolve_entry_conflict(
+            &cancel_slot(),
+            "entry",
+            Some(b"my-edit"),
+            &remote_tip,
+            ExpectedKind::Edit,
+            EntryConflictChoice::KeepMine,
+            None,
+        )
+        .await
+        .expect("keep-mine resolve");
+    assert!(result.changed, "keep-mine advanced HEAD");
+    assert!(!result.head.is_empty());
+
+    // The user's edit landed locally and on the remote (pushed).
+    assert_eq!(store.get("entry").await.expect("get").password(), "my-edit");
+    let blob = bare_blob(bare_dir.path(), "entry.age");
+    assert_eq!(
+        crypto::decrypt_bytes(&blob, identity.as_bytes(), None).unwrap(),
+        b"my-edit",
+        "remote HEAD == the keep-mine edit (pushed)"
+    );
+}
+
+/// R026 resolve — keep-theirs: a guarded no-op. Local HEAD already sits at the
+/// reviewed tip (the teammate's v2); nothing is committed or pushed, and the bare
+/// tip is unchanged.
+#[tokio::test]
+async fn entry_conflict_keep_theirs_is_a_noop() {
+    let (store, bare_dir, _config_dir, _identity, _recipient, remote_tip) =
+        stale_edit_conflict().await;
+    let bare_before = bare_head_oid(bare_dir.path());
+
+    let result = store
+        .resolve_entry_conflict(
+            &cancel_slot(),
+            "entry",
+            None,
+            &remote_tip,
+            ExpectedKind::Edit,
+            EntryConflictChoice::KeepTheirs,
+            None,
+        )
+        .await
+        .expect("keep-theirs resolve");
+    assert!(!result.changed, "keep-theirs changes nothing");
+
+    // Local still reads the teammate's version; the remote tip didn't move.
+    assert_eq!(
+        store.get("entry").await.expect("get").password(),
+        "newer-from-teammate"
+    );
+    assert_eq!(
+        bare_head_oid(bare_dir.path()),
+        bare_before,
+        "no commit pushed"
+    );
+}
+
+/// R026 resolve — TOCTOU: if the remote moved again between the conflict and the
+/// resolve, keep-mine refuses (the reviewed tip is stale) instead of overwriting a
+/// second unseen change.
+#[tokio::test]
+async fn entry_conflict_resolve_toctou_refuses_when_remote_moved() {
+    let (store, bare_dir, _config_dir, _identity, recipient, remote_tip) =
+        stale_edit_conflict().await;
+
+    // A second teammate advance lands AFTER the user reviewed the conflict.
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("entry.age", b"v3-from-teammate")],
+        &recipient,
+        "remote advances again",
+    );
+
+    let err = store
+        .resolve_entry_conflict(
+            &cancel_slot(),
+            "entry",
+            Some(b"my-edit"),
+            &remote_tip,
+            ExpectedKind::Edit,
+            EntryConflictChoice::KeepMine,
+            None,
+        )
+        .await
+        .expect_err("TOCTOU must refuse");
+    assert_eq!(
+        err.code, "PULL_FF_FAILED",
+        "stale reviewed tip → refuse: {err}"
+    );
+
+    // The second advance is intact (not clobbered by a blind keep-mine); local
+    // fast-forwarded to it during the resolve's fetch, but the write was refused.
+    assert_eq!(
+        store.get("entry").await.expect("get").password(),
+        "v3-from-teammate",
+        "the unseen v3 survived"
     );
 }
 

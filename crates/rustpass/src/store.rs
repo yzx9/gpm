@@ -56,8 +56,8 @@ pub const CLEAR_SECS_MAX: u64 = 600;
 // doesn't form a `store ↔ storage` module cycle. Re-exported here for callers
 // that still reach them via `rustpass::store::`.
 pub use crate::storage::{
-    AuthenticityResult, CommitIdentity, DivergenceChoice, ExpectedEntry, ExpectedKind,
-    SyncDivergence, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
+    AuthenticityResult, CommitIdentity, DivergenceChoice, EntryConflictChoice, ExpectedEntry,
+    ExpectedKind, SyncDivergence, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
 };
 // `list_entries` / `resolve_entry_path` were relocated to `storage::git`
 // and are re-exported here so existing integration-test call sites
@@ -1537,6 +1537,111 @@ impl Store {
             head,
             authenticity,
         })
+    }
+
+    /// Resolve a [`WriteOutcome::EntryConflict`] (RFC R026): keep-mine or
+    /// keep-theirs for an entry whose base version differed from the remote's
+    /// current version. Holds the write critical section, re-fetches
+    /// (authenticity-checked, like the save pull), and TOCTOU-guards on the
+    /// reviewed tip.
+    ///
+    /// `KeepMine` re-sends the caller's edit ([`Self::set`], re-encrypted with the
+    /// cached identity) or removes the entry ([`Self::delete`]), then pushes.
+    /// `KeepTheirs` is a guarded no-op — local HEAD already sits at the reviewed tip,
+    /// so confirming the tip suffices ([`Self::adopt_remote`] is NOT called: it
+    /// re-fetches and could race past the reviewed tip). Unlike
+    /// [`Self::resolve_keep_mine`] there are no local-only entries to replay — the
+    /// save refused to write.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::PullFfFailed`] when the remote moved again between the conflict
+    /// and the resolve (the TOCTOU guard), or the repository diverged unexpectedly.
+    /// An Enforce block on the re-fetch returns `Ok` with `authenticity.blocked`
+    /// (HEAD unchanged, nothing committed) — mirroring [`Self::resolve_keep_mine`].
+    #[allow(clippy::too_many_arguments)] // slot/cancel + entry (name, content) + decision (tip, kind, choice)
+    pub async fn resolve_entry_conflict(
+        &self,
+        slot: &CancelSlot,
+        name: &str,
+        content: Option<&[u8]>,
+        expected_remote_oid: &str,
+        kind: ExpectedKind,
+        choice: EntryConflictChoice,
+        cancel: Option<CancelToken>,
+    ) -> Result<SyncResult, Error> {
+        let _guard = self.write_mu.lock().await;
+        let _repo_lock = self.repo_lock()?;
+        // Arm under the lock so a cancel during the keep-mine push targets this
+        // resolve, not one queued behind write_mu (RFC 0032, mirrors autosync_write).
+        let _armed = cancel
+            .as_ref()
+            .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
+
+        // Re-fetch + authenticity (mirrors the save pull). An Enforce block refuses
+        // the resolve (HEAD unchanged, nothing committed) and surfaces the block.
+        let pull = match self.sync_with_locked(cancel.clone(), None).await? {
+            SyncOutcome::FastForwarded(r) => r,
+            // Local diverged from the remote — impossible in normal flow (the
+            // conflict left local at the reviewed tip; writes are serialized by
+            // write_mu). Treat it as a moved remote so the UI re-prompts rather
+            // than acting blind.
+            SyncOutcome::Diverged(_) => {
+                return Err(Error::new(
+                    ErrorCode::PullFfFailed,
+                    "Entry conflict resolve: the repository diverged — re-check and retry",
+                ));
+            }
+        };
+        if pull.authenticity.blocked {
+            return Ok(pull);
+        }
+
+        // TOCTOU guard: the remote tip must still be the one the user reviewed. The
+        // fetch above fast-forwarded local HEAD onto the current remote; if that
+        // differs from the reviewed tip, the remote moved again — refuse (the UI
+        // re-prompts, mirroring useDivergence's recovery).
+        let tip = self.current_head_hash().await?;
+        if tip != expected_remote_oid {
+            return Err(Error::new(
+                ErrorCode::PullFfFailed,
+                "Entry conflict resolve: the remote changed again since you reviewed it",
+            ));
+        }
+
+        match choice {
+            EntryConflictChoice::KeepTheirs => {
+                // Local HEAD is already at the reviewed tip (the conflict's pull put
+                // it there; the fetch + tip-guard confirmed it hasn't moved). No-op.
+                Ok(SyncResult {
+                    changed: false,
+                    ..pull
+                })
+            }
+            EntryConflictChoice::KeepMine => {
+                match kind {
+                    ExpectedKind::Edit => {
+                        let content = content.ok_or_else(|| {
+                            Error::new(
+                                ErrorCode::StoreError,
+                                "Entry conflict keep-mine (edit) requires the edited content",
+                            )
+                        })?;
+                        self.set(name, content).await?;
+                    }
+                    ExpectedKind::Delete => {
+                        self.delete(name).await?;
+                    }
+                }
+                self.push_locked(cancel.clone(), None).await?;
+                let full = self.current_head_hash().await?;
+                Ok(SyncResult {
+                    changed: true,
+                    head: full.chars().take(7).collect::<String>(),
+                    authenticity: pull.authenticity,
+                })
+            }
+        }
     }
 
     /// Compute the local-vs-remote divergence preview on demand, WITHOUT moving
