@@ -144,6 +144,17 @@ let
   #   - addLocalDevExtras: the pre-commit hook install. CI never commits, so
   #     the hook would never fire there — local-dev only.
   addLocalDevExtras = args: {
+    packages =
+      args.packages
+      ++ (with pkgs; [
+        # rust
+        rust-analyzer
+        cargo-audit
+        cargo-outdated
+
+        # Agentic tools
+        playwright-mcp
+      ]);
     shellHook = pre-commit-checks.shellHook + args.shellHook;
   };
 
@@ -157,36 +168,11 @@ let
       [
         # Rust
         rustToolchain
-        rust-analyzer
-        cargo-audit
-        cargo-release
-        cargo-outdated
         sccache
-
-        # Frontend
-        nodejs
-        pnpm
 
         # Android
         jdk17
         androidComp.androidsdk
-
-        # Utils
-        just
-        jq
-        nixfmt
-        prettier
-
-        # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
-        # `age` CLI (independent of rustpass's own decrypt path).
-        age
-
-        # Cross-tool store interop: drive the real `gopass` binary (age backend)
-        # so the gopass-interop tests verify gpm reads a store gopass produced.
-        gopass
-
-        # Testing
-        playwright-mcp
       ]
       ++ lib.optionals pkgs.stdenv.isLinux (
         [
@@ -195,30 +181,32 @@ let
         ++ linuxDesktopRuntime
       );
 
-    # sccache caches rustc outputs by content hash, so it is immune to the
-    # cargo-fingerprint drift that defeats rust-cache's target/ reuse under
-    # nix (see .github/actions/setup-ci-env/action.yml).
-    RUSTC_WRAPPER = "sccache";
+    env = {
+      # sccache caches rustc outputs by content hash, so it is immune to the
+      # cargo-fingerprint drift that defeats rust-cache's target/ reuse under
+      # nix (see .github/actions/setup-ci-env/action.yml).
+      RUSTC_WRAPPER = "sccache";
 
-    ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
-    ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
-    ANDROID_NDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
-    # Tauri's Android build reads NDK_HOME (not just ANDROID_NDK_ROOT) and
-    # JAVA_HOME; missing either, `tauri android build` aborts early.
-    NDK_HOME = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
-    JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
-    # AGP downloads a generic FHS aapt2 from Maven that the Nix stub-ld
-    # refuses to run; point it at the Nix SDK's patchelf'd aapt2 instead.
-    # Keep this build-tools version in sync with buildToolsVersions above.
-    GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComp.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
+      ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
+      ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
+      ANDROID_NDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+      # Tauri's Android build reads NDK_HOME (not just ANDROID_NDK_ROOT) and
+      # JAVA_HOME; missing either, `tauri android build` aborts early.
+      NDK_HOME = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+      JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
+      # AGP downloads a generic FHS aapt2 from Maven that the Nix stub-ld
+      # refuses to run; point it at the Nix SDK's patchelf'd aapt2 instead.
+      # Keep this build-tools version in sync with buildToolsVersions above.
+      GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComp.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
 
-    # NDK toolchain for cross-compiling native C deps (OpenSSL, libgit2)
-    # Fixes: rust-lang/rust#131407 — macOS ar creates corrupt Linux archives.
-    # llvm-ar produces GNU-format archives that rustc can handle cross-platform.
-    CC_aarch64_linux_android = "${ndkBin}/aarch64-linux-android28-clang";
-    CC_armv7_linux_androideabi = "${ndkBin}/armv7a-linux-androideabi28-clang";
-    CC_x86_64_linux_android = "${ndkBin}/x86_64-linux-android28-clang";
-    CC_i686_linux_android = "${ndkBin}/i686-linux-android28-clang";
+      # NDK toolchain for cross-compiling native C deps (OpenSSL, libgit2)
+      # Fixes: rust-lang/rust#131407 — macOS ar creates corrupt Linux archives.
+      # llvm-ar produces GNU-format archives that rustc can handle cross-platform.
+      CC_aarch64_linux_android = "${ndkBin}/aarch64-linux-android28-clang";
+      CC_armv7_linux_androideabi = "${ndkBin}/armv7a-linux-androideabi28-clang";
+      CC_x86_64_linux_android = "${ndkBin}/x86_64-linux-android28-clang";
+      CC_i686_linux_android = "${ndkBin}/i686-linux-android28-clang";
+    };
 
     # Use shellHook for PATH and AR/RANLIB — plain attr may be overridden by shell profile.
     # Both TARGET_AR and plain AR are set so openssl-sys's build script picks them up
@@ -245,13 +233,25 @@ let
     packages =
       with pkgs;
       [
+        # rust
         hostRustToolchain
+
+        # Frontend
         nodejs
         pnpm
+
+        # Utils
         just
         nixfmt
         prettier
+
+        # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
+        # `age` CLI (independent of rustpass's own decrypt path).
         age
+
+        # Cross-tool store interop: drive the real `gopass` binary (age backend)
+        # so the gopass-interop tests verify gpm reads a store gopass produced.
+        gopass
       ]
       ++ lib.optionals pkgs.stdenv.isLinux (
         [
