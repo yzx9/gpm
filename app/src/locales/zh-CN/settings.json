@@ -104,7 +104,8 @@
     "enabledHint": "✓ 生物识别解锁已启用。",
     "disable": "禁用生物识别",
     "enabledToast": "✓ 生物识别解锁已启用",
-    "disabledToast": "生物识别解锁已禁用"
+    "disabledToast": "生物识别解锁已禁用",
+    "disableConfirm": "关闭生物识别解锁？再次开启需要重新输入口令。"
   },
   "appLock": {
     "title": "应用锁",
@@ -114,6 +115,7 @@
     "disable": "禁用应用锁",
     "enabledToast": "✓ 应用锁已启用",
     "disabledToast": "应用锁已禁用",
+    "disableConfirm": "关闭应用锁？应用将不再要求生物识别即可打开，身份自动解锁也会一并关闭。",
     "enableFailed": "启用应用锁失败",
     "disableFailed": "禁用应用锁失败",
     "autoUnlock": {
@@ -123,6 +125,7 @@
       "enabledHint": "✓ 身份与应用一同解锁。",
       "disable": "禁用自动解锁",
       "disabledToast": "身份自动解锁已禁用",
+      "disableConfirm": "关闭身份自动解锁？再次开启需要重新输入口令。",
       "enabledToast": "✓ 身份自动解锁已启用"
     },
     "gateIdle": {

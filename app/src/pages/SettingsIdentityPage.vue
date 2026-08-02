@@ -46,6 +46,7 @@ import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
   Z,
+  useDialog,
   useSecureClaim,
   useSecuritySettings,
   useToast,
@@ -61,6 +62,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { toast } = useToast();
+const { dialog } = useDialog();
 const { t } = useI18n();
 const { applySecurityConfig } = useSecuritySettings();
 
@@ -337,6 +339,13 @@ async function onPassphraseSubmit() {
 }
 
 async function onDisableBiometric() {
+  // Enable takes a passphrase (+ enroll) — confirm before dropping the sealed slot.
+  const confirmed = await dialog.confirm({
+    message: t("settings.biometric.disableConfirm"),
+    confirmLabel: t("common.button.disable"),
+    danger: true,
+  });
+  if (!confirmed) return;
   await disableBiometricUnlock();
   biometricEnabled.value = false;
   toast.success(t("settings.biometric.disabledToast"));
@@ -363,6 +372,14 @@ async function onEnableAppLock() {
 }
 
 async function onDisableAppLock() {
+  // The migration's biometric prompt authenticates but reads as "confirm" —
+  // confirm intent first; disabling also cascades auto-unlock off.
+  const confirmed = await dialog.confirm({
+    message: t("settings.appLock.disableConfirm"),
+    confirmLabel: t("common.button.disable"),
+    danger: true,
+  });
+  if (!confirmed) return;
   error.value = "";
   appLockLoading.value = true;
   try {
@@ -384,6 +401,12 @@ async function onDisableAppLock() {
 }
 
 async function onDisableIdentityAutoUnlock() {
+  const confirmed = await dialog.confirm({
+    message: t("settings.appLock.autoUnlock.disableConfirm"),
+    confirmLabel: t("common.button.disable"),
+    danger: true,
+  });
+  if (!confirmed) return;
   await disableIdentityAutoUnlock();
   identityAutoUnlockEnabled.value = false;
   toast.success(t("settings.appLock.autoUnlock.disabledToast"));

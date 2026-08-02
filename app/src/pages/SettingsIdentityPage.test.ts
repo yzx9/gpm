@@ -379,12 +379,12 @@ describe("SettingsIdentityPage", () => {
       );
     });
 
-    it("calls disable_biometric_unlock when disabling", async () => {
+    it("calls disable_biometric_unlock after confirming when disabling", async () => {
       when("get_auth_state", encryptedAuth);
       when("is_biometric_available", "available");
       when("is_biometric_unlock_enabled", true);
       when("disable_biometric_unlock", undefined);
-      const wrapper = mountPage();
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
       await flushPromises();
 
       const disableBtn = wrapper
@@ -394,7 +394,58 @@ describe("SettingsIdentityPage", () => {
       await disableBtn!.trigger("click");
       await flushPromises();
 
+      // The disable is now gated behind a destructive confirm.
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ danger: true }),
+      );
       expect(invoke).toHaveBeenCalledWith("disable_biometric_unlock");
+    });
+
+    it("does not disable when the confirm is cancelled", async () => {
+      when("get_auth_state", encryptedAuth);
+      when("is_biometric_available", "available");
+      when("is_biometric_unlock_enabled", true);
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
+      // mountWithApp defaults confirm to "proceed"; flip it to cancel.
+      vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
+      await flushPromises();
+
+      const disableBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Disable Biometric"));
+      await disableBtn!.trigger("click");
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalledWith("disable_biometric_unlock");
+    });
+  });
+
+  describe("identity auto-unlock disable", () => {
+    it("calls disable_identity_auto_unlock after confirming", async () => {
+      when("is_app_lock_available", true);
+      when("get_app_lock_state", { enabled: true, locked: false });
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: false,
+        identity_type: "x25519",
+      });
+      when("get_config", { unlock_identity_with_app: true });
+      when("disable_identity_auto_unlock", undefined);
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
+      await flushPromises();
+
+      const disableBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Disable Auto-Unlock"));
+      await disableBtn!.trigger("click");
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ danger: true }),
+      );
+      expect(invoke).toHaveBeenCalledWith("disable_identity_auto_unlock");
     });
   });
 

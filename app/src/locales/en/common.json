@@ -8,7 +8,8 @@
     "delete": "Delete",
     "clear": "Clear",
     "export": "Export",
-    "remove": "Remove"
+    "remove": "Remove",
+    "disable": "Disable"
   },
   "toast": {
     "secureScreenFailed": "Couldn't secure screen — try again",

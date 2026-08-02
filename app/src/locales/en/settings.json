@@ -104,7 +104,8 @@
     "enabledHint": "✓ Biometric unlock is enabled.",
     "disable": "Disable Biometric",
     "enabledToast": "✓ Biometric unlock enabled",
-    "disabledToast": "Biometric unlock disabled"
+    "disabledToast": "Biometric unlock disabled",
+    "disableConfirm": "Turn off biometric unlock? You'll need to re-enter your passphrase to turn it back on."
   },
   "appLock": {
     "title": "App Lock",
@@ -114,6 +115,7 @@
     "disable": "Disable App Lock",
     "enabledToast": "✓ App lock enabled",
     "disabledToast": "App lock disabled",
+    "disableConfirm": "Turn off App Lock? The app will open without biometric, and Identity Auto-Unlock will also be turned off.",
     "enableFailed": "Failed to enable app lock",
     "disableFailed": "Failed to disable app lock",
     "autoUnlock": {
@@ -123,6 +125,7 @@
       "enabledHint": "✓ Identity unlocks together with the app.",
       "disable": "Disable Auto-Unlock",
       "disabledToast": "Identity auto-unlock disabled",
+      "disableConfirm": "Turn off Identity Auto-Unlock? You'll need to re-enter your passphrase to turn it back on.",
       "enabledToast": "✓ Identity auto-unlock enabled"
     },
     "gateIdle": {

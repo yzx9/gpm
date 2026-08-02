@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The diagnostic log now opens with the app's version and build (so a bug report is never ambiguous about what was running) and records each time the app returns to the foreground, loses or regains window focus, or exits — giving a clearer picture of what the app was doing when you attach the log.
+- Turning off **Biometric Unlock**, **App Lock**, or **Identity Auto-Unlock** now asks for confirmation first. Re-enabling any of them takes your fingerprint or passphrase again, so an accidental tap no longer disables them instantly.
 - The Settings list drops the one-line summaries that used to sit next to each category — each category's own page already shows the detail, so the summaries only added clutter and often got cut off. Only About still shows the installed version; everything else is now just the label and arrow, and the Logs row's arrow lines up with the others again.
 
 ### Fixed
