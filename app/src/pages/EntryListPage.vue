@@ -971,33 +971,6 @@ defineExpose({ syncRepo });
   color: var(--color-muted);
 }
 
-.btn-danger {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 48px;
-}
-
-.btn-danger:active:not(:disabled) {
-  background: var(--color-danger);
-  color: var(--color-surface);
-}
-@media (hover: hover) {
-  .btn-danger:hover:not(:disabled) {
-    background: var(--color-danger);
-    color: var(--color-surface);
-  }
-}
-
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .div-scroll {
   max-height: 40vh;
   overflow-y: auto;

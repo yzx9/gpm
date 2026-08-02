@@ -16,6 +16,7 @@ import {
   type ComponentMountingOptions,
 } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import BaseButton from "./base/BaseButton.vue";
 import DivergenceModal from "./DivergenceModal.vue";
 
 // DivergenceModal mounts BaseModalShell(s), which lock the document scroller on
@@ -73,8 +74,8 @@ const DIV: SyncDivergence = {
 };
 
 const STEP1 = '[aria-label="Local and remote have diverged"]';
-// Step-2 aria-label depends on which choice opened it; adopt_remote is the
-// raw `<button class="btn-danger">`, so opening via that yields the discard label.
+// Step-2 aria-label depends on which choice opened it; opening via the
+// adopt-remote button (the first step-1 choice) yields the discard label.
 const STEP2_ADOPT = '[aria-label="Discard your local commit"]';
 
 describe("DivergenceModal back/backdrop coordination", () => {
@@ -101,7 +102,7 @@ describe("DivergenceModal back/backdrop coordination", () => {
     });
     await flushPromises();
     // Open step 2 (adopt-remote confirm) via the Adopt button.
-    await wrapper.find("button.btn-danger").trigger("click");
+    await wrapper.findAllComponents(BaseButton)[0].trigger("click");
     await flushPromises();
     expect(wrapper.find(STEP2_ADOPT).exists()).toBe(true);
 
@@ -120,7 +121,7 @@ describe("DivergenceModal back/backdrop coordination", () => {
       props: { divergence: DIV, context: "sync", resolving: true },
     });
     await flushPromises();
-    await wrapper.find("button.btn-danger").trigger("click");
+    await wrapper.findAllComponents(BaseButton)[0].trigger("click");
     await flushPromises();
     const step2 = wrapper.find(STEP2_ADOPT);
     expect(step2.exists()).toBe(true);

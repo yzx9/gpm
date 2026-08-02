@@ -16,7 +16,6 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
-import BaseSpinner from "./base/BaseSpinner.vue";
 
 const { t } = useI18n();
 
@@ -191,10 +190,13 @@ watch(
       {{ error }}
     </p>
 
+    <!-- Step-1 choices stay neutral (both outline): the destructive action is
+         re-confirmed in red at step 2, so this screen shouldn't bias toward
+         either path. -->
     <div class="flex flex-col gap-2">
-      <button class="btn-danger" @click="openConfirm('adopt_remote')">
+      <BaseButton variant="outline" block @click="openConfirm('adopt_remote')">
         {{ t("common.divergence.adoptRemote") }}
-      </button>
+      </BaseButton>
       <BaseButton variant="outline" block @click="openConfirm('keep_mine')">
         {{ t("common.divergence.keepMine") }}
       </BaseButton>
@@ -264,8 +266,12 @@ watch(
     </template>
 
     <div class="flex flex-col gap-2">
-      <button class="btn-danger" :disabled="resolving" @click="confirm">
-        <BaseSpinner v-if="resolving" />
+      <BaseButton
+        variant="danger"
+        size="sm"
+        :loading="resolving"
+        @click="confirm"
+      >
         <template v-if="resolving">
           {{
             pendingChoice === "adopt_remote"
@@ -280,7 +286,7 @@ watch(
               : t("common.divergence.pushOverwrite")
           }}
         </template>
-      </button>
+      </BaseButton>
       <BaseButton size="sm" :disabled="resolving" @click="cancelConfirm">
         {{ t("common.button.cancel") }}
       </BaseButton>
@@ -291,35 +297,6 @@ watch(
 <style scoped>
 /* Lifted from EntryListPage so the shared modal owns its own list styles and
    doesn't depend on a page's scoped CSS. */
-.btn-danger {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 48px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-}
-.btn-danger:active:not(:disabled) {
-  background: var(--color-danger);
-  color: var(--color-surface);
-}
-@media (hover: hover) {
-  .btn-danger:hover:not(:disabled) {
-    background: var(--color-danger);
-    color: var(--color-surface);
-  }
-}
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .div-scroll {
   max-height: 40vh;
   overflow-y: auto;
