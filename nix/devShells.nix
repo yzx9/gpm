@@ -5,10 +5,7 @@
 # Dev-shell definitions, factored out of flake.nix. flake.nix imports this per
 # system and exposes the result directly as its `devShells` output.
 
-{
-  inputs,
-  system,
-}:
+{ inputs, system }:
 
 let
   inherit (pkgs) lib;
@@ -118,101 +115,118 @@ let
   '';
 
   # mkShell derivations have no `.override`, so the shells extend the shared
-  # *argument* attrset via transform functions before mkShell:
-  #   - addLocalDevExtras: the pre-commit hook install. CI never commits, so
-  #     the hook would never fire there — local-dev only.
-  addLocalDevExtras = args: {
-    packages =
-      args.packages
-      ++ (with pkgs; [
-        # rust
-        rust-analyzer
-        cargo-audit
-        cargo-outdated
-
-        # Agentic tools
-        playwright-mcp
-      ]);
-    shellHook = pre-commit-checks.shellHook + args.shellHook;
-  };
-
-  # `full`-shell args (no sccache, no pre-commit hook): every toolchain the
-  # repo touches — the four Android Rust targets, the Android SDK/NDK, JDK,
-  # and the desktop runtime. CI uses `ci-full` (= mkShell fullShellArgs)
-  # directly; local dev uses `full` (= mkShell (addLocalDevExtras fullShellArgs)).
-  fullShellArgs = {
-    packages =
-      with pkgs;
-      [
-        # Rust
-        rustToolchain
-        sccache
-
-        # Android
-        jdk17
-        androidComp.androidsdk
-      ]
-      ++ lib.optionals pkgs.stdenv.isLinux (
-        [
-          pkg-config # pkg-config is build-time only
-        ]
-        ++ linuxDesktopRuntime
-      );
-
-    env = {
-      # sccache caches rustc outputs by content hash, so it is immune to the
-      # cargo-fingerprint drift that defeats rust-cache's target/ reuse under
-      # nix (see .github/actions/setup-ci-env/action.yml).
-      RUSTC_WRAPPER = "sccache";
-
-      ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
-      ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
-      ANDROID_NDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
-      # Tauri's Android build reads NDK_HOME (not just ANDROID_NDK_ROOT) and
-      # JAVA_HOME; missing either, `tauri android build` aborts early.
-      NDK_HOME = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
-      JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
-      # AGP downloads a generic FHS aapt2 from Maven that the Nix stub-ld
-      # refuses to run; point it at the Nix SDK's patchelf'd aapt2 instead.
-      # Keep this build-tools version in sync with buildToolsVersions above.
-      GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComp.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
-
-      # NDK toolchain for cross-compiling native C deps (OpenSSL, libgit2)
-      # Fixes: rust-lang/rust#131407 — macOS ar creates corrupt Linux archives.
-      # llvm-ar produces GNU-format archives that rustc can handle cross-platform.
-      CC_aarch64_linux_android = "${ndkBin}/aarch64-linux-android28-clang";
-      CC_armv7_linux_androideabi = "${ndkBin}/armv7a-linux-androideabi28-clang";
-      CC_x86_64_linux_android = "${ndkBin}/x86_64-linux-android28-clang";
-      CC_i686_linux_android = "${ndkBin}/i686-linux-android28-clang";
-    };
-
-    # Use shellHook for PATH and AR/RANLIB — plain attr may be overridden by shell profile.
-    # Both TARGET_AR and plain AR are set so openssl-sys's build script picks them up
-    # regardless of which fallback it checks.
-    # macOS-only: rust-lang/rust#131407 — macOS ar creates BSD-format archives
-    # that rustc cannot handle when cross-compiling to Linux/Android targets.
-    shellHook = ''
-      export PATH="${ndkBin}:$PATH"
-    ''
-    + linuxDesktopLdHook
-    + lib.optionalString pkgs.stdenv.isDarwin ''
-      export AR="${ndkBin}/llvm-ar"
-      export TARGET_AR="${ndkBin}/llvm-ar"
-      export RANLIB="${ndkBin}/llvm-ranlib"
-    '';
-  };
-
+  # *argument* attrset via transform functions before mkShell.
+  #
   # `lite`-shell args (no sccache, no pre-commit hook): host Rust + Tauri
   # desktop runtime + frontend/tools, but NO Android SDK/NDK/JDK/android
   # targets. For CI lint, test (be/fe) and format-fe: everything that
   # compiles/links Tauri for the host or runs the frontend, but never
   # cross-compiles to Android.
-  liteShellArgs = {
+  addLiteShellExtras =
+    args:
+    args
+    // {
+      packages = args.packages ++ [
+        # Rust
+        hostRustToolchain
+      ];
+    };
+
+  # `full`-shell args (no sccache, no pre-commit hook): every toolchain the
+  # repo touches — the four Android Rust targets, the Android SDK/NDK, JDK,
+  # and the desktop runtime. CI uses `ci-full` (= mkShell fullShellArgs)
+  # directly; local dev uses `full` (= mkShell (addLocalDevExtras fullShellArgs)).
+  addFullShellExtras =
+    args:
+    args
+    // {
+      packages = args.packages ++ [
+        # Rust
+        rustToolchain
+      ];
+
+      env = args.env // {
+        ANDROID_HOME = "${androidComp.androidsdk}/libexec/android-sdk";
+        ANDROID_SDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk";
+        ANDROID_NDK_ROOT = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+        # Tauri's Android build reads NDK_HOME (not just ANDROID_NDK_ROOT) and
+        # JAVA_HOME; missing either, `tauri android build` aborts early.
+        NDK_HOME = "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle";
+        JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
+        # AGP downloads a generic FHS aapt2 from Maven that the Nix stub-ld
+        # refuses to run; point it at the Nix SDK's patchelf'd aapt2 instead.
+        # Keep this build-tools version in sync with buildToolsVersions above.
+        GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComp.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
+
+        # NDK toolchain for cross-compiling native C deps (OpenSSL, libgit2)
+        # Fixes: rust-lang/rust#131407 — macOS ar creates corrupt Linux archives.
+        # llvm-ar produces GNU-format archives that rustc can handle cross-platform.
+        CC_aarch64_linux_android = "${ndkBin}/aarch64-linux-android28-clang";
+        CC_armv7_linux_androideabi = "${ndkBin}/armv7a-linux-androideabi28-clang";
+        CC_x86_64_linux_android = "${ndkBin}/x86_64-linux-android28-clang";
+        CC_i686_linux_android = "${ndkBin}/i686-linux-android28-clang";
+      };
+
+      # Use shellHook for PATH and AR/RANLIB — plain attr may be overridden by shell profile.
+      # Both TARGET_AR and plain AR are set so openssl-sys's build script picks them up
+      # regardless of which fallback it checks.
+      # macOS-only: rust-lang/rust#131407 — macOS ar creates BSD-format archives
+      # that rustc cannot handle when cross-compiling to Linux/Android targets.
+      shellHook = ''
+        export PATH="${ndkBin}:$PATH"
+      ''
+      + args.shellHook
+      + lib.optionalString pkgs.stdenv.isDarwin ''
+        export AR="${ndkBin}/llvm-ar"
+        export TARGET_AR="${ndkBin}/llvm-ar"
+        export RANLIB="${ndkBin}/llvm-ranlib"
+      '';
+    };
+
+  # CI shells: sccache pointed at a fixed dir the setup-ci-env action persists
+  # with actions/cache (local dev leaves SCCACHE_DIR unset -> sccache default).
+  addCiExtras =
+    args:
+    args
+    // {
+      env = args.env // {
+        SCCACHE_DIR = "/tmp/sccache";
+      };
+    };
+
+  # the pre-commit hook install. CI never commits, so the hook would never
+  # fire there — local-dev only.
+  addLocalDevExtras =
+    args:
+    args
+    // {
+      packages =
+        args.packages
+        ++ (with pkgs; [
+          # Rust
+          rust-analyzer
+          cargo-audit
+          cargo-outdated
+
+          # Agentic tools
+          playwright-mcp
+        ]);
+      shellHook = pre-commit-checks.shellHook + args.shellHook;
+    };
+
+  baseShellArgs = {
+    env = {
+      # sccache caches rustc outputs by content hash, so it is immune to the
+      # cargo-fingerprint drift that defeats rust-cache's target/ reuse under
+      # nix (see .github/actions/setup-ci-env/action.yml).
+      RUSTC_WRAPPER = "sccache";
+    };
+
     packages =
       with pkgs;
       [
-        # rust
-        hostRustToolchain
+        # Rust
+        sccache
 
         # Frontend
         nodejs
@@ -243,23 +257,25 @@ let
     shellHook = linuxDesktopLdHook;
   };
 
-  # CI shells: sccache pointed at a fixed dir the setup-ci-env action persists
-  # with actions/cache (local dev leaves SCCACHE_DIR unset -> sccache default).
-  ciFullShell = pkgs.mkShell (fullShellArgs // { SCCACHE_DIR = "/tmp/sccache"; });
-  ciLiteShell = pkgs.mkShell (liteShellArgs // { SCCACHE_DIR = "/tmp/sccache"; });
-  fullShell = pkgs.mkShell (addLocalDevExtras fullShellArgs);
+  liteShellArgs = addLiteShellExtras baseShellArgs;
+  fullShellArgs = addFullShellExtras baseShellArgs;
+
+  ciLiteShell = pkgs.mkShell (addCiExtras liteShellArgs);
+  ciFullShell = pkgs.mkShell (addCiExtras fullShellArgs);
   liteShell = pkgs.mkShell (addLocalDevExtras liteShellArgs);
+  fullShell = pkgs.mkShell (addLocalDevExtras fullShellArgs);
 in
 {
   # CI shells: sccache (RUSTC_WRAPPER) + SCCACHE_DIR=/tmp/sccache, persisted by
   # setup-ci-env. No pre-commit hook (CI never commits).
-  ci-full = ciFullShell;
   ci-lite = ciLiteShell;
+  ci-full = ciFullShell;
 
   # Local-dev shells: sccache (default ~/.cache/sccache, machine-global so a
   # fresh worktree reuses compiles from others) + the pre-commit hook install.
   # `default` (bare `nix develop`) resolves to `full`.
-  full = fullShell;
   lite = liteShell;
+  full = fullShell;
+
   default = fullShell;
 }
