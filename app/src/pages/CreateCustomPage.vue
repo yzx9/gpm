@@ -91,8 +91,9 @@ async function refreshPreview() {
   try {
     hasTemplate.value = (await lookupTemplate(name)) !== null;
     preview.value = await previewCreate(name, customContent.value);
-  } catch {
+  } catch (e) {
     // Invalid name mid-typing, or a template references an unknown var — no preview.
+    console.debug("[create-custom] preview failed", e);
     hasTemplate.value = false;
     preview.value = null;
   }
@@ -135,6 +136,7 @@ async function onSave() {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || t("create.createFailed");
+    console.warn("[create-custom] create failed", e);
   } finally {
     submitting.value = false;
     cancelling.value = false;

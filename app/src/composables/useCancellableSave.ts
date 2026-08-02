@@ -27,8 +27,9 @@ export function useCancellableSave(): {
     cancelling.value = true;
     try {
       await cancelGit();
-    } catch {
+    } catch (e) {
       // best-effort — the save continues if the cancel request itself fails
+      console.debug("[cancellable-save] cancel failed", e);
     }
   }
 

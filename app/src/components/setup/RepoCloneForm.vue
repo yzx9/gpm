@@ -99,6 +99,7 @@ async function cancelClone() {
     cancelling.value = false;
     const appError = e as AppError;
     toast.danger(appError?.message || t("setup.clone.cancelFailed"));
+    console.warn("[clone] cancel failed", e);
   }
 }
 
@@ -114,8 +115,9 @@ async function onAdvancedToggle(e: Event) {
   if (!(e.target as HTMLDetailsElement).open || commitDefault.value) return;
   try {
     commitDefault.value = await getCommitIdentityDefault();
-  } catch {
+  } catch (e) {
     // Non-critical — the default hint just won't render.
+    console.debug("[clone] commit-identity hint failed", e);
   }
 }
 
@@ -164,8 +166,9 @@ async function onClone() {
           commitName.value.trim() || null,
           commitEmail.value.trim() || null,
         );
-      } catch {
+      } catch (e) {
         // Non-critical — editable later in Settings.
+        console.debug("[clone] set-commit-identity failed", e);
       }
     }
     emit("done");
@@ -176,6 +179,7 @@ async function onClone() {
       cancelled.value = true;
     } else {
       error.value = appError?.message || t("setup.clone.errCloneFailed");
+      console.error("[clone] clone failed", e);
     }
   } finally {
     progressUnlisten?.();

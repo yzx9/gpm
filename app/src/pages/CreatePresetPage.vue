@@ -110,6 +110,7 @@ async function loadPreset() {
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("create.presetsFailed");
+    console.warn("[create-preset] presets load failed", e);
   } finally {
     presetsLoading.value = false;
   }
@@ -134,6 +135,7 @@ async function onGeneratePassword(f: PresetField) {
     if (myToken !== generateToken) return;
     const appError = e as AppError;
     toast.danger(appError?.message || t("create.genFailed"));
+    console.warn("[create-preset] field generate failed", e);
   } finally {
     if (myToken === generateToken) generating.value = false;
   }
@@ -174,6 +176,7 @@ async function onSave() {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || t("create.createFailed");
+    console.warn("[create-preset] create failed", e);
   } finally {
     submitting.value = false;
     cancelling.value = false;

@@ -42,8 +42,9 @@ export async function unlock(passphrase: string): Promise<void> {
 export async function bumpIdleTimer(): Promise<void> {
   try {
     await invoke("bump_idle_timer");
-  } catch {
+  } catch (e) {
     // Best-effort: a failed bump is equivalent to no bump.
+    console.debug("[auth] idle-timer bump failed", e);
   }
 }
 

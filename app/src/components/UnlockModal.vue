@@ -202,8 +202,9 @@ onMounted(async () => {
   // setting. A failure (or pre-setup) leaves the "immediate" default.
   try {
     lockMode.value = (await getAppConfig()).lock_mode ?? "immediate";
-  } catch {
+  } catch (e) {
     // keep default
+    console.debug("[unlock-modal] lock-mode probe failed", e);
   }
 });
 

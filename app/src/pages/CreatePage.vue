@@ -27,6 +27,7 @@ async function loadPresets() {
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("create.presetsFailed");
+    console.warn("[create] presets load failed", e);
   } finally {
     presetsLoading.value = false;
   }

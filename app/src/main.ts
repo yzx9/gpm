@@ -7,7 +7,6 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import App from "./App.vue";
 import "./style.css";
 
-import { installFrontendLogger } from "./api";
 import {
   APP_LOCK_KEY,
   BACK_HANDLER_KEY,
@@ -35,8 +34,15 @@ import {
   loadBundle,
   reconcileLocaleFromBackend,
 } from "./i18n";
+import { installConsoleCapture, installFrontendLogger } from "./log-capture";
 import { installRouteGuards } from "./router-guards";
 import { reconcileThemeFromBackend } from "./theme";
+
+// Arm console→backend capture FIRST, before any other module runs side effects
+// (route guards, i18n bootstrap, app-shell singletons), so nothing can print to
+// a console we aren't yet forwarding. No `app` dependency — the Vue/`window`
+// handlers in `installFrontendLogger(app)` are wired later, once `app` exists.
+installConsoleCapture();
 
 // App-shell singletons — created once here (the composition root), provided
 // app-wide, and held by direct ref where non-setup code needs them. The router

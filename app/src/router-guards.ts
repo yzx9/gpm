@@ -44,4 +44,14 @@ export function installRouteGuards(router: Router): void {
     }
     return true;
   });
+
+  // Log every confirmed navigation so a bug report can reconstruct the user's
+  // flow up to a failure. `to.name` only — NOT `to.fullPath`: the entry routes
+  // are `/entry/:pathMatch(.*)`, so `fullPath` carries the full slash-separated
+  // path (directory structure), broader than SECURITY.md's entry-name policy,
+  // and `to.query` could leak future params. `console.info` persists via the
+  // console shim; navigation is low-frequency so `info` is appropriate.
+  router.afterEach((to) => {
+    console.info("[nav]", to.name);
+  });
 }

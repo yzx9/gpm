@@ -106,6 +106,7 @@ export function useDivergence(opts: {
         opts.onPullFfFailed();
       } else {
         divergeError.value = appError?.message || t(opts.resolveFailedKey);
+        console.warn("[divergence] resolve failed", e);
       }
     } finally {
       resolving.value = false;

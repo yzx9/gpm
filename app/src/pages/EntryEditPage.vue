@@ -149,6 +149,7 @@ async function loadBody() {
     const appError = e as AppError;
     decryptError.value = true;
     error.value = appError?.message || t("entry.decryptFailed");
+    console.error("[entry-edit] decrypt failed", e);
   } finally {
     loading.value = false;
   }
@@ -197,6 +198,7 @@ async function onSave() {
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("entry.saveFailed");
+    console.error("[entry-edit] save failed", e);
   } finally {
     saving.value = false;
     cancelling.value = false;

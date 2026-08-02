@@ -153,6 +153,7 @@ async function generate() {
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("setup.create.err.errGeneration");
+    console.warn("[setup] generate identity failed", e);
   } finally {
     generating.value = false;
   }
@@ -240,6 +241,7 @@ async function onCreate() {
         error.value =
           (pushError?.message || t("setup.create.err.errPush")) +
           t("setup.create.err.errPushSuffix");
+        console.warn("[setup] push failed", e);
         return;
       }
     }
@@ -248,6 +250,7 @@ async function onCreate() {
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("setup.create.err.errCreate");
+    console.warn("[setup] create failed", e);
   } finally {
     loading.value = false;
   }

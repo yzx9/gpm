@@ -10,7 +10,6 @@ import {
   ensureClipboardNotifyPermission,
   hasTotp as hasTotpCmd,
   showPassword as showPasswordCmd,
-  writeLog,
   type AppError,
   type DivergenceChoice,
   type PullResult,
@@ -96,8 +95,9 @@ async function probeTotp() {
   try {
     const has = await hasTotpCmd(entryPath);
     if (has !== null) showTotp.value = has;
-  } catch {
+  } catch (e) {
     // Probe failed (rare) — leave unknown; the button stays as the fallback.
+    console.debug("[entry-detail] probe-totp failed", e);
   } finally {
     totpProbing.value = false;
   }
@@ -164,6 +164,7 @@ async function showPassword() {
     const appError = e as AppError;
     decryptError.value = true;
     error.value = appError?.message || t("entry.decryptFailed");
+    console.error("[entry-detail] reveal failed", e);
   } finally {
     loading.value = false;
   }
@@ -189,10 +190,7 @@ async function copyPassword() {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || t("common.toast.copyFailed");
-    void writeLog(
-      "error",
-      `copy password failed: ${appError?.code ?? "unknown"}: ${appError?.message ?? "(no message)"}`,
-    ).catch(() => {});
+    console.error("[entry-detail] copy password failed", e);
   }
 }
 
@@ -222,10 +220,7 @@ async function copyTotp() {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || t("common.toast.copyFailed");
-    void writeLog(
-      "error",
-      `copy totp failed: ${appError?.code ?? "unknown"}: ${appError?.message ?? "(no message)"}`,
-    ).catch(() => {});
+    console.error("[entry-detail] copy totp failed", e);
   }
 }
 
@@ -267,8 +262,10 @@ async function deleteSecret() {
       error.value = t("entry.deleteBlocked");
     }
   } catch (e) {
+    if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || t("entry.deleteFailed");
+    console.error("[entry-detail] delete failed", e);
   } finally {
     deleting.value = false;
     cancelling.value = false;

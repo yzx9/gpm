@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The diagnostic log now records the app's own activity — each screen you open, and any operation that fails (a copy, reveal, sync, create, and so on) — alongside the existing backend trace, so a failure leaves a clue in **Settings → Logs** instead of disappearing. A failed copy, for example, used to leave no trace at all; the log now captures what went wrong.
+
 ## [v0.15.1] - 2026-08-02
 
 ### Changed

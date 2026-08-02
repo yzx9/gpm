@@ -59,8 +59,9 @@ onMounted(async () => {
     if (ready) {
       step.value = 2;
     }
-  } catch {
+  } catch (e) {
     // Not ready — stay on step 1
+    console.debug("[clone] repo-ready probe failed", e);
   }
 });
 

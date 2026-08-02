@@ -99,6 +99,7 @@ async function onGenerate() {
     if (myToken !== generateToken) return;
     const appError = e as AppError;
     error.value = appError?.message || t("generate.genFailed");
+    console.error("[generate] generate failed", e);
   } finally {
     if (myToken === generateToken) generating.value = false;
   }
@@ -113,6 +114,7 @@ async function onCopyRow(pw: string) {
   } catch (e) {
     const appError = e as AppError;
     toast.danger(appError?.message || t("common.toast.copyFailed"));
+    console.warn("[generate] copy failed", e);
   }
 }
 

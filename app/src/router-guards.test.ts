@@ -154,4 +154,47 @@ describe("installRouteGuards", () => {
       ).toBeDefined();
     });
   });
+
+  it("logs each confirmed navigation as [nav] <name> (not fullPath)", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_auth_state")
+        return Promise.resolve({ configured: true });
+      return Promise.resolve();
+    });
+    // The console shim isn't armed in tests, so spy on console.info directly to
+    // prove the afterEach fires with the route NAME only (no fullPath payload).
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", name: "home", component: { render: () => h("div") } },
+        {
+          path: "/entries",
+          name: "entries",
+          component: { render: () => h("div") },
+        },
+      ],
+    });
+    installRouteGuards(router);
+
+    const app = createApp({ render: () => h(RouterView) });
+    app.use(router);
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    app.mount(el);
+    cleanup = () => app.unmount();
+    await flushPromises();
+
+    await router.push("/entries");
+    await flushPromises();
+
+    expect(infoSpy).toHaveBeenCalledWith("[nav]", "entries");
+    // Never the fullPath — it carries the full entry path on /entry/:pathMatch.
+    for (const call of infoSpy.mock.calls) {
+      expect(call).toHaveLength(2);
+      expect(typeof call[1]).toBe("string");
+    }
+    infoSpy.mockRestore();
+  });
 });

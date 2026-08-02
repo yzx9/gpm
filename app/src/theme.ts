@@ -67,7 +67,8 @@ export async function reconcileThemeFromBackend(): Promise<void> {
   try {
     const cfg = await getAppConfig();
     applyTheme(normalizeThemeMode(cfg.theme_mode));
-  } catch {
+  } catch (e) {
     // Keep the CSS default (System).
+    console.debug("[theme] reconcile failed", e);
   }
 }

@@ -201,6 +201,7 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
     hasFetchedOnce.value = true; // state is known (even if this page was empty)
   } catch (e) {
     if (myId !== reqId) return;
+    console.error("[entry-list] load failed", e);
     const msg = (e as AppError)?.message || t("entries.loadFailed");
     if (replace && q.trim()) {
       searchError.value = true;
@@ -277,8 +278,9 @@ watch(search, (q) => {
 async function loadAuthState() {
   try {
     authState.value = await getAuthenticityState();
-  } catch {
+  } catch (e) {
     // Verification unavailable (e.g. repo mid-clone) — leave the badge as-is.
+    console.debug("[entry-list] auth-state unavailable", e);
   }
 }
 
@@ -301,8 +303,9 @@ function onPullProgress(p: GitProgressEvent) {
 async function cancelSync() {
   try {
     await cancelGit();
-  } catch {
+  } catch (e) {
     // best-effort — the sync continues if cancel fails
+    console.debug("[entry-list] cancel-sync failed", e);
   }
 }
 
@@ -327,6 +330,7 @@ async function onSyncOutcome(outcome: SyncOutcome) {
 }
 
 async function syncRepo() {
+  console.info("[sync] pull");
   pulling.value = true;
   pullResult.value = "";
   error.value = "";
@@ -378,6 +382,7 @@ async function syncRepo() {
       }, 3000);
     } else {
       error.value = appError?.message || t("entries.syncFailed");
+      console.error("[entry-list] sync failed", e);
     }
   } finally {
     pullProgressUnlisten?.();
@@ -443,6 +448,7 @@ async function resolveDivergence(choice: DivergenceChoice) {
       await syncRepo();
     } else {
       divergeError.value = appError?.message || t("entries.resolveFailed");
+      console.error("[entry-list] resolve divergence failed", e);
     }
   } finally {
     resolving.value = false;
@@ -470,6 +476,7 @@ async function ignoreIssue(commit: CommitSigInfo) {
   } catch (e) {
     const appError = e as AppError;
     toast.danger(appError?.message || t("entries.toastIgnoreFailed"));
+    console.warn("[entry-list] ignore issue failed", e);
   }
 }
 
@@ -487,6 +494,7 @@ async function trustBlockSigner(commit: CommitSigInfo) {
   } catch (e) {
     const appError = e as AppError;
     toast.danger(appError?.message || t("entries.toastTrustFailed"));
+    console.warn("[entry-list] trust signer failed", e);
   }
 }
 
@@ -499,6 +507,7 @@ async function switchToAudit() {
   } catch (e) {
     const appError = e as AppError;
     toast.danger(appError?.message || t("entries.toastSwitchFailed"));
+    console.warn("[entry-list] switch to audit failed", e);
   }
 }
 

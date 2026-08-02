@@ -145,6 +145,8 @@ onMounted(() => {
   initSecureScreen();
   // Surface a notice if a verbose session is still active from a prior launch.
   void notifyVerboseOnBoot();
+  // Anchor the frontend session alongside the backend's `gpm … starting`.
+  console.info("[app] ready");
 });
 </script>
 
