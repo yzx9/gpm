@@ -23,6 +23,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use base64::Engine;
 use rustpass::Error;
 use rustpass::error::ErrorCode;
 use serde::Serialize;
@@ -158,11 +159,14 @@ pub(crate) fn get_app_lock_state(state: State<'_, AppState>) -> AppLockState {
     }
 }
 
-/// Enable the app-launch biometric gate: migrate the master key from the
-/// auth-free Keystore store to the biometric-gated one. The biometric prompt
-/// (ENCRYPT) runs first; only on its success is the auth-free copy deleted, so a
-/// cancel never orphans the store. The in-memory master key is unchanged (same
-/// bytes), so the session keeps working.
+/// Enable the app-launch biometric gate (R064 model B): mint a **distinct**
+/// vault key, seal it behind biometric (ENCRYPT prompt), and re-key `identity`
+/// + `app_id_pass` from the auth-free master to the vault key. The auth-free
+/// master stays permanent (never deleted) so the headless worker can sync under
+/// lock — only the identity moves under the gate. The ENCRYPT prompt runs before
+/// the re-key, so a cancel leaves the store untouched; the vault alias is
+/// created before the identity moves, so a mid-enable crash is self-healed by
+/// the `app_unlock` resume.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn enable_biometric_app_lock(
@@ -178,42 +182,56 @@ pub(crate) async fn enable_biometric_app_lock(
             tauri_plugin_secure_keystore::SecureKeystoreError::unavailable(),
         ));
     }
-    // Already enabled (key already biometric-gated) — nothing to migrate.
+    // Already enabled (a biometric key already exists) — nothing to do.
     if ks.has_stored_biometric().await? {
         state.app_lock_enabled.store(true, Ordering::SeqCst);
         return Ok(());
     }
 
-    // Read the current auth-free master key (non-prompting). This is the value
-    // we re-seal; wipe it as soon as it's copied into the biometric store.
-    let b64 = Zeroizing::new(
+    // Read the auth-free master key (non-prompting). R064 keeps it auth-free and
+    // permanent — it is NOT migrated away; we use it to re-key identity.
+    let master_b64 = Zeroizing::new(
         ks.retrieve()
             .await?
-            .ok_or_else(|| AppLockError::failed("No seal master key to migrate"))?,
+            .ok_or_else(|| AppLockError::failed("No auth-free master key to gate"))?,
     );
+    let master = decode_master_key(&master_b64)
+        .ok_or_else(|| AppLockError::failed("Auth-free master key is malformed"))?;
 
-    // Seal behind biometric FIRST (prompt). If the user cancels, the auth-free
-    // key is untouched — no bricking.
+    // Mint a vault key DISTINCT from the master. The forensic property of the
+    // split depends on this: the auth-free master must not decrypt identity.
+    let vault = rustpass::seal::generate_master_key()
+        .map_err(|e| AppLockError::failed(&format!("vault key generation failed: {e}")))?;
+    let vault_b64 = Zeroizing::new(crate::B64.encode(vault));
+
+    // Create the vault alias FIRST (ENCRYPT prompt). Crash-safe: the vault key
+    // is recoverable BEFORE identity moves under it.
     ks.store_biometric(
-        &b64,
-        tauri_plugin_secure_keystore::BiometricSlot::Legacy,
+        &vault_b64,
+        tauri_plugin_secure_keystore::BiometricSlot::Vault,
         prompt_text.as_ref(),
     )
     .await?;
-    // Only now drop the auth-free copy and persist the flag.
-    ks.delete().await?;
+    // Re-key identity + app_id_pass master→vault. Both seals keyed: master_seal
+    // reads, the just-injected vault_seal writes.
+    state.store.set_master_key(Some(master));
+    state.store.set_vault_key(Some(vault));
+    state.store.rekey_identity_to_vault().await?;
+    // The auth-free master stays (permanent) — do NOT delete it. Persist the
+    // flag last so a crash before this leaves the resume to finish the enable.
     state.app_config.set_biometric_app_lock(true).await?;
     state.app_lock_enabled.store(true, Ordering::SeqCst);
-    // The gate is now on with the master key resident and the app unlocked —
-    // arm the in-app idle timer (R057). No-op when gate-idle is Off.
+    // The gate is now on with the app unlocked — arm the in-app idle timer
+    // (R057). No-op when gate-idle is Off.
     identity::reset_gate_idle_timer(&state, &app);
     Ok(())
 }
 
-/// Disable the app-launch biometric gate: migrate the master key back to the
-/// auth-free store (one last biometric DECRYPT prompt), then drop the
-/// biometric-gated copy. If the biometric key is dead (all biometrics removed),
-/// the master key is unrecoverable and this fails — re-setup is the only path.
+/// Disable the app-launch biometric gate (R064 model B): one biometric DECRYPT
+/// retrieves the vault key, `identity` + `app_id_pass` re-key vault→master, the
+/// vault alias is dropped, and `vault_seal` collapses back onto the permanent
+/// auth-free master. If the biometric key is dead (all biometrics removed), the
+/// vault key is unrecoverable and this fails — re-setup is the only path.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn disable_biometric_app_lock(
@@ -229,29 +247,37 @@ pub(crate) async fn disable_biometric_app_lock(
     // hasn't passed its stale-check yet.
     identity::disarm_gate_idle(&state);
     let ks = app.secure_keystore();
-    // Retrieve the master key from the biometric store (prompt DECRYPT).
-    let b64 = Zeroizing::new(
+    // Retrieve the vault key (DECRYPT prompt) — the biometric key post-R064.
+    let vault_b64 = Zeroizing::new(
         ks.retrieve_biometric(
-            tauri_plugin_secure_keystore::BiometricSlot::Legacy,
+            tauri_plugin_secure_keystore::BiometricSlot::Vault,
             prompt_text.as_ref(),
         )
         .await?
-        .ok_or_else(|| AppLockError::failed("No biometric master key to migrate back"))?,
+        .ok_or_else(|| AppLockError::failed("No vault key to migrate back"))?,
     );
-    // Re-seal into the auth-free store (non-prompting), then drop the biometric
-    // copy. The Store's in-memory master key may have been wiped by a prior
-    // `app_lock` (disable can be invoked while locked, before a frontend guard
-    // exists) — re-inject it BEFORE clearing the flag, since the flag write
-    // seals `repo.json` via Seal::unseal and would fail with
-    // `SealKeyUnavailable` if the key were still absent.
-    ks.store(&b64).await?;
-    ks.delete_biometric(tauri_plugin_secure_keystore::BiometricSlot::Legacy)
+    let vault = decode_master_key(&vault_b64)
+        .ok_or_else(|| AppLockError::failed("Vault key is malformed"))?;
+    state.store.set_vault_key(Some(vault)); // key vault_seal to read identity
+    // Load the auth-free master (permanent, non-prompting) to write identity
+    // back under it. The in-memory master may have been wiped by a prior
+    // `app_lock` (disable can run while locked), so re-inject it BEFORE the
+    // re-key — rekey_identity_to_master writes via master_seal.
+    let master_b64 = Zeroizing::new(
+        ks.retrieve()
+            .await?
+            .ok_or_else(|| AppLockError::failed("No auth-free master to disable into"))?,
+    );
+    let master = decode_master_key(&master_b64)
+        .ok_or_else(|| AppLockError::failed("Auth-free master key is malformed"))?;
+    state.store.set_master_key(Some(master));
+    // Re-key identity + app_id_pass vault→master, drop the vault alias, then
+    // collapse vault_seal onto the master (post-disable there is no separate
+    // vault — identity lives under the master).
+    state.store.rekey_identity_to_master().await?;
+    ks.delete_biometric(tauri_plugin_secure_keystore::BiometricSlot::Vault)
         .await?;
-    if let Some(key) = decode_master_key(&b64) {
-        // R064 bridge: vault == master until the keys split.
-        state.store.set_master_key(Some(key));
-        state.store.set_vault_key(Some(key));
-    }
+    state.store.set_vault_key(Some(master));
     state.app_config.set_biometric_app_lock(false).await?;
     // The identity-auto-unlock opt-in is meaningless without the gate (app_unlock
     // is never called when app_lock_enabled is false). Clear its flag + sealed
@@ -374,25 +400,79 @@ pub(crate) async fn app_unlock(
         return Ok(());
     }
     let ks = app.secure_keystore();
-    let b64 = Zeroizing::new(
-        ks.retrieve_biometric(
-            tauri_plugin_secure_keystore::BiometricSlot::Legacy,
+    // Load the auth-free master if present (post-m0007: permanent; upgrader
+    // pre-m0007: absent — its master lives in the legacy biometric alias).
+    // Non-prompting; a failure degrades to None (the deadlock-fix below or m0007
+    // supplies the master on the upgrader path).
+    if let Some(master_b64) = ks.retrieve().await.unwrap_or(None)
+        && let Some(master) = decode_master_key(&master_b64)
+    {
+        state.store.set_master_key(Some(master));
+    }
+    // Retrieve the biometric key: the vault (post-m0007), or — when the vault
+    // alias is absent (BIOMETRIC_NOT_SET, non-prompting) — the legacy master
+    // (upgrader pre-m0007, until m0007 relocates it). Either way one DECRYPT.
+    let (key, from_vault) = match ks
+        .retrieve_biometric(
+            tauri_plugin_secure_keystore::BiometricSlot::Vault,
             prompt_text.as_ref(),
         )
         .await
-        .map_err(|e| {
+    {
+        Ok(Some(b64)) => {
+            let b64 = Zeroizing::new(b64);
+            (
+                decode_master_key(&b64)
+                    .ok_or_else(|| AppLockError::failed("Stored vault key is malformed"))?,
+                true,
+            )
+        }
+        Ok(None) => return Err(AppLockError::failed("No biometric key stored")),
+        Err(e) if e.code == "BIOMETRIC_NOT_SET" => {
+            // Vault absent → upgrader: the master is trapped in the legacy alias.
+            let b64 = Zeroizing::new(
+                ks.retrieve_biometric(
+                    tauri_plugin_secure_keystore::BiometricSlot::Legacy,
+                    prompt_text.as_ref(),
+                )
+                .await
+                .map_err(|err| {
+                    let ae: AppLockError = err.into();
+                    log::warn!("app-lock: unlock (legacy) failed: {ae}");
+                    ae
+                })?
+                .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
+            );
+            let key = decode_master_key(&b64)
+                .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;
+            // D6: inject BOTH seals with this master so identity (still under
+            // master pre-m0007) stays readable if m0007's prompt cancels, and so
+            // m0005/m0006 un-defer. m0007 (chunk 6) relocates master→auth-free +
+            // mints the vault.
+            state.store.set_master_key(Some(key));
+            state.store.set_vault_key(Some(key));
+            (key, false)
+        }
+        Err(e) => {
             let ae: AppLockError = e.into();
             log::warn!("app-lock: unlock failed: {ae}");
-            ae
-        })?
-        .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
-    );
-    let key = decode_master_key(&b64)
-        .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;
-    // R064 bridge: vault == master until the keys split.
-    state.store.set_master_key(Some(key));
-    state.store.set_vault_key(Some(key));
-    log::info!("app-lock: master key retrieved");
+            return Err(ae);
+        }
+    };
+    if from_vault {
+        // Post-m0007: inject the vault key (master already loaded above).
+        state.store.set_vault_key(Some(key));
+        // Crash-safety resume: a half-finished enable/disable left identity
+        // under the master while the vault alias is present — finish moving it
+        // under the vault. An interrupted disable is undone here (identity stays
+        // readable; the user re-disables) — no data loss either way.
+        if state.store.is_identity_under_master().await {
+            state.store.rekey_identity_to_vault().await?;
+            let _ = state.app_config.set_biometric_app_lock(true).await;
+            log::info!("app-lock: resumed unfinished master→vault re-key");
+        }
+    }
+    log::info!("app-lock: biometric key retrieved");
     // Copy the app-scoped behavior prefs out of a pre-split repo.json into
     // app.json BEFORE anything reads them — the first unlock, and the cache
     // refresh inside try_identity_auto_unlock, must see the migrated values, not
@@ -546,8 +626,11 @@ pub(crate) fn do_app_lock<R: Runtime>(
     reason: AppLockReason,
 ) {
     log::info!("app-lock: lock ({reason:?})");
-    // R064 bridge: wipe both seals until the vault key is split off.
-    store.set_master_key(None);
+    // R064: wipe only the vault key (the identity gate). The auth-free master
+    // stays keyed so the headless worker can still read `repo.json`/`app.json`
+    // under lock — the whole point of the master/vault split. Identity (under
+    // `vault_seal`) becomes unreadable until the next `app_unlock` re-injects
+    // the vault key.
     store.set_vault_key(None);
     store.lock();
     app_locked.store(true, Ordering::SeqCst);

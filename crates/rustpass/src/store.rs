@@ -523,6 +523,13 @@ impl Store {
         self.config.rekey_identity_to_master().await
     }
 
+    /// Delegate for [`Config::is_identity_under_master`] — the R064 crash-safety
+    /// + m0007 idempotency probe. See [`Config::is_identity_under_master`].
+    #[must_use]
+    pub async fn is_identity_under_master(&self) -> bool {
+        self.config.is_identity_under_master().await
+    }
+
     /// One-time migration: wrap any plaintext config files in the seal
     /// envelope. No-op on desktop (no master key) and for already-wrapped
     /// files. Safe to call on every startup.

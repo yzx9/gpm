@@ -332,13 +332,16 @@ impl Config {
     /// R064 crash-safe ordering: the caller creates the vault alias (so the vault
     /// key is recoverable) BEFORE invoking this, so a mid-rekey crash leaves the
     /// identity readable under the master — the resume check finishes the move.
+    /// The per-file idempotency ([`rekey_seal_pair`]) makes resuming a partial
+    /// master→vault move converge without error.
     ///
     /// # Errors
     ///
-    /// Returns an error if a vault-tier file cannot be read, unsealed by
-    /// `master_seal` (e.g. `SealTampered` if the identity is already under the
-    /// vault), re-sealed by `vault_seal` (`SealKeyUnavailable` if the vault key
-    /// is not loaded), or written.
+    /// Returns an error if a vault-tier file cannot be read, re-sealed by
+    /// `vault_seal` (`SealKeyUnavailable` if the vault key is not loaded), or
+    /// written. A file already under the vault is skipped (idempotent); a file
+    /// under neither seal surfaces its `master_seal` error — see
+    /// [`rekey_seal_pair`].
     pub async fn rekey_identity_to_vault(&self) -> Result<(), Error> {
         self.rekey_seal_pair(&self.master_seal, &self.vault_seal)
             .await
@@ -351,18 +354,37 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns an error if a vault-tier file cannot be read, unsealed by
-    /// `vault_seal`, re-sealed by `master_seal`, or written.
+    /// Returns an error if a vault-tier file cannot be read, re-sealed by
+    /// `master_seal`, or written. A file already under `master_seal` is skipped
+    /// (idempotent); a file under neither seal surfaces its `vault_seal` error —
+    /// see [`rekey_seal_pair`].
     pub async fn rekey_identity_to_master(&self) -> Result<(), Error> {
         self.rekey_seal_pair(&self.vault_seal, &self.master_seal)
             .await
     }
 
+    /// Whether the `identity` file currently unseals under `master_seal` — the
+    /// R064 crash-safety + m0007 idempotency probe. `true` ⇒ identity is still
+    /// under the auth-free master (a half-finished enable/disable, or a
+    /// pre-m0007 upgrader); `false` ⇒ it is under the vault (already migrated),
+    /// the master key is not loaded, or the file is absent/unreadable. Never
+    /// prompts and never errors — callers treat `false` as "not under master."
+    pub async fn is_identity_under_master(&self) -> bool {
+        let Ok(raw) = fs::read(self.identity_path()).await else {
+            return false;
+        };
+        self.master_seal.unseal("identity", &raw).is_ok()
+    }
+
     /// Read each vault-tier file via `from`, re-seal via `to`, write atomically.
     /// A missing file (e.g. `app_id_pass` when the auto-unlock opt-in is off) is
-    /// skipped — nothing to re-seal. Any other read/unseal/seal/write error
-    /// propagates (notably `SealTampered` from `from.unseal` when the file is
-    /// already under `to` — the signal a re-key already completed).
+    /// skipped — nothing to re-seal.
+    ///
+    /// **Idempotent per file (R064 crash-safety):** if `from` cannot unseal a
+    /// file it is retried under `to`; a file that already opens under `to` (a
+    /// prior partial re-key finished it) is skipped, so a half-done master↔vault
+    /// move self-finishes on re-run instead of aborting. A file that opens under
+    /// neither seal surfaces its `from` error.
     async fn rekey_seal_pair(&self, from: &Seal, to: &Seal) -> Result<(), Error> {
         for (path, name) in [
             (self.identity_path(), "identity"),
@@ -373,7 +395,17 @@ impl Config {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => return Err(e.into()),
             };
-            let plain = from.unseal(name, &raw)?;
+            let plain = match from.unseal(name, &raw) {
+                Ok(p) => p,
+                // `from` can't open it — usually already under `to` (a partial
+                // re-key finished this file). Confirm via `to`; if it opens,
+                // skip so the whole call stays re-runnable. Under neither seal
+                // ⇒ surface the original `from` error.
+                Err(from_err) => match to.unseal(name, &raw) {
+                    Ok(_) => continue,
+                    Err(_) => return Err(from_err),
+                },
+            };
             let sealed = to.seal(name, &plain)?;
             save_atomic(&path, &sealed).await?;
         }
@@ -856,6 +888,51 @@ mod tests {
         cfg.rekey_identity_to_master().await.unwrap();
         cfg.set_vault_key(Some(master));
         assert_eq!(cfg.load_identity().await.unwrap(), b"the-identity");
+    }
+
+    /// Regression (R064 review P1): a crash mid-disable leaves `identity` under
+    /// the master but `app_id_pass` under the vault. The `app_unlock` resume
+    /// re-runs `rekey_identity_to_vault` on that mixed state. Pre-fix the call
+    /// errored (`SealTampered` on `app_id_pass`, already under the vault) and
+    /// bricked that unlock attempt; post-fix the idempotent per-file re-key
+    /// skips the already-migrated `app_id_pass` and finishes `identity`,
+    /// converging without error.
+    #[tokio::test]
+    async fn rekey_identity_to_vault_converges_on_partial_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let master = crate::seal::generate_master_key().unwrap();
+        let vault = crate::seal::generate_master_key().unwrap();
+        assert_ne!(master, vault, "test keys must differ");
+
+        let cfg = Config::new(dir.path().to_path_buf(), Some(master));
+        cfg.save_identity(b"the-identity", None).await.unwrap();
+        cfg.save_app_identity_pass(b"the-passphrase").await.unwrap();
+
+        // A completed enable: both vault-tier files under the vault key.
+        cfg.set_vault_key(Some(vault));
+        cfg.rekey_identity_to_vault().await.unwrap();
+
+        // Crash mid-disable: `identity` moved back to master, `app_id_pass`
+        // stranded under the vault. (rekey_identity_to_master moves identity
+        // first; fake the crash by re-planting only identity under master.)
+        let cfg_master = Config::new(dir.path().to_path_buf(), Some(master));
+        cfg_master
+            .save_identity(b"the-identity", None)
+            .await
+            .unwrap();
+
+        // Resume re-runs master→vault. Pre-fix: Err on app_id_pass; post-fix:
+        // identity re-keyed to vault, app_id_pass skipped (already there).
+        cfg.rekey_identity_to_vault()
+            .await
+            .expect("idempotent re-key must converge on a partial state");
+
+        // Both under the vault, readable via the vault key.
+        assert_eq!(cfg.load_identity().await.unwrap(), b"the-identity");
+        assert_eq!(
+            cfg.load_app_identity_pass().await.unwrap(),
+            b"the-passphrase"
+        );
     }
 
     #[test]
