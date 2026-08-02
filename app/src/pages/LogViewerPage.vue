@@ -16,12 +16,11 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
-import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { useDialog, useToast } from "@/composables";
-import { Download, RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
+import { Bug, Download, RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
 import { listen } from "@tauri-apps/api/event";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -29,6 +28,7 @@ const { toast } = useToast();
 const { dialog } = useDialog();
 
 const logText = ref("");
+const logPre = ref<HTMLPreElement | null>(null);
 const loading = ref(false);
 const clearing = ref(false);
 const exporting = ref(false);
@@ -66,6 +66,22 @@ const remainingLabel = computed(() => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 });
 
+/** State badge appended to the verbose toggle button — the countdown while the
+ *  window is live, a marker once it has elapsed, nothing while off. */
+const verboseBadge = computed(() => {
+  if (verboseState.value === "on")
+    return t("log.verboseRemaining", { remaining: remainingLabel.value });
+  if (verboseState.value === "elapsed") return t("log.verboseElapsedBadge");
+  return "";
+});
+/** Caption under the toggle. Only off (onboarding) and elapsed (needs
+ *  explaining) surface one; while on, the badge carries the state. */
+const verboseHint = computed(() => {
+  if (verboseState.value === "off") return t("log.verboseOffHint");
+  if (verboseState.value === "elapsed") return t("log.verboseElapsedHint");
+  return "";
+});
+
 function startCountdown() {
   if (countdownTimer) return;
   countdownTimer = setInterval(() => {
@@ -97,6 +113,16 @@ async function onVerboseReverted() {
 
 let disposed = false;
 let verboseRevertedUnlisten: (() => void) | null = null;
+
+/** Newest entries accumulate at the bottom of the log, so pin the view there
+ *  on load/refresh instead of defaulting to the top (oldest). */
+function scrollToBottom() {
+  const el = logPre.value;
+  if (el) el.scrollTop = el.scrollHeight;
+}
+watch(logText, () => {
+  void nextTick(scrollToBottom);
+});
 
 onMounted(() => {
   void load();
@@ -219,52 +245,61 @@ async function onExport() {
       :back-fallback="{ name: 'settings' }"
       :title="t('log.title')"
       :title-icon="ScrollText"
-    >
-      <template #actions>
-        <BaseButton variant="ghost" :loading="loading" @click="load">
-          <BaseIcon :icon="RefreshCw" :size="16" />
-          {{ t("log.refresh") }}
-        </BaseButton>
-        <BaseButton variant="ghost" :loading="exporting" @click="onExport">
-          <BaseIcon :icon="Download" :size="16" />
-          {{ t("log.export") }}
-        </BaseButton>
-        <BaseButton
-          variant="ghost"
-          :loading="clearing"
-          :disabled="!logText"
-          @click="onClear"
-        >
-          <BaseIcon :icon="Trash2" :size="16" />
-          {{ t("log.clear") }}
-        </BaseButton>
-      </template>
-    </BaseHeader>
+    />
 
     <BaseCard as="section" class="mb-4">
-      <BaseSegmentedControl
-        name="verbose"
-        :legend="t('log.verboseLegend')"
-        :model-value="verboseOn"
-        :options="[
-          { label: t('log.verboseOn'), value: true },
-          { label: t('log.verboseOff'), value: false },
-        ]"
-        :disabled="verboseLoading"
-        @change="onVerboseChange"
-      >
-        <template #hint>
-          <p class="text-xs text-muted mt-1">
-            <template v-if="verboseState === 'on'">{{
-              t("log.verboseOnHint", { remaining: remainingLabel })
-            }}</template>
-            <template v-else-if="verboseState === 'elapsed'">{{
-              t("log.verboseElapsedHint")
-            }}</template>
-            <template v-else>{{ t("log.verboseOffHint") }}</template>
-          </p>
-        </template>
-      </BaseSegmentedControl>
+      <div class="flex flex-col gap-2">
+        <!-- File actions. These lived in the header as three long labeled
+             buttons that overflowed on narrow screens; moved to a full-width
+             toolbar below the title. -->
+        <div class="flex gap-2">
+          <BaseButton
+            class="flex-1"
+            variant="ghost"
+            :loading="loading"
+            @click="load"
+          >
+            <BaseIcon :icon="RefreshCw" :size="16" />
+            {{ t("log.refresh") }}
+          </BaseButton>
+          <BaseButton
+            class="flex-1"
+            variant="ghost"
+            :loading="exporting"
+            @click="onExport"
+          >
+            <BaseIcon :icon="Download" :size="16" />
+            {{ t("common.button.export") }}
+          </BaseButton>
+          <BaseButton
+            class="flex-1"
+            variant="ghost"
+            :loading="clearing"
+            :disabled="!logText"
+            @click="onClear"
+          >
+            <BaseIcon :icon="Trash2" :size="16" />
+            {{ t("common.button.clear") }}
+          </BaseButton>
+        </div>
+
+        <!-- Verbose (Debug) toggle. Binary and already state-visible, so a single
+             switch button rather than an On/Off option picker — tap flips it, the
+             label carries the live countdown, and the caption only surfaces for
+             off (onboarding) and elapsed (needs explaining). -->
+        <BaseButton
+          block
+          :variant="verboseOn ? 'primary' : 'secondary'"
+          :loading="verboseLoading"
+          :aria-pressed="verboseOn"
+          @click="onVerboseChange(!verboseOn)"
+        >
+          <BaseIcon :icon="Bug" :size="16" />
+          {{ t("log.verboseLegend")
+          }}<span v-if="verboseBadge"> · {{ verboseBadge }}</span>
+        </BaseButton>
+        <p v-if="verboseHint" class="text-xs text-muted">{{ verboseHint }}</p>
+      </div>
     </BaseCard>
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">{{
@@ -277,7 +312,9 @@ async function onExport() {
     >
       <BaseSpinner />
     </div>
-    <pre v-else-if="logText" class="log-display">{{ logText }}</pre>
+    <pre v-else-if="logText" ref="logPre" class="log-display">{{
+      logText
+    }}</pre>
     <p v-else class="text-muted text-sm">{{ t("log.empty") }}</p>
   </main>
 </template>

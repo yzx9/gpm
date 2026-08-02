@@ -36,6 +36,16 @@ describe("LogViewerPage", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
+  /** The verbose toggle button — labeled with the verbose legend (plus its state
+   *  badge once active), so it's found by that label regardless of on/off. */
+  function verboseButton(wrapper: ReturnType<typeof mountWithApp>["wrapper"]) {
+    const btn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Verbose logging"));
+    if (!btn) throw new Error("verbose toggle button not found");
+    return btn;
+  }
+
   it("loads the log text on mount", async () => {
     const { wrapper } = mountWithApp(LogViewerPage);
     await flushPromises();
@@ -47,17 +57,18 @@ describe("LogViewerPage", () => {
     expect(pre.text()).toContain("line two");
   });
 
-  it("renders a verbose On/Off toggle, Off by default", async () => {
+  it("renders a verbose toggle button, Off by default", async () => {
     const { wrapper } = mountWithApp(LogViewerPage);
     await flushPromises();
 
+    // Verbose is now a single toggle button, not an On/Off option picker — the
+    // state is already visible, so the two-option segmented control is gone.
     expect(
       wrapper.findComponent({ name: "BaseSegmentedControl" }).exists(),
-    ).toBe(true);
-    const radios = wrapper.findAll('input[name="verbose"]');
-    expect(radios).toHaveLength(2);
-    // No verbose_until ⇒ the Off option (second) is checked.
-    expect((radios[1].element as HTMLInputElement).checked).toBe(true);
+    ).toBe(false);
+    const btn = verboseButton(wrapper);
+    // No verbose_until ⇒ off (aria-pressed conveys the state).
+    expect(btn.attributes("aria-pressed")).toBe("false");
   });
 
   it("turning verbose on calls set_verbose and notifies", async () => {
@@ -73,8 +84,7 @@ describe("LogViewerPage", () => {
     const infoSpy = vi.spyOn(toast.toast, "info");
     await flushPromises();
 
-    const radios = wrapper.findAll('input[name="verbose"]');
-    await radios[0].trigger("change"); // On
+    await verboseButton(wrapper).trigger("click"); // Off → On
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith(
@@ -102,8 +112,7 @@ describe("LogViewerPage", () => {
     const infoSpy = vi.spyOn(toast.toast, "info");
     await flushPromises();
 
-    const radios = wrapper.findAll('input[name="verbose"]');
-    await radios[1].trigger("change"); // Off
+    await verboseButton(wrapper).trigger("click"); // On → Off
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith(
@@ -120,15 +129,17 @@ describe("LogViewerPage", () => {
     expect(wrapper.text()).toContain("Turn on to capture everything");
   });
 
-  it("renders the on hint with a countdown while verbose is active", async () => {
+  it("shows the live countdown in the toggle while verbose is active", async () => {
     routeInvoke({
       read_log: "",
       get_app_config: { verbose_until: Math.floor(Date.now() / 1000) + 595 },
     });
     const { wrapper } = mountWithApp(LogViewerPage);
     await flushPromises();
-    expect(wrapper.text()).toContain("Debug logging is on");
-    expect(wrapper.text()).toMatch(/\d{1,2}:\d\d/); // a m:ss countdown renders
+    const btn = verboseButton(wrapper);
+    expect(btn.attributes("aria-pressed")).toBe("true");
+    // The remaining window renders inline in the toggle label.
+    expect(btn.text()).toMatch(/\d{1,2}:\d\d/);
     wrapper.unmount(); // stop the live countdown started on load
   });
 
@@ -152,8 +163,8 @@ describe("LogViewerPage", () => {
     const { wrapper } = mountWithApp(LogViewerPage);
     await flushPromises();
 
-    const radios = wrapper.findAll('input[name="verbose"]');
-    expect((radios[0].element as HTMLInputElement).checked).toBe(true);
+    // An expired deadline still reads as On (deadline set) until next launch.
+    expect(verboseButton(wrapper).attributes("aria-pressed")).toBe("true");
   });
 
   it("shows the empty state when the log is empty", async () => {
@@ -170,7 +181,7 @@ describe("LogViewerPage", () => {
 
     const clearBtn = wrapper
       .findAll("button")
-      .find((b) => b.text().includes("Clear log"));
+      .find((b) => b.text().includes("Clear"));
     expect(clearBtn).toBeTruthy();
     await clearBtn!.trigger("click");
     await flushPromises();
@@ -187,7 +198,7 @@ describe("LogViewerPage", () => {
 
     const clearBtn = wrapper
       .findAll("button")
-      .find((b) => b.text().includes("Clear log"));
+      .find((b) => b.text().includes("Clear"));
     await clearBtn!.trigger("click");
     await flushPromises();
 
