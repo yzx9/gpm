@@ -28,7 +28,7 @@ use crate::template;
 use super::worktree::{
     assert_within_repo, ensure_within_repo, list_entries, resolve_entry_path, write_atomic,
 };
-use super::{commit, divergence, pull};
+use super::{commit, divergence, history, pull};
 
 /// The git storage backend (stateless — `repo_path` passed per call).
 #[derive(Debug, Default, Clone, Copy)]
@@ -344,6 +344,20 @@ impl StorageBackend for GitStorage {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
         spawn_blocking(move || pull::verify_remote_auth(&repo_path, &auth)).await?
+    }
+
+    async fn blob_at_revision(
+        &self,
+        repo_path: &Path,
+        passfile: &str,
+        commit_oid: &str,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        ensure_within_repo(passfile)?;
+        let repo_path = repo_path.to_path_buf();
+        let passfile = passfile.to_string();
+        let commit_oid = commit_oid.to_string();
+        spawn_blocking(move || history::blob_at_commit_at(&repo_path, &commit_oid, &passfile))
+            .await?
     }
 }
 

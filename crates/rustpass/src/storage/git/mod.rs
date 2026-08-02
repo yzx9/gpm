@@ -14,6 +14,8 @@
 //! - [`commit`] — clone/init/remote_add/commit/push (the write surface).
 //! - [`pull`] — sync read-in, authenticity-verified checkout, `adopt_remote`.
 //! - [`divergence`] — divergence preview + keep-mine resolution.
+//! - [`history`] — per-revision content reads (`blob_at_commit`) for secret
+//!   revision history (R027); shared with `divergence`'s keep-mine replay.
 //! - [`util`] — shared git helpers (`short_hash`, `gpm_signature`, …).
 //!
 //! `GitStorage` is stateless — auth/policy are passed per-op, not held at
@@ -23,6 +25,7 @@
 mod backend;
 mod commit;
 mod divergence;
+mod history;
 mod pull;
 #[cfg(test)]
 mod test_support;

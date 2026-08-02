@@ -7,6 +7,8 @@
   "showingLabel": "Showing...",
   "editAria": "Edit {name}",
   "editLabel": "✎ Edit",
+  "revisionsAria": "Revision history for {name}",
+  "revisionsLabel": "⌚ Revisions",
   "deleteAria": "Delete {name}",
   "deleteLabel": "Delete",
   "deleting": "Deleting…",

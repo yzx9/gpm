@@ -13,6 +13,7 @@ import enHistory from "@/locales/en/history.json";
 import enLog from "@/locales/en/log.json";
 import enPat from "@/locales/en/pat.json";
 import enPermissions from "@/locales/en/permissions.json";
+import enRevisions from "@/locales/en/revisions.json";
 import enSecurity from "@/locales/en/security.json";
 import enSettings from "@/locales/en/settings.json";
 import enSetup from "@/locales/en/setup.json";
@@ -39,6 +40,7 @@ const TEST_MESSAGES = {
     log: enLog,
     pat: enPat,
     permissions: enPermissions,
+    revisions: enRevisions,
     security: enSecurity,
     settings: enSettings,
     setup: enSetup,

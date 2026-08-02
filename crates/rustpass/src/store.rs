@@ -63,6 +63,21 @@ pub use crate::storage::{
 // (`store::list_entries`, `store::resolve_entry_path`) keep compiling unchanged.
 pub use crate::storage::git::{list_entries, resolve_entry_path};
 
+/// The outcome of reading one past revision of a secret (R027). Ciphertext
+/// never leaves [`Store::get_at_revision`]: a revision the current identity
+/// can't decrypt is reported as [`RevisionContent::Undecryptable`], not
+/// surfaced.
+#[derive(Debug)]
+pub enum RevisionContent {
+    /// Decrypted past value.
+    Decrypted(Secret),
+    /// The revision's ciphertext can't be decrypted with the current identity
+    /// (recipient-set rotation, an identity change, or a teammate's revision).
+    Undecryptable,
+    /// The commit deleted the entry — no blob at that commit.
+    Deleted,
+}
+
 /// Password store — aligned with `gopass.Store` interface.
 ///
 /// Provides read-only operations on a gopass-compatible password store:
@@ -2505,6 +2520,78 @@ impl Store {
             signing::commit_sig_info_at(&repo_path, &hash_owned, &trusted, &ignored)
         })
         .await?
+    }
+
+    /// One page of revisions for `name` — the commits (newest first) that
+    /// touched it, each with verification status. The per-secret history view
+    /// (R027). `base_oid` anchors pagination: page 0 passes `None` (captures
+    /// HEAD); later pages pass the prior page's `base_oid` so a background
+    /// fast-forward can't drift the window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo cannot be opened or HEAD cannot be read.
+    pub async fn list_revisions(
+        &self,
+        name: &str,
+        offset: usize,
+        limit: usize,
+        base_oid: Option<&str>,
+    ) -> Result<signing::RevisionPage, Error> {
+        let repo_path = self.repo_path().await?;
+        let rc = self.config.load_repo_config().await?;
+        let trusted = signing::TrustSet::from_config(&rc.authenticity);
+        let ignored = rc.authenticity.ignored.clone();
+        let passfile = passfile_rel(name, self.secret_ext()?);
+        let base_owned = base_oid.map(str::to_string);
+        spawn_blocking(move || {
+            signing::list_path_signatures_at(
+                &repo_path,
+                &passfile,
+                offset,
+                limit,
+                base_owned.as_deref(),
+                &trusted,
+                &ignored,
+            )
+        })
+        .await?
+    }
+
+    /// Read one past revision of `name` at `commit_oid` (a full oid from a
+    /// revision listing) and decrypt it with the current identity (R027). The
+    /// outcome distinguishes a decryptable past value from a revision the current
+    /// identity can't decrypt (recipient rotation / a teammate's revision) and
+    /// from a revision that deleted the entry. Ciphertext never leaves this call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo can't be opened, the entry path is invalid,
+    /// or the identity is encrypted but not unlocked (so the caller can prompt);
+    /// a decrypt failure is `Ok(RevisionContent::Undecryptable)`, not an error.
+    pub async fn get_at_revision(
+        &self,
+        name: &str,
+        commit_oid: &str,
+    ) -> Result<RevisionContent, Error> {
+        let repo_config = self.config.load_repo_config().await?;
+        let repo_path = Path::new(&repo_config.local_path);
+        let passfile = passfile_rel(name, self.secret_ext()?);
+
+        let encrypted = self
+            .storage()?
+            .blob_at_revision(repo_path, &passfile, commit_oid)
+            .await?;
+        let Some(encrypted) = encrypted else {
+            return Ok(RevisionContent::Deleted);
+        };
+
+        let identity_bytes = self.get_identity_bytes().await?;
+        let crypto = self.crypto()?;
+        let Ok(decrypted) = crypto.decrypt(&encrypted, &identity_bytes).await else {
+            return Ok(RevisionContent::Undecryptable);
+        };
+        Ok(RevisionContent::Decrypted(Secret::parse(&decrypted)?))
     }
 
     /// Reset all configuration and local data. Clears the identity cache.

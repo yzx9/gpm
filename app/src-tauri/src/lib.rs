@@ -44,6 +44,7 @@ mod logging;
 mod migrations;
 mod page;
 mod read;
+mod revisions;
 mod setup;
 mod verbose;
 mod write;
@@ -521,6 +522,10 @@ pub fn run() {
             clipboard::are_clipboard_notifications_enabled,
             clipboard::request_clipboard_notifications_permission,
             clipboard::open_clipboard_notification_settings,
+            // revisions
+            revisions::list_revisions,
+            revisions::show_revision,
+            revisions::copy_revision,
             // generator
             generator::generate_password,
             generator::generate_password_batch,

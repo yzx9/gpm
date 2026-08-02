@@ -104,6 +104,12 @@ const routes = [
     props: true,
   },
   {
+    path: "/revisions/:pathMatch(.*)",
+    name: "revisions",
+    component: () => import("./pages/RevisionsPage.vue"),
+    props: true,
+  },
+  {
     path: "/edit/:pathMatch(.*)",
     name: "entryEdit",
     component: () => import("./pages/EntryEditPage.vue"),

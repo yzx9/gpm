@@ -35,6 +35,7 @@ use std::path::Path;
 
 use git2::Repository;
 
+use super::history::blob_at_commit;
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
 use crate::storage::{
@@ -201,16 +202,6 @@ fn age_diff_side(
         }
     }
     Ok(AgeDiff { changed, deleted })
-}
-
-/// Read the blob content of `rel_path` at `commit_oid`, or `None` if the path
-/// is absent from that commit's tree.
-fn blob_at_commit(repo: &Repository, commit_oid: git2::Oid, rel_path: &str) -> Option<Vec<u8>> {
-    let commit = repo.find_commit(commit_oid).ok()?;
-    let tree = commit.tree().ok()?;
-    let entry = tree.get_path(Path::new(rel_path)).ok()?;
-    let blob = repo.find_blob(entry.id()).ok()?;
-    Some(blob.content().to_vec())
 }
 
 /// Whether `path` is an `.age` secret (case-insensitive suffix).

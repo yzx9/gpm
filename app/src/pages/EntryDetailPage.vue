@@ -347,6 +347,10 @@ function editEntry() {
   router.push({ name: "entryEdit", params: { pathMatch } });
 }
 
+function openRevisions() {
+  router.push({ name: "revisions", params: { pathMatch } });
+}
+
 // Shared by the header Back button and the Escape-key goBack() so the two
 // can't drift to different destinations.
 const BACK_FALLBACK: RouteLocationRaw = { name: "entries" };
@@ -461,6 +465,18 @@ function handleKeydown(e: KeyboardEvent) {
     <p v-if="editDisabled" class="text-center text-xs text-muted mb-3">
       {{ t("entry.attachmentEditDisabledHint") }}
     </p>
+
+    <BaseButton
+      v-if="!isAttachment"
+      variant="outline"
+      block
+      class="mb-3"
+      :disabled="loading || deleting"
+      :aria-label="t('entry.revisionsAria', { name: entryName })"
+      @click="openRevisions"
+    >
+      {{ t("entry.revisionsLabel") }}
+    </BaseButton>
 
     <div class="flex gap-3 mb-6">
       <BaseButton

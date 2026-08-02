@@ -25,6 +25,7 @@ export * from "./config";
 export * from "./identity";
 export * from "./log";
 export * from "./repo";
+export * from "./revisions";
 export * from "./secrets";
 export * from "./setup";
 export * from "./system";

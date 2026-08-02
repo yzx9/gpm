@@ -27,17 +27,17 @@ use crate::page::clamp_limit;
 /// Returned by `copy_password` — no secret data, safe for IPC.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CopyResult {
-    success: bool,
-    entry_name: String,
-    cleared_after_secs: u32,
+    pub(crate) success: bool,
+    pub(crate) entry_name: String,
+    pub(crate) cleared_after_secs: u32,
     /// A free byproduct of this decrypt: whether the entry's body carries a
     /// TOTP seed, so the UI can show/hide the 2FA affordance without a second
     /// read. No secret data.
-    has_totp: bool,
+    pub(crate) has_totp: bool,
     /// A free byproduct of this decrypt: whether the entry's body is a binary
     /// attachment, so the UI can switch to the Export affordance without a
     /// second read. No secret data.
-    has_attachment: bool,
+    pub(crate) has_attachment: bool,
 }
 
 /// Returned by `copy_totp`. Like [`CopyResult`] but distinguishes "copied a

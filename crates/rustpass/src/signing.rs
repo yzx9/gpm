@@ -30,7 +30,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
-use git2::{Oid, Repository};
+use git2::{DiffOptions, Oid, Repository};
 use serde::{Deserialize, Serialize};
 use ssh_key::{HashAlg, PublicKey, SshSig};
 
@@ -672,6 +672,141 @@ pub fn list_commit_signatures(
     Ok(CommitSigPage { commits, has_more })
 }
 
+/// Upper bound on commits examined per revision page. A pathspec walk is
+/// O(commits-traversed-to-find-matches), so a rarely-changed secret in a deep
+/// repo could otherwise walk the whole history per page; this caps the
+/// worst-case per-page cost. Password-store scale never approaches it.
+const MAX_PATH_SCAN: usize = 5_000;
+
+/// One page of revisions for a single secret (R027): the commits (newest first)
+/// whose tree-to-parent diff touched the secret's `passfile`, each annotated
+/// with verification status. The per-secret counterpart to [`CommitSigPage`]
+/// (which is repo-wide).
+///
+/// `base_oid` anchors pagination: page 0 captures HEAD and returns it here; the
+/// caller passes it back on subsequent pages so a background fast-forward
+/// between page turns can't drift the window (the [`CommitSigPage`] pagination
+/// invariant, now reachable under R061 background sync). `offset` counts
+/// *matching* commits, not raw commits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevisionPage {
+    /// The page's revisions (up to `limit`, starting at the `offset`-th match).
+    pub commits: Vec<CommitSigInfo>,
+    /// `true` when more matching revisions may remain. The per-page scan cap
+    /// bounds the worst case: halting mid-page with matches found means more
+    /// may exist beyond it (`true`); halting with nothing matched this page
+    /// means there is no point paging further (`false`).
+    pub has_more: bool,
+    /// The full HEAD oid this page walked from — pass back on the next page.
+    pub base_oid: String,
+}
+
+/// Whether `passfile` changed between `oid`'s tree and its first parent's (or
+/// against the empty tree for a root commit). A pathspec-limited diff, so each
+/// probe is O(1). libgit2 has no `git log -- <path>`; this is its equivalent.
+fn path_touched(repo: &Repository, oid: Oid, passfile: &str) -> Result<bool, Error> {
+    let commit = repo.find_commit(oid)?;
+    let tree = commit.tree()?;
+    let parent_tree = match commit.parent(0) {
+        Ok(parent) => Some(parent.tree()?),
+        Err(_) => None, // root commit (no parent) — diff against the empty tree
+    };
+    let mut opts = DiffOptions::new();
+    opts.pathspec(passfile);
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+    Ok(diff.deltas().count() > 0)
+}
+
+/// One page of revisions for `passfile` (newest first), each annotated with
+/// verification status. Walks the full DAG from `base_oid` (or HEAD) — NOT
+/// first-parent, so side-branch changes in a repo with merge commits aren't
+/// silently dropped. Path-bound (no rename-following): matches the literal
+/// `passfile` path only, matching gopass's `git log -- <path>`.
+///
+/// `offset` counts *matching* commits (not raw commits). `MAX_PATH_SCAN` bounds
+/// the per-page traversal.
+///
+/// # Errors
+///
+/// Returns an error if `base_oid`/HEAD cannot be resolved or the walk fails.
+pub fn list_path_signatures(
+    repo: &Repository,
+    passfile: &str,
+    offset: usize,
+    limit: usize,
+    base_oid: Option<Oid>,
+    trust: &TrustSet,
+    ignored: &[IgnoredIssue],
+) -> Result<RevisionPage, Error> {
+    list_path_signatures_inner(
+        repo,
+        passfile,
+        offset,
+        limit,
+        base_oid,
+        trust,
+        ignored,
+        MAX_PATH_SCAN,
+    )
+}
+
+/// The walk, parameterized over the per-page scan cap so the cap branch is
+/// unit-testable without a 5 000-commit fixture. [`list_path_signatures`] calls
+/// this with [`MAX_PATH_SCAN`].
+#[allow(clippy::too_many_arguments)] // test seam: scan_cap over the public 7-arg signature
+fn list_path_signatures_inner(
+    repo: &Repository,
+    passfile: &str,
+    offset: usize,
+    limit: usize,
+    base_oid: Option<Oid>,
+    trust: &TrustSet,
+    ignored: &[IgnoredIssue],
+    scan_cap: usize,
+) -> Result<RevisionPage, Error> {
+    let start = match base_oid {
+        Some(oid) => oid,
+        None => repo.head()?.peel_to_commit()?.id(),
+    };
+    let mut walk = repo.revwalk()?;
+    walk.push(start)?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL)?;
+
+    let mut commits = Vec::new();
+    let mut has_more = false;
+    let mut matches_seen = 0usize;
+    let mut examined = 0usize;
+    for oid in walk {
+        examined += 1;
+        if examined > scan_cap {
+            // Bounded traversal. If nothing matched on this page, stop —
+            // claiming `has_more` would make the frontend re-request the same
+            // empty window (a stall, and a 5 000-commit re-walk on each click).
+            // Matches found here mean more may exist beyond the cap.
+            has_more = !commits.is_empty();
+            break;
+        }
+        let oid = oid?;
+        if !path_touched(repo, oid, passfile)? {
+            continue;
+        }
+        if matches_seen < offset {
+            matches_seen += 1;
+            continue;
+        }
+        if commits.len() >= limit {
+            has_more = true;
+            break;
+        }
+        commits.push(commit_sig_info(repo, oid, trust, ignored)?);
+    }
+    Ok(RevisionPage {
+        commits,
+        has_more,
+        base_oid: start.to_string(),
+    })
+}
+
 /// Convenience: status of the current HEAD commit.
 ///
 /// Returns [`CommitSigStatus::Unsigned`] if HEAD has no signature.
@@ -815,6 +950,32 @@ pub fn verify_range_at(
     let from = Oid::from_str(from)?;
     let to = Oid::from_str(to)?;
     verify_range(&repo, from, to, trust, ignored)
+}
+
+/// Discover the repo at `repo_path` and return one page of revisions for
+/// `passfile` — the commits that touched it, newest first — each with per-commit
+/// verification status. `base_oid` anchors pagination (page 0 passes `None` and
+/// captures HEAD; later pages pass the prior page's returned `base_oid`); a
+/// stale `base_oid` whose object is absent (post-`reset` / re-clone) silently
+/// falls back to HEAD.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be discovered or HEAD cannot be read.
+pub fn list_path_signatures_at(
+    repo_path: &Path,
+    passfile: &str,
+    offset: usize,
+    limit: usize,
+    base_oid: Option<&str>,
+    trust: &TrustSet,
+    ignored: &[IgnoredIssue],
+) -> Result<RevisionPage, Error> {
+    let repo = Repository::discover(repo_path)?;
+    let base = base_oid
+        .and_then(|s| Oid::from_str(s).ok())
+        .filter(|&oid| repo.find_commit(oid).is_ok());
+    list_path_signatures(&repo, passfile, offset, limit, base, trust, ignored)
 }
 
 /// Discover the repo at `repo_path` and return one page of the most recent
@@ -1092,6 +1253,107 @@ mod tests {
     /// functions take since GPG support landed.
     fn fps(keys: &[TrustedKey]) -> TrustSet {
         TrustSet::ssh_only(keys.iter().map(|k| k.fingerprint.clone()).collect())
+    }
+
+    /// Create a child commit of `parent` that adds/updates `path` with `content`
+    /// (writes through the working tree + index, so the tree-to-parent diff has
+    /// a delta at `path`). The counterpart to [`create_child_commit`] (which
+    /// reuses the parent tree — no delta).
+    fn commit_touching(
+        repo: &Repository,
+        sig: &git2::Signature<'_>,
+        parent: Oid,
+        path: &str,
+        content: &[u8],
+        msg: &str,
+    ) -> Oid {
+        let workdir = repo.workdir().expect("repo has a workdir");
+        std::fs::write(workdir.join(path), content).expect("write file");
+        let mut index = repo.index().expect("index");
+        index.add_path(Path::new(path)).expect("add path");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("tree");
+        let parent_commit = repo.find_commit(parent).expect("parent commit");
+        repo.commit(Some("HEAD"), sig, sig, msg, &tree, &[&parent_commit])
+            .expect("commit")
+    }
+
+    // ── path-bound revision walk (R027) ──────────────────────────────────
+
+    /// The per-page scan cap, hit with NO path matches on this page, must report
+    /// `has_more = false` — the regression guard for the empty-page pagination
+    /// stall (claiming `has_more` would make the frontend re-request the same
+    /// window, re-walking up to the cap each time).
+    #[test]
+    fn scan_cap_with_no_matches_is_terminal() {
+        let (_dir, repo, head) = repo_with_initial_commit();
+        let sig = test_signature();
+        // Four empty-tree children — none touch foo.age.
+        let mut parent = head;
+        for i in 0..4 {
+            parent = create_child_commit(&repo, &sig, parent, &format!("empty {i}"));
+        }
+        let trust = fps(&[]);
+        let page = list_path_signatures_inner(
+            &repo,
+            "foo.age",
+            0,
+            50,
+            None,
+            &trust,
+            &[],
+            /* scan_cap */ 3,
+        )
+        .expect("walk");
+        assert!(page.commits.is_empty(), "no commit touches foo.age");
+        assert!(
+            !page.has_more,
+            "cap + no matches must be terminal, not has_more"
+        );
+    }
+
+    /// The cap, hit WITH matches on this page, reports `has_more = true` (more
+    /// may exist beyond the cap) and returns the matches found before it.
+    #[test]
+    fn scan_cap_with_matches_may_have_more() {
+        let (_dir, repo, head) = repo_with_initial_commit();
+        let sig = test_signature();
+        // Five commits, each updating foo.age to a distinct value → every commit
+        // touches it (a same-content rewrite would show no delta).
+        let mut parent = head;
+        for i in 0..5 {
+            parent = commit_touching(
+                &repo,
+                &sig,
+                parent,
+                "foo.age",
+                format!("v{i}").as_bytes(),
+                &format!("v{i}"),
+            );
+        }
+        let trust = fps(&[]);
+        let page = list_path_signatures_inner(
+            &repo,
+            "foo.age",
+            0,
+            50,
+            None,
+            &trust,
+            &[],
+            /* scan_cap */ 3,
+        )
+        .expect("walk");
+        // The cap (3) halts after 3 examined commits, each of which matched.
+        assert_eq!(
+            page.commits.len(),
+            3,
+            "collected one match per examined commit up to the cap"
+        );
+        assert!(
+            page.has_more,
+            "matches found before the cap ⇒ more may exist beyond it"
+        );
     }
 
     // ── status model unit tests ───────────────────────────────────────────

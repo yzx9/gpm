@@ -7,6 +7,8 @@
   "showingLabel": "显示中……",
   "editAria": "编辑 {name}",
   "editLabel": "✎ 编辑",
+  "revisionsAria": "{name} 的修订历史",
+  "revisionsLabel": "⌚ 修订历史",
   "deleteAria": "删除 {name}",
   "deleteLabel": "删除",
   "deleting": "删除中……",

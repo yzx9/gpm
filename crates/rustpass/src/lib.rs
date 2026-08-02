@@ -90,13 +90,13 @@ pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use repo_lock::RepoLock;
 pub use secret::Secret;
 pub use signing::{
-    AuthenticityConfig, CommitSigInfo, CommitSigPage, CommitSigStatus, IgnoredIssue, TrustedGpgKey,
-    TrustedKey, VerifyMode, fingerprint_of_public_key,
+    AuthenticityConfig, CommitSigInfo, CommitSigPage, CommitSigStatus, IgnoredIssue, RevisionPage,
+    TrustedGpgKey, TrustedKey, VerifyMode, fingerprint_of_public_key,
 };
 pub use storage::{CancelSlot, CancelToken, GitProgress, ProgressSender, StoreBuilder};
 pub use store::{
-    CommitIdentity, DivergenceChoice, RankedPage, Store, SyncDivergence, SyncOutcome, SyncResult,
-    WriteOutcome, WriteResult, clamp_lock_mode, normalize_clear_secs,
+    CommitIdentity, DivergenceChoice, RankedPage, RevisionContent, Store, SyncDivergence,
+    SyncOutcome, SyncResult, WriteOutcome, WriteResult, clamp_lock_mode, normalize_clear_secs,
 };
 pub use totp::{Otp, extract, generate_at};
 

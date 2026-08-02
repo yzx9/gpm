@@ -490,6 +490,22 @@ pub trait StorageBackend: Send + Sync {
             "Connection testing is not supported by this storage backend.",
         ))
     }
+
+    /// Read the ciphertext blob of `passfile` at `commit_oid` (a full oid from a
+    /// revision listing), or `None` if the path is absent at that commit (the
+    /// revision deleted the entry). Per-secret revision view (R027).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::EntryNotFound`] if `passfile` escapes the repo;
+    /// [`ErrorCode::NoRepo`] if the repo can't be opened; otherwise a git error
+    /// (including an unparseable `commit_oid`).
+    async fn blob_at_revision(
+        &self,
+        repo_path: &Path,
+        passfile: &str,
+        commit_oid: &str,
+    ) -> Result<Option<Vec<u8>>, Error>;
 }
 
 /// Read-only view of repo working-tree files, bound to a specific `repo_path`.

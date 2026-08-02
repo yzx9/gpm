@@ -47,6 +47,10 @@ Once a store can hold entries encrypted to a recipient set that does **not** inc
 
 When multi-identity lands, add a gate: refuse to overwrite a remote entry whose current ciphertext we can't decrypt, unless the user explicitly confirms (a `keep_mine_force`-class choice). This is a team-store safety item, irrelevant for the single-user MVP; recorded here so it is not silently dropped. (Deferred from the decouple-sync work — the orchestrator that would surface this ships without the gate.)
 
+### Revision decryption uses current identities only (no historical recipients)
+
+Viewing a past secret revision (the shipped secret-revisions feature, formerly R027) decrypts with the current identity/identities only — it does **not** reconstruct the recipient set the revision was encrypted to at the time (no "historical recipient" notion). A revision encrypted to a recipient none of the current identities covers — key rotation, a departed teammate's revision in a shared store — remains **undecryptable** and is reported as a state rather than surfaced as ciphertext. Multi-identity broadens "current identity" to "any current identity" but does not change this: the recipient set at revision time is not modeled, and a past revision readable only to a long-removed identity stays unreadable. (From R027 decision 2.)
+
 ## Effort
 
 ~1-2 days (human) / ~45 min (CC)

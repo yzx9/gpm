@@ -7,7 +7,7 @@ scope: git
 
 # 005 — Git Storage & Sync
 
-> Status: Partial · Last verified: 2026-07-28
+> Status: Partial · Last verified: 2026-08-02
 > Core shipped; several forward-looking reliability items not yet done.
 
 ## 1. Introduction
@@ -87,7 +87,8 @@ See <./security.md>.
 ## 6. Roadmap
 
 - **Shipped:** repo setup, auto-sync + conflict, manual sync, SSH/HTTPS, signature
-  verification (SSH+GPG), trusted keys, global history pagination, recipients root
-  index.
+  verification (SSH+GPG), trusted keys, global history pagination, per-entry
+  revision history (list + view + copy, path-bound, graceful undecryptable),
+  recipients root index.
 - **Next / Future:** stale-read protection, cancellable push, background sync,
-  per-entry history revision, repo reconfiguration, provenance tracking.
+  repo reconfiguration, provenance tracking.

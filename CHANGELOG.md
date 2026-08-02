@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- You can now **browse a secret's past versions** and view or copy an old value. Open any secret and tap **Revisions** to see every change recorded for it, newest first, each with its signature status. Tap a version to reveal it — an old value is always marked as a past version (date and commit) so it can't be mistaken for the current one, and it auto-clears like any revealed password. A version encrypted for an identity you no longer have shows as "can't decrypt" instead of failing, and one that deleted the secret is called out. This is the recovery and audit counterpart to gopass's `history` / `show --revision`.
+
 ## [v0.16.1] - 2026-08-04
 
 ### Changed
