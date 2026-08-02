@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { ClipboardNotifyText } from "@/i18n/native";
 import type { AuthenticityResult } from "./common";
-import type { SyncDivergence } from "./repo";
+import type { PullResult, SyncDivergence } from "./repo";
 
 /**
  * Secret read/create/edit IPC — folds together the backend `read`, `clipboard`,
@@ -75,6 +75,10 @@ export interface SensitiveContent {
   attachment: AttachmentMeta | null;
   /** When set, the entry can't be safely text-edited; the UI disables Edit. */
   edit_blocked: EditBlockReason | null;
+  /** The blob oid (base version) captured atomically with this decrypt — the
+   *  R026 base-version the edit screen sends back as `baseOid` to guard a save
+   *  against a stale snapshot. Non-secret; `null` only when not captured. */
+  version: string | null;
 }
 
 /** One-shot entry probe: one decrypt returns both the 2FA-presence signal and
@@ -131,16 +135,38 @@ export interface WriteResult {
   commit: string;
 }
 
+/** Whether a base-version-aware write is an edit or a delete (serde snake_case). */
+export type EntryConflictOp = "edit" | "delete";
+
+/** How to resolve an `entry_conflict` outcome (serde snake_case). "cancel" is
+ *  client-side (the frontend dismisses the modal), so it is absent here. */
+export type EntryConflictChoice = "keep_mine" | "keep_theirs";
+
 /** Outcome of a create/edit/delete (serde tagged by `kind`, snake_case). A
  *  normal save is `written`; `needs_divergence_resolve` means the push was
  *  rejected (a race with a newer remote) and the carried {@link SyncDivergence}
  *  lets the UI show the resolve modal without a second round-trip;
- *  `authenticity_blocked` means the pre-write pull was refused under Enforce. */
+ *  `authenticity_blocked` means the pre-write pull was refused under Enforce;
+ *  `entry_conflict` means a base-version-aware edit/delete/create collided with a
+ *  newer remote (R026) — edit/delete when a teammate changed it, create when a
+ *  teammate took the name first — and surfaces the per-entry resolve modal;
+ *  `no_change` means a delete found the entry already removed (delete-only) and
+ *  toasts "already removed". */
 export type WriteOutcome =
   | ({ kind: "written" } & WriteResult)
   | ({ kind: "needs_divergence_resolve" } & SyncDivergence)
   | ({ kind: "authenticity_blocked" } & AuthenticityResult)
-  | { kind: "cancelled"; committed: boolean };
+  | { kind: "cancelled"; committed: boolean }
+  | {
+      kind: "entry_conflict";
+      name: string;
+      base_oid: string;
+      current_oid: string | null;
+      remote_tip: string;
+      /** "edit" | "delete" | "create" — named `op` because the serde tag is already `kind`. */
+      op: EntryConflictOp;
+    }
+  | { kind: "no_change"; head: string };
 
 /** List one page of entries (no query). */
 export async function listEntries(
@@ -205,6 +231,13 @@ export async function showPassword(
   return invoke<SensitiveContent>("show_password", { entryPath });
 }
 
+/** Blob oid (base version) of `entry` at HEAD, or `null` if absent — the R026
+ *  base-version capture for a base-version-aware delete (fetched on the detail
+ *  page mount so a delete-without-reveal is still protected). Non-secret. */
+export async function entryOid(entryPath: string): Promise<string | null> {
+  return invoke<string | null>("entry_oid", { entryPath });
+}
+
 /** Copy an already-generated password string; clipboard auto-clears after 30s. */
 export async function copyGeneratedPassword(
   text: string,
@@ -265,7 +298,9 @@ export async function createFromPresetSecret(
   });
 }
 
-/** Create a custom secret; returns the write outcome. */
+/** Create a custom secret; returns the write outcome. `entry_conflict` (R026) is
+ *  returned when a teammate already created the same name — the per-entry resolve
+ *  modal lets the user overwrite or keep theirs. */
 export async function createSecret(
   name: string,
   content: string,
@@ -273,16 +308,51 @@ export async function createSecret(
   return invoke<WriteOutcome>("create_secret", { name, content });
 }
 
-/** Edit an existing secret; returns the write outcome. */
+/** Edit an existing secret; returns the write outcome. `baseOid` (the blob oid
+ *  captured at read time) enables the R026 base-version guard — when set, a
+ *  stale edit surfaces `entry_conflict` instead of silently clobbering. */
 export async function editSecret(
   name: string,
   content: string,
+  baseOid?: string | null,
 ): Promise<WriteOutcome> {
-  return invoke<WriteOutcome>("edit_secret", { name, content });
+  return invoke<WriteOutcome>("edit_secret", {
+    name,
+    content,
+    ...(baseOid != null && { baseOid }),
+  });
 }
 
-/** Delete a secret; returns the write outcome (usually `written`, or
- *  `needs_divergence_resolve` when the delete's push lost a race). */
-export async function deleteSecret(name: string): Promise<WriteOutcome> {
-  return invoke<WriteOutcome>("delete_secret", { name });
+/** Delete a secret; returns the write outcome (usually `written`,
+ *  `needs_divergence_resolve` when the delete's push lost a race, `entry_conflict`
+ *  when a teammate changed it since the read, or `no_change` when a teammate
+ *  already removed it). `baseOid` enables the R026 base-version guard. */
+export async function deleteSecret(
+  name: string,
+  baseOid?: string | null,
+): Promise<WriteOutcome> {
+  return invoke<WriteOutcome>("delete_secret", {
+    name,
+    ...(baseOid != null && { baseOid }),
+  });
+}
+
+/** Resolve a per-entry edit/delete conflict (R026 `entry_conflict`) per `choice`
+ *  against the reviewed remote tip. `keep_mine` (edit) is identity-gated
+ *  backend-side (re-encrypts the caller's `content`); `keep_mine` (delete) and
+ *  `keep_theirs` need no identity. Returns the post-resolve result. */
+export async function resolveEntryConflict(
+  name: string,
+  content: string | null,
+  expectedRemoteOid: string,
+  op: EntryConflictOp,
+  choice: EntryConflictChoice,
+): Promise<PullResult> {
+  return invoke<PullResult>("resolve_entry_conflict", {
+    name,
+    content,
+    expectedRemoteOid,
+    op,
+    choice,
+  });
 }
