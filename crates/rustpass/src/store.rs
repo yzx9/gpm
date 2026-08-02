@@ -505,6 +505,24 @@ impl Store {
         self.config.set_vault_key(vault_key);
     }
 
+    /// Delegate for [`Config::rekey_identity_to_vault`] (App-Lock enable / m0007).
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from [`Config::rekey_identity_to_vault`].
+    pub async fn rekey_identity_to_vault(&self) -> Result<(), Error> {
+        self.config.rekey_identity_to_vault().await
+    }
+
+    /// Delegate for [`Config::rekey_identity_to_master`] (App-Lock disable).
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from [`Config::rekey_identity_to_master`].
+    pub async fn rekey_identity_to_master(&self) -> Result<(), Error> {
+        self.config.rekey_identity_to_master().await
+    }
+
     /// One-time migration: wrap any plaintext config files in the seal
     /// envelope. No-op on desktop (no master key) and for already-wrapped
     /// files. Safe to call on every startup.

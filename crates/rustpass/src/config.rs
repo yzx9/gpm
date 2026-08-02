@@ -321,6 +321,65 @@ impl Config {
         Ok(())
     }
 
+    /// Re-seal the vault-tier files (`identity` + `app_id_pass`) from the
+    /// auth-free `master_seal` to the biometric `vault_seal` — the App-Lock
+    /// **enable** (and m0007 upgrader) path. Both seals must be keyed:
+    /// `master_seal` with the master (reads the identity where it lives today),
+    /// `vault_seal` with the freshly-minted vault key (writes it). Each file is
+    /// decrypted with `master_seal` and re-encrypted with `vault_seal` via an
+    /// atomic write; the plaintext never touches disk.
+    ///
+    /// R064 crash-safe ordering: the caller creates the vault alias (so the vault
+    /// key is recoverable) BEFORE invoking this, so a mid-rekey crash leaves the
+    /// identity readable under the master — the resume check finishes the move.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a vault-tier file cannot be read, unsealed by
+    /// `master_seal` (e.g. `SealTampered` if the identity is already under the
+    /// vault), re-sealed by `vault_seal` (`SealKeyUnavailable` if the vault key
+    /// is not loaded), or written.
+    pub async fn rekey_identity_to_vault(&self) -> Result<(), Error> {
+        self.rekey_seal_pair(&self.master_seal, &self.vault_seal)
+            .await
+    }
+
+    /// Re-seal the vault-tier files from the `vault_seal` back to the
+    /// `master_seal` — the App-Lock **disable** path. `vault_seal` keyed with
+    /// the biometric vault (reads), `master_seal` with the auth-free master
+    /// (writes).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a vault-tier file cannot be read, unsealed by
+    /// `vault_seal`, re-sealed by `master_seal`, or written.
+    pub async fn rekey_identity_to_master(&self) -> Result<(), Error> {
+        self.rekey_seal_pair(&self.vault_seal, &self.master_seal)
+            .await
+    }
+
+    /// Read each vault-tier file via `from`, re-seal via `to`, write atomically.
+    /// A missing file (e.g. `app_id_pass` when the auto-unlock opt-in is off) is
+    /// skipped — nothing to re-seal. Any other read/unseal/seal/write error
+    /// propagates (notably `SealTampered` from `from.unseal` when the file is
+    /// already under `to` — the signal a re-key already completed).
+    async fn rekey_seal_pair(&self, from: &Seal, to: &Seal) -> Result<(), Error> {
+        for (path, name) in [
+            (self.identity_path(), "identity"),
+            (self.app_identity_pass_path(), "app_identity_pass"),
+        ] {
+            let raw = match fs::read(&path).await {
+                Ok(raw) => raw,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
+            };
+            let plain = from.unseal(name, &raw)?;
+            let sealed = to.seal(name, &plain)?;
+            save_atomic(&path, &sealed).await?;
+        }
+        Ok(())
+    }
+
     /// Path of the sealed app-behavior config slot — the post-split home of the
     /// behavior prefs (`lock_mode`, clear timers, `autosync`,
     /// `biometric_app_lock`, `secure_screen_mode`). Same file name as the legacy
@@ -766,6 +825,38 @@ mod tests {
     use super::*;
 
     use std::{fs, sync::Mutex};
+
+    /// R064 rekey: identity + `app_id_pass` round-trip master↔vault. Both files
+    /// move seal-to-seal without the plaintext touching disk, and load cleanly
+    /// under the destination seal. Mirrors enable (master→vault) then disable
+    /// (vault→master); the keys differ, so a no-op (un-rekeyed) load would fail.
+    #[tokio::test]
+    async fn rekey_identity_round_trips_master_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let master = crate::seal::generate_master_key().unwrap();
+        let vault = crate::seal::generate_master_key().unwrap();
+        assert_ne!(master, vault, "test keys must differ");
+
+        let cfg = Config::new(dir.path().to_path_buf(), Some(master));
+        // Config::new bridges vault_seal = master_seal, so identity is "under the
+        // master" pre-enable (vault_seal currently holds the master).
+        cfg.save_identity(b"the-identity", None).await.unwrap();
+        cfg.save_app_identity_pass(b"the-passphrase").await.unwrap();
+
+        // Enable: switch vault_seal to a distinct vault key, rekey master→vault.
+        cfg.set_vault_key(Some(vault));
+        cfg.rekey_identity_to_vault().await.unwrap();
+        assert_eq!(cfg.load_identity().await.unwrap(), b"the-identity");
+        assert_eq!(
+            cfg.load_app_identity_pass().await.unwrap(),
+            b"the-passphrase"
+        );
+
+        // Disable: rekey vault→master, collapse vault_seal back to master.
+        cfg.rekey_identity_to_master().await.unwrap();
+        cfg.set_vault_key(Some(master));
+        assert_eq!(cfg.load_identity().await.unwrap(), b"the-identity");
+    }
 
     #[test]
     fn debug_redacts_credentials_and_url() {
