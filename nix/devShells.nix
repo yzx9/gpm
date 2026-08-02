@@ -54,17 +54,6 @@ let
     + (if pkgs.stdenv.isDarwin then "darwin-x86_64" else "linux-x86_64")
     + "/bin";
 
-  # Generated / volatile paths the write-hooks must not touch. prettier also
-  # honors .prettierignore; this covers the whitespace hooks and mirrors it.
-  formatExcludes = [
-    "^app/src-tauri/gen/android/"
-    "^pnpm-lock\\.yaml$"
-    "^Cargo\\.lock$"
-    "^crates/rustpass/data/cacert\\.pem$"
-    "^app/dist/"
-    "^\\.agents/skills/"
-  ];
-
   # git pre-commit hooks, auto-installed into the local-dev shells (direnv
   # loads `default`, whose shellHook runs pre-commit-checks.shellHook to set
   # core.hooksPath). CI shells opt out via addLocalDevExtras. Unlike the old
@@ -76,10 +65,7 @@ let
     hooks = {
       nixfmt.enable = true;
 
-      prettier = {
-        enable = true;
-        excludes = formatExcludes;
-      };
+      prettier.enable = true;
 
       # Per-file rustfmt (edition 2024) — formats only staged .rs files.
       # `cargo fmt` would reformat the whole workspace and drag unrelated
@@ -96,19 +82,11 @@ let
         pass_filenames = true;
       };
 
-      # Conventional-Commit gate at the `commit-msg` stage. Validates the
-      # subject and confines the scope to a closed allowlist: feature scopes
-      # are read live from docs/specs/*/prd.md `scope:` frontmatter (so a
-      # new spec + token auto-extends the list), code-area scopes live in
-      # the script. `stages = ["commit-msg"]` makes git-hooks.nix install
-      # the git commit-msg hook — install_stages is the union of enabled
-      # hooks' stages, so this adds commit-msg alongside the pre-commit
-      # install rather than replacing it.
       conventional-commit = {
         enable = true;
         name = "conventional-commit-scope";
         description = "Conventional Commits + closed scope enum (scopes from PRD frontmatter)";
-        entry = "${pkgs.bash}/bin/bash ${./hooks/check-commit-msg.sh}";
+        entry = "${lib.getExe pkgs.bash} ${../scripts/check-commit-msg.sh}";
         stages = [ "commit-msg" ];
         language = "system";
         pass_filenames = true;

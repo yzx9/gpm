@@ -1,3 +1,6 @@
-dist
-pnpm-lock.yaml
 .agents/skills/
+app/src-tauri/gen/android/
+app/dist/
+Cargo.lock
+pnpm-lock.yaml
+crates/rustpass/data/cacert.pem
