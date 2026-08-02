@@ -12,7 +12,6 @@ import {
   Info,
   Lock,
   ScrollText,
-  Settings,
   ShieldCheck,
   SlidersHorizontal,
 } from "@lucide/vue";
@@ -35,7 +34,6 @@ const version = pkg.version;
     <BaseHeader
       :back-fallback="{ name: 'entries' }"
       :title="t('settings.title')"
-      :title-icon="Settings"
     />
 
     <BaseCard as="section" class="hub">

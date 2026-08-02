@@ -22,7 +22,6 @@ import {
   FileText,
   Fingerprint,
   Globe,
-  ShieldCheck,
 } from "@lucide/vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -168,7 +167,6 @@ function toneClass(tone: string) {
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('permissions.title')"
-      :title-icon="ShieldCheck"
       spacing="sm"
     />
 

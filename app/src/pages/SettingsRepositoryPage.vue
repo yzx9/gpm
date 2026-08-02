@@ -31,7 +31,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import { useDialog, useToast, Z } from "@/composables";
-import { Database, FileUp, History, KeyRound, Plus } from "@lucide/vue";
+import { FileUp, History, KeyRound, Plus } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
@@ -305,7 +305,6 @@ onMounted(() => {
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('settings.hub.repository')"
-      :title-icon="Database"
     />
 
     <div v-if="loading" class="text-center text-muted py-8">

@@ -29,7 +29,7 @@ import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import { useSecureScreen, useToast, Z } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
 import { applyTheme, normalizeThemeMode, type ThemeMode } from "@/theme";
-import { SlidersHorizontal, Trash2 } from "@lucide/vue";
+import { Trash2 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -240,7 +240,6 @@ onMounted(() => {
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('settings.hub.general')"
-      :title-icon="SlidersHorizontal"
     />
 
     <div v-if="loading" class="text-center text-muted py-8">

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - In the Lock & Identity passphrase prompts (set, change, enable biometric, and enable identity auto-unlock), the action button now uses the accent color and matches the Cancel button's width — previously it looked the same as Cancel and stretched wider, making the two hard to tell apart.
+- The headers on the Settings pages no longer carry an icon next to the title, so they read like the rest of the app's headers.
 
 ## [v0.15.0] - 2026-08-01
 

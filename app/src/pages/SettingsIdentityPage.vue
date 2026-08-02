@@ -529,7 +529,6 @@ onMounted(() => {
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('settings.hub.lockAndIdentity')"
-      :title-icon="Lock"
     />
 
     <div v-if="loading" class="text-center text-muted py-8">
