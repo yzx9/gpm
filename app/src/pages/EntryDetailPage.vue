@@ -10,6 +10,7 @@ import {
   ensureClipboardNotifyPermission,
   hasTotp as hasTotpCmd,
   showPassword as showPasswordCmd,
+  writeLog,
   type AppError,
   type DivergenceChoice,
   type PullResult,
@@ -188,6 +189,10 @@ async function copyPassword() {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || t("common.toast.copyFailed");
+    void writeLog(
+      "error",
+      `copy password failed: ${appError?.code ?? "unknown"}: ${appError?.message ?? "(no message)"}`,
+    ).catch(() => {});
   }
 }
 
@@ -217,6 +222,10 @@ async function copyTotp() {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
     error.value = appError?.message || t("common.toast.copyFailed");
+    void writeLog(
+      "error",
+      `copy totp failed: ${appError?.code ?? "unknown"}: ${appError?.message ?? "(no message)"}`,
+    ).catch(() => {});
   }
 }
 

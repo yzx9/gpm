@@ -173,7 +173,8 @@ pub(crate) async fn copy_password(
         secret.password().to_string(),
         notify_text.as_ref(),
     )
-    .await?;
+    .await
+    .inspect_err(|e| log::warn!("copy failed: clipboard stage: {entry_name}: {e}"))?;
 
     Ok(CopyResult {
         success: true,
@@ -243,7 +244,9 @@ pub(crate) async fn copy_totp(
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
 
-    let Some(otp) = rustpass::totp::extract(secret.body())? else {
+    let Some(otp) = rustpass::totp::extract(secret.body())
+        .inspect_err(|e| log::warn!("copy-totp failed: extract: {entry_name}: {e}"))?
+    else {
         // No TOTP seed: don't touch the clipboard. A prior copy's auto-clear
         // timer is left intact; `cleared_after_secs` is unused on this branch.
         return Ok(TotpCopyResult {
@@ -252,14 +255,16 @@ pub(crate) async fn copy_totp(
             cleared_after_secs: 0,
         });
     };
-    let code = rustpass::totp::generate_at(&otp, std::time::SystemTime::now())?;
+    let code = rustpass::totp::generate_at(&otp, std::time::SystemTime::now())
+        .inspect_err(|e| log::warn!("copy-totp failed: generate: {entry_name}: {e}"))?;
     let cleared_after_secs = crate::clipboard::write_and_schedule_clear(
         &state,
         &app,
         (*code).clone(),
         notify_text.as_ref(),
     )
-    .await?;
+    .await
+    .inspect_err(|e| log::warn!("copy-totp failed: clipboard stage: {entry_name}: {e}"))?;
     Ok(TotpCopyResult {
         copied: true,
         entry_name,
