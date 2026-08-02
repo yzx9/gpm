@@ -1,8 +1,10 @@
 # gopass Binary Interop Tests
 
 **Priority:** P1
-**Status:** Accepted
-**Phase:** Now
+**Status:** Shipped (forward)
+**Phase:** Next
+
+**Retained** past the usual ship-and-delete RFC convention: the forward interop test (gopass writes → gpm decrypts) plus a `GOPASS-SECRET-1.0` legacy-format agreement test have landed, but the follow-on matrix this RFC scopes — the reverse direction (gpm writes modern format → gopass decrypts, gated on the SSH-ed25519 shared identity) and the git-sync round-trip — is still open, so the rationale stays here as the reference those build on.
 
 ## What
 
