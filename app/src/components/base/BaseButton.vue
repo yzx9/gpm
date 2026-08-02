@@ -56,7 +56,9 @@ const sizeClass = computed(() =>
   >
     <BaseSpinner
       v-if="loading"
-      :variant="variant === 'primary' ? 'white' : 'dark'"
+      :variant="
+        variant === 'primary' || variant === 'danger' ? 'white' : 'dark'
+      "
     />
     <slot />
   </button>
@@ -144,13 +146,16 @@ const sizeClass = computed(() =>
   background: var(--color-edge);
 }
 
+/* Filled destructive primary (mirrors `.primary`): a solid red fill so the
+   destructive action reads as the clear primary next to its outline/secondary
+   cancel, instead of competing as a second outlined button. */
 .danger {
-  background: var(--color-surface);
-  color: var(--color-danger);
-  border: 1px solid var(--color-danger);
+  background: var(--color-danger);
+  color: var(--color-on-accent);
+  border: none;
 }
 .danger:active:not(:disabled) {
-  background: var(--color-danger-soft);
+  background: var(--color-danger-deep);
 }
 
 /* Action variants: full-width, left-aligned, compact (size prop ignored). */
@@ -190,7 +195,7 @@ const sizeClass = computed(() =>
     color: var(--color-accent);
   }
   .danger:hover:not(:disabled) {
-    background: var(--color-danger-soft);
+    background: var(--color-danger-deep);
   }
 }
 </style>

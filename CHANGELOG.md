@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Turning off **Biometric Unlock**, **App Lock**, or **Identity Auto-Unlock** now asks for confirmation first. Re-enabling any of them takes your fingerprint or passphrase again, so an accidental tap no longer disables them instantly.
 - The **Logs** screen is reworked so it isn't cramped on a phone: Refresh, Export, and Clear have moved out of the header (where three long buttons didn't fit) into a toolbar below the title. The verbose (debug-logging) toggle is now a single switch that shows the time remaining while it's on, instead of an On/Off picker, and the log opens scrolled to the newest entries at the bottom rather than the oldest.
 - The Settings list drops the one-line summaries that used to sit next to each category — each category's own page already shows the detail, so the summaries only added clutter and often got cut off. Only About still shows the installed version; everything else is now just the label and arrow, and the Logs row's arrow lines up with the others again.
+- Confirming a destructive action — deleting an entry, resetting all settings, or tapping a red Confirm in a dialog — now shows a solid red button instead of an outlined one, so it's clearly the main action next to its Cancel.
 
 ### Fixed
 

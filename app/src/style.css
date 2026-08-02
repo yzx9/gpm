@@ -41,6 +41,7 @@
   --color-on-accent: #ffffff;
   --color-accent-ring: oklch(54.28% 0.2275 264.05 / 0.2);
   --color-danger: #c33;
+  --color-danger-deep: #a82828;
   --color-danger-soft: #fee;
   --color-danger-edge: #fcc;
   --color-success: #2e7d32;
@@ -84,6 +85,7 @@
     --color-accent-deep: #5b7bf5;
     --color-on-accent: #0d1117;
     --color-danger: #ff6b6b;
+    --color-danger-deep: #e85555;
     --color-danger-soft: #3a1a1a;
     --color-danger-edge: #5a2a2a;
     --color-success: #4ade80;
@@ -111,6 +113,7 @@
   --color-accent-deep: #5b7bf5;
   --color-on-accent: #0d1117;
   --color-danger: #ff6b6b;
+  --color-danger-deep: #e85555;
   --color-danger-soft: #3a1a1a;
   --color-danger-edge: #5a2a2a;
   --color-success: #4ade80;

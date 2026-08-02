@@ -38,7 +38,7 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   /** Cancel-button label; defaults to `common.button.cancel`. */
   cancelLabel?: string;
-  /** Style the confirm button as destructive (danger outline). */
+  /** Style the confirm button as destructive (filled danger). */
   danger?: boolean;
 }
 
