@@ -59,6 +59,16 @@ fn map_invoke_err(err: PluginInvokeError) -> FileSaveError {
     }
 }
 
+/// Lowercase filename extension without the dot, or `None` when the name has
+/// none. Labels the desktop save-dialog filter; the Android path uses the
+/// caller-supplied MIME type instead.
+fn extension_of(filename: &str) -> Option<String> {
+    std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+}
+
 // ---------------------------------------------------------------------------
 // FileSaveHandle (cfg-gated: mobile plugin handle on Android, AppHandle
 // elsewhere so it can drive tauri-plugin-dialog)
@@ -79,13 +89,21 @@ pub struct FileSaveHandle<R: Runtime>(tauri::AppHandle<R>);
 impl<R: Runtime> FileSaveHandle<R> {
     /// Pop the SAF save dialog (`ACTION_CREATE_DOCUMENT`) and stream the staged
     /// file at `temp_path` into the chosen destination. `filename` is the
-    /// suggested name. Returns `CANCELLED` if the user dismisses the picker.
-    pub async fn save(&self, filename: String, temp_path: PathBuf) -> Result<(), FileSaveError> {
+    /// suggested name; `mime_type` is the picker's MIME filter (e.g.
+    /// `application/zip`, `application/octet-stream`). Returns `CANCELLED` if
+    /// the user dismisses the picker.
+    pub async fn save(
+        &self,
+        filename: String,
+        temp_path: PathBuf,
+        mime_type: String,
+    ) -> Result<(), FileSaveError> {
         #[derive(serde::Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Payload<'a> {
             filename: &'a str,
             temp_path: &'a str,
+            mime_type: &'a str,
         }
         #[derive(serde::Deserialize)]
         struct SaveResp {
@@ -101,6 +119,7 @@ impl<R: Runtime> FileSaveHandle<R> {
                 Payload {
                     filename: &filename,
                     temp_path: temp.as_ref(),
+                    mime_type: &mime_type,
                 },
             )
             .await
@@ -112,18 +131,26 @@ impl<R: Runtime> FileSaveHandle<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> FileSaveHandle<R> {
     /// Pop the native save dialog and copy the staged file at `temp_path` into
-    /// the chosen destination. Returns `CANCELLED` if the user dismisses it.
-    pub async fn save(&self, filename: String, temp_path: PathBuf) -> Result<(), FileSaveError> {
+    /// the chosen destination. The filter is derived from `filename`'s extension
+    /// (more specific than a MIME on a native dialog); `mime_type` is accepted
+    /// for signature parity with Android but unused here. Returns `CANCELLED` if
+    /// the user dismisses it.
+    pub async fn save(
+        &self,
+        filename: String,
+        temp_path: PathBuf,
+        _mime_type: String,
+    ) -> Result<(), FileSaveError> {
         let handle = self.0.clone();
         // `blocking_save_file` drives the dialog on the main thread and blocks
         // the caller — run it on a blocking task so the async runtime is spared.
         let dest = tauri::async_runtime::spawn_blocking(move || {
-            handle
-                .dialog()
-                .file()
-                .set_file_name(filename)
-                .add_filter("Zip", &["zip"])
-                .blocking_save_file()
+            let mut builder = handle.dialog().file().set_file_name(filename.clone());
+            if let Some(ext) = extension_of(&filename) {
+                let label = ext.to_uppercase();
+                builder = builder.add_filter(&label, &[ext.as_str()]);
+            }
+            builder.blocking_save_file()
         })
         .await
         .map_err(|e| FileSaveError {

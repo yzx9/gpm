@@ -254,7 +254,11 @@ pub(crate) async fn export_diagnostics(
     // ── 4. Save (picker + write), then wipe the stage regardless of outcome ─
     let save_result = app
         .file_save()
-        .save(BUNDLE_FILENAME.to_string(), temp_path.clone())
+        .save(
+            BUNDLE_FILENAME.to_string(),
+            temp_path.clone(),
+            "application/zip".to_string(),
+        )
         .await;
     let _ = tokio::fs::remove_file(&temp_path).await;
 

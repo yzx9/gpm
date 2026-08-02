@@ -52,6 +52,9 @@ class SaveArgs {
     lateinit var filename: String
     /** Absolute path of the staged file to stream into the destination. */
     lateinit var tempPath: String
+    /** MIME type filter for the picker (e.g. `application/zip`,
+     *  `application/octet-stream`). */
+    lateinit var mimeType: String
 }
 
 /**
@@ -67,13 +70,17 @@ class FileSavePlugin(private val activity: Activity) : Plugin(activity) {
     // Staged path carried from `save` to the `onSaveResult` callback.
     private var pendingTempPath: String? = null
 
-    /** Pop the SAF save dialog for a zip document. */
+    /** Pop the SAF save dialog for a document of the caller's MIME type. */
     @Command
     fun save(invoke: Invoke) {
         val args = invoke.parseArgs(SaveArgs::class.java)
+        if (args.mimeType.isBlank()) {
+            invoke.reject("Save requires a MIME type", "SAVE_FAILED")
+            return
+        }
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/zip"
+            type = args.mimeType
             putExtra(Intent.EXTRA_TITLE, args.filename)
         }
         pendingTempPath = args.tempPath
