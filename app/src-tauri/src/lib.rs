@@ -202,7 +202,21 @@ async fn startup_master_key<R: tauri::Runtime>(
 ///
 /// Panics if the config directory cannot be determined.
 fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
-    log::info!("gpm {} starting", env!("CARGO_PKG_VERSION"));
+    // Cold-start banner: version first (the thing bug reports most need to
+    // pin), then build profile + target so a trace distinguishes dev vs
+    // release and android vs desktop at a glance. Emitted BEFORE the keystore
+    // await below so a hang there still leaves a breadcrumb.
+    log::info!(
+        "gpm {} starting ({} {}/{})",
+        env!("CARGO_PKG_VERSION"),
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        },
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
     let config_dir = app
         .path()
         .app_config_dir()
@@ -215,6 +229,14 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // key loads silently (the pre-app-lock path).
     let (master_key, app_lock_enabled) =
         tauri::async_runtime::block_on(startup_master_key(app.secure_keystore()));
+    // Basic-state summary — config dir (where the rotated log + sealed config
+    // live) and whether the app-launch biometric gate is armed. Logged here,
+    // before `config_dir` moves into `Store`, so a trace lands the paths once.
+    log::info!(
+        "startup: config_dir={}, app_lock={}",
+        config_dir.display(),
+        app_lock_enabled,
+    );
     // App-shell (non-repo) preferences — primarily the screen-capture master
     // toggle. Borrows `config_dir` before it is moved into `Store` below.
     let app_config = app_config::AppConfigStore::new(&config_dir);
@@ -541,8 +563,35 @@ pub fn run() {
             authenticity::list_commit_signatures,
             authenticity::get_commit_signature,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(log_run_event);
+}
+
+/// Event-loop observer: logs app lifecycle transitions so a diagnostic trace
+/// records when the app started, returned to the foreground, lost/regained
+/// window focus (backgrounding, biometric prompts, system dialogs), and exited.
+/// Pure observation — never blocks or mutates state. `Focused(false)` on Android
+/// also fires for in-activity system windows (biometric prompt, permission
+/// dialog), so read it as "lost window focus," not strictly "backgrounded"; the
+/// `Resumed` event is the reliable foreground signal.
+#[allow(clippy::needless_pass_by_value)] // signature dictated by `App::run`'s callback contract
+fn log_run_event<R: tauri::Runtime>(_app: &tauri::AppHandle<R>, event: tauri::RunEvent) {
+    match event {
+        tauri::RunEvent::Resumed => log::info!("app: resumed (foreground)"),
+        tauri::RunEvent::ExitRequested { code, .. } => {
+            log::info!("app: exit requested (code: {code:?})");
+        }
+        tauri::RunEvent::Exit => log::info!("app: exited"),
+        tauri::RunEvent::WindowEvent {
+            event: tauri::WindowEvent::Focused(focused),
+            ..
+        } => log::info!(
+            "app: window focus {}",
+            if focused { "gained" } else { "lost" }
+        ),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
