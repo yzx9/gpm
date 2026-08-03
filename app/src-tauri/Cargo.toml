@@ -45,7 +45,7 @@ log = "0.4"
 # `#[no_mangle]` shim in `jni_sync.rs`; `rt-multi-thread` for its owned
 # `tokio::runtime` (host builds don't compile the shim).
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+jni = "0.22"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
