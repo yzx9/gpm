@@ -687,7 +687,9 @@ defineExpose({ syncRepo });
       class="flex justify-between items-center mb-3"
     >
       {{ error }}
-      <button @click="retry" class="btn-retry">{{ t("entries.retry") }}</button>
+      <BaseButton variant="link" size="xs" tone="danger" @click="retry">
+        {{ t("entries.retry") }}
+      </BaseButton>
     </BaseAlert>
     <BaseAlert v-if="pullResult" variant="info" class="mb-3">
       {{ pullResult }}
@@ -847,26 +849,6 @@ defineExpose({ syncRepo });
   background: var(--color-accent);
   border-radius: 9999px;
   transition: width 0.2s ease;
-}
-
-.btn-retry {
-  background: none;
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  padding: 0.15rem 0.5rem;
-  border-radius: 4px;
-  font-size: var(--text-xs);
-  cursor: pointer;
-  min-height: 48px;
-}
-
-.btn-retry:active {
-  opacity: 0.8;
-}
-@media (hover: hover) {
-  .btn-retry:hover {
-    opacity: 0.8;
-  }
 }
 
 .pull-progress-row {

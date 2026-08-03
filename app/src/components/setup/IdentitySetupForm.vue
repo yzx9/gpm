@@ -571,13 +571,15 @@ onUnmounted(clearPendingFile);
               t("setup.identity.fileEncrypted")
             }}</span>
           </span>
-          <button
-            type="button"
-            class="shrink-0 text-muted hover:text-danger active:text-danger transition-colors"
+          <BaseButton
+            variant="link"
+            size="xs"
+            tone="danger"
+            class="shrink-0"
             @click="onUsePaste"
           >
             {{ t("setup.identity.fileRemove") }}
-          </button>
+          </BaseButton>
         </div>
 
         <!-- Public key, once usable (unencrypted, or unlocked) -->

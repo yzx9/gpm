@@ -160,8 +160,11 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(wrapper.find(".btn-retry").exists()).toBe(true);
-      await wrapper.find(".btn-retry").trigger("click");
+      const retryBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Retry"));
+      expect(retryBtn).toBeDefined();
+      await retryBtn!.trigger("click");
       await flushPromises();
 
       expect(wrapper.text()).toContain("github-token");

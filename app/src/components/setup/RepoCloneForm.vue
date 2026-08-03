@@ -250,16 +250,17 @@ async function onClone() {
     <div v-if="loading" class="flex flex-col gap-1">
       <div class="flex justify-between items-center text-xs text-muted">
         <span aria-live="polite">{{ progressText }}</span>
-        <button
-          type="button"
-          class="cancel-link"
+        <BaseButton
+          variant="link"
+          size="xs"
+          tone="accent"
           :disabled="cancelling"
           @click="cancelClone"
         >
           {{
             cancelling ? t("setup.clone.cancelling") : t("common.button.cancel")
           }}
-        </button>
+        </BaseButton>
       </div>
       <div
         class="progress-track"
@@ -304,20 +305,5 @@ async function onClone() {
   background: var(--color-accent);
   border-radius: 9999px;
   transition: width 0.2s ease;
-}
-.cancel-link {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--color-accent);
-  cursor: pointer;
-}
-.cancel-link:active:not(:disabled) {
-  color: var(--color-accent-deep);
-}
-.cancel-link:disabled {
-  color: var(--color-muted);
-  cursor: default;
 }
 </style>

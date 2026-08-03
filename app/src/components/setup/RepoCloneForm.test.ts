@@ -60,22 +60,28 @@ describe("RepoCloneForm — cancel", () => {
     await flushPromises();
 
     // Before submit there is no progress block / cancel button.
-    expect(wrapper.find("button.cancel-link").exists()).toBe(false);
+    expect(
+      wrapper.findAll("button").some((b) => b.text().includes("Cancel")),
+    ).toBe(false);
 
     await startClone(wrapper);
 
     // The clone is in flight → the cancel button is present and enabled.
-    const cancelBtn = wrapper.find("button.cancel-link");
-    expect(cancelBtn.exists()).toBe(true);
-    expect(cancelBtn.attributes("disabled")).toBeUndefined();
-    expect(cancelBtn.text()).toContain("Cancel");
+    const cancelBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Cancel"));
+    expect(cancelBtn).toBeDefined();
+    expect(cancelBtn!.attributes("disabled")).toBeUndefined();
+    expect(cancelBtn!.text()).toContain("Cancel");
 
-    await cancelBtn.trigger("click");
+    await cancelBtn!.trigger("click");
     await flushPromises();
 
     // The cancel request was sent and the button immediately reflects it.
     expect(invoke).toHaveBeenCalledWith("cancel_git");
-    const after = wrapper.find("button.cancel-link");
+    const after = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Cancel"))!;
     expect(after.text()).toContain("Cancelling");
     expect(after.attributes("disabled")).toBeDefined();
   });
@@ -92,7 +98,10 @@ describe("RepoCloneForm — cancel", () => {
     await flushPromises();
     await startClone(wrapper);
 
-    await wrapper.find("button.cancel-link").trigger("click");
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Cancel"))!
+      .trigger("click");
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("cancel_git");
