@@ -293,29 +293,10 @@
  * Shared UI utilities
  *
  * Small presentation helpers used across several pages/components that aren't
- * worth a full component (copy button, back button, monospace key display). The interactive
+ * worth a full component (monospace key display). The interactive
  * primitives (buttons/inputs/spinner/segmented control) live as Base* components
  * under src/components/base/ instead.
  * --------------------------------------------------------------------------- */
-
-.btn-copy {
-  padding: 0.3rem 0.6rem;
-  font-size: var(--text-xs);
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 36px;
-}
-
-.btn-copy:active {
-  background: var(--color-hover);
-}
-@media (hover: hover) {
-  .btn-copy:hover {
-    background: var(--color-hover);
-  }
-}
 
 .public-key-display {
   padding: 0.6rem 0.75rem;

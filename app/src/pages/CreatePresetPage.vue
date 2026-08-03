@@ -248,10 +248,10 @@ useWipeOnLeave(wipeFields);
               <option value="memorable">{{ t("create.genMemorable") }}</option>
               <option value="xkcd">{{ t("create.genPassphrase") }}</option>
             </select>
-            <button
+            <BaseButton
               v-if="f.type === 'password'"
-              type="button"
-              class="icon-btn"
+              variant="secondary"
+              size="sm"
               :disabled="generating"
               :aria-label="
                 revealed[f.key] ? t('create.hide') : t('create.show')
@@ -259,17 +259,17 @@ useWipeOnLeave(wipeFields);
               @click="revealed[f.key] = !revealed[f.key]"
             >
               <BaseIcon :icon="revealed[f.key] ? EyeOff : Eye" />
-            </button>
-            <button
+            </BaseButton>
+            <BaseButton
               v-if="f.type === 'password'"
-              type="button"
-              class="icon-btn"
+              variant="secondary"
+              size="sm"
               :disabled="generating"
               :aria-label="t('create.generateAria')"
               @click="onGeneratePassword(f)"
             >
               <BaseIcon :icon="Dices" />
-            </button>
+            </BaseButton>
           </div>
         </div>
         <div class="flex gap-3">
@@ -322,33 +322,6 @@ useWipeOnLeave(wipeFields);
   color: inherit;
   font-size: var(--text-sm);
   min-height: 48px;
-}
-
-.icon-btn {
-  flex: 0 0 auto;
-  width: 48px;
-  min-height: 48px;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  cursor: pointer;
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: 0;
-}
-
-.icon-btn:active:not(:disabled) {
-  background: var(--color-hover);
-}
-@media (hover: hover) {
-  .icon-btn:hover:not(:disabled) {
-    background: var(--color-hover);
-  }
-}
-
-.icon-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .loading {

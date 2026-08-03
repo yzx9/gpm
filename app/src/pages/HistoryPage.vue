@@ -300,13 +300,14 @@ onBeforeUnmount(() => {
     >
       <div class="flex justify-between items-start mb-2">
         <code class="text-xs text-muted">{{ selected.short_hash }}</code>
-        <button
-          class="btn-copy"
-          @click="closeDetail"
+        <BaseButton
+          variant="link"
+          size="xs"
           :aria-label="t('history.closeAria')"
+          @click="closeDetail"
         >
           <BaseIcon :icon="X" />
-        </button>
+        </BaseButton>
       </div>
 
       <h2 class="text-base font-medium wrap-break-word">

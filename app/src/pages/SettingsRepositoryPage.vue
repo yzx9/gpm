@@ -460,13 +460,14 @@ onMounted(() => {
               <span class="text-xs text-muted mx-2 truncate">{{
                 row.label
               }}</span>
-              <button
-                type="button"
-                class="btn-copy"
+              <BaseButton
+                variant="link"
+                size="xs"
+                tone="danger"
                 @click="onRemoveKey(row.fingerprint, row.kind)"
               >
                 {{ t("settings.auth.remove") }}
-              </button>
+              </BaseButton>
             </li>
           </ul>
           <p v-else class="text-xs text-muted mb-2">

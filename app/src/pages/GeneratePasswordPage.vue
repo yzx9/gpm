@@ -204,14 +204,14 @@ useWipeOnLeave(() => {
     <ul v-if="generated.length" class="result-list" role="list">
       <li v-for="(pw, i) in generated" :key="i" class="result-row">
         <code class="result-pw">{{ pw }}</code>
-        <button
-          type="button"
-          class="icon-btn"
+        <BaseButton
+          variant="secondary"
+          size="sm"
           :aria-label="t('generate.copyAria')"
           @click="onCopyRow(pw)"
         >
           <BaseIcon :icon="Copy" />
-        </button>
+        </BaseButton>
       </li>
     </ul>
   </main>
@@ -262,30 +262,5 @@ useWipeOnLeave(() => {
   font-size: var(--text-sm);
   word-break: break-all;
   min-height: 48px;
-}
-
-.icon-btn {
-  flex: 0 0 auto;
-  width: 48px;
-  min-height: 48px;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  cursor: pointer;
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: 0;
-}
-.icon-btn:active:not(:disabled) {
-  background: var(--color-hover);
-}
-@media (hover: hover) {
-  .icon-btn:hover:not(:disabled) {
-    background: var(--color-hover);
-  }
-}
-.icon-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 </style>

@@ -216,9 +216,9 @@ async function copyPublicKey() {
             <BaseIcon :icon="CircleCheck" :size="14" />
             {{ t("setup.auth.publicKeyLabel") }}
           </span>
-          <button type="button" class="btn-copy" @click="copyPublicKey">
+          <BaseButton variant="secondary" size="xs" @click="copyPublicKey">
             <BaseIcon :icon="Copy" /> {{ t("setup.auth.publicKeyCopy") }}
-          </button>
+          </BaseButton>
         </div>
         <pre class="public-key-display" @click="copyPublicKey">{{
           generatedPublicKey

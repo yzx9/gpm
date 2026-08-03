@@ -165,7 +165,7 @@ describe("SettingsRepositoryPage", () => {
       expect(wrapper.text()).toContain("Alice");
 
       const removeBtn = wrapper
-        .findAll(".btn-copy")
+        .findAll("button")
         .find((b) => b.text().includes("Remove"));
       expect(removeBtn).toBeDefined();
       await removeBtn!.trigger("click");
@@ -198,7 +198,7 @@ describe("SettingsRepositoryPage", () => {
       expect(wrapper.text()).toContain("GPG");
 
       const removeBtn = wrapper
-        .findAll(".btn-copy")
+        .findAll("button")
         .find((b) => b.text().includes("Remove"));
       expect(removeBtn).toBeDefined();
       await removeBtn!.trigger("click");

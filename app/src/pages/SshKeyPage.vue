@@ -116,14 +116,16 @@ useWipeOnLeave(hidePrivate);
     <section class="mb-6">
       <div class="flex justify-between items-center mb-2">
         <span class="text-xs text-muted">{{ t("sshKey.publicKeyLabel") }}</span>
-        <button
+        <BaseButton
           v-if="publicKey"
-          class="btn-copy"
+          variant="link"
+          size="xs"
+          tone="accent"
           :aria-label="t('sshKey.copy')"
           @click="copyText(publicKey)"
         >
           <BaseIcon :icon="Copy" /> {{ t("sshKey.copy") }}
-        </button>
+        </BaseButton>
       </div>
       <div v-if="loading" class="flex items-center gap-2 text-muted py-4">
         <BaseSpinner />
@@ -152,9 +154,14 @@ useWipeOnLeave(hidePrivate);
           {{ t("sshKey.privateVisible") }}
         </BaseAlert>
         <div class="flex justify-end">
-          <button class="btn-copy" @click="copyText(privateKey)">
+          <BaseButton
+            variant="link"
+            size="xs"
+            tone="accent"
+            @click="copyText(privateKey)"
+          >
             <BaseIcon :icon="Copy" /> {{ t("sshKey.copy") }}
-          </button>
+          </BaseButton>
         </div>
         <pre class="key-display private-key-display">{{ privateKey }}</pre>
         <BaseButton variant="action" class="mt-1" @click="hidePrivate">
@@ -182,16 +189,5 @@ useWipeOnLeave(hidePrivate);
 
 .private-key-display {
   max-height: 300px;
-}
-
-.btn-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: transparent;
-  border: none;
-  color: var(--color-accent);
-  cursor: pointer;
-  font-size: var(--text-sm);
 }
 </style>
