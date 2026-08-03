@@ -611,6 +611,23 @@ impl Config {
         Ok(())
     }
 
+    /// Repo-only variant of [`migrate_seal`] for the headless background worker
+    /// (R064): wraps ONLY `repo_config` under `master_seal`, skipping the
+    /// vault-tier files (`identity`, `app_id_pass`). The worker is pull-only —
+    /// it never decrypts the identity — so it must not touch vault-tier files
+    /// (sealed under the distinct vault key it does not hold), and doing so
+    /// would surface `SealKeyUnavailable`/`SealTampered` from [`wrap_if_needed`]
+    /// when the vault key is absent. See [`Store::migrate_repo_seal`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `repo_config` cannot be read, sealed/unsealed, or
+    /// written.
+    pub async fn migrate_repo_seal(&self) -> Result<(), Error> {
+        self.wrap_if_needed(&self.master_seal, &self.repo_config_path(), "repo_config")
+            .await
+    }
+
     /// If `path` holds plaintext, seal it; if it holds a legacy-magic envelope,
     /// re-wrap it under the current magic. No-op for current-magic envelopes and
     /// missing files.
@@ -932,6 +949,31 @@ mod tests {
         assert_eq!(
             cfg.load_app_identity_pass().await.unwrap(),
             b"the-passphrase"
+        );
+    }
+
+    /// `migrate_repo_seal` (the headless worker's repo-only migration) must
+    /// skip the vault-tier files. Identity sits PLAINTEXT on disk and `vault_seal`
+    /// is wiped (the pull-only worker posture: it holds only the auth-free
+    /// master). A full `migrate_seal` would try to wrap that plaintext via the
+    /// wiped `vault_seal` ⇒ `SEAL_KEY_UNAVAILABLE`; the repo-only variant must
+    /// touch only `repo_config`, leaving identity untouched and error-free.
+    #[tokio::test]
+    async fn migrate_repo_seal_skips_vault_tier_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let master = crate::seal::generate_master_key().unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), Some(master));
+        fs::write(cfg.identity_path(), b"plaintext-identity").unwrap();
+        cfg.set_vault_key(None); // pull-only worker: no vault key in memory
+
+        cfg.migrate_repo_seal()
+            .await
+            .expect("repo-only migrate skips vault-tier files");
+
+        assert_eq!(
+            fs::read(cfg.identity_path()).unwrap(),
+            b"plaintext-identity",
+            "identity untouched by repo-only migrate",
         );
     }
 

@@ -204,4 +204,30 @@ class SecureKeystorePluginTest {
         assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString(""))
         assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString("garbage"))
     }
+
+    // hasUsableBiometricInAnySlot (R064) — the dual-alias "app-lock is on" OR.
+    // Args: (legacyPresent, legacyUsable, vaultPresent, vaultUsable). Pins that
+    // EITHER slot with a usable key ⇒ true, and a present-but-dead key
+    // (usable=false, all-biometrics-removed) ⇒ false so a cold launch skips a
+    // doomed prompt. Covers the m0007 transition: legacy-only (pre-m0007),
+    // vault-only (post-m0007), and neither.
+    @Test
+    fun hasUsableBiometricInAnySlot_true_when_only_legacy_present_and_usable() {
+        assertEquals(true, hasUsableBiometricInAnySlot(true, true, false, false))
+    }
+
+    @Test
+    fun hasUsableBiometricInAnySlot_true_when_only_vault_present_and_usable() {
+        assertEquals(true, hasUsableBiometricInAnySlot(false, false, true, true))
+    }
+
+    @Test
+    fun hasUsableBiometricInAnySlot_false_when_neither_slot_present() {
+        assertEquals(false, hasUsableBiometricInAnySlot(false, false, false, false))
+    }
+
+    @Test
+    fun hasUsableBiometricInAnySlot_false_when_present_but_unusable() {
+        assertEquals(false, hasUsableBiometricInAnySlot(true, false, true, false))
+    }
 }

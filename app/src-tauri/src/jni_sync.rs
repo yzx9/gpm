@@ -59,15 +59,20 @@ pub(crate) async fn run_headless_sync(
     }
 
     // The master key arrives base64-encoded (the existing Rust↔Keystore IPC
-    // shape). Missing ⇒ AppLock is on (auth-free key migrated to the biometric
-    // alias) or the store isn't set up — skip, don't error.
+    // shape). Missing ⇒ the store isn't set up yet (R064: the auth-free master
+    // is permanent, so its absence is never "App Lock on") — skip, don't error.
     let Some(master_key) = crate::decode_master_key(&master_key_b64) else {
         return BackgroundSyncResult::Skipped { reason: "no_key" };
     };
 
     let store = Arc::new(Store::new(config_dir, Some(master_key)));
+    // R064: the worker is pull-only — it reads `repo.json`/`app.json` under the
+    // auth-free master but never the identity. Drop the vault_seal bridge so no
+    // identity key sits in worker memory, and migrate ONLY `repo_config` (the
+    // vault-tier files are under the distinct vault key the worker lacks).
+    store.set_vault_key(None);
     app_cfg.set_store(Arc::clone(&store));
-    if let Err(e) = store.migrate_seal().await {
+    if let Err(e) = store.migrate_repo_seal().await {
         return BackgroundSyncResult::Error {
             message: e.to_string(),
         };

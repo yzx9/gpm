@@ -541,6 +541,17 @@ impl Store {
         self.config.migrate_seal().await
     }
 
+    /// Delegate for [`Config::migrate_repo_seal`] — the headless background
+    /// worker's repo-only seal migration (wraps `repo_config` only, skips the
+    /// vault-tier files the pull-only worker must not touch).
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from [`Config::migrate_repo_seal`].
+    pub async fn migrate_repo_seal(&self) -> Result<(), Error> {
+        self.config.migrate_repo_seal().await
+    }
+
     /// Check if the store has been configured (identity + repo exist).
     #[must_use]
     pub fn is_configured(&self) -> bool {

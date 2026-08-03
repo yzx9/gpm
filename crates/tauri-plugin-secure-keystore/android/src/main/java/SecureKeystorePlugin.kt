@@ -102,6 +102,21 @@ internal enum class BiometricSlot(val alias: String, val prefsName: String) {
     }
 }
 
+/**
+ * R064 dual-alias "app-lock is on" decision (pure, host-testable): `true` iff
+ * EITHER biometric slot holds a sealed key that still inits cleanly. Pre-m0007
+ * upgraders hold the legacy alias (vault absent); post-m0007 hold the vault
+ * (legacy deleted); mutually exclusive in steady state. Extracted from
+ * [SecureKeystorePlugin.hasStoredBiometric] so the OR-disjunction is pinned by
+ * a plain JVM unit test (no Activity / Keystore needed).
+ */
+internal fun hasUsableBiometricInAnySlot(
+    legacyPresent: Boolean,
+    legacyUsable: Boolean,
+    vaultPresent: Boolean,
+    vaultUsable: Boolean,
+): Boolean = (legacyPresent && legacyUsable) || (vaultPresent && vaultUsable)
+
 /** Generic BiometricPrompt fallbacks (NOT a duplicate of
  *  native.json/en): the app name (title) + a neutral word (negative) keep the
  *  prompt coherent if the frontend omits the localized text. Duplicated from
@@ -484,9 +499,12 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(ret)
             return
         }
-        val stored = BiometricSlot.entries.any { slot ->
-            readCipherData(biometricPrefs(slot)) != null && biometricKeyUsable(slot)
-        }
+        val stored = hasUsableBiometricInAnySlot(
+            legacyPresent = readCipherData(biometricPrefs(BiometricSlot.LEGACY)) != null,
+            legacyUsable = biometricKeyUsable(BiometricSlot.LEGACY),
+            vaultPresent = readCipherData(biometricPrefs(BiometricSlot.VAULT)) != null,
+            vaultUsable = biometricKeyUsable(BiometricSlot.VAULT),
+        )
         val ret = JSObject()
         ret.put("stored", stored)
         invoke.resolve(ret)
