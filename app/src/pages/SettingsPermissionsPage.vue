@@ -178,110 +178,114 @@ function toneClass(tone: string) {
     <template v-if="secureAvailable">
       <p class="group-label">{{ t("permissions.groups.adjustable") }}</p>
 
-      <BaseCard as="section">
-        <div
-          class="perm-row"
-          :class="{ 'perm-tappable': notifTap }"
-          :role="notifTap ? 'button' : undefined"
-          :tabindex="notifTap ? 0 : undefined"
-          :aria-label="notifAria"
-          @click="notifTap && openNotifications()"
-          @keydown.enter="notifTap && openNotifications()"
-          @keydown.space.prevent="notifTap && openNotifications()"
-        >
-          <BaseIcon :icon="Bell" :size="20" class="text-muted" />
-          <div class="perm-text">
-            <h2 class="perm-title">
-              {{ t("permissions.notifications.title") }}
-            </h2>
-            <p class="perm-body">{{ t("permissions.notifications.body") }}</p>
+      <div class="cards">
+        <BaseCard as="section">
+          <div
+            class="perm-row"
+            :class="{ 'perm-tappable': notifTap }"
+            :role="notifTap ? 'button' : undefined"
+            :tabindex="notifTap ? 0 : undefined"
+            :aria-label="notifAria"
+            @click="notifTap && openNotifications()"
+            @keydown.enter="notifTap && openNotifications()"
+            @keydown.space.prevent="notifTap && openNotifications()"
+          >
+            <BaseIcon :icon="Bell" :size="20" class="text-muted" />
+            <div class="perm-text">
+              <h2 class="perm-title">
+                {{ t("permissions.notifications.title") }}
+              </h2>
+              <p class="perm-body">{{ t("permissions.notifications.body") }}</p>
+            </div>
+            <div class="perm-trailing">
+              <BaseSpinner v-if="!notifStatus" :size="14" />
+              <span
+                v-else
+                class="perm-status"
+                :class="toneClass(notifStatus.tone)"
+                >{{ notifStatus.text }}</span
+              >
+              <BaseIcon
+                v-if="notifTap"
+                :icon="ChevronRight"
+                :size="18"
+                class="text-muted"
+              />
+            </div>
           </div>
-          <div class="perm-trailing">
-            <BaseSpinner v-if="!notifStatus" :size="14" />
-            <span
-              v-else
-              class="perm-status"
-              :class="toneClass(notifStatus.tone)"
-              >{{ notifStatus.text }}</span
-            >
-            <BaseIcon
-              v-if="notifTap"
-              :icon="ChevronRight"
-              :size="18"
-              class="text-muted"
-            />
-          </div>
-        </div>
-      </BaseCard>
+        </BaseCard>
 
-      <BaseCard as="section">
-        <div
-          class="perm-row"
-          :class="{ 'perm-tappable': bioTap }"
-          :role="bioTap ? 'button' : undefined"
-          :tabindex="bioTap ? 0 : undefined"
-          :aria-label="bioAria"
-          @click="bioTap && openBiometric()"
-          @keydown.enter="bioTap && openBiometric()"
-          @keydown.space.prevent="bioTap && openBiometric()"
-        >
-          <BaseIcon :icon="Fingerprint" :size="20" class="text-muted" />
-          <div class="perm-text">
-            <h2 class="perm-title">{{ t("permissions.biometric.title") }}</h2>
-            <p class="perm-body">{{ t("permissions.biometric.body") }}</p>
+        <BaseCard as="section">
+          <div
+            class="perm-row"
+            :class="{ 'perm-tappable': bioTap }"
+            :role="bioTap ? 'button' : undefined"
+            :tabindex="bioTap ? 0 : undefined"
+            :aria-label="bioAria"
+            @click="bioTap && openBiometric()"
+            @keydown.enter="bioTap && openBiometric()"
+            @keydown.space.prevent="bioTap && openBiometric()"
+          >
+            <BaseIcon :icon="Fingerprint" :size="20" class="text-muted" />
+            <div class="perm-text">
+              <h2 class="perm-title">{{ t("permissions.biometric.title") }}</h2>
+              <p class="perm-body">{{ t("permissions.biometric.body") }}</p>
+            </div>
+            <div class="perm-trailing">
+              <BaseSpinner v-if="!bioStatus" :size="14" />
+              <span
+                v-else
+                class="perm-status"
+                :class="toneClass(bioStatus.tone)"
+                >{{ bioStatus.text }}</span
+              >
+              <BaseIcon
+                v-if="bioTap"
+                :icon="ChevronRight"
+                :size="18"
+                class="text-muted"
+              />
+            </div>
           </div>
-          <div class="perm-trailing">
-            <BaseSpinner v-if="!bioStatus" :size="14" />
-            <span
-              v-else
-              class="perm-status"
-              :class="toneClass(bioStatus.tone)"
-              >{{ bioStatus.text }}</span
-            >
-            <BaseIcon
-              v-if="bioTap"
-              :icon="ChevronRight"
-              :size="18"
-              class="text-muted"
-            />
-          </div>
-        </div>
-      </BaseCard>
+        </BaseCard>
+      </div>
     </template>
 
     <!-- Informational data-access notes (both platforms). No trailing affordance
          — these surfaces have no permission toggle the user can flip. -->
     <p class="group-label">{{ t("permissions.groups.informational") }}</p>
 
-    <BaseCard as="section">
-      <div class="perm-row">
-        <BaseIcon :icon="Clipboard" :size="20" class="text-muted" />
-        <div class="perm-text">
-          <h2 class="perm-title">{{ t("permissions.clipboard.title") }}</h2>
-          <p class="perm-body">{{ t("permissions.clipboard.body") }}</p>
+    <div class="cards">
+      <BaseCard as="section">
+        <div class="perm-row">
+          <BaseIcon :icon="Clipboard" :size="20" class="text-muted" />
+          <div class="perm-text">
+            <h2 class="perm-title">{{ t("permissions.clipboard.title") }}</h2>
+            <p class="perm-body">{{ t("permissions.clipboard.body") }}</p>
+          </div>
         </div>
-      </div>
-    </BaseCard>
+      </BaseCard>
 
-    <BaseCard as="section">
-      <div class="perm-row">
-        <BaseIcon :icon="Globe" :size="20" class="text-muted" />
-        <div class="perm-text">
-          <h2 class="perm-title">{{ t("permissions.network.title") }}</h2>
-          <p class="perm-body">{{ t("permissions.network.body") }}</p>
+      <BaseCard as="section">
+        <div class="perm-row">
+          <BaseIcon :icon="Globe" :size="20" class="text-muted" />
+          <div class="perm-text">
+            <h2 class="perm-title">{{ t("permissions.network.title") }}</h2>
+            <p class="perm-body">{{ t("permissions.network.body") }}</p>
+          </div>
         </div>
-      </div>
-    </BaseCard>
+      </BaseCard>
 
-    <BaseCard as="section">
-      <div class="perm-row">
-        <BaseIcon :icon="FileText" :size="20" class="text-muted" />
-        <div class="perm-text">
-          <h2 class="perm-title">{{ t("permissions.files.title") }}</h2>
-          <p class="perm-body">{{ t("permissions.files.body") }}</p>
+      <BaseCard as="section">
+        <div class="perm-row">
+          <BaseIcon :icon="FileText" :size="20" class="text-muted" />
+          <div class="perm-text">
+            <h2 class="perm-title">{{ t("permissions.files.title") }}</h2>
+            <p class="perm-body">{{ t("permissions.files.body") }}</p>
+          </div>
         </div>
-      </div>
-    </BaseCard>
+      </BaseCard>
+    </div>
   </main>
 </template>
 
@@ -290,6 +294,11 @@ function toneClass(tone: string) {
   font-size: var(--text-sm);
   color: var(--color-muted);
   margin-bottom: 1rem;
+}
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 .group-label {
   font-size: 0.7rem;
