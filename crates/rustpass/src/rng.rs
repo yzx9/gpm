@@ -17,7 +17,7 @@ use crate::error::{Error, ErrorCode};
 /// Returns [`ErrorCode::StoreError`] if the OS RNG fails (essentially never on a
 /// booted device; the same mapping the seal path has always used).
 pub fn fill_random(out: &mut [u8]) -> Result<(), Error> {
-    getrandom::getrandom(out)
+    getrandom::fill(out)
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("OS RNG failed: {e}")))
 }
 
