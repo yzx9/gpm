@@ -938,6 +938,11 @@ pub enum ExpectedKind {
     Edit,
     /// Delete an existing entry.
     Delete,
+    /// Create a new entry. Guarded by an existence check (a teammate creating the
+    /// same name first surfaces a conflict), not a base-oid compare — there is no
+    /// read-time base for a brand-new entry, so `ExpectedEntry.base_oid` is unused
+    /// for this kind.
+    Create,
 }
 
 /// The base version a caller captured at read time, to guard a subsequent

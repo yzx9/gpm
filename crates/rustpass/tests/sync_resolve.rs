@@ -752,6 +752,95 @@ async fn autosync_detects_stale_edit_same_name_change() {
     );
 }
 
+/// R026 resurrection cell: a teammate DELETES the entry while the user is
+/// editing v1. The stale edit (base = v1 oid) is refused as
+/// `WriteOutcome::EntryConflict` with `current_oid: None` (the entry is absent at
+/// HEAD) — NOT silently committed as a resurrection. The entry stays deleted.
+/// Covers the edit × entry-absent matrix cell the edit × entry-changed test
+/// above does not (its `current_oid` is `Some`).
+#[tokio::test]
+async fn autosync_edit_refuses_when_teammate_deleted_entry_resurrection() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo_with(
+        vec![("entry.age", b"v1")],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
+        &recipient,
+    );
+    let config_dir = tempfile::tempdir().expect("config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("utf8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure");
+    let store = Arc::new(store);
+
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("entry present at v1");
+
+    // A teammate DELETES the entry on the remote (the resurrection trigger).
+    common::remove_entry_from_bare(bare_dir.path(), "entry.age", "remote deletes entry");
+
+    // The user, editing from the stale v1 snapshot, saves with the v1 base oid.
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid.clone(),
+                kind: ExpectedKind::Edit,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.set("entry", b"stale-edit").await }
+            },
+        )
+        .await
+        .expect("autosync write");
+
+    match outcome {
+        rustpass::WriteOutcome::EntryConflict {
+            name,
+            base_oid,
+            current_oid,
+            op,
+            ..
+        } => {
+            assert_eq!(name, "entry");
+            assert_eq!(base_oid, v1_oid);
+            assert_eq!(op, ExpectedKind::Edit);
+            assert!(
+                current_oid.is_none(),
+                "resurrection: entry absent at HEAD → current_oid None"
+            );
+        }
+        other => panic!("expected EntryConflict, got {other:?}"),
+    }
+
+    // The refusal did not resurrect the entry — it stays deleted locally and on
+    // the remote. (`current_oid: None` above already proves absence at HEAD; this
+    // pins the bare remote directly.)
+    assert!(
+        store.entry_oid("entry").await.unwrap().is_none(),
+        "entry stays deleted locally after the refused edit"
+    );
+    let bare = git2::Repository::open(bare_dir.path()).expect("open bare");
+    let head_tree = bare.head().expect("head").peel_to_tree().expect("tree");
+    assert!(
+        head_tree.get_path(std::path::Path::new("entry.age")).is_err(),
+        "remote HEAD carries no entry.age — the stale edit did NOT resurrect it"
+    );
+}
+
 /// Set up the R026 stale-edit conflict for the resolve tests: a store at v1 with
 /// its base oid captured, a teammate advancing "entry" to v2, and the user's
 /// stale-v1 edit refused as `EntryConflict`. Returns the store + the tempdirs
@@ -777,9 +866,7 @@ async fn stale_edit_conflict() -> (
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -821,6 +908,80 @@ async fn stale_edit_conflict() -> (
 
     let remote_tip = match outcome {
         rustpass::WriteOutcome::EntryConflict { remote_tip, .. } => remote_tip,
+        other => panic!("expected EntryConflict, got {other:?}"),
+    };
+    (store, bare_dir, config_dir, identity, recipient, remote_tip)
+}
+
+/// Set up the R026 stale-delete conflict for the resolve tests: a store at v1
+/// with its base oid captured, a teammate advancing "entry" to v2, and the
+/// user's stale-v1 delete refused as `EntryConflict` (`op = Delete`). Mirrors
+/// [`stale_edit_conflict`] but the local op is a DELETE. Returns the same tuple
+/// shape so the resolve tests read identically.
+async fn stale_delete_conflict() -> (
+    Arc<Store>,
+    tempfile::TempDir,
+    tempfile::TempDir,
+    String,
+    String,
+    String,
+) {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo_with(
+        vec![("entry.age", b"v1")],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
+        &recipient,
+    );
+    let config_dir = tempfile::tempdir().expect("config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure");
+    let store = Arc::new(store);
+
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("entry present at v1");
+
+    let newer = b"newer-from-teammate".to_vec();
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("entry.age", newer.as_slice())],
+        &recipient,
+        "remote advances same-name",
+    );
+
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid,
+                kind: ExpectedKind::Delete,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.delete("entry").await }
+            },
+        )
+        .await
+        .expect("autosync delete");
+
+    let remote_tip = match outcome {
+        rustpass::WriteOutcome::EntryConflict { op, remote_tip, .. } => {
+            assert_eq!(op, ExpectedKind::Delete, "delete conflict");
+            remote_tip
+        }
         other => panic!("expected EntryConflict, got {other:?}"),
     };
     (store, bare_dir, config_dir, identity, recipient, remote_tip)
@@ -936,6 +1097,84 @@ async fn entry_conflict_resolve_toctou_refuses_when_remote_moved() {
     );
 }
 
+/// R026 resolve — keep-mine (delete): confirming the deletion removes the entry
+/// locally AND on the remote, and pushes — the bare tip advances to the
+/// keep-mine removal commit. Pins the delete sibling of
+/// [`entry_conflict_keep_mine_edit_overwrites_and_pushes`].
+#[tokio::test]
+async fn entry_conflict_delete_keep_mine_removal_and_pushes() {
+    let (store, bare_dir, _config_dir, _identity, _recipient, remote_tip) =
+        stale_delete_conflict().await;
+    let bare_before = bare_head_oid(bare_dir.path());
+
+    let result = store
+        .resolve_entry_conflict(
+            &cancel_slot(),
+            "entry",
+            None,
+            &remote_tip,
+            ExpectedKind::Delete,
+            EntryConflictChoice::KeepMine,
+            None,
+        )
+        .await
+        .expect("keep-mine resolve");
+    assert!(result.changed, "keep-mine advanced HEAD");
+
+    // The entry is gone locally — `entry_oid` reports None (no blob at HEAD).
+    assert!(
+        store.entry_oid("entry").await.expect("entry_oid").is_none(),
+        "entry removed locally"
+    );
+    // The removal was pushed: the entry is gone from the bare remote's HEAD tree
+    // and the bare tip advanced to the keep-mine commit.
+    assert!(
+        !entry_exists_on_bare(bare_dir.path(), "entry.age"),
+        "entry.age removed from the bare remote"
+    );
+    assert_ne!(
+        bare_head_oid(bare_dir.path()),
+        bare_before,
+        "the bare tip advanced (the keep-mine removal was pushed)"
+    );
+}
+
+/// R026 resolve — keep-theirs (delete): a guarded no-op. The teammate's v2 stays
+/// in place locally and on the remote; nothing is committed or pushed.
+#[tokio::test]
+async fn entry_conflict_delete_keep_theirs_keeps_teammate_version() {
+    let (store, bare_dir, _config_dir, _identity, _recipient, remote_tip) =
+        stale_delete_conflict().await;
+    let bare_before = bare_head_oid(bare_dir.path());
+
+    let result = store
+        .resolve_entry_conflict(
+            &cancel_slot(),
+            "entry",
+            None,
+            &remote_tip,
+            ExpectedKind::Delete,
+            EntryConflictChoice::KeepTheirs,
+            None,
+        )
+        .await
+        .expect("keep-theirs resolve");
+    assert!(!result.changed, "keep-theirs changes nothing");
+
+    // The teammate's v2 survived (the stale delete was not forced through); the
+    // bare tip is unchanged (no commit pushed).
+    assert_eq!(
+        store.get("entry").await.expect("get").password(),
+        "newer-from-teammate",
+        "the teammate's v2 survived"
+    );
+    assert_eq!(
+        bare_head_oid(bare_dir.path()),
+        bare_before,
+        "no commit pushed"
+    );
+}
+
 /// R026 read primitive: `entry_oid` returns the blob oid for a present entry and
 /// `None` for one absent at HEAD (the signal the delete no-op rule keys on).
 #[tokio::test]
@@ -1036,6 +1275,51 @@ async fn autosync_delete_refuses_when_entry_changed() {
     );
 }
 
+/// R026: a delete built on the v1 base is a `NoChange` (not an EntryConflict)
+/// when a teammate ALREADY removed the same entry on the remote — there's
+/// nothing to delete and nothing to conflict over (R026 D7). Pins the
+/// `WriteOutcome::NoChange` branch distinct from the EntryConflict-on-advance
+/// case in [`autosync_delete_refuses_when_entry_changed`].
+#[tokio::test]
+async fn autosync_delete_returns_no_change_when_teammate_removed() {
+    let (bare_dir, _cfg, store, _recipient) = store_with_base(vec![("entry.age", b"v1")]).await;
+    let store = Arc::new(store);
+    let v1_oid = store
+        .entry_oid("entry")
+        .await
+        .expect("entry_oid")
+        .expect("present at v1");
+    // Teammate REMOVES entry.age from the remote (not advances).
+    remove_entry_from_bare(bare_dir.path(), "entry.age", "remote removes same-name");
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "entry".to_string(),
+                base_oid: v1_oid,
+                kind: ExpectedKind::Delete,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.delete("entry").await }
+            },
+        )
+        .await
+        .expect("autosync delete");
+    let head = match outcome {
+        rustpass::WriteOutcome::NoChange { head } => head,
+        other => panic!("expected NoChange, got {other:?}"),
+    };
+    assert!(!head.is_empty(), "NoChange carries the current HEAD hash");
+    // The entry is gone from the bare remote (the teammate's removal stands).
+    assert!(
+        !entry_exists_on_bare(bare_dir.path(), "entry.age"),
+        "entry.age stays removed on the remote"
+    );
+}
+
 /// R026: under AutoSync-OFF the base-version guard is skipped by design — a
 /// stale edit still commits locally (Written) and surfaces as a repo-level
 /// divergence at the next manual Sync. Pin the documented limitation.
@@ -1075,6 +1359,164 @@ async fn autosync_off_skips_base_check_even_with_expected() {
     assert!(
         matches!(outcome, rustpass::WriteOutcome::Written(_)),
         "autosync-off skips the base check → Written, got {outcome:?}"
+    );
+}
+
+/// R026: creating a name a teammate already took is refused as EntryConflict —
+/// their version survives unless the user explicitly overwrites. (Create is
+/// existence-based: a brand-new entry has no read-time base to compare.)
+#[tokio::test]
+async fn autosync_create_refuses_when_name_taken_remotely() {
+    let (bare_dir, _cfg, store, recipient) = store_with_base(vec![]).await;
+    let store = Arc::new(store);
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("taken.age", b"theirs")],
+        &recipient,
+        "remote creates taken",
+    );
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "taken".to_string(),
+                base_oid: String::new(),
+                kind: ExpectedKind::Create,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.create("taken", b"mine").await }
+            },
+        )
+        .await
+        .expect("autosync create");
+    match outcome {
+        rustpass::WriteOutcome::EntryConflict {
+            op, current_oid, ..
+        } => {
+            assert_eq!(op, ExpectedKind::Create);
+            assert!(current_oid.is_some(), "entry exists remotely (theirs)");
+        }
+        other => panic!("expected EntryConflict, got {other:?}"),
+    }
+    // The teammate's version survived (the create was refused, not clobbered).
+    assert_eq!(store.get("taken").await.expect("get").password(), "theirs");
+}
+
+/// R026: creating a free name (no teammate collision) proceeds normally — no
+/// false-positive conflict.
+#[tokio::test]
+async fn autosync_create_proceeds_when_name_is_free() {
+    let (_bare_dir, _cfg, store, _recipient) = store_with_base(vec![]).await;
+    let store = Arc::new(store);
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "fresh".to_string(),
+                base_oid: String::new(),
+                kind: ExpectedKind::Create,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.create("fresh", b"mine").await }
+            },
+        )
+        .await
+        .expect("autosync create");
+    assert!(
+        matches!(outcome, rustpass::WriteOutcome::Written(_)),
+        "free name → Written, got {outcome:?}"
+    );
+    assert_eq!(store.get("fresh").await.expect("get").password(), "mine");
+}
+
+/// R026 create resolve — keep-mine: overwrites the teammate's version with the
+/// caller's new secret (template applied via `create`) and pushes. Pins both
+/// halves of the contract — the local store reads "mine", AND the bare remote
+/// was actually overwritten (decrypt the pushed blob, assert the tip advanced).
+#[tokio::test]
+async fn entry_conflict_create_keep_mine_overwrites_and_pushes() {
+    // Manual setup (mirrors `stale_edit_conflict`) so the identity is retained
+    // for decrypting the pushed blob — `store_with_base` doesn't return it.
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo_with(
+        vec![],
+        vec![(TEST_RECIPIENTS_FILE, recipient.as_bytes())],
+        &recipient,
+    );
+    let config_dir = tempfile::tempdir().expect("config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure");
+    let store = Arc::new(store);
+
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("taken.age", b"theirs")],
+        &recipient,
+        "remote creates taken",
+    );
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            Some(ExpectedEntry {
+                name: "taken".to_string(),
+                base_oid: String::new(),
+                kind: ExpectedKind::Create,
+            }),
+            move || {
+                let s = s.clone();
+                async move { s.create("taken", b"mine").await }
+            },
+        )
+        .await
+        .expect("detect conflict");
+    let remote_tip = match outcome {
+        rustpass::WriteOutcome::EntryConflict { remote_tip, .. } => remote_tip,
+        other => panic!("expected EntryConflict, got {other:?}"),
+    };
+    let bare_before = bare_head_oid(bare_dir.path());
+    let result = store
+        .resolve_entry_conflict(
+            &cancel_slot(),
+            "taken",
+            Some(b"mine"),
+            &remote_tip,
+            ExpectedKind::Create,
+            EntryConflictChoice::KeepMine,
+            None,
+        )
+        .await
+        .expect("keep-mine resolve");
+    assert!(result.changed, "keep-mine advanced HEAD");
+    assert_eq!(store.get("taken").await.expect("get").password(), "mine");
+
+    // The bare remote was overwritten — decrypt the pushed blob and assert the
+    // tip advanced to the keep-mine create commit.
+    let blob = bare_blob(bare_dir.path(), "taken.age");
+    assert_eq!(
+        crypto::decrypt_bytes(&blob, identity.as_bytes(), None).unwrap(),
+        b"mine",
+        "remote HEAD == the keep-mine create (pushed)"
+    );
+    assert_ne!(
+        bare_head_oid(bare_dir.path()),
+        bare_before,
+        "the bare tip advanced (the keep-mine create was pushed)"
     );
 }
 
@@ -1164,5 +1606,79 @@ async fn sync_repo_pull_diverged_returns_diverged() {
         bare_head_oid(bare_dir.path()),
         bare_after_advance,
         "sync_repo must not push when the pull diverged"
+    );
+}
+
+/// R026 resolve — a divergence between the conflict and the resolve is refused.
+/// The conflict left local HEAD at the reviewed tip; if local AND remote each
+/// gain a commit in between (a fork — writes are serialized by `write_mu`, so
+/// this is defensive, but the refusal is load-bearing), the resolve's fetch sees
+/// `SyncOutcome::Diverged` and returns `PullFfFailed` rather than acting blind.
+#[tokio::test]
+async fn entry_conflict_resolve_refuses_when_repo_diverged() {
+    let (store, bare_dir, config_dir, _identity, recipient, remote_tip) =
+        stale_edit_conflict().await;
+
+    // Fork: a local-only commit AND a remote-only commit (neither is an ancestor
+    // of the other) so the resolve's fetch reports Diverged.
+    let repo_path = config_dir.path().join("repo");
+    local_commit_files(
+        &repo_path,
+        &[("local-only.txt", b"x")],
+        "local diverges post-conflict",
+    );
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("remote-only.age", b"y")],
+        &recipient,
+        "remote diverges post-conflict",
+    );
+
+    let err = store
+        .resolve_entry_conflict(
+            &cancel_slot(),
+            "entry",
+            Some(b"my-edit"),
+            &remote_tip,
+            ExpectedKind::Edit,
+            EntryConflictChoice::KeepMine,
+            None,
+        )
+        .await
+        .expect_err("a diverged resolve must fail, not act blind");
+    assert_eq!(err.code, "PULL_FF_FAILED");
+}
+
+/// R026: a create with `expected: None` (preset-create's contract — the frontend
+/// sends fields, not the rendered body, so a conflict can't be resolved
+/// client-side) skips the base-version guard. A same-name collision returns
+/// `Written`, not `EntryConflict`. Pins the documented gap so a future change
+/// that started passing `Some(Create)` here can't silently break preset create.
+#[tokio::test]
+async fn autosync_create_with_no_expected_skips_guard_even_on_collision() {
+    let (bare_dir, _cfg, store, recipient) = store_with_base(vec![]).await;
+    let store = Arc::new(store);
+    add_commit_to_bare(
+        bare_dir.path(),
+        vec![("taken.age", b"theirs")],
+        &recipient,
+        "remote creates taken",
+    );
+    let s = store.clone();
+    let outcome = store
+        .autosync_write(
+            &cancel_slot(),
+            None,
+            None, // no ExpectedEntry → guard skipped (preset-create contract)
+            move || {
+                let s = s.clone();
+                async move { s.create("taken", b"mine").await }
+            },
+        )
+        .await
+        .expect("autosync create");
+    assert!(
+        matches!(outcome, rustpass::WriteOutcome::Written(_)),
+        "no ExpectedEntry → no guard → Written even on collision, got {outcome:?}"
     );
 }

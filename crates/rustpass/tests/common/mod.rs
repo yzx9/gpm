@@ -233,6 +233,48 @@ pub fn create_test_git_repo_with(
     (bare_dir, clone_dir)
 }
 
+/// Remove `rel_path` from the bare repo's HEAD via a working-clone + commit +
+/// push back. The delete sibling of [`add_commit_to_bare`]: identical shape,
+/// minus the encrypt step (the file is gone, not rewritten). Mirrors the
+/// `index.remove_path` pattern the sync_resolve tests use for local deletions.
+#[allow(dead_code)]
+pub fn remove_entry_from_bare(
+    bare_path: &std::path::Path,
+    rel_path: &str,
+    message: &str,
+) -> git2::Oid {
+    let work_dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::clone(bare_path.to_str().unwrap(), work_dir.path()).unwrap();
+
+    let sig = git2::Signature::new("Test", "test@test.com", &git2_time(0)).unwrap();
+
+    // Drop the worktree file, then stage its removal (mirrors the local-delete
+    // pattern in `keep_mine_preserves_local_deletion`).
+    std::fs::remove_file(work_dir.path().join(rel_path)).unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .remove_path(std::path::Path::new(rel_path))
+        .unwrap_or_else(|_| panic!("remove_path {rel_path}"));
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+
+    let head = repo.head().unwrap().target().unwrap();
+    let parent = repo.find_commit(head).unwrap();
+
+    let commit_id = repo
+        .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+        .unwrap();
+
+    // Push back to bare repo (origin).
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let refspec = format!("{0}:{0}", format!("refs/heads/{branch}"));
+    let mut remote = repo.find_remote("origin").unwrap();
+    remote.push(&[&refspec], None).unwrap();
+
+    commit_id
+}
+
 /// Add a new commit to the bare repo with additional entries.
 #[allow(dead_code)]
 pub fn add_commit_to_bare(

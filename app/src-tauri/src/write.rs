@@ -167,9 +167,14 @@ pub(crate) async fn create_secret(
     content: String,
 ) -> Result<WriteOutcome, Error> {
     log::info!("create: {name}");
+    let expected = ExpectedEntry {
+        name: name.clone(),
+        base_oid: String::new(),
+        kind: ExpectedKind::Create,
+    };
     let store = state.store.clone();
     let body = content.into_bytes();
-    do_save(&state, &app, None, move || {
+    do_save(&state, &app, Some(expected), move || {
         let store = store.clone();
         async move { store.create(&name, &body).await }
     })
@@ -204,6 +209,11 @@ pub(crate) async fn create_from_preset_secret(
     log::info!("create: {name} (preset {preset_id})");
     let body = template::preset_body(preset, &fields_ref)?;
     let store = state.store.clone();
+    // R026: preset create is NOT base-version-guarded (custom create is). The
+    // keep-mine resolve would need to re-send the template-rendered body, which
+    // the frontend doesn't hold (it sends fields, not the body), so a conflict
+    // here can't be resolved client-side. A same-name preset collision stays a
+    // documented gap (rare: two devices filling the same preset fields).
     do_save(&state, &app, None, move || {
         let store = store.clone();
         async move { store.create(&name, &body).await }

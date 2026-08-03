@@ -1311,12 +1311,13 @@ impl Store {
             Err(e) => return Err(e),
         }
 
-        // Base-version guard (RFC R026): when the caller captured the entry's
-        // blob oid at read time, refuse the write if its current oid at HEAD
-        // (settled onto the remote by the pull above) differs from the base —
-        // the edit was built on a stale snapshot and would silently fast-forward
-        // over a teammate's change. `None` (create/preset/no captured base)
-        // skips the check, preserving the legacy path.
+        // Base-version guard (RFC R026): when the caller carries an expected
+        // entry, refuse the write if it would silently clobber a teammate's
+        // change. Edit/delete compare the captured base oid against the current
+        // oid at HEAD (settled onto the remote by the pull above); create uses an
+        // existence check (a teammate creating the same name first). `None` (no
+        // captured base / unguarded caller) skips the check, preserving the
+        // legacy path.
         if let Some(expected) = expected {
             let ExpectedEntry {
                 name,
@@ -1336,7 +1337,15 @@ impl Store {
                     .collect::<String>();
                 return Ok(WriteOutcome::NoChange { head });
             }
-            if current.as_deref() != Some(base_oid.as_str()) {
+            // create vs. a name a teammate already took (existence-based — a
+            // brand-new entry has no read-time base to compare): refuse so the
+            // user overwrites deliberately or keeps the existing one.
+            let conflict = if matches!(kind, ExpectedKind::Create) {
+                current.is_some()
+            } else {
+                current.as_deref() != Some(base_oid.as_str())
+            };
+            if conflict {
                 let remote_tip = self.current_head_hash().await?;
                 return Ok(WriteOutcome::EntryConflict {
                     name,
@@ -1619,7 +1628,10 @@ impl Store {
                 })
             }
             EntryConflictChoice::KeepMine => {
-                match kind {
+                // Each primitive returns the short hash of the commit it just made;
+                // reuse it instead of re-reading HEAD (push_locked sends refs without
+                // moving local HEAD, so the re-read would return the same commit).
+                let written = match kind {
                     ExpectedKind::Edit => {
                         let content = content.ok_or_else(|| {
                             Error::new(
@@ -1627,17 +1639,53 @@ impl Store {
                                 "Entry conflict keep-mine (edit) requires the edited content",
                             )
                         })?;
-                        self.set(name, content).await?;
+                        self.set(name, content).await?
                     }
-                    ExpectedKind::Delete => {
-                        self.delete(name).await?;
+                    ExpectedKind::Create => {
+                        let content = content.ok_or_else(|| {
+                            Error::new(
+                                ErrorCode::StoreError,
+                                "Entry conflict keep-mine (create) requires the new content",
+                            )
+                        })?;
+                        // `create` (not `set`) so the same template that shaped
+                        // the original attempt applies on the overwrite.
+                        self.create(name, content).await?
                     }
+                    ExpectedKind::Delete => self.delete(name).await?,
+                };
+                // The keep-mine already committed locally (`written.commit`). A push
+                // failure here would strand that commit: returning the raw error
+                // leaves the modal retryable, but a retry's tip-guard would compare
+                // the moved local HEAD against the reviewed tip and misfire ("remote
+                // changed" — it didn't; the local moved). So map EVERY push failure
+                // to PullFfFailed (terminal — the UI drops the modal and re-checks
+                // from the list), mirroring autosync_write's push-rejection handling.
+                // The stranded commit self-heals: the list's foreground sync pulls +
+                // pushes, publishing it (or surfacing a clean divergence). This
+                // matches autosync_write, which likewise strands a committed write on
+                // a non-rejection push error and recovers it on the next save/sync.
+                if let Err(e) = self.push_locked(cancel.clone(), None).await {
+                    return Err(if e.code == "PUSH_REJECTED" {
+                        Error::new(
+                            ErrorCode::PullFfFailed,
+                            "Entry conflict resolve: the remote changed again before the push",
+                        )
+                    } else {
+                        // Network/auth/etc.: the change IS saved locally — Sync to
+                        // publish it. Keep the original error in the message.
+                        Error::new(
+                            ErrorCode::PullFfFailed,
+                            format!(
+                                "Entry conflict resolve: your change is saved locally \
+                                 — Sync to publish it (push failed: {e})"
+                            ),
+                        )
+                    });
                 }
-                self.push_locked(cancel.clone(), None).await?;
-                let full = self.current_head_hash().await?;
                 Ok(SyncResult {
                     changed: true,
-                    head: full.chars().take(7).collect::<String>(),
+                    head: written.commit,
                     authenticity: pull.authenticity,
                 })
             }
