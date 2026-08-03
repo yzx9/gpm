@@ -6,13 +6,12 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{fmt, str};
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 use tokio::fs;
-use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use zeroize::Zeroizing;
 
@@ -75,7 +74,7 @@ pub struct Store {
     /// management — `Store` never touches the age/GPG libraries directly.
     /// Lazily resolved post-unlock — the backend kind lives in sealed
     /// `repo.json`, unreadable until app unlock — so `None` until
-    /// [`resolve_crypto`](Self::resolve_crypto) runs. `std::sync::Mutex` (not
+    /// [`resolve_crypto`](Self::resolve_crypto) runs. `Mutex` (not
     /// `tokio::sync`) because the guard is dropped before any `.await`:
     /// [`crypto`](Self::crypto)() clones the `Arc` out and releases.
     ///
@@ -84,29 +83,29 @@ pub struct Store {
     /// every backend is a stateless unit struct (`AgeBackend`, `GpgBackend`) —
     /// `GpgBackend`'s keyring is read through `RepoFileView` per call, never held
     /// on the struct. A stateful backend would need re-review before sharing.
-    crypto: std::sync::Mutex<Option<Arc<dyn CryptoBackend>>>,
+    crypto: Mutex<Option<Arc<dyn CryptoBackend>>>,
     /// The storage backend (git today; `ext:` extensions via the registry).
     /// Lazily resolved post-unlock — the backend type + root live in sealed
     /// `repo.json`, unreadable until app unlock — so `None` until
     /// [`resolve_storage`](Self::resolve_storage) or a setup path calls
-    /// [`resolve_and_set`](Self::resolve_and_set). `std::sync::Mutex` (not
+    /// [`resolve_and_set`](Self::resolve_and_set). `Mutex` (not
     /// `tokio::sync`) because the guard is dropped before any `.await`:
     /// [`storage`](Self::storage)() clones the `Arc` out and releases.
-    storage: std::sync::Mutex<Option<Arc<dyn StorageBackend>>>,
+    storage: Mutex<Option<Arc<dyn StorageBackend>>>,
     /// The most recent hard resolve failure (a tampered config, an unregistered
     /// `ext:` backend, …). Stashed by [`resolve_storage`](Self::resolve_storage)
     /// so [`storage`](Self::storage)() surfaces the specific reason instead of a
     /// generic `BackendNotAvailable`. Cleared on a successful
     /// [`set_storage_backend`](Self::set_storage_backend) /
     /// [`clear_storage_backend`](Self::clear_storage_backend).
-    resolve_err: std::sync::Mutex<Option<Error>>,
+    resolve_err: Mutex<Option<Error>>,
     /// The most recent hard crypto-resolve failure (an unknown crypto kind in
     /// `repo.json`). Stashed by [`resolve_crypto`](Self::resolve_crypto) so
     /// [`crypto`](Self::crypto)() surfaces the specific reason instead of a
     /// generic `BackendNotAvailable`. Cleared on a successful
     /// [`resolve_crypto`](Self::resolve_crypto) /
     /// [`clear_crypto_backend`](Self::clear_crypto_backend).
-    crypto_resolve_err: std::sync::Mutex<Option<Error>>,
+    crypto_resolve_err: Mutex<Option<Error>>,
     /// The backend registry (built-ins + `ext:` extensions). Injected by
     /// [`StoreBuilder::build`](crate::storage::StoreBuilder::build) and consulted
     /// at resolve time. Immutable after construction.
@@ -119,7 +118,7 @@ pub struct Store {
     /// the git index or let a reviewed divergence go stale vs local HEAD
     /// mid-resolution. Public mutation entry points acquire it; the orchestrator
     /// acquires it once and composes the lock-free `*_locked` inners.
-    write_mu: Mutex<()>,
+    write_mu: tokio::sync::Mutex<()>,
     /// Cached app-scoped `autosync` flag — the only app-scoped pref `rustpass`
     /// still consumes (`autosync_write` reads it). Owned by the app shell; seeded
     /// on startup and re-pushed on every mutation via [`Store::set_autosync`],
@@ -220,20 +219,20 @@ impl Store {
         registry: Arc<StorageRegistry>,
     ) -> Self {
         Self {
-            crypto: std::sync::Mutex::new(None),
-            storage: std::sync::Mutex::new(None),
-            resolve_err: std::sync::Mutex::new(None),
-            crypto_resolve_err: std::sync::Mutex::new(None),
+            crypto: Mutex::new(None),
+            storage: Mutex::new(None),
+            resolve_err: Mutex::new(None),
+            crypto_resolve_err: Mutex::new(None),
             registry,
             config: Config::new(config_dir, master_key),
             cached_identity: RwLock::new(None),
-            write_mu: Mutex::new(()),
+            write_mu: tokio::sync::Mutex::new(()),
             autosync: AtomicBool::new(true),
         }
     }
 
     /// Borrow the resolved storage backend, cloning its `Arc` out so the
-    /// `std::sync::Mutex` guard is dropped before any caller `.await`.
+    /// `Mutex` guard is dropped before any caller `.await`.
     ///
     /// Returns [`ErrorCode::BackendNotAvailable`] when the backend hasn't been
     /// resolved yet (pre-unlock, or after a resolve failure — `resolve_storage`
@@ -341,7 +340,7 @@ impl Store {
     /// specific reason instead of a generic `BackendNotAvailable`. Shared by the
     /// storage and crypto resolve paths — pass the slot (`resolve_err` /
     /// `crypto_resolve_err`).
-    fn stash_err(slot: &std::sync::Mutex<Option<Error>>, err: Error) {
+    fn stash_err(slot: &Mutex<Option<Error>>, err: Error) {
         if let Ok(mut s) = slot.lock() {
             *s = Some(err);
         }
@@ -349,14 +348,14 @@ impl Store {
 
     /// Clear the stashed resolve error for `slot` (a working backend supersedes
     /// it, or `reset` tears everything down).
-    fn clear_err(slot: &std::sync::Mutex<Option<Error>>) {
+    fn clear_err(slot: &Mutex<Option<Error>>) {
         if let Ok(mut s) = slot.lock() {
             *s = None;
         }
     }
 
     /// Borrow the resolved crypto backend, cloning its `Arc` out so the
-    /// `std::sync::Mutex` guard is dropped before any caller `.await`.
+    /// `Mutex` guard is dropped before any caller `.await`.
     ///
     /// Returns [`ErrorCode::BackendNotAvailable`] when the backend hasn't been
     /// resolved yet (pre-unlock, or after a resolve failure — `resolve_crypto`
@@ -2657,7 +2656,7 @@ mod tests {
         // The load-bearing contract for the RFC 0032 bug #1 fix: the slot holds
         // the running op's token only while the guard lives, then clears — so a
         // queued op arming under the next critical section isn't clobbered.
-        let slot: CancelSlot = Arc::new(std::sync::Mutex::new(None));
+        let slot: CancelSlot = Arc::new(Mutex::new(None));
         let token: CancelToken = Arc::new(AtomicBool::new(false));
         {
             let _armed = ArmedSlot::arm(slot.clone(), token.clone());
