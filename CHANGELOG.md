@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Creating a new store without a remote now works: the repository-URL field in setup was marked required, so leaving it empty silently blocked the **Create** button in the real app — even though the on-screen hint already said a remote was optional. You can now skip the URL and keep the store entirely local.
+- **Background sync** now runs while **App Lock** is on. Every scheduled background pull used to be silently skipped as soon as the app-launch biometric lock was enabled, so a store you rarely opened never caught up. The sync only needs the git credential (not your identity) to pull, so it now keeps your secrets current even when the app stays locked behind biometrics.
 
 ## [v0.15.1] - 2026-08-02
 

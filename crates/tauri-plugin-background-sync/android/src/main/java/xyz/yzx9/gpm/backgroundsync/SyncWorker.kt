@@ -12,8 +12,10 @@ import org.json.JSONObject
 
 /**
  * The periodic background-sync worker. Runs pull-only (the heavy-autofill
- * persona is read-only), gated on AutoSync + cadence + AppLock (all re-checked
- * in the Rust entry). Loads `libgpm_lib.so` (already packaged by Tauri's
+ * persona is read-only), gated on AutoSync + cadence (re-checked in the Rust
+ * entry). R064: the auth-free master key is permanent, so this syncs under App
+ * Lock too — the identity stays sealed under the separate vault key the worker
+ * never retrieves. Loads `libgpm_lib.so` (already packaged by Tauri's
  * `RustPlugin.kt`) and crosses into Rust via [nativeSync].
  *
  * Default no-arg constructor — WorkManager instantiates workers via reflection,
@@ -47,9 +49,9 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
             inputData.getString(BackgroundSyncScheduler.KEY_CONFIG_DIR)
                 ?: return Result.success() // stale work — nothing to do
 
-        // AppLock-skip: the auth-free master key is absent when AppLock is on
-        // (migrated to the biometric alias) or the store isn't set up. A
-        // background worker can't show the biometric prompt, so skip cleanly.
+        // No-key skip: the auth-free master key is absent only when the store
+        // isn't set up yet (R064: it's permanent — never migrated away on an App
+        // Lock toggle — so its absence is "not set up", never "App Lock on").
         val keyB64 = MasterKeyAccess.loadAuthFree(applicationContext) ?: return Result.success()
 
         val json =
