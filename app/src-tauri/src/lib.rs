@@ -133,6 +133,12 @@ pub(crate) struct AppState {
     /// behavior prefs (lock mode, clear timers, autosync, app-lock flag) moved
     /// here from `RepoConfig`. Persists at `app.json`; survives `reset_config`.
     pub(crate) app_config: app_config::AppConfigStore,
+    /// The Tauri app handle, so a migration that needs the Android Keystore
+    /// (m0007 vault-key relocate) can reach `secure_keystore()` without a
+    /// signature change to the whole migration engine. `Some` in the live app
+    /// (`init_state`), `None` on desktop and in tests (the keystore is inert /
+    /// absent there, so keystore-touching migrations no-op).
+    pub(crate) app_handle: Option<tauri::AppHandle>,
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +232,7 @@ async fn startup_master_key<R: tauri::Runtime>(
 /// # Panics
 ///
 /// Panics if the config directory cannot be determined.
-fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
+fn init_state(app: &tauri::App<tauri::Wry>) -> AppState {
     // Cold-start banner: version first (the thing bug reports most need to
     // pin), then build profile + target so a trace distinguishes dev vs
     // release and android vs desktop at a glance. Emitted BEFORE the keystore
@@ -304,6 +310,10 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     let app_state = AppState {
         store,
         app_config,
+        // `Some` so m0007 (vault-key relocate) can reach the Keystore. Concrete
+        // `Wry` (not generic `<R>`) because `app.handle()` is `AppHandle<R>` and
+        // AppState is non-generic — gpm only ever runs the default Wry runtime.
+        app_handle: Some(app.handle().clone()),
         lock_timer: identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         // Defaults until the first unlock/set refreshes them from config;

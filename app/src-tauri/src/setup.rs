@@ -711,6 +711,7 @@ mod tests {
         let state = AppState {
             store: Arc::new(Store::new(dir.path().to_path_buf(), None)),
             app_config: crate::app_config::AppConfigStore::new(dir.path()),
+            app_handle: None,
             lock_timer: crate::identity::IdleTimer::new(),
             pending_identity: Mutex::new(None),
             lock_mode: Mutex::new(LockMode::default()),

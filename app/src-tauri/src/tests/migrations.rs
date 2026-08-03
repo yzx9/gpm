@@ -35,6 +35,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
     AppState {
         store,
         app_config,
+        app_handle: None,
         lock_timer: crate::identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(LockMode::default()),
@@ -497,6 +498,53 @@ async fn m0005_completes_when_master_key_injected() {
     assert_eq!(
         state.app_config.get_pref().schema_version,
         APP_CONFIG_SCHEMA_VERSION,
+    );
+}
+
+/// m0007 desktop path: `app_handle` is `None` (no Keystore) and App Lock is off,
+/// so there is nothing to relocate — the migration just advances the schema.
+/// Seeds schema-6 (post-`m0006`) so only `m0007` runs. Pins the no-op + the bump.
+#[tokio::test]
+async fn m0007_no_op_on_desktop_advances_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
+    let state = build_state(
+        Arc::new(Store::new(dir.path().to_path_buf(), None)),
+        AppConfigStore::new(dir.path()),
+    );
+    // app_handle None + app_lock_enabled false ⇒ desktop no-op: bump to target.
+    run_app_migrations(&state).await;
+    assert_eq!(
+        state.app_config.get_pref().schema_version,
+        APP_CONFIG_SCHEMA_VERSION,
+    );
+}
+
+/// m0007 defers (`Pending`) at cold start under App Lock: `app_lock_enabled` is
+/// on but the vault key is not yet injected (it arrives only after the
+/// `app_unlock` biometric prompt). The engine must leave schema below target so
+/// the next `app_unlock` retries. Mirrors `m0005`'s app-lock guard test. (The
+/// App-Lock-ON keystore path — mint + rekey + delete — needs a real Keystore +
+/// `BiometricPrompt` and is covered on-device, not here.)
+#[tokio::test]
+async fn m0007_pends_under_app_lock_without_vault_key() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
+    let state = build_state(
+        Arc::new(Store::new(dir.path().to_path_buf(), None)), // keyless: vault_seal unkeyed
+        AppConfigStore::new(dir.path()),
+    );
+    state
+        .app_lock_enabled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    run_app_migrations(&state).await;
+
+    // Pending ⇒ schema stays at 6 (the engine returns without bumping).
+    assert_eq!(
+        state.app_config.get_pref().schema_version,
+        6,
+        "m0007 must defer until the vault key is injected at app_unlock"
     );
 }
 

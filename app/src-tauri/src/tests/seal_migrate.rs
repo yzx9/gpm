@@ -28,6 +28,7 @@ fn keyed_state(dir: &std::path::Path) -> AppState {
     AppState {
         store,
         app_config: crate::app_config::AppConfigStore::new(dir),
+        app_handle: None,
         lock_timer: crate::identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(rustpass::LockMode::default()),

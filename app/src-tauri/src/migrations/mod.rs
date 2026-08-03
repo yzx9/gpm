@@ -30,6 +30,7 @@ pub(crate) mod m0003_secure_screen_mode;
 pub(crate) mod m0004_verbose_from_debug;
 pub(crate) mod m0005_split_app_json;
 pub(crate) mod m0006_gate_idle_timeout;
+pub(crate) mod m0007_vault_key;
 
 /// Outcome of a single migration step.
 ///
@@ -50,6 +51,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (4, "0004_verbose_from_debug"),
     (5, "0005_split_app_json"),
     (6, "0006_gate_idle_timeout"),
+    (7, "0007_vault_key"),
 ];
 
 /// The `app.json`/`pref.json` schema version once every registered migration has
@@ -108,6 +110,7 @@ async fn apply_migration(state: &AppState, version: u32) -> Result<MigrationOutc
         4 => m0004_verbose_from_debug::apply(state, version).await,
         5 => m0005_split_app_json::apply(state, version).await,
         6 => m0006_gate_idle_timeout::apply(state, version).await,
+        7 => m0007_vault_key::apply(state, version).await,
         // Unreachable in practice — `version` comes from iterating `MIGRATIONS`,
         // whose every entry has a match arm above. Return an `Err` (not a panic)
         // so a future mismatch (a registry row without a dispatch arm) surfaces

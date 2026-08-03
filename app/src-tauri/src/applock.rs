@@ -443,12 +443,17 @@ pub(crate) async fn app_unlock(
                 })?
                 .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
             );
+            // R064: relocate the legacy master to the auth-free alias NOW (the
+            // bytes are in hand here) so it becomes the permanent auth-free
+            // master; m0007 then only has to mint the vault + re-key identity.
+            // Idempotent on retry (overwrites the same value). A failure aborts
+            // the unlock so the user retries rather than landing half-relocated.
+            ks.store(b64.as_str()).await?;
             let key = decode_master_key(&b64)
                 .ok_or_else(|| AppLockError::failed("Stored master key is malformed"))?;
             // D6: inject BOTH seals with this master so identity (still under
-            // master pre-m0007) stays readable if m0007's prompt cancels, and so
-            // m0005/m0006 un-defer. m0007 (chunk 6) relocates master→auth-free +
-            // mints the vault.
+            // master pre-m0007) stays readable if m0007's ENCRYPT cancels, and so
+            // m0005/m0006 un-defer. m0007 mints the distinct vault + re-keys.
             state.store.set_master_key(Some(key));
             state.store.set_vault_key(Some(key));
             (key, false)

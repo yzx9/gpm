@@ -177,6 +177,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
     let state = AppState {
         store,
         app_config,
+        app_handle: None,
         lock_timer: crate::identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(rustpass::LockMode::default()),
