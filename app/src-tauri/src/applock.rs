@@ -399,6 +399,13 @@ pub(crate) async fn app_unlock(
     if !state.app_locked.load(Ordering::SeqCst) {
         return Ok(());
     }
+    // Disarm the gate-idle timer for the duration of the unlock awaits (the
+    // DECRYPT prompt, m0007's ENCRYPT, run_app_migrations). A fire in that
+    // window would call do_app_lock mid-unlock, wiping vault_seal before
+    // app_locked clears — leaving the app rendered unlocked but unable to read
+    // identity (SealKeyUnavailable) until the next lock/unlock. reset_gate_idle
+    // _timer at the end of this fn re-arms it on success. Mirrors disable.
+    identity::disarm_gate_idle(&state);
     let ks = app.secure_keystore();
     // Load the auth-free master if present (post-m0007: permanent; upgrader
     // pre-m0007: absent — its master lives in the legacy biometric alias).
@@ -473,7 +480,9 @@ pub(crate) async fn app_unlock(
         // readable; the user re-disables) — no data loss either way.
         if state.store.is_identity_under_master().await {
             state.store.rekey_identity_to_vault().await?;
-            let _ = state.app_config.set_biometric_app_lock(true).await;
+            if let Err(e) = state.app_config.set_biometric_app_lock(true).await {
+                log::warn!("app-lock: resume set_biometric_app_lock persist failed: {e}");
+            }
             log::info!("app-lock: resumed unfinished master→vault re-key");
         }
     }

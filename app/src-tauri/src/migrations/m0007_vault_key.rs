@@ -41,6 +41,7 @@ use std::sync::atomic::Ordering;
 use base64::Engine;
 use rustpass::Error;
 use tauri_plugin_secure_keystore::{BiometricSlot, SecureKeystoreExt};
+use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::migrations::MigrationOutcome;
@@ -82,7 +83,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     //    its own marker, and a re-mint would strand it under the old vault key.
     if state.store.is_identity_under_master().await {
         let vault = rustpass::seal::generate_master_key()?;
-        let vault_b64 = crate::B64.encode(vault);
+        let vault_b64 = Zeroizing::new(crate::B64.encode(vault));
         // One-time ENCRYPT prompt (prompt text `None` → Kotlin fallback strings;
         // this is a one-shot migration). A cancel/reject ⇒ Pending so the next
         // app_unlock retries; nothing is stranded (master auth-free, identity
@@ -101,10 +102,16 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     //    is a no-op. vault_seal is keyed here (the mint above) or, on a resume,
     //    by app_unlock's retrieve of the existing vault key.
     state.store.rekey_identity_to_vault().await?;
-    // 6. Drop the legacy biometric alias — the master now lives auth-free.
-    //    Best-effort: a failure leaves a dead alias, but the split is complete
-    //    and the schema bump still lands.
-    if let Err(e) = ks.delete_biometric(BiometricSlot::Legacy).await {
+    // 6. Drop the legacy biometric alias — the master now lives auth-free. Gate
+    //    on identity existing: a vault key is only minted when identity exists
+    //    (step 4), so deleting legacy is safe only then. If identity is absent
+    //    (e.g. a pre-upgrade reset_config cleared the file but left the keystore
+    //    alias), KEEP the legacy alias as app_unlock's biometric fallback —
+    //    deleting it with no vault would lock the user out until a cold restart.
+    //    Best-effort: a delete failure leaves a dead alias, not a brick.
+    if state.store.has_identity()
+        && let Err(e) = ks.delete_biometric(BiometricSlot::Legacy).await
+    {
         log::warn!("0007_vault_key: legacy alias delete failed: {e:?}");
     }
     // 7. Advance the schema. Self-contained copy of the bump helper — migrations

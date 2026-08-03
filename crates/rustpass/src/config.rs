@@ -369,11 +369,31 @@ impl Config {
     /// pre-m0007 upgrader); `false` ⇒ it is under the vault (already migrated),
     /// the master key is not loaded, or the file is absent/unreadable. Never
     /// prompts and never errors — callers treat `false` as "not under master."
+    ///
+    /// # Security
+    ///
+    /// Materializes the age-identity **plaintext** into a transient `Vec<u8>`
+    /// (via the always-keyed `master_seal`) — this is NOT a cheap metadata
+    /// probe. Every caller today runs post-auth (`app_unlock`, `m0007`). The
+    /// headless worker must NEVER call this: its `master_seal` is permanently
+    /// keyed, so a worker call would read the identity headlessly and defeat the
+    /// vault gate the master/vault split exists to enforce.
     pub async fn is_identity_under_master(&self) -> bool {
         let Ok(raw) = fs::read(self.identity_path()).await else {
             return false;
         };
         self.master_seal.unseal("identity", &raw).is_ok()
+    }
+
+    /// Whether an `identity` file exists on disk (regardless of which seal keys
+    /// it). m0007 gates the legacy-alias delete on this: a vault key is only
+    /// minted when identity exists, so deleting the legacy alias is safe only
+    /// then — if identity is absent (e.g. a pre-upgrade `reset_config` cleared
+    /// the file but left the keystore alias), the legacy alias must stay as the
+    /// unlock fallback to avoid a session lockout.
+    #[must_use]
+    pub fn has_identity(&self) -> bool {
+        self.identity_path().exists()
     }
 
     /// Read each vault-tier file via `from`, re-seal via `to`, write atomically.
@@ -975,6 +995,29 @@ mod tests {
             b"plaintext-identity",
             "identity untouched by repo-only migrate",
         );
+    }
+
+    /// Pins `is_identity_under_master`'s bool in each residence — the input the
+    /// m0007 mint-gate reads. identity under master ⇒ true (mint runs); under a
+    /// distinct vault ⇒ false (mint skipped, existing vault preserved).
+    #[tokio::test]
+    async fn is_identity_under_master_reflects_seal_residence() {
+        let dir = tempfile::tempdir().unwrap();
+        let master = crate::seal::generate_master_key().unwrap();
+        let vault = crate::seal::generate_master_key().unwrap();
+        assert_ne!(master, vault);
+        let cfg = Config::new(dir.path().to_path_buf(), Some(master));
+        // identity under master (the bridge) ⇒ true.
+        cfg.save_identity(b"id", None).await.unwrap();
+        assert!(cfg.is_identity_under_master().await);
+        // moved under the distinct vault ⇒ false.
+        cfg.set_vault_key(Some(vault));
+        cfg.rekey_identity_to_vault().await.unwrap();
+        assert!(!cfg.is_identity_under_master().await);
+        // moved back to master (vault_seal=vault reads, master_seal=master writes) ⇒ true.
+        cfg.rekey_identity_to_master().await.unwrap();
+        cfg.set_vault_key(Some(master));
+        assert!(cfg.is_identity_under_master().await);
     }
 
     #[test]

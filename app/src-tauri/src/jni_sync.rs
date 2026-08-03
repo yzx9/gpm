@@ -218,6 +218,7 @@ mod jni {
 #[cfg(test)]
 mod tests {
     use crate::app_config::BackgroundSyncCadence;
+    use base64::Engine;
 
     use super::*;
 
@@ -249,5 +250,41 @@ mod tests {
             res,
             BackgroundSyncResult::Skipped { reason: "no_key" }
         ));
+    }
+
+    /// Pins the R064 chunk-7 wiring: `run_headless_sync` must call
+    /// `migrate_repo_seal` (not `migrate_seal`) so the pull-only worker never
+    /// touches vault-tier files. With a plaintext identity + the wiped
+    /// `vault_seal`, a revert to `migrate_seal` would `SealKeyUnavailable` on the
+    /// plaintext identity ⇒ `Error`; repo-only migrate skips it cleanly and the
+    /// worker skips `not_ready` (no repo.json).
+    #[tokio::test]
+    async fn headless_sync_leaves_plaintext_identity_untouched() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let app_cfg = AppConfigStore::new(dir.path());
+        app_cfg
+            .set_background_sync(BackgroundSyncCadence::Hours1)
+            .await
+            .expect("set cadence");
+        let master = rustpass::seal::generate_master_key().unwrap();
+        let master_b64 = crate::B64.encode(master);
+        std::fs::write(dir.path().join("identity"), b"plaintext-identity").unwrap();
+
+        let res = run_headless_sync(dir.path().to_path_buf(), master_b64).await;
+
+        assert!(
+            matches!(
+                res,
+                BackgroundSyncResult::Skipped {
+                    reason: "not_ready"
+                }
+            ),
+            "pull-only worker should skip cleanly, not error on vault-tier files"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("identity")).unwrap(),
+            b"plaintext-identity",
+            "headless worker must not touch vault-tier identity"
+        );
     }
 }

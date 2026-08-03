@@ -530,6 +530,13 @@ impl Store {
         self.config.is_identity_under_master().await
     }
 
+    /// Delegate for [`Config::has_identity`] — whether an `identity` file exists.
+    /// m0007 gates the legacy-alias delete on this. See [`Config::has_identity`].
+    #[must_use]
+    pub fn has_identity(&self) -> bool {
+        self.config.has_identity()
+    }
+
     /// One-time migration: wrap any plaintext config files in the seal
     /// envelope. No-op on desktop (no master key) and for already-wrapped
     /// files. Safe to call on every startup.
