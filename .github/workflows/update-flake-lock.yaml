@@ -49,5 +49,8 @@ jobs:
             git -c user.name='${{ github.actor }}' \
                 -c user.email='${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com' \
                 commit -m "build(deps): sync packageManager to pnpm@${NEW_PM}"
-            git push
+            # `gh pr checkout` leaves the local branch without upstream
+            # tracking, so a bare `git push` fails with "no upstream branch".
+            # Push HEAD to the matching remote branch explicitly instead.
+            git push origin "HEAD:$(git rev-parse --abbrev-ref HEAD)"
           fi
