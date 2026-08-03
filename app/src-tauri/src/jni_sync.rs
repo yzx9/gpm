@@ -135,9 +135,9 @@ mod jni {
     use std::path::PathBuf;
     use std::sync::OnceLock;
 
-    use jni::JNIEnv;
+    use jni::EnvUnowned;
+    use jni::errors::LogErrorAndDefault;
     use jni::objects::{JClass, JString};
-    use jni::sys::jstring;
     use tokio::runtime::Runtime;
 
     use super::BackgroundSyncResult;
@@ -167,43 +167,46 @@ mod jni {
     // The function body itself is safe Rust.
     #[allow(unsafe_code)]
     #[unsafe(no_mangle)]
-    pub extern "system" fn Java_xyz_yzx9_gpm_backgroundsync_SyncWorker_nativeSync(
-        mut env: JNIEnv,
-        _class: JClass,
-        config_dir: JString,
-        master_key_b64: JString,
-    ) -> jstring {
-        let config_dir: String = env
-            .get_string(&config_dir)
-            .ok()
-            .and_then(|s| s.to_str().ok().map(str::to_string))
-            .unwrap_or_default();
-        let master_key_b64: String = env
-            .get_string(&master_key_b64)
-            .ok()
-            .and_then(|s| s.to_str().ok().map(str::to_string))
-            .unwrap_or_default();
+    pub extern "system" fn Java_xyz_yzx9_gpm_backgroundsync_SyncWorker_nativeSync<'local>(
+        mut unowned_env: EnvUnowned<'local>,
+        _class: JClass<'local>,
+        config_dir: JString<'local>,
+        master_key_b64: JString<'local>,
+    ) -> JString<'local> {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<JString<'local>> {
+                // Kotlin passes valid non-null Strings; if a read fails the value
+                // degrades to "" so the sync skips on `no_key` / `not_ready`
+                // rather than throwing.
+                let config_dir: String = config_dir.try_to_string(env).unwrap_or_default();
+                let master_key_b64: String = master_key_b64.try_to_string(env).unwrap_or_default();
 
-        // `catch_unwind` so a Rust panic (e.g. a poisoned `Mutex`) returns an
-        // error JSON instead of unwinding through `extern "system"` and aborting
-        // the Worker process — Kotlin's `catch(Throwable)` can't
-        // catch a native abort.
-        let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            runtime().block_on(super::run_headless_sync(
-                PathBuf::from(config_dir),
-                master_key_b64,
-            ))
-        })) {
-            Ok(r) => r,
-            Err(_) => BackgroundSyncResult::Error {
-                message: "internal panic".to_string(),
-            },
-        };
-        let json = serde_json::to_string(&result)
-            .unwrap_or_else(|_| r#"{"status":"error","message":"serialize_failed"}"#.to_string());
-        env.new_string(json)
-            .map(|s| s.into_raw())
-            .unwrap_or(std::ptr::null_mut())
+                // `catch_unwind` so a Rust panic (e.g. a poisoned `Mutex`) inside
+                // the sync returns an error JSON instead of a null. (`with_env`
+                // already catches panics, but the `LogErrorAndDefault` policy
+                // below would turn one into a null — this inner guard preserves
+                // the error-JSON contract. Kotlin's `catch(Throwable)` can't
+                // catch a native abort either way.)
+                let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    runtime().block_on(super::run_headless_sync(
+                        PathBuf::from(config_dir),
+                        master_key_b64,
+                    ))
+                })) {
+                    Ok(r) => r,
+                    Err(_) => BackgroundSyncResult::Error {
+                        message: "internal panic".to_string(),
+                    },
+                };
+                let json = serde_json::to_string(&result).unwrap_or_else(|_| {
+                    r#"{"status":"error","message":"serialize_failed"}"#.to_string()
+                });
+                env.new_string(json)
+            })
+            // `LogErrorAndDefault` (not `ThrowRuntimeExAndDefault`): a JNI failure
+            // logs and returns a null string instead of throwing — the Kotlin
+            // Worker treats null as failure, matching the prior `unwrap_or(null)`.
+            .resolve::<LogErrorAndDefault>()
     }
 }
 
