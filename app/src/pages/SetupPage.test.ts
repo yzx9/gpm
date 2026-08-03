@@ -1199,11 +1199,12 @@ describe("SetupPage", () => {
         .setValue("git@github.com:user/repo.git");
       await flushPromises();
 
-      // Click "Generate Key" tab
-      const tabs = wrapper.findAll("button[type='button']");
-      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
-      expect(genTab).toBeDefined();
-      await genTab!.trigger("click");
+      // Click "Generate Key" tab (a BaseSegmentedControl radio, not a button)
+      const genLabel = wrapper
+        .findAll("label")
+        .find((l) => l.text().includes("Generate Key"));
+      expect(genLabel).toBeDefined();
+      await genLabel!.find('input[type="radio"]').trigger("change");
       await flushPromises();
 
       expect(wrapper.text()).toContain("Generate SSH Key");
@@ -1226,10 +1227,11 @@ describe("SetupPage", () => {
         .setValue("git@github.com:user/repo.git");
       await flushPromises();
 
-      // Switch to Generate tab
-      const tabs = wrapper.findAll("button[type='button']");
-      const genTab = tabs.find((b) => b.text().includes("Generate Key"));
-      await genTab!.trigger("click");
+      // Switch to Generate tab (a BaseSegmentedControl radio, not a button)
+      const genLabel = wrapper
+        .findAll("label")
+        .find((l) => l.text().includes("Generate Key"));
+      await genLabel!.find('input[type="radio"]').trigger("change");
       await flushPromises();
 
       // Click generate button

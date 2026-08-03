@@ -8,6 +8,7 @@ import { generateSshKey } from "@/api";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
+import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import { CircleCheck, Copy, KeyRound } from "@lucide/vue";
@@ -44,6 +45,10 @@ const isSshUrl = computed(() => isSshRepoUrl(repoUrl.value));
 
 // SSH key generation state — owned here, same behavior as the original.
 const sshKeySource = ref<"paste" | "generate">("paste");
+// BaseSegmentedControl's generic widens T to string; cast back to the union.
+function onSshKeySourceChange(selection: string): void {
+  sshKeySource.value = selection as "paste" | "generate";
+}
 const generatedPublicKey = ref("");
 const generating = ref(false);
 // Confirm-field controller for the generated-key passphrase (validate/reset).
@@ -117,35 +122,16 @@ async function copyPublicKey() {
   <!-- SSH key fields (shown for SSH URLs) -->
   <template v-if="isSshUrl">
     <!-- Tab toggle: Paste / Generate (hidden when showKeygen is false) -->
-    <div
+    <BaseSegmentedControl
       v-if="showKeygen"
-      class="flex gap-1 border border-edge rounded-md overflow-hidden"
-    >
-      <button
-        type="button"
-        :class="[
-          'flex-1 py-2 text-sm font-medium transition-colors',
-          sshKeySource === 'paste'
-            ? 'bg-accent text-on-accent active:bg-accent-deep'
-            : 'bg-surface active:bg-hover',
-        ]"
-        @click="sshKeySource = 'paste'"
-      >
-        {{ t("setup.auth.tabPasteKey") }}
-      </button>
-      <button
-        type="button"
-        :class="[
-          'flex-1 py-2 text-sm font-medium transition-colors',
-          sshKeySource === 'generate'
-            ? 'bg-accent text-on-accent active:bg-accent-deep'
-            : 'bg-surface active:bg-hover',
-        ]"
-        @click="sshKeySource = 'generate'"
-      >
-        {{ t("setup.auth.tabGenerateKey") }}
-      </button>
-    </div>
+      name="ssh-key-source"
+      :model-value="sshKeySource"
+      :options="[
+        { label: t('setup.auth.tabPasteKey'), value: 'paste' },
+        { label: t('setup.auth.tabGenerateKey'), value: 'generate' },
+      ]"
+      @change="onSshKeySourceChange"
+    />
 
     <!-- Paste key (or always-shown SSH block when keygen hidden) -->
     <template v-if="sshKeySource === 'paste' || !showKeygen">
