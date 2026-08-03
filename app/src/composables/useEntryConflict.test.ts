@@ -51,6 +51,7 @@ describe("useEntryConflict", () => {
   function mountConflict() {
     const onResolved = vi.fn();
     const onPullFfFailed = vi.fn();
+    const onAuthenticityBlocked = vi.fn();
     let handle!: Handle;
     const Host = defineComponent({
       setup() {
@@ -58,12 +59,20 @@ describe("useEntryConflict", () => {
           resolveFailedKey: "entry.resolveFailed",
           onResolved,
           onPullFfFailed,
+          onAuthenticityBlocked,
         });
         return () => null;
       },
     });
     const { wrapper, lock } = mountWithApp(Host);
-    return { wrapper, lock, handle, onResolved, onPullFfFailed };
+    return {
+      wrapper,
+      lock,
+      handle,
+      onResolved,
+      onPullFfFailed,
+      onAuthenticityBlocked,
+    };
   }
 
   it("keep_mine edit re-sends the captured pendingBody as content via resolve_entry_conflict (runWithAuth path)", async () => {
@@ -198,6 +207,63 @@ describe("useEntryConflict", () => {
 
     // Re-raise the same conflict WITHOUT recapturing a body: assign the ref
     // directly so openConflict (which would reset pendingBody) is bypassed.
+    handle.conflict.value = PAYLOAD;
+    await flushPromises();
+
+    await handle.resolveConflict("keep_mine");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      content: null,
+      op: "edit",
+      choice: "keep_mine",
+      expectedRemoteOid: PAYLOAD.remote_tip,
+      name: PAYLOAD.name,
+    });
+  });
+
+  it("an authenticity-blocked resolve routes to onAuthenticityBlocked, not onResolved (no false 'saved')", async () => {
+    // Pins the R026 #1 fix: resolve_entry_conflict returns Ok with
+    // authenticity.blocked=true (Enforce refused the re-fetch — nothing
+    // committed, HEAD unchanged). The composable must NOT call onResolved
+    // (which the page uses to toast success); it routes to onAuthenticityBlocked
+    // so the page surfaces the block instead.
+    vi.mocked(invoke).mockResolvedValue({
+      ...PULL_RESULT,
+      authenticity: { ...PULL_RESULT.authenticity, blocked: true },
+    });
+    const { handle, onResolved, onAuthenticityBlocked } = mountConflict();
+    handle.openConflict(PAYLOAD, "my-body");
+    await flushPromises();
+
+    await handle.resolveConflict("keep_mine");
+    await flushPromises();
+
+    expect(onAuthenticityBlocked).toHaveBeenCalledTimes(1);
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(handle.conflict.value).toBeNull();
+  });
+
+  it("unmount wipes pendingBody — a subsequent keep_mine edit sends content:null (F1 unmount window)", async () => {
+    // Pins the second F1 hook (onBeforeUnmount): a route-away while the modal is
+    // open must null the captured plaintext. Asserted indirectly as the onLock
+    // test — after unmount + a re-raised conflict WITHOUT recapturing a body,
+    // keep_mine edit sends content:null (a surviving pendingBody would send
+    // "my-body"). The onLock test above covers the hard-lock window; this covers
+    // the unmount window onLock does not fire on.
+    vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
+    const { wrapper, lock, handle } = mountConflict();
+    handle.openConflict(PAYLOAD, "my-body");
+    await flushPromises();
+
+    // Unmount fires onBeforeUnmount → nulls pendingBody (the unmount half of F1).
+    wrapper.unmount();
+    await flushPromises();
+
+    // Re-cache the identity (mirrors a fresh mount) so runWithAuth runs the op
+    // instead of parking; then re-raise the conflict WITHOUT recapturing a body.
+    lock.setLocked(false);
+    await flushPromises();
     handle.conflict.value = PAYLOAD;
     await flushPromises();
 

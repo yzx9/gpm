@@ -33,6 +33,7 @@
   "createFailed": "Failed to create secret",
   "adoptedRemote": "Adopted the remote version",
   "keptMine": "✓ Kept mine (commit {head})",
+  "keptTheirs": "✓ Kept the existing one",
   "remoteChanged": "The remote changed since you reviewed this — rechecking…",
   "resolveFailed": "Could not resolve the divergence"
 }

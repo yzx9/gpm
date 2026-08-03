@@ -133,6 +133,11 @@ const {
     toast.info(t("entry.remoteChanged"));
     navBack(router, { name: "entries" });
   },
+  onAuthenticityBlocked() {
+    // Enforce refused the resolve's re-fetch — nothing saved. Stay + explain
+    // (mirrors the save path's authenticity_blocked branch).
+    error.value = t("entry.saveBlocked");
+  },
 });
 
 onMounted(loadBody);

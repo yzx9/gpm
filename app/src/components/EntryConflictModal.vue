@@ -15,6 +15,7 @@ import {
   showPassword as showPasswordCmd,
   type AppError,
   type EntryConflictChoice,
+  type EntryConflictOp,
 } from "@/api";
 import type { EntryConflictPayload } from "@/composables";
 import { Z, useSecretReveal } from "@/composables";
@@ -53,24 +54,96 @@ const headingEl = ref<HTMLHeadingElement | null>(null);
 const previewLoading = ref(false);
 const previewError = ref("");
 
-const isEdit = computed(() => props.conflict?.op === "edit");
-const heading = computed(() =>
-  isEdit.value
-    ? t("common.entryConflict.headingEdit")
-    : t("common.entryConflict.headingDelete"),
+const op = computed(() => props.conflict?.op ?? "edit");
+const heading = computed(
+  () =>
+    (
+      ({
+        edit: t("common.entryConflict.headingEdit"),
+        delete: t("common.entryConflict.headingDelete"),
+        create: t("common.entryConflict.headingCreate"),
+      }) as const
+    )[op.value],
 );
-/** The discard-your-work action — keep-theirs for edit, keep-theirs for delete. */
-const keepTheirsLabel = computed(() =>
-  isEdit.value
-    ? t("common.entryConflict.useTheirsEdit")
-    : t("common.entryConflict.keepTheirsDelete"),
+/** The discard-your-work action — keep-theirs (drops your edit/delete/create). */
+const keepTheirsLabel = computed(
+  () =>
+    (
+      ({
+        edit: t("common.entryConflict.useTheirsEdit"),
+        delete: t("common.entryConflict.keepTheirsDelete"),
+        create: t("common.entryConflict.keepTheirsCreate"),
+      }) as const
+    )[op.value],
 );
 /** The informed-overwrite/remove action — keep-mine. */
-const keepMineLabel = computed(() =>
-  isEdit.value
-    ? t("common.entryConflict.useMineEdit")
-    : t("common.entryConflict.deleteAnyway"),
+const keepMineLabel = computed(
+  () =>
+    (
+      ({
+        edit: t("common.entryConflict.useMineEdit"),
+        delete: t("common.entryConflict.deleteAnyway"),
+        create: t("common.entryConflict.overwriteCreate"),
+      }) as const
+    )[op.value],
 );
+// Step-2 contextual confirm copy, keyed by (choice, op). Returns an i18n key.
+const confirmHeading = computed(() => {
+  const byChoice: Record<EntryConflictChoice, Record<EntryConflictOp, string>> = {
+    keep_theirs: {
+      edit: "common.entryConflict.confirmKeepTheirsHeading",
+      delete: "common.entryConflict.confirmKeepTheirsDeleteHeading",
+      create: "common.entryConflict.confirmKeepTheirsCreateHeading",
+    },
+    keep_mine: {
+      edit: "common.entryConflict.confirmKeepMineEditHeading",
+      delete: "common.entryConflict.confirmDeleteHeading",
+      create: "common.entryConflict.confirmKeepMineCreateHeading",
+    },
+  };
+  return (byChoice[pendingChoice.value ?? "keep_mine"] ?? {})[op.value];
+});
+const confirmLine = computed(() => {
+  const byChoice: Record<EntryConflictChoice, Record<EntryConflictOp, string>> = {
+    keep_theirs: {
+      edit: "common.entryConflict.confirmKeepTheirsLine1",
+      delete: "common.entryConflict.confirmKeepTheirsDeleteLine1",
+      create: "common.entryConflict.confirmKeepTheirsCreateLine1",
+    },
+    keep_mine: {
+      edit: "common.entryConflict.confirmKeepMineEditLine1",
+      delete: "common.entryConflict.confirmDeleteLine1",
+      create: "common.entryConflict.confirmKeepMineCreateLine1",
+    },
+  };
+  return (byChoice[pendingChoice.value ?? "keep_mine"] ?? {})[op.value];
+});
+// Confirm button label — choice + op. keep-theirs discards YOUR change and
+// keeps theirs, so its wording is op-specific (delete/create reuse the step-1
+// "keep theirs" labels); keep-mine is the overwrite/remove (edit/create
+// "overwrite", delete "delete").
+const confirmBtnIdle = computed(() => {
+  if (pendingChoice.value === "keep_theirs") {
+    return op.value === "delete"
+      ? t("common.entryConflict.keepTheirsDelete")
+      : op.value === "create"
+        ? t("common.entryConflict.keepTheirsCreate")
+        : t("common.entryConflict.discardMyEdit");
+  }
+  return op.value === "delete"
+    ? t("common.entryConflict.deleteBtn")
+    : t("common.entryConflict.overwrite");
+});
+const confirmBtnBusy = computed(() => {
+  if (pendingChoice.value === "keep_theirs") {
+    return op.value === "delete" || op.value === "create"
+      ? t("common.entryConflict.keepingTheirs")
+      : t("common.entryConflict.discarding");
+  }
+  return op.value === "delete"
+    ? t("common.entryConflict.deleting")
+    : t("common.entryConflict.overwriting");
+});
 
 function openConfirm(choice: EntryConflictChoice) {
   pendingChoice.value = choice;
@@ -91,7 +164,14 @@ function cancelAll() {
 /** Opt-in: reveal the teammate's current value (local HEAD already IS their
  *  version at the conflict moment) under the secure-reveal contract — same
  *  FLAG_SECURE + auto-clear as Show Password. Surfaces a clear error if it can't
- *  decrypt (recipient set changed); keep-theirs stays a stated leap of faith. */
+ *  decrypt (recipient set changed); keep-theirs stays a stated leap of faith.
+ *
+ *  Tradeoff (R026): `show_password` runs `maybe_soft_wipe`, which under the
+ *  default Immediate auto-lock wipes the identity cache the edit save deferred
+ *  (so a keep-mine-edit resolve could reuse it without a second unlock). After a
+ *  Preview, a keep-mine-edit resolve therefore re-prompts for unlock via
+ *  `runWithAuth` — safe, just one extra prompt. Coupling the canonical reveal
+ *  path to conflict-state to avoid it would be worse than the prompt. */
 async function previewTheirs() {
   if (!props.conflict || previewLoading.value) return;
   previewError.value = "";
@@ -199,10 +279,12 @@ watch(
     </p>
 
     <div class="flex flex-col gap-2">
-      <!-- keep-theirs discards YOUR work → the danger action (D4). -->
-      <button class="btn-danger" @click="openConfirm('keep_theirs')">
+      <!-- Both step-1 choices are neutral outline — danger is reserved for the
+           step-2 confirm (mirrors DivergenceModal: the sheet doesn't bias toward
+           either path; the destructive action is re-confirmed in red). -->
+      <BaseButton variant="outline" block @click="openConfirm('keep_theirs')">
         {{ keepTheirsLabel }}
-      </button>
+      </BaseButton>
       <BaseButton variant="outline" block @click="openConfirm('keep_mine')">
         {{ keepMineLabel }}
       </BaseButton>
@@ -232,61 +314,17 @@ watch(
       class="text-base font-medium mb-2 text-danger"
       tabindex="-1"
     >
-      <template v-if="pendingChoice === 'keep_theirs'">
-        {{ t("common.entryConflict.confirmKeepTheirsHeading") }}
-      </template>
-      <template v-else-if="isEdit">
-        {{ t("common.entryConflict.confirmKeepMineEditHeading") }}
-      </template>
-      <template v-else>
-        {{ t("common.entryConflict.confirmDeleteHeading") }}
-      </template>
+      {{ t(confirmHeading) }}
     </h2>
 
     <p class="text-sm mb-3">
-      <template v-if="pendingChoice === 'keep_theirs'">
-        {{
-          t("common.entryConflict.confirmKeepTheirsLine1", {
-            name: conflict!.name,
-          })
-        }}
-      </template>
-      <template v-else-if="isEdit">
-        {{
-          t("common.entryConflict.confirmKeepMineEditLine1", {
-            name: conflict!.name,
-          })
-        }}
-      </template>
-      <template v-else>
-        {{
-          t("common.entryConflict.confirmDeleteLine1", { name: conflict!.name })
-        }}
-      </template>
+      {{ t(confirmLine, { name: conflict!.name }) }}
     </p>
 
     <div class="flex flex-col gap-2">
-      <button class="btn-danger" :disabled="resolving" @click="confirm">
-        <BaseSpinner v-if="resolving" />
-        <template v-if="resolving">
-          {{
-            pendingChoice === "keep_theirs"
-              ? t("common.entryConflict.discarding")
-              : isEdit
-                ? t("common.entryConflict.overwriting")
-                : t("common.entryConflict.deleting")
-          }}
-        </template>
-        <template v-else>
-          {{
-            pendingChoice === "keep_theirs"
-              ? t("common.entryConflict.discardMyEdit")
-              : isEdit
-                ? t("common.entryConflict.overwrite")
-                : t("common.entryConflict.deleteBtn")
-          }}
-        </template>
-      </button>
+      <BaseButton variant="danger" size="sm" :loading="resolving" @click="confirm">
+        {{ resolving ? confirmBtnBusy : confirmBtnIdle }}
+      </BaseButton>
       <BaseButton size="sm" :disabled="resolving" @click="cancelConfirm">
         {{ t("common.button.cancel") }}
       </BaseButton>
@@ -295,37 +333,9 @@ watch(
 </template>
 
 <style scoped>
-/* Mirrors DivergenceModal's danger button + divergence block styles so the two
-   conflict modals read as one family. */
-.btn-danger {
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 48px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-}
-.btn-danger:active:not(:disabled) {
-  background: var(--color-danger);
-  color: var(--color-surface);
-}
-@media (hover: hover) {
-  .btn-danger:hover:not(:disabled) {
-    background: var(--color-danger);
-    color: var(--color-surface);
-  }
-}
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
+/* The divergence-block styles mirror DivergenceModal so the two conflict modals
+   read as one family. The danger actions use BaseButton variant="danger"
+   (DivergenceModal migrated off a bespoke .btn-danger — kept there too). */
 .div-block {
   border-left: 3px solid var(--color-edge);
   padding-left: 0.5rem;
@@ -363,6 +373,15 @@ watch(
   align-items: center;
   gap: 0.4rem;
   margin-bottom: 0.5rem;
+  min-height: 44px;
+}
+.ec-preview-btn:active:not(:disabled) {
+  opacity: 0.7;
+}
+@media (hover: hover) {
+  .ec-preview-btn:hover:not(:disabled) {
+    opacity: 0.7;
+  }
 }
 .ec-preview-btn:disabled {
   opacity: 0.5;

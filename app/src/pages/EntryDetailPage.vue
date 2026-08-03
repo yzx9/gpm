@@ -220,6 +220,11 @@ const {
     toast.info(t("entry.remoteChanged"));
     navBack(router, { name: "entries" });
   },
+  onAuthenticityBlocked() {
+    // Enforce refused the resolve's re-fetch — nothing deleted. Stay + explain
+    // (mirrors the save path's authenticity_blocked branch).
+    error.value = t("entry.deleteBlocked");
+  },
 });
 
 async function showPassword() {

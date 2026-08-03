@@ -9,6 +9,7 @@ import {
   previewCreate,
   type AppError,
   type DivergenceChoice,
+  type EntryConflictChoice,
   type PullResult,
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
@@ -17,10 +18,12 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
+import EntryConflictModal from "@/components/EntryConflictModal.vue";
 import {
   isAuthCancelled,
   useCancellableSave,
   useDivergence,
+  useEntryConflict,
   useLockState,
   useSecureClaim,
   useToast,
@@ -75,6 +78,34 @@ const {
   },
 });
 
+const {
+  conflict: entryConflict,
+  resolving: entryConflictResolving,
+  conflictError: entryConflictError,
+  openConflict,
+  resolveConflict,
+  cancelConflict,
+} = useEntryConflict({
+  resolveFailedKey: "create.resolveFailed",
+  onResolved(result: PullResult, choice: EntryConflictChoice) {
+    toast.success(
+      choice === "keep_mine"
+        ? t("create.saved", { commit: result.head })
+        : t("create.keptTheirs"),
+    );
+    navBack(router, { name: "entries" });
+  },
+  onPullFfFailed() {
+    toast.info(t("create.remoteChanged"));
+    navBack(router, { name: "entries" });
+  },
+  onAuthenticityBlocked() {
+    // Enforce refused the resolve's re-fetch — nothing created. Stay + explain
+    // (mirrors the save path's authenticity_blocked branch).
+    error.value = t("create.saveBlocked");
+  },
+});
+
 // Debounced template lookup + preview (location-based, gopass).
 watch([customName, customContent], () => {
   if (previewTimer) clearTimeout(previewTimer);
@@ -117,6 +148,11 @@ async function onSave() {
     if (outcome.kind === "written") {
       toast.success(t("create.saved", { commit: outcome.commit }));
       navBack(router, { name: "entries" });
+    } else if (outcome.kind === "entry_conflict") {
+      // R026: a teammate created the same name — refuse and let the user pick.
+      const { kind: _kind, ...payload } = outcome;
+      void _kind;
+      openConflict(payload, customContent.value);
     } else if (outcome.kind === "needs_divergence_resolve") {
       const { kind: _kind, ...preview } = outcome;
       void _kind;
@@ -236,6 +272,14 @@ onBeforeUnmount(() => {
       :error="divergeError"
       @resolve="resolveDivergence"
       @close="cancelDivergence"
+    />
+
+    <EntryConflictModal
+      :conflict="entryConflict"
+      :resolving="entryConflictResolving"
+      :error="entryConflictError"
+      @resolve="resolveConflict"
+      @close="cancelConflict"
     />
   </main>
 </template>

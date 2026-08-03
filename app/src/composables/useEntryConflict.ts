@@ -29,7 +29,7 @@ export interface EntryConflictPayload {
  * entry-conflict sibling of {@link useDivergence}. Owns the modal state
  * (`conflict`/`resolving`/`conflictError`) and the resolve/cancel logic.
  *
- * `keep_mine` (edit) re-encrypts the caller's edited body, so it is
+ * `keep_mine` (edit/create) re-encrypts the caller's body, so it is
  * identity-gated (`runWithAuth`); `keep_mine` (delete) and `keep_theirs` need no
  * identity. `PULL_FF_FAILED` (the remote moved again since the user reviewed)
  * routes to `onPullFfFailed`; `AUTH_CANCELLED` is swallowed. The caller decides
@@ -52,6 +52,11 @@ export function useEntryConflict(opts: {
   ) => void;
   /** `PULL_FF_FAILED` — the remote moved since the user reviewed; the page recovers. */
   onPullFfFailed: () => void;
+  /** Enforce signature verification refused the resolve's re-fetch (an unverified
+   *  remote commit): nothing was committed and HEAD is unchanged. The block itself
+   *  is correct; this surfaces it instead of `onResolved`'s success toast (mirrors
+   *  the save path's `authenticity_blocked`). */
+  onAuthenticityBlocked: (result: PullResult) => void;
 }): {
   conflict: Ref<EntryConflictPayload | null>;
   resolving: Ref<boolean>;
@@ -115,22 +120,34 @@ export function useEntryConflict(opts: {
   async function resolveConflict(choice: EntryConflictChoice) {
     if (!conflict.value) return;
     const { name, remote_tip, op } = conflict.value;
-    // Only a keep-mine edit re-sends plaintext; delete + keep-theirs carry none.
+    // Only a keep-mine edit/create re-sends plaintext; delete + keep-theirs
+    // carry none.
     const content =
-      op === "edit" && choice === "keep_mine" ? pendingBody : null;
+      (op === "edit" || op === "create") && choice === "keep_mine"
+        ? pendingBody
+        : null;
     resolving.value = true;
     conflictError.value = "";
     try {
       const result =
-        choice === "keep_mine" && op === "edit"
-          ? // keep-mine edit re-encrypts → identity-gated (the F4-deferred cache is
-            // still warm; runWithAuth prompts only if it expired).
+        choice === "keep_mine" && (op === "edit" || op === "create")
+          ? // keep-mine edit/create re-encrypts → identity-gated (the F4-deferred
+            // cache is still warm for edit; create prompts if it expired).
             await runWithAuth(() =>
               resolveEntryConflict(name, content, remote_tip, op, choice),
             )
           : await resolveEntryConflict(name, content, remote_tip, op, choice);
       conflict.value = null;
       pendingBody = null;
+      // Enforce may refuse the resolve's re-fetch (an unverified remote commit).
+      // The block is correct (nothing committed, HEAD unchanged) — don't toast
+      // "saved"; route to the page's blocked handler instead of onResolved's
+      // success toast, mirroring the save path's authenticity_blocked branch.
+      // (useDivergence has the same gap — a systemic follow-up, not fixed here.)
+      if (result.authenticity?.blocked) {
+        opts.onAuthenticityBlocked(result);
+        return;
+      }
       opts.onResolved(result, choice, op);
     } catch (e) {
       if (isAuthCancelled(e)) return;

@@ -64,6 +64,40 @@ describe("CreateCustomPage", () => {
     expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
 
+  it("on entry_conflict outcome, surfaces the per-entry modal (create op)", async () => {
+    // R026: a teammate created the same name — the create surfaces the
+    // EntryConflictModal (create op) instead of overwriting silently. Pins the
+    // create-conflict modal render (heading + name + op-specific copy), the one
+    // base-version-aware op with no prior frontend coverage.
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "create_secret")
+        return Promise.resolve({
+          kind: "entry_conflict",
+          name: "misc/foo",
+          base_oid: "",
+          current_oid: "theirs-oid",
+          remote_tip: "tip",
+          op: "create",
+        });
+      if (cmd === "lookup_template") return Promise.resolve(null);
+      if (cmd === "preview_create") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(CreateCustomPage).wrapper;
+    await flushPromises();
+    await w.find('input[id="c-name"]').setValue("misc/foo");
+    await w.find('textarea[id="c-content"]').setValue("hunter2");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+
+    // The per-entry conflict sheet shows the create-op heading + the name.
+    expect(w.text()).toContain("This name is already in use");
+    expect(w.text()).toContain("misc/foo");
+    // op-specific step-1 labels render (create keeps existing / overwrites).
+    expect(w.text()).toContain("Keep the existing one");
+    expect(w.text()).toContain("Overwrite with mine");
+  });
+
   it("Back returns to the pick step", async () => {
     const w = mountWithApp(CreateCustomPage).wrapper;
     await flushPromises();

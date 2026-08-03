@@ -62,7 +62,7 @@ describe("EntryConflictModal", () => {
     const wrapper = mountModal({ props: { conflict: CONFLICT } });
     await flushPromises();
 
-    // Step 1 danger button = "Use their version" (useTheirsEdit).
+    // Step 1 outline button = "Use their version" (useTheirsEdit).
     const keepTheirs = wrapper
       .findAll("button")
       .find((b) => b.text().includes("Use their version"))!;
@@ -72,7 +72,7 @@ describe("EntryConflictModal", () => {
     // Step-2 confirm is up.
     expect(wrapper.find(STEP2_KEEPTHEIRS).exists()).toBe(true);
 
-    // The step-2 confirm button (also .btn-danger) emits "resolve" with the
+    // The step-2 confirm button (variant=danger) emits "resolve" with the
     // pending choice; it does NOT call any IPC directly.
     const confirmBtn = wrapper
       .findAll("button")

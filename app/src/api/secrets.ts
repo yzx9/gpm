@@ -135,8 +135,9 @@ export interface WriteResult {
   commit: string;
 }
 
-/** Whether a base-version-aware write is an edit or a delete (serde snake_case). */
-export type EntryConflictOp = "edit" | "delete";
+/** Whether a base-version-aware write is an edit, delete, or create (serde
+ *  snake_case). Create is existence-based (a name a teammate took first). */
+export type EntryConflictOp = "edit" | "delete" | "create";
 
 /** How to resolve an `entry_conflict` outcome (serde snake_case). "cancel" is
  *  client-side (the frontend dismisses the modal), so it is absent here. */

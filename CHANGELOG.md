@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Switching the **display language** back to **Follow system** now switches to your device's language right away. It used to stay stuck on the language you'd pinned earlier (for example, Chinese) and only correct itself after restarting the app.
 - Secrets whose content isn't valid text (for example, one whose body somehow holds raw bytes) used to be silently corrupted if you opened and saved them in gpm — the save rewrote them with mangled characters. gpm now refuses to edit such a secret and points you to the gopass command line instead, so the original is never damaged. Reading and syncing these secrets is unchanged. A secret whose password itself isn't valid text likewise can't be copied in gpm (it would only copy an empty string); copying it now shows a hint to use the gopass command line instead.
 
+### Changed
+
+- When **Auto-sync** is on, editing, deleting, or creating a secret that collides with another device's change no longer silently overwrites it — you now get a clear per-entry choice (keep your version or theirs); a delete a teammate already did is recognized as "already removed" instead of claiming a commit, and a create that reuses a name another device took asks before overwriting. With Auto-sync off it still surfaces when you manually sync.
+
+### Fixed
+
+- Bottom sheets (the edit/delete conflict and sync-divergence prompts, and other bottom-sheet dialogs) no longer tuck their lowest button under the Android gesture-navigation bar — they now respect the bottom safe-area inset so every button stays tappable.
+
 ## [v0.16.1] - 2026-08-04
 
 ### Changed
@@ -42,7 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secrets saved in gopass's older `GOPASS-SECRET-1.0` format (used for a few months in 2020–2021 and still produced by some older stores) now open correctly. gpm used to treat the format's identifying header line as the password, so it showed — and copied — the wrong string; the real password, which that format stores in a `Password:` field, is now used instead. Editing one of these secrets still rewrites it in the current format, exactly as gopass does; gpm never writes the old format.
 - gpm can now **export a gopass binary attachment** to a file you choose. Entries that are attachments (created with `gopass fscopy` / `gopass binary attach`) show their filename and size and an **Export Attachment** action instead of an empty password and a wall of base64 — tap it to save the original file to your device or desktop. The decoded bytes never pass through the app's UI. Editing or replacing an attachment isn't supported yet.
 - A new **personal access token** screen (Settings → Repository → Manage token) shows a masked preview of your stored token, lets you replace it — the new token is checked against the remote before it's saved, so a mistyped or expired one is caught immediately — and clear it. A matching **Remove key** action on the SSH key screen lets you switch away from SSH authentication (to a stored token, or to none) without re-running setup.
-- When **Auto-sync** is on, editing or deleting a secret that another device changed since you opened it no longer silently overwrites that change — you now get a clear per-entry choice (keep your edit or theirs), and a delete a teammate already did is recognized as "already removed" instead of claiming a commit. With Auto-sync off it still surfaces when you manually sync.
 
 ### Changed
 

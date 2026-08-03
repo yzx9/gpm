@@ -33,6 +33,7 @@
   "createFailed": "无法创建密钥",
   "adoptedRemote": "已采用远程版本",
   "keptMine": "✓ 已保留本地版本（提交 {head}）",
+  "keptTheirs": "✓ 已保留已有的条目",
   "remoteChanged": "自你查看以来远程仓库已更改——正在重新检查……",
   "resolveFailed": "无法解决差异"
 }

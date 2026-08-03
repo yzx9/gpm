@@ -679,6 +679,35 @@ describe("EntryDetailPage", () => {
       expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
 
+    it("on entry_conflict outcome, surfaces the per-entry modal (delete op)", async () => {
+      // R026: a teammate changed the entry since the read — the delete surfaces
+      // the EntryConflictModal (delete op) instead of removing it. The no_change
+      // and needs_divergence_resolve outcomes are covered above; this pins the
+      // delete-conflict modal render (heading + entry name + op-specific copy).
+      mockDelete({
+        entryOid: "oid-1",
+        deleteOutcome: {
+          kind: "entry_conflict",
+          name: "servers/prod",
+          base_oid: "oid-1",
+          current_oid: "oid-2",
+          remote_tip: "tip-3",
+          op: "delete",
+        },
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+      await wrapper.find(deleteBtn()).trigger("click");
+      await flushPromises();
+
+      // The per-entry conflict sheet shows the delete-op heading + the name.
+      expect(wrapper.text()).toContain("This secret was changed elsewhere");
+      expect(wrapper.text()).toContain("servers/prod");
+      // op-specific step-1 labels render (delete keeps theirs / deletes anyway).
+      expect(wrapper.text()).toContain("Keep their version");
+      expect(wrapper.text()).toContain("Delete it anyway");
+    });
+
     it("on delete divergence, surfaces the shared modal and adopt resolves", async () => {
       // First queued response is the mount-time `has_totp` probe (identity is
       // cached by default); the next two are the delete + its resolve.
