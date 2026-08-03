@@ -2,7 +2,7 @@
   "name": "gpm-monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.11.0",
+  "packageManager": "pnpm@11.18.0",
   "scripts": {
     "dev": "pnpm -C app dev",
     "build": "pnpm -C app build",
