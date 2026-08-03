@@ -17,10 +17,13 @@
     "title": "生物识别解锁",
     "body": "用指纹或面容解锁 gpm，免输主口令。",
     "available": "已就绪",
+    "enabled": "已启用",
     "noEnrollment": "未录入 · 点按去录入",
     "weakEnrolled": "需要 Class 3 · 点按去录入",
     "unavailable": "此设备不可用",
-    "failed": "无法打开安全设置"
+    "failed": "无法打开安全设置",
+    "enableLink": "在「锁定与身份」中开启",
+    "manageLink": "在「锁定与身份」中管理"
   },
   "clipboard": {
     "title": "剪贴板",

@@ -18,6 +18,21 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPermissionsPage from "./SettingsPermissionsPage.vue";
 
+const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
+
+vi.mock("vue-router", () => ({
+  createRouter: vi.fn(),
+  createWebHashHistory: vi.fn(),
+  useRouter: () => ({ push: mockPush, replace: vi.fn(), back: vi.fn() }),
+  useRoute: () => ({
+    params: {},
+    query: {},
+    name: "",
+    path: "/",
+    fullPath: "/",
+  }),
+}));
+
 describe("SettingsPermissionsPage", () => {
   const overrides: Overrides = {};
   const defaults = { ...baseDefaults };
@@ -86,6 +101,7 @@ describe("SettingsPermissionsPage", () => {
     const row = rowByText(wrapper, "Notifications");
     expect(row.attributes("role")).toBe("button");
     expect(row.attributes("tabindex")).toBe("0");
+    expect(row.text()).toContain("Off");
     await row.trigger("click");
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("open_clipboard_notification_settings");
@@ -263,5 +279,87 @@ describe("SettingsPermissionsPage", () => {
       (c) => c[0] === "focus",
     )?.[1];
     expect(focusRemoved).toBe(focusAdded);
+  });
+
+  it("biometric available + enabled → Enabled status, Manage link to the biometric card", async () => {
+    when("are_clipboard_notifications_enabled", true);
+    when("is_biometric_available", "available");
+    when("is_biometric_unlock_enabled", true);
+    when("get_auth_state", {
+      configured: true,
+      encrypted: true,
+      unlocked: false,
+      identity_type: "x25519",
+    });
+    const { wrapper } = mountPage();
+    await flushPromises();
+    expect(rowByText(wrapper, "Biometric unlock").text()).toContain("Enabled");
+    const link = wrapper.find(".perm-link");
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toContain("Manage");
+    await link.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({
+      name: "settingsIdentity",
+      query: { focus: "biometric" },
+    });
+  });
+
+  it("biometric available + not enabled → Ready status, Turn-on link to the biometric card", async () => {
+    when("are_clipboard_notifications_enabled", true);
+    when("is_biometric_available", "available");
+    when("get_auth_state", {
+      configured: true,
+      encrypted: true,
+      unlocked: false,
+      identity_type: "x25519",
+    });
+    const { wrapper } = mountPage();
+    await flushPromises();
+    expect(rowByText(wrapper, "Biometric unlock").text()).toContain("Ready");
+    const link = wrapper.find(".perm-link");
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toContain("Turn on");
+    await link.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({
+      name: "settingsIdentity",
+      query: { focus: "biometric" },
+    });
+  });
+
+  it("biometric available but identity unencrypted → link points at the passphrase card", async () => {
+    when("are_clipboard_notifications_enabled", true);
+    when("is_biometric_available", "available");
+    // get_auth_state defaults to encrypted=false; is_biometric_unlock_enabled=false
+    const { wrapper } = mountPage();
+    await flushPromises();
+    const link = wrapper.find(".perm-link");
+    expect(link.exists()).toBe(true);
+    await link.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({
+      name: "settingsIdentity",
+      query: { focus: "passphrase" },
+    });
+  });
+
+  it("biometric unavailable → no manage link (nothing to configure there)", async () => {
+    when("are_clipboard_notifications_enabled", true);
+    when("is_biometric_available", "unavailable");
+    const { wrapper } = mountPage();
+    await flushPromises();
+    expect(wrapper.find(".perm-link").exists()).toBe(false);
+  });
+
+  it("biometric available + SSH identity → no manage link (biometric can't apply)", async () => {
+    when("are_clipboard_notifications_enabled", true);
+    when("is_biometric_available", "available");
+    when("get_auth_state", {
+      configured: true,
+      encrypted: false,
+      unlocked: false,
+      identity_type: "ssh_ed25519",
+    });
+    const { wrapper } = mountPage();
+    await flushPromises();
+    expect(wrapper.find(".perm-link").exists()).toBe(false);
   });
 });

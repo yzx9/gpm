@@ -13,11 +13,22 @@ import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsIdentityPage from "./SettingsIdentityPage.vue";
 
-const { mockPush, mockReplace, mockOnBeforeRouteLeave } = vi.hoisted(() => ({
-  mockPush: vi.fn(),
-  mockReplace: vi.fn(),
-  mockOnBeforeRouteLeave: vi.fn(),
-}));
+const { mockPush, mockReplace, mockOnBeforeRouteLeave, mockRoute } = vi.hoisted(
+  () => ({
+    mockPush: vi.fn(),
+    mockReplace: vi.fn(),
+    mockOnBeforeRouteLeave: vi.fn(),
+    // Mutable route so a test can set `mockRoute.query = { focus: ... }` before
+    // mounting to exercise the deep-link scroll/highlight.
+    mockRoute: {
+      params: {},
+      query: {} as Record<string, unknown>,
+      name: "",
+      path: "/",
+      fullPath: "/",
+    },
+  }),
+);
 
 vi.mock("@tauri-apps/api/core");
 vi.mock("vue-router", () => ({
@@ -25,13 +36,7 @@ vi.mock("vue-router", () => ({
   createWebHashHistory: vi.fn(),
   onBeforeRouteLeave: mockOnBeforeRouteLeave,
   useRouter: () => ({ push: mockPush, replace: mockReplace, back: vi.fn() }),
-  useRoute: () => ({
-    params: {},
-    query: {},
-    name: "",
-    path: "/",
-    fullPath: "/",
-  }),
+  useRoute: () => mockRoute,
 }));
 
 describe("SettingsIdentityPage", () => {
@@ -76,6 +81,79 @@ describe("SettingsIdentityPage", () => {
   function mountPage() {
     return mountWithApp(SettingsIdentityPage).wrapper;
   }
+
+  describe("deep-link focus (?focus=...)", () => {
+    it("focus=biometric scrolls to the biometric card and flashes it", async () => {
+      // scrollIntoView is undefined in jsdom — stub it on Element so the call is
+      // observable, then restore it in finally.
+      const proto = Element.prototype as { scrollIntoView?: unknown };
+      const orig = proto.scrollIntoView;
+      const scrollIntoView = vi.fn();
+      proto.scrollIntoView = scrollIntoView;
+      mockRoute.query = { focus: "biometric" };
+      mockRoute.name = "settingsIdentity"; // applyFocus only clears the query on this route
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: false,
+        identity_type: "x25519",
+      });
+      const wrapper = mountPage();
+      try {
+        await flushPromises(); // settle onMounted: loadConfig → applyFocus
+        const card = wrapper.find("#biometric-card");
+        expect(card.exists()).toBe(true);
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          behavior: "smooth",
+          block: "center",
+        });
+        expect(card.classes()).toContain("card-highlight");
+        expect(mockReplace).toHaveBeenCalledWith({ query: {} });
+        vi.advanceTimersByTime(1700); // the flash auto-clears
+        await flushPromises();
+        expect(wrapper.find("#biometric-card").classes()).not.toContain(
+          "card-highlight",
+        );
+      } finally {
+        wrapper.unmount(); // cancels the highlight-clear timer
+        proto.scrollIntoView = orig;
+        mockRoute.query = {};
+        mockRoute.name = "";
+      }
+    });
+
+    it("focus=passphrase scrolls to the passphrase card and flashes it", async () => {
+      const proto = Element.prototype as { scrollIntoView?: unknown };
+      const orig = proto.scrollIntoView;
+      const scrollIntoView = vi.fn();
+      proto.scrollIntoView = scrollIntoView;
+      mockRoute.query = { focus: "passphrase" };
+      mockRoute.name = "settingsIdentity";
+      when("get_auth_state", {
+        configured: true,
+        encrypted: false, // unencrypted x25519 → the Set Passphrase card renders
+        unlocked: false,
+        identity_type: "x25519",
+      });
+      const wrapper = mountPage();
+      try {
+        await flushPromises();
+        const card = wrapper.find("#passphrase-card");
+        expect(card.exists()).toBe(true);
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          behavior: "smooth",
+          block: "center",
+        });
+        expect(card.classes()).toContain("card-highlight");
+        expect(mockReplace).toHaveBeenCalledWith({ query: {} });
+      } finally {
+        wrapper.unmount();
+        proto.scrollIntoView = orig;
+        mockRoute.query = {};
+        mockRoute.name = "";
+      }
+    });
+  });
 
   describe("identity passphrase", () => {
     it("set passphrase: blocks Encrypt until the unrecoverable ack is checked", async () => {

@@ -58,13 +58,32 @@ import {
   identityEnrollPrompt,
 } from "@/i18n/native";
 import { CircleCheck, KeyRound, Lock } from "@lucide/vue";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRoute, useRouter } from "vue-router";
 
 const { toast } = useToast();
 const { dialog } = useDialog();
 const { t } = useI18n();
 const { applySecurityConfig } = useSecuritySettings();
+const route = useRoute();
+const router = useRouter();
+// Deep-link target arriving from the Permissions screen: scroll the matching
+// card into view and flash a highlight ring so the user lands on it. Null on a
+// normal visit, and cleared once the flash finishes.
+const highlightKey = ref<"biometric" | "passphrase" | null>(null);
+// Handle to the highlight-clear timer so it can be cancelled if the page is
+// left mid-flash (otherwise it would fire on an unmounted component).
+let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+// Root element ref — the deep-link card lookup is scoped to it (not document)
+// so it resolves whether or not the page is attached to the document.
+const rootEl = ref<HTMLElement | null>(null);
+// Highlight ring lasts 1.6s (.card-highlight in style.css); the clear timer
+// adds slack so the class outlives the animation and isn't stripped mid-flash.
+const HIGHLIGHT_MS = 1700;
+// The deep-link target card renders after loadConfig commits; poll a few ticks
+// for it. Bounded so we never wait forever on a card that won't exist (SSH).
+const FOCUS_MAX_TICKS = 5;
 
 const loading = ref(false);
 const error = ref("");
@@ -542,13 +561,54 @@ async function onGateIdleChange(mode: GateIdle) {
   }
 }
 
-onMounted(() => {
-  loadConfig();
+// Deep-link focus: arriving with ?focus=biometric|passphrase scrolls that card
+// into view and flashes it, then drops the query so a refresh/back can't
+// re-trigger. Runs after loadConfig so the (config-gated) cards exist.
+async function applyFocus() {
+  const focus = route.query.focus;
+  if (typeof focus !== "string") return;
+  if (focus !== "biometric" && focus !== "passphrase") return;
+  const id = focus === "biometric" ? "biometric-card" : "passphrase-card";
+  // The target card is config-gated and commits to the DOM only after loadConfig
+  // re-renders, so wait for it. Scoped to this page's root (not document) so it
+  // resolves whether or not the page is attached; bounded because it may
+  // legitimately never exist (e.g. SSH identity).
+  let el: HTMLElement | null = null;
+  for (let i = 0; i < FOCUS_MAX_TICKS && !el; i++) {
+    await nextTick();
+    el = (rootEl.value?.querySelector(`#${id}`) as HTMLElement | null) ?? null;
+  }
+  // Drop the query so a refresh/back can't re-trigger the flash — but only when
+  // still on this page, so navigating away mid-load can't clobber the new page's
+  // query. Runs whether or not the card was found.
+  if (route.name === "settingsIdentity") {
+    await router.replace({ query: {} });
+  }
+  if (!el) return; // card not present → graceful no-op
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  highlightKey.value = focus;
+  highlightTimer = window.setTimeout(() => {
+    highlightKey.value = null;
+    highlightTimer = null;
+  }, HIGHLIGHT_MS);
+}
+
+onUnmounted(() => {
+  if (highlightTimer) clearTimeout(highlightTimer);
+});
+
+onMounted(async () => {
+  await loadConfig();
+  try {
+    await applyFocus();
+  } catch {
+    // Deep-link focus is best-effort UX — never fatal.
+  }
 });
 </script>
 
 <template>
-  <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
+  <main ref="rootEl" class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('settings.hub.lockAndIdentity')"
@@ -566,7 +626,12 @@ onMounted(() => {
       <!-- Passphrase management (x25519 identities only — SSH keys rely on
            their own native passphrase protection). Set / change run in the
            shared passphrase modal, which is the commit boundary. -->
-      <BaseCard as="section" v-if="!isSshIdentity">
+      <BaseCard
+        as="section"
+        v-if="!isSshIdentity"
+        id="passphrase-card"
+        :class="{ 'card-highlight': highlightKey === 'passphrase' }"
+      >
         <h2 class="text-sm font-medium mb-3">
           {{ t("settings.passphrase.title") }}
         </h2>
@@ -604,7 +669,12 @@ onMounted(() => {
       </BaseCard>
 
       <!-- Biometric unlock (only meaningful when the identity is encrypted) -->
-      <BaseCard as="section" v-if="isIdentityEncrypted">
+      <BaseCard
+        as="section"
+        v-if="isIdentityEncrypted"
+        id="biometric-card"
+        :class="{ 'card-highlight': highlightKey === 'biometric' }"
+      >
         <h2 class="text-sm font-medium mb-3">
           {{ t("settings.biometric.title") }}
         </h2>

@@ -5,7 +5,9 @@
 <script setup lang="ts">
 import {
   areClipboardNotificationsEnabled,
+  getAuthState,
   isBiometricAvailable,
+  isBiometricUnlockEnabled,
   openClipboardNotificationSettings,
   openSecuritySettings,
   type BiometricState,
@@ -25,6 +27,7 @@ import {
 } from "@lucide/vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 
 // A permissions/data-access transparency page. Each row names a surface gpm
 // touches, says why, and — only where Android lets the user change it and may
@@ -37,11 +40,19 @@ import { useI18n } from "vue-i18n";
 const { t } = useI18n();
 const { toast } = useToast();
 const { secureAvailable } = useSecureScreen();
+const router = useRouter();
 
 // Tri-state probe results: the resolved state, or "unknown" while loading / when
 // the probe failed (the row then shows a spinner, not a misleading status).
 const notificationsState = ref<"granted" | "blocked" | "unknown">("unknown");
 const biometricState = ref<BiometricState | "unknown">("unknown");
+// Whether the in-app biometric unlock is on (the Lock & Identity toggle), and
+// whether the identity is encrypted. Without encryption biometric can't apply,
+// so the manage link then points at the passphrase card instead. Probed with
+// the hardware state so the row reflects the actual toggle, not just hardware.
+const biometricEnabled = ref(false);
+const identityEncrypted = ref(false);
+const identityType = ref("");
 
 // Monotonic generation tag: a probe started after a rapid mount/unmount/remount
 // (or two resume signals firing close together) must be able to discard a slower
@@ -51,9 +62,11 @@ let probeGen = 0;
 
 async function probe() {
   const gen = ++probeGen;
-  const [n, b] = await Promise.allSettled([
+  const [n, b, enabled, auth] = await Promise.allSettled([
     areClipboardNotificationsEnabled(),
     isBiometricAvailable(),
+    isBiometricUnlockEnabled(),
+    getAuthState(),
   ]);
   if (gen !== probeGen) return; // a newer probe started; this result is stale
   // A rejected notif probe degrades to "blocked" (tappable recovery) rather than
@@ -63,6 +76,12 @@ async function probe() {
   notificationsState.value =
     n.status === "fulfilled" && n.value ? "granted" : "blocked";
   biometricState.value = b.status === "fulfilled" ? b.value : "unknown";
+  biometricEnabled.value =
+    enabled.status === "fulfilled" ? !!enabled.value : false;
+  identityEncrypted.value =
+    auth.status === "fulfilled" ? !!auth.value?.encrypted : false;
+  identityType.value =
+    auth.status === "fulfilled" ? (auth.value?.identity_type ?? "") : "";
 }
 
 // Resume refresh: `visibilitychange` is the reliable Android app-resume signal
@@ -138,7 +157,14 @@ const bioTap = computed(
 const bioStatus = computed(() => {
   switch (biometricState.value) {
     case "available":
-      return { text: t("permissions.biometric.available"), tone: "muted" };
+      // Hardware ready — say whether the in-app toggle is on ("Enabled") or not
+      // ("Ready"). "Off" is deliberately avoided: it reads as "unavailable".
+      return {
+        text: biometricEnabled.value
+          ? t("permissions.biometric.enabled")
+          : t("permissions.biometric.available"),
+        tone: "muted",
+      };
     case "no_enrollment":
       return { text: t("permissions.biometric.noEnrollment"), tone: "accent" };
     case "weak_enrolled":
@@ -154,6 +180,30 @@ const bioAria = computed(() =>
     ? `${t("permissions.biometric.title")} — ${bioStatus.value.text}`
     : t("permissions.biometric.title"),
 );
+
+// Hardware ready → the in-app toggle on Lock & Identity is the next step (the
+// row is a dead-end otherwise). Sibling of the row, so it never fires the
+// enrollment deep-link's whole-row tap. The label follows the toggle state, and
+// the focus query picks the landing card: the biometric card when the identity
+// is encrypted, else the passphrase card (set one first).
+const bioAvailable = computed(() => biometricState.value === "available");
+// SSH-key identities can't be sealed for biometric unlock, so the manage link
+// is suppressed for them — it would deep-link to a card that doesn't exist.
+const isSshIdentity = computed(
+  () =>
+    identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
+);
+const bioLinkLabel = computed(() =>
+  biometricEnabled.value
+    ? t("permissions.biometric.manageLink")
+    : t("permissions.biometric.enableLink"),
+);
+function openBiometricSettings() {
+  router.push({
+    name: "settingsIdentity",
+    query: { focus: identityEncrypted.value ? "biometric" : "passphrase" },
+  });
+}
 
 function toneClass(tone: string) {
   if (tone === "danger") return "text-danger";
@@ -247,6 +297,16 @@ function toneClass(tone: string) {
               />
             </div>
           </div>
+
+          <button
+            v-if="bioAvailable && !isSshIdentity"
+            type="button"
+            class="perm-link"
+            @click="openBiometricSettings"
+          >
+            {{ bioLinkLabel }}
+            <BaseIcon :icon="ChevronRight" :size="14" />
+          </button>
         </BaseCard>
       </div>
     </template>
@@ -351,5 +411,29 @@ function toneClass(tone: string) {
 .perm-status {
   font-size: var(--text-sm);
   text-align: right;
+}
+/* "Manage in Lock & Identity" — a link-styled button to the in-app unlock
+   toggle. Native button chrome is reset so it reads as an inline accent link. */
+.perm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  /* Align under the row body: card edge + 20px icon + 0.75rem gap = 2rem. */
+  margin: 0.5rem 0 0 1.5rem;
+  padding: 0.4rem 0.5rem;
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.perm-link:active {
+  background: var(--color-hover);
+}
+@media (hover: hover) {
+  .perm-link:hover {
+    background: var(--color-hover);
+  }
 }
 </style>

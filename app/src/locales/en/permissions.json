@@ -17,10 +17,13 @@
     "title": "Biometric unlock",
     "body": "Unlock gpm with your fingerprint or face instead of your passphrase.",
     "available": "Ready",
+    "enabled": "Enabled",
     "noEnrollment": "Not enrolled — tap to set up",
     "weakEnrolled": "Class 3 needed — tap to set up",
     "unavailable": "Not available on this device",
-    "failed": "Couldn't open security settings"
+    "failed": "Couldn't open security settings",
+    "enableLink": "Turn on in Lock & Identity",
+    "manageLink": "Manage in Lock & Identity"
   },
   "clipboard": {
     "title": "Clipboard",

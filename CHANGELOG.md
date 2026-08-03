@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- On the **Permissions & data** screen, the biometric row now says **Enabled** when fingerprint/face unlock is on (and **Ready** when the hardware is set up but it isn't), and a link takes you to **Lock & Identity** to turn it on or off. Landing there scrolls to the biometric card and briefly highlights it so you can find it.
 - Secrets saved in gopass's older `GOPASS-SECRET-1.0` format (used for a few months in 2020–2021 and still produced by some older stores) now open correctly. gpm used to treat the format's identifying header line as the password, so it showed — and copied — the wrong string; the real password, which that format stores in a `Password:` field, is now used instead. Editing one of these secrets still rewrites it in the current format, exactly as gopass does; gpm never writes the old format.
 - gpm can now **export a gopass binary attachment** to a file you choose. Entries that are attachments (created with `gopass fscopy` / `gopass binary attach`) show their filename and size and an **Export Attachment** action instead of an empty password and a wall of base64 — tap it to save the original file to your device or desktop. The decoded bytes never pass through the app's UI. Editing or replacing an attachment isn't supported yet.
 
