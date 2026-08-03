@@ -221,28 +221,30 @@ onUnmounted(() => {
     @close="emit('close')"
   >
     <div class="title-row relative mb-1">
-      <button
-        type="button"
-        class="close-x"
+      <BaseButton
+        variant="link"
+        size="xs"
+        tone="muted"
+        class="absolute -top-1 -right-1"
         :aria-label="t('common.unlock.close')"
         @click="emit('close')"
       >
         <BaseIcon :icon="X" :size="18" />
-      </button>
+      </BaseButton>
       <h1
         class="text-center text-display flex items-center justify-center gap-2"
       >
         <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
-        <button
-          type="button"
-          class="help-btn"
-          :class="{ active: showHelp }"
+        <BaseButton
+          variant="link"
+          size="xs"
+          :tone="showHelp ? 'default' : 'muted'"
           :aria-expanded="showHelp"
           :aria-label="t('common.unlock.helpLabel')"
           @click="showHelp = !showHelp"
         >
           <BaseIcon :icon="HelpCircle" :size="16" />
-        </button>
+        </BaseButton>
       </h1>
     </div>
     <p class="text-center text-muted text-sm mb-1">
@@ -330,46 +332,3 @@ onUnmounted(() => {
     </form>
   </BaseModalShell>
 </template>
-
-<style scoped>
-.close-x {
-  position: absolute;
-  top: -0.25rem;
-  right: -0.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: var(--radius-sm, 0.25rem);
-  color: var(--color-muted);
-  transition: color 0.15s;
-}
-.close-x:active {
-  color: var(--color-default);
-}
-@media (hover: hover) {
-  .close-x:hover {
-    color: var(--color-default);
-  }
-}
-.help-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: var(--radius-sm, 0.25rem);
-  color: var(--color-muted);
-  transition: color 0.15s;
-}
-.help-btn:active,
-.help-btn.active {
-  color: var(--color-default);
-}
-@media (hover: hover) {
-  .help-btn:hover {
-    color: var(--color-default);
-  }
-}
-</style>

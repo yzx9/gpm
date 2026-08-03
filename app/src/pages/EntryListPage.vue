@@ -132,33 +132,34 @@ const divergence = ref<SyncDivergence | null>(null);
 const resolving = ref(false);
 const divergeError = ref("");
 
-/** The indicator badge for the current authenticity state. */
-const badge = computed<{ icon: LucideIcon; cls: string; title: string }>(() => {
+/** The indicator badge for the current authenticity state. `tone` drives the
+ * lamp color via BaseButton's link variant (success / warn / muted). */
+const badge = computed<{
+  icon: LucideIcon;
+  tone: "muted" | "success" | "warn";
+  title: string;
+}>(() => {
   const s = authState.value;
   if (!s || s.mode === "off") {
-    return {
-      icon: Circle,
-      cls: "badge-off",
-      title: t("entries.badgeOff"),
-    };
+    return { icon: Circle, tone: "muted", title: t("entries.badgeOff") };
   }
   switch (s.head_status.kind) {
     case "verified":
       return {
         icon: CircleCheck,
-        cls: "badge-ok",
+        tone: "success",
         title: t("entries.badgeTrustedHead"),
       };
     case "unknown":
       return {
         icon: CircleDashed,
-        cls: "badge-none",
+        tone: "muted",
         title: t("entries.badgeUnchecked"),
       };
     default:
       return {
         icon: CircleAlert,
-        cls: "badge-warn",
+        tone: "warn",
         title: t("entries.badgeReviewHead", {
           status: signatureLabel(s.head_status),
         }),
@@ -585,15 +586,17 @@ defineExpose({ syncRepo });
           <h1 class="text-xl flex items-center gap-1">
             <BaseIcon :icon="LockKeyhole" :size="24" /> gpm
           </h1>
-          <button
-            @click="openHistory"
-            class="sig-light"
-            :class="badge.cls"
+          <BaseButton
+            variant="link"
+            size="sm"
+            class="-ml-1"
+            :tone="badge.tone"
             :aria-label="badge.title"
             :title="badge.title"
+            @click="openHistory"
           >
             <BaseIcon :icon="badge.icon" :size="16" />
-          </button>
+          </BaseButton>
         </div>
       </template>
       <template #actions>
@@ -644,14 +647,16 @@ defineExpose({ syncRepo });
             :style="{ width: `${pullProgressPercent}%` }"
           ></div>
         </div>
-        <button
-          class="cancel-sync"
+        <BaseButton
+          variant="link"
+          size="xs"
+          tone="muted"
           :aria-label="t('entries.cancelSync')"
           :title="t('entries.cancelSync')"
           @click="cancelSync"
         >
           <BaseIcon :icon="X" :size="14" />
-        </button>
+        </BaseButton>
       </div>
       <div class="text-xs text-muted mt-1 text-center" aria-live="polite">
         {{ pullProgressText }}
@@ -880,34 +885,6 @@ defineExpose({ syncRepo });
   color: var(--color-accent);
   animation: spin 0.8s linear infinite;
 }
-/* Secondary: a small, calm stop control trailing the bar — only turns danger-red
-   on hover/press, so the in-flight state isn't presented as an alarm. */
-.cancel-sync {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  min-height: 26px;
-  padding: 0;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-muted);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.cancel-sync:active {
-  background: var(--color-hover);
-  color: var(--color-danger);
-}
-@media (hover: hover) {
-  .cancel-sync:hover {
-    background: var(--color-hover);
-    color: var(--color-danger);
-  }
-}
-
 /* Pull-to-refresh indicator: a centered icon whose container grows with the
    pull distance. At rest (0) it collapses out of flow; once the sync starts
    (`pulling`), `v-if="!pulling"` removes it entirely and the progress bar below
@@ -929,46 +906,6 @@ defineExpose({ syncRepo });
 }
 .ptr-icon-wrap.ptr-armed {
   color: var(--color-accent);
-}
-
-/* Status light next to the logo: visually a small colored icon, but the touch
-   target stays ≥48 px (transparent padding around the 16 px icon) so it's an
-   accessible tap on Android. Borderless/backgroundless so it reads as a lamp,
-   not a toolbar button. */
-.sig-light {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 48px;
-  padding: 0;
-  margin-left: -0.25rem;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-.sig-light:active {
-  opacity: 0.7;
-}
-@media (hover: hover) {
-  .sig-light:hover {
-    opacity: 0.7;
-  }
-}
-.sig-light:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-.badge-ok {
-  color: var(--color-success);
-}
-.badge-warn {
-  color: var(--color-warning);
-}
-.badge-off,
-.badge-none {
-  color: var(--color-muted);
 }
 
 .div-scroll {

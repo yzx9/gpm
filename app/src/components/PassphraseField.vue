@@ -3,6 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
+import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import { Eye, EyeOff } from "@lucide/vue";
@@ -135,9 +136,10 @@ defineExpose({
         :style="{ paddingRight: '2.5rem' }"
         @update:model-value="onMain"
       />
-      <button
-        type="button"
-        class="absolute inset-y-0 right-0 px-3 text-muted hover:text-accent active:text-accent transition-colors"
+      <BaseButton
+        variant="link"
+        tone="muted"
+        class="absolute inset-y-0 right-0"
         :aria-label="
           show
             ? t('common.passphraseField.hide')
@@ -146,7 +148,7 @@ defineExpose({
         @click="show = !show"
       >
         <BaseIcon :icon="show ? EyeOff : Eye" :size="18" />
-      </button>
+      </BaseButton>
     </div>
 
     <template v-if="showConfirmField">

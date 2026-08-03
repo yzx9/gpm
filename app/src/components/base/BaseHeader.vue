@@ -23,6 +23,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { RouteLocationRaw } from "vue-router";
 import { useRouter } from "vue-router";
+import BaseButton from "./BaseButton.vue";
 import BaseIcon from "./BaseIcon.vue";
 
 const props = withDefaults(
@@ -72,15 +73,16 @@ function onBack() {
          otherwise it's the back button (if any) + the title. -->
     <slot name="nav">
       <div class="flex items-center gap-3 min-w-0 flex-1">
-        <button
+        <BaseButton
           v-if="backFallback"
-          type="button"
-          class="base-header__back"
+          variant="link"
+          size="sm"
+          tone="accent"
           :aria-label="t('common.back')"
           @click="onBack"
         >
           <BaseIcon :icon="ArrowLeft" />
-        </button>
+        </BaseButton>
         <slot name="title">
           <h1 v-if="title" class="text-xl flex items-center gap-1">
             <BaseIcon v-if="titleIcon" :icon="titleIcon" :size="24" />
@@ -96,35 +98,3 @@ function onBack() {
     </div>
   </header>
 </template>
-
-<style scoped>
-/* Icon-only back affordance: transparent (reads as a link, not a chip),
-   accent-colored, ≥48px touch target, press feedback to a deeper accent.
-   aria-label supplies the accessible name; the icon self-marks aria-hidden. */
-.base-header__back {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--color-accent);
-  min-width: 48px;
-  min-height: 48px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  -webkit-tap-highlight-color: transparent;
-}
-.base-header__back:active {
-  color: var(--color-accent-deep);
-}
-@media (hover: hover) {
-  .base-header__back:hover {
-    color: var(--color-accent-deep);
-  }
-}
-.base-header__back:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-</style>

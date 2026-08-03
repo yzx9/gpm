@@ -7,6 +7,7 @@ import { useToast } from "@/composables";
 import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import BaseAlert from "./base/BaseAlert.vue";
+import BaseButton from "./base/BaseButton.vue";
 import BaseIcon from "./base/BaseIcon.vue";
 
 // Single app-wide toast renderer. Mounts once in `App.vue` (above
@@ -28,15 +29,15 @@ const { t } = useI18n();
         class="toast-host__item flex items-center gap-2"
       >
         <span class="flex-1">{{ item.message }}</span>
-        <button
+        <BaseButton
           v-if="item.closable"
-          type="button"
-          class="toast-host__close"
+          variant="link"
+          size="xs"
           :aria-label="t('common.toast.closeLabel')"
           @click="toast.dismiss(item.id)"
         >
           <BaseIcon :icon="X" :size="14" />
-        </button>
+        </BaseButton>
       </BaseAlert>
     </TransitionGroup>
   </div>
@@ -56,23 +57,6 @@ const { t } = useI18n();
    completes instead of being ripped out by a `v-if`) but reserves no top gap. */
 .toast-host--empty {
   padding: 0;
-}
-
-.toast-host__close {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 24px;
-  min-height: 24px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-}
-.toast-host__close:active {
-  opacity: 0.7;
 }
 
 .toast-enter-active,

@@ -261,14 +261,14 @@ describe("EntryListPage", () => {
 
       // While locked: the badge is stuck on the sealed "off" reading.
       expect(authCall).toBe(1);
-      expect(wrapper.find("button.sig-light").classes()).toContain("badge-off");
+      expect(wrapper.find("button.tone-muted").exists()).toBe(true);
 
       // Biometric unlock: the badge is refetched and reflects the real state.
       appLocked.value = false;
       await flushPromises();
 
       expect(authCall).toBe(2);
-      expect(wrapper.find("button.sig-light").classes()).toContain("badge-ok");
+      expect(wrapper.find("button.tone-success").exists()).toBe(true);
     });
 
     it("reloads on unlock even if the cold-start fetch is still in flight (biometric race)", async () => {
