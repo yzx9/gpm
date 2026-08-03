@@ -10,7 +10,7 @@
     "title": "Notifications",
     "body": "Shows a sticky notification while a password is on the clipboard so you can clear it early.",
     "granted": "Enabled",
-    "blocked": "Off — tap to re-enable",
+    "blocked": "Off",
     "failed": "Couldn't open notification settings"
   },
   "biometric": {
