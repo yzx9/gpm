@@ -122,7 +122,7 @@ impl Error {
                 ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
                 ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
                 ErrorCode::RepoBusy => "REPO_BUSY",
-            ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
+                ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
             }
             .to_string(),
             message: message.into(),
