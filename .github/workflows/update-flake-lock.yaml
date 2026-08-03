@@ -21,7 +21,7 @@ jobs:
 
       - name: Update flake.lock
         id: update
-        uses: DeterminateSystems/update-flake-lock@v24
+        uses: DeterminateSystems/update-flake-lock@v28
         with:
           pr-title: "build(deps): bump flake.lock"
           commit-msg: "build(deps): bump flake.lock"
