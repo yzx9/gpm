@@ -1967,6 +1967,63 @@ impl Store {
         Ok(rc)
     }
 
+    /// Set the HTTPS personal access token. `None` (or blank/whitespace) clears
+    /// it. Returns the persisted [`RepoConfig`] (the app layer masks the PAT
+    /// before it crosses IPC — see `RepoConfigPublic`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or persisted.
+    pub async fn set_pat(&self, pat: Option<String>) -> Result<RepoConfig, Error> {
+        let pat = pat.and_then(|s| {
+            let t = s.trim().to_string();
+            (!t.is_empty()).then_some(t)
+        });
+        let mut rc = self.config.load_repo_config().await?;
+        rc.pat = pat;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
+    /// Remove the stored SSH key + passphrase, clearing SSH auth. A stored PAT,
+    /// if any, then becomes the active auth method on the next op (SSH takes
+    /// precedence in `to_git_auth` only while the key is present). Returns the
+    /// persisted [`RepoConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or persisted.
+    pub async fn clear_ssh_key(&self) -> Result<RepoConfig, Error> {
+        let mut rc = self.config.load_repo_config().await?;
+        rc.ssh_key = None;
+        rc.ssh_passphrase = None;
+        self.config.save_repo_config_full(&rc).await?;
+        Ok(rc)
+    }
+
+    /// Read-only auth probe: fetch `origin` into a throwaway ref (HEAD untouched)
+    /// using `pat` to prove the credential works, without persisting it. Used to
+    /// validate a PAT before saving it. Authenticity policy is irrelevant here
+    /// (nothing is checked out), so a default policy is used.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::CloneFailed`] on an auth failure, [`ErrorCode::NetworkError`]
+    /// on a network problem.
+    pub async fn verify_pat(&self, pat: String) -> Result<(), Error> {
+        let rc = self.config.load_repo_config().await?;
+        let auth = GitAuth::Pat(pat);
+        let policy = AuthenticityConfig::default();
+        let ctx = StorageCtx {
+            repo_path: Path::new(&rc.local_path),
+            auth: &auth,
+            policy: &policy,
+            commit_name: None,
+            commit_email: None,
+        };
+        self.storage()?.verify_auth(&ctx).await
+    }
+
     /// Push the app-scoped `autosync` flag into the [`Store`]'s cache — the
     /// value [`autosync_write`](Store::autosync_write) reads. The app shell owns
     /// the authoritative copy in `app.json`; this keeps the cached injection in

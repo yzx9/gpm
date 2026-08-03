@@ -1,0 +1,19 @@
+{
+  "title": "Personal Access Token",
+  "description": "Authenticates gpm to the git repository over HTTPS. The token is stored; only a masked preview is shown here.",
+  "previewLabel": "Current token",
+  "noToken": "No token is configured.",
+  "loadFailed": "Failed to load config",
+  "maskedHelp": "Only the first and last characters are shown. Recreate the token on your git host if you need the full value.",
+  "replaceLabel": "New token",
+  "replacePlaceholder": "Paste token",
+  "replace": "Replace token",
+  "verifying": "Verifying…",
+  "replaceToast": "Token updated",
+  "replaceFailed": "Failed to update token",
+  "verifyFailed": "Couldn't authenticate with that token. Check it's valid and not expired, then try again.",
+  "clear": "Clear token",
+  "clearConfirm": "Remove the stored token? Syncing will need a new token or SSH key to push.",
+  "clearToast": "Token removed",
+  "clearFailed": "Failed to remove token"
+}

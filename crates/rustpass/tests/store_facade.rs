@@ -125,6 +125,109 @@ async fn set_commit_identity_persists_trims_and_clears() {
     assert_eq!(rc.commit_user_email, None);
 }
 
+/// `set_pat` persists a trimmed PAT; `None`/whitespace clears it.
+#[tokio::test]
+async fn set_pat_persists_trims_and_clears() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            None,
+            None,
+            None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    // Freshly configured → no PAT.
+    assert_eq!(store.config().await.expect("config").pat, None);
+
+    // A PAT is trimmed and persisted; the call returns the updated config.
+    let rc = store
+        .set_pat(Some("  ghp_token123  ".to_string()))
+        .await
+        .expect("set_pat");
+    assert_eq!(rc.pat.as_deref(), Some("ghp_token123"));
+    assert_eq!(
+        store.config().await.expect("reload").pat.as_deref(),
+        Some("ghp_token123")
+    );
+
+    // Whitespace-only and None both clear it.
+    let rc = store
+        .set_pat(Some("   ".to_string()))
+        .await
+        .expect("set_pat clear");
+    assert_eq!(rc.pat, None);
+    let rc = store.set_pat(None).await.expect("set_pat none");
+    assert_eq!(rc.pat, None);
+}
+
+/// `clear_ssh_key` clears BOTH the SSH key and its passphrase.
+#[tokio::test]
+async fn clear_ssh_key_clears_key_and_passphrase() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            None,
+            Some("-----BEGIN OPENSSH PRIVATE KEY-----\ndummy\n-----END OPENSSH PRIVATE KEY-----"),
+            Some("ssh-pass"),
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    // Both fields are seeded.
+    let rc = store.config().await.expect("config");
+    assert!(rc.ssh_key.is_some());
+    assert!(rc.ssh_passphrase.is_some());
+
+    // clear_ssh_key nulls both; the returned config + a reload confirm it.
+    let rc = store.clear_ssh_key().await.expect("clear_ssh_key");
+    assert_eq!(rc.ssh_key, None);
+    assert_eq!(rc.ssh_passphrase, None);
+    let rc = store.config().await.expect("reload");
+    assert_eq!(rc.ssh_key, None);
+    assert_eq!(rc.ssh_passphrase, None);
+}
+
+/// `verify_pat` probes the remote with a throwaway fetch (HEAD untouched) and
+/// returns `Ok` on a reachable repo. The PAT is ignored for a `file://` remote,
+/// so any value exercises the happy path (including temp-ref cleanup).
+#[tokio::test]
+async fn verify_pat_ok_on_reachable_remote() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            None,
+            None,
+            None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    store
+        .verify_pat("ignored-for-file-remote".to_string())
+        .await
+        .expect("verify_pat should succeed against the cloned origin");
+}
+
 /// `set_commit_identity` rejects characters that corrupt a commit's
 /// `Name <email>` line (newlines, `<`, `>`, control bytes) and persists
 /// nothing on rejection.

@@ -11,6 +11,7 @@ import enEntry from "@/locales/en/entry.json";
 import enGenerate from "@/locales/en/generate.json";
 import enHistory from "@/locales/en/history.json";
 import enLog from "@/locales/en/log.json";
+import enPat from "@/locales/en/pat.json";
 import enPermissions from "@/locales/en/permissions.json";
 import enSecurity from "@/locales/en/security.json";
 import enSettings from "@/locales/en/settings.json";
@@ -36,6 +37,7 @@ const TEST_MESSAGES = {
     generate: enGenerate,
     history: enHistory,
     log: enLog,
+    pat: enPat,
     permissions: enPermissions,
     security: enSecurity,
     settings: enSettings,

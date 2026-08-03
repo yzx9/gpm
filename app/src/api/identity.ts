@@ -17,9 +17,10 @@ export interface SshKeyPairResult {
   private_key: string;
 }
 
-/** The identity's SSH public key (safe to display/copy). */
+/** The identity's SSH public key — `null` when no SSH key is configured (a
+ *  normal state surfaced as an empty page, not an error). Safe to display/copy. */
 export interface SshPublicKeyResult {
-  public_key: string;
+  public_key: string | null;
 }
 
 /** The exported SSH private key (sensitive — auto-cleared after use). */

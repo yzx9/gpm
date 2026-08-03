@@ -3,7 +3,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { exportSshPrivateKey, getSshPublicKey, type AppError } from "@/api";
+import {
+  clearSshKey,
+  exportSshPrivateKey,
+  getSshPublicKey,
+  type AppError,
+} from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
@@ -15,20 +20,26 @@ import {
   useToast,
   useWipeOnLeave,
 } from "@/composables";
-import { Copy, KeyRound, LockOpen, TriangleAlert } from "@lucide/vue";
+import { Copy, KeyRound, LockOpen, Trash2, TriangleAlert } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 
 const { t } = useI18n();
 const { toast } = useToast();
 const { dialog } = useDialog();
+const router = useRouter();
 
 const publicKey = ref("");
 const privateKey = ref("");
 const showPrivate = ref(false);
 const loading = ref(false);
 const exporting = ref(false);
+const removing = ref(false);
 const error = ref("");
+/** No SSH key configured — a normal state, surfaced as an empty page (not an
+ * error). Reached if the key was removed after the settings card linked here. */
+const noKey = ref(false);
 // R031: hold a screen-capture claim while the private key is on screen.
 // `withClaim` raises FLAG_SECURE before it arrives; `release` drops it on hide /
 // lock / unmount (onScopeDispose backs up the unmount path).
@@ -41,7 +52,13 @@ async function loadPublicKey() {
   error.value = "";
   try {
     const result = await getSshPublicKey();
-    publicKey.value = result.public_key;
+    if (result.public_key === null) {
+      noKey.value = true;
+      publicKey.value = "";
+    } else {
+      noKey.value = false;
+      publicKey.value = result.public_key;
+    }
   } catch (e) {
     const appError = e as AppError;
     error.value = appError?.message || t("sshKey.publicFailed");
@@ -74,6 +91,29 @@ async function exportPrivateKey() {
     error.value = appError?.message || t("sshKey.exportFailed");
   } finally {
     exporting.value = false;
+  }
+}
+
+async function removeKey() {
+  const confirmed = await dialog.confirm({
+    message: t("sshKey.removeConfirm"),
+    confirmLabel: t("common.button.remove"),
+    danger: true,
+  });
+  if (!confirmed) return;
+  removing.value = true;
+  error.value = "";
+  try {
+    await clearSshKey();
+    toast.success(t("sshKey.removedToast"));
+    // The key is gone — return to the settings card, which re-derives the active
+    // method (a stored PAT becomes active, else None).
+    router.push({ name: "settingsRepository" });
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || t("sshKey.removeFailed");
+  } finally {
+    removing.value = false;
   }
 }
 
@@ -112,63 +152,83 @@ useWipeOnLeave(hidePrivate);
       error
     }}</BaseAlert>
 
-    <!-- Public key -->
-    <section class="mb-6">
-      <div class="flex justify-between items-center mb-2">
-        <span class="text-xs text-muted">{{ t("sshKey.publicKeyLabel") }}</span>
-        <BaseButton
-          v-if="publicKey"
-          variant="link"
-          size="xs"
-          tone="accent"
-          :aria-label="t('sshKey.copy')"
-          @click="copyText(publicKey)"
-        >
-          <BaseIcon :icon="Copy" /> {{ t("sshKey.copy") }}
-        </BaseButton>
-      </div>
-      <div v-if="loading" class="flex items-center gap-2 text-muted py-4">
-        <BaseSpinner />
-      </div>
-      <pre v-else class="key-display">{{ publicKey }}</pre>
-    </section>
+    <!-- No SSH key configured — a normal state, not an error. -->
+    <BaseAlert v-if="noKey" variant="info" class="mb-4">{{
+      t("sshKey.noKey")
+    }}</BaseAlert>
 
-    <!-- Private key export -->
-    <section>
-      <BaseButton
-        variant="action-danger"
-        :loading="exporting"
-        :disabled="showPrivate"
-        @click="exportPrivateKey"
-      >
-        <BaseIcon :icon="LockOpen" /> {{ t("sshKey.exportPrivate") }}
-      </BaseButton>
-
-      <div v-if="showPrivate" class="mt-3 flex flex-col gap-2">
-        <BaseAlert variant="danger">
-          <BaseIcon
-            :icon="TriangleAlert"
-            :size="14"
-            class="inline-block align-middle"
-          />
-          {{ t("sshKey.privateVisible") }}
-        </BaseAlert>
-        <div class="flex justify-end">
+    <template v-if="!noKey">
+      <!-- Public key -->
+      <section class="mb-6">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-xs text-muted">{{
+            t("sshKey.publicKeyLabel")
+          }}</span>
           <BaseButton
+            v-if="publicKey"
             variant="link"
             size="xs"
             tone="accent"
-            @click="copyText(privateKey)"
+            :aria-label="t('sshKey.copy')"
+            @click="copyText(publicKey)"
           >
             <BaseIcon :icon="Copy" /> {{ t("sshKey.copy") }}
           </BaseButton>
         </div>
-        <pre class="key-display private-key-display">{{ privateKey }}</pre>
-        <BaseButton variant="action" class="mt-1" @click="hidePrivate">
-          {{ t("sshKey.hidePrivate") }}
+        <div v-if="loading" class="flex items-center gap-2 text-muted py-4">
+          <BaseSpinner />
+        </div>
+        <pre v-else class="key-display">{{ publicKey }}</pre>
+      </section>
+
+      <!-- Private key export -->
+      <section class="mb-6">
+        <BaseButton
+          variant="action-danger"
+          :loading="exporting"
+          :disabled="showPrivate"
+          @click="exportPrivateKey"
+        >
+          <BaseIcon :icon="LockOpen" /> {{ t("sshKey.exportPrivate") }}
         </BaseButton>
-      </div>
-    </section>
+
+        <div v-if="showPrivate" class="mt-3 flex flex-col gap-2">
+          <BaseAlert variant="danger">
+            <BaseIcon
+              :icon="TriangleAlert"
+              :size="14"
+              class="inline-block align-middle"
+            />
+            {{ t("sshKey.privateVisible") }}
+          </BaseAlert>
+          <div class="flex justify-end">
+            <BaseButton
+              variant="link"
+              size="xs"
+              tone="accent"
+              @click="copyText(privateKey)"
+            >
+              <BaseIcon :icon="Copy" /> {{ t("sshKey.copy") }}
+            </BaseButton>
+          </div>
+          <pre class="key-display private-key-display">{{ privateKey }}</pre>
+          <BaseButton variant="action" class="mt-1" @click="hidePrivate">
+            {{ t("sshKey.hidePrivate") }}
+          </BaseButton>
+        </div>
+      </section>
+
+      <!-- Remove key (method switching: clears SSH so a stored PAT / None takes over) -->
+      <section>
+        <BaseButton
+          variant="action-danger"
+          :loading="removing"
+          @click="removeKey"
+        >
+          <BaseIcon :icon="Trash2" /> {{ t("sshKey.remove") }}
+        </BaseButton>
+      </section>
+    </template>
   </main>
 </template>
 

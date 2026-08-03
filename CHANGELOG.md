@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On the **Permissions & data** screen, the biometric row now says **Enabled** when fingerprint/face unlock is on (and **Ready** when the hardware is set up but it isn't), and a link takes you to **Lock & Identity** to turn it on or off. Landing there scrolls to the biometric card and briefly highlights it so you can find it.
 - Secrets saved in gopass's older `GOPASS-SECRET-1.0` format (used for a few months in 2020–2021 and still produced by some older stores) now open correctly. gpm used to treat the format's identifying header line as the password, so it showed — and copied — the wrong string; the real password, which that format stores in a `Password:` field, is now used instead. Editing one of these secrets still rewrites it in the current format, exactly as gopass does; gpm never writes the old format.
 - gpm can now **export a gopass binary attachment** to a file you choose. Entries that are attachments (created with `gopass fscopy` / `gopass binary attach`) show their filename and size and an **Export Attachment** action instead of an empty password and a wall of base64 — tap it to save the original file to your device or desktop. The decoded bytes never pass through the app's UI. Editing or replacing an attachment isn't supported yet.
+- A new **personal access token** screen (Settings → Repository → Manage token) shows a masked preview of your stored token, lets you replace it — the new token is checked against the remote before it's saved, so a mistyped or expired one is caught immediately — and clear it. A matching **Remove key** action on the SSH key screen lets you switch away from SSH authentication (to a stored token, or to none) without re-running setup.
 
 ### Changed
 
@@ -19,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The **Permissions & data** screen now spaces its cards apart — they used to sit edge to edge, matching the Security screen's stacked-card layout.
 - The diagnostic log now records the app's own activity — each screen you open, and any operation that fails (a copy, reveal, sync, create, and so on) — alongside the existing backend trace, so a failure leaves a clue in **Settings → Logs** instead of disappearing. A failed copy, for example, used to leave no trace at all; the log now captures what went wrong.
 - The many small buttons throughout the app — copy, close, show/hide, cancel, back, retry, and so on — now share one consistent look and the same tap, hover, and keyboard-focus feedback, instead of each screen having its own slightly different version. A few inline destructive actions (removing a trusted signing key, removing a picked identity file, and retrying a failed entry-list load) are now a quiet red link rather than a generic chip, so they read clearly without competing with the main action.
+- The Repository settings page now shows a dedicated **Git Authentication** card naming the active method — SSH key, personal access token, or none — instead of a small line under the URL, and surfaces a second stored credential when both are present so neither sits hidden.
+- Opening the SSH key screen with no key configured is no longer shown as a red error — it's a normal empty state.
+- Your stored personal access token and SSH private key (with its passphrase) are now masked before they reach the app's interface, so only a masked preview is shown; the full values stay in the backend.
 
 ### Fixed
 

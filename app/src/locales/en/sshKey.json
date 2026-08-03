@@ -7,5 +7,10 @@
   "privateVisible": "Private key is now visible. Copy it to a safe place and close this screen.",
   "hidePrivate": "Hide Private Key",
   "publicFailed": "Failed to get public key",
-  "exportFailed": "Failed to export private key"
+  "exportFailed": "Failed to export private key",
+  "noKey": "No SSH key is configured for this repository.",
+  "remove": "Remove Key",
+  "removeConfirm": "Remove the stored SSH key? If a personal access token is also stored it becomes the active method; otherwise syncing will need new credentials.",
+  "removedToast": "SSH key removed",
+  "removeFailed": "Failed to remove SSH key"
 }

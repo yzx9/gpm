@@ -30,12 +30,19 @@
     "failed": "无法保存主题 —— 请重试"
   },
   "repo": {
-    "title": "仓库",
-    "auth": {
-      "ssh": "认证：SSH 密钥",
-      "pat": "认证：PAT",
-      "none": "认证：无（公开）"
-    }
+    "title": "仓库"
+  },
+  "gitAuth": {
+    "title": "Git 认证",
+    "ssh": "SSH 密钥",
+    "sshHint": "使用 SSH 密钥向远程仓库认证。",
+    "pat": "个人访问令牌",
+    "patHint": "通过 HTTPS 使用个人访问令牌向远程仓库认证。",
+    "none": "未配置凭据",
+    "noneHint": "尚未设置 git 凭据。公开仓库的拉取仍可使用；推送需要个人访问令牌或 SSH 密钥。",
+    "managePat": "管理令牌",
+    "setUpPat": "设置令牌",
+    "alsoPat": "同时存储了一个个人访问令牌。"
   },
   "commit": {
     "title": "提交身份",

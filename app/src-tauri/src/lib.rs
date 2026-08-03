@@ -508,6 +508,9 @@ pub fn run() {
             // config
             config::get_config,
             config::set_commit_identity,
+            config::set_pat,
+            config::clear_ssh_key,
+            config::verify_git_auth,
             config::set_lock_mode,
             config::set_gate_idle,
             config::set_view_clear_secs,

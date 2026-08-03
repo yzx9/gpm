@@ -10,12 +10,15 @@ import SshKeyPage from "./SshKeyPage.vue";
 
 vi.mock("@tauri-apps/api/core");
 
-const { mockReplace } = vi.hoisted(() => ({ mockReplace: vi.fn() }));
+const { mockPush, mockReplace } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+  mockReplace: vi.fn(),
+}));
 
 vi.mock("vue-router", () => ({
   createRouter: vi.fn(),
   createWebHashHistory: vi.fn(),
-  useRouter: () => ({ push: vi.fn(), replace: mockReplace, back: vi.fn() }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: vi.fn() }),
   useRoute: () => ({
     params: {},
     query: {},
@@ -64,5 +67,36 @@ describe("SshKeyPage", () => {
     await w.find('button[aria-label="Back"]').trigger("click");
     await flushPromises();
     expect(mockReplace).toHaveBeenCalledWith({ name: "settings" });
+  });
+
+  it("shows an empty state (not an error) when no SSH key is configured", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_ssh_public_key")
+        return Promise.resolve({ public_key: null });
+      if (cmd === "export_ssh_private_key")
+        return Promise.resolve({
+          private_key: "-----OPENSSH PRIVATE KEY-----",
+        });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(SshKeyPage).wrapper;
+    await flushPromises();
+
+    expect(w.text()).toContain("No SSH key is configured");
+    expect(w.text()).not.toContain("ssh-ed25519");
+  });
+
+  it("Remove key (after confirm) clears the SSH key and returns to settings", async () => {
+    const w = mountWithApp(SshKeyPage).wrapper;
+    await flushPromises();
+
+    await w
+      .findAll("button")
+      .find((b) => b.text().includes("Remove Key"))!
+      .trigger("click");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("clear_ssh_key");
+    expect(mockPush).toHaveBeenCalledWith({ name: "settingsRepository" });
   });
 });

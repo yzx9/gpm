@@ -339,6 +339,12 @@ impl StorageBackend for GitStorage {
         })
         .await?
     }
+
+    async fn verify_auth(&self, ctx: &StorageCtx<'_>) -> Result<(), Error> {
+        let repo_path = ctx.repo_path.to_path_buf();
+        let auth = ctx.auth.clone();
+        spawn_blocking(move || pull::verify_remote_auth(&repo_path, &auth)).await?
+    }
 }
 
 #[cfg(test)]

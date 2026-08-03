@@ -63,10 +63,12 @@ impl fmt::Debug for SshKeyPairResult {
     }
 }
 
-/// Returned by `get_ssh_public_key` — public key only, safe to display.
+/// Returned by `get_ssh_public_key` — `None` when no SSH key is configured (a
+/// normal state, surfaced to the UI as an empty page, not an error); `Some`
+/// public key (safe to display) when one is stored.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SshPublicKeyResult {
-    public_key: String,
+    public_key: Option<String>,
 }
 
 /// Returned by `export_ssh_private_key` — secret, strict Vue lifecycle required.
@@ -341,11 +343,15 @@ pub(crate) async fn get_ssh_public_key(
     state: State<'_, AppState>,
 ) -> Result<SshPublicKeyResult, Error> {
     let config = state.store.config().await?;
-    let private_key = config
-        .ssh_key
-        .ok_or_else(|| Error::new(ErrorCode::SshKeyInvalid, "No SSH key configured"))?;
+    let Some(private_key) = config.ssh_key else {
+        // No SSH key configured is a normal state, not an error — surface it as
+        // an empty page rather than a red danger alert.
+        return Ok(SshPublicKeyResult { public_key: None });
+    };
     let public_key = ssh::get_public_key(&private_key)?;
-    Ok(SshPublicKeyResult { public_key })
+    Ok(SshPublicKeyResult {
+        public_key: Some(public_key),
+    })
 }
 
 /// Export the stored SSH private key (secret — requires confirmation in UI).

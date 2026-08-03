@@ -16,11 +16,53 @@ use crate::identity::{
     reset_lock_timer,
 };
 
+/// IPC-safe projection of [`RepoConfig`] with credential fields masked, so the
+/// full PAT / SSH private key / passphrase never reach the `WebView`. The mask is
+/// applied in the only constructor ([`From<RepoConfig>`]); every repo-config
+/// command returns this type, so forgetting to mask is a compile error rather
+/// than a silent leak. `#[serde(transparent)]` serializes the inner `RepoConfig`
+/// verbatim, so the on-wire shape (and the frontend `RepoConfig` type) is
+/// unchanged — only the credential *values* differ (masked here, full on disk).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(transparent)]
+pub(crate) struct RepoConfigPublic(RepoConfig);
+
+/// Fixed presence marker for credentials that are never displayed positionally
+/// (an SSH private key is viewed via its public half; a passphrase is short and
+/// human-chosen, so first/last chars would leak too much). Non-empty ⇒ set.
+const PRESENCE_MASK: &str = "••••";
+
+/// Mask a PAT for display: keep the first and last 4 chars (enough to tell two
+/// tokens apart, and the `ghp_`-style provider prefix is public anyway) and hide
+/// the middle behind a fixed run of bullets. Tokens of 8 chars or fewer collapse
+/// to the presence marker so no positional leak occurs on a short token.
+fn mask_pat(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= 8 {
+        return PRESENCE_MASK.to_string();
+    }
+    let n = chars.len();
+    // `take`/`skip` avoid panicking slices; safe because we returned above when
+    // `len <= 8`, so `n >= 9` here.
+    let head: String = chars.iter().take(4).collect();
+    let tail: String = chars.iter().skip(n - 4).collect();
+    format!("{head}{PRESENCE_MASK}{tail}")
+}
+
+impl From<RepoConfig> for RepoConfigPublic {
+    fn from(mut rc: RepoConfig) -> Self {
+        rc.pat = rc.pat.take().map(|p| mask_pat(&p));
+        rc.ssh_key = rc.ssh_key.take().map(|_| PRESENCE_MASK.to_string());
+        rc.ssh_passphrase = rc.ssh_passphrase.take().map(|_| PRESENCE_MASK.to_string());
+        Self(rc)
+    }
+}
+
 /// Get the current repo config (for display in settings).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn get_config(state: State<'_, AppState>) -> Result<RepoConfig, Error> {
-    state.store.config().await
+pub(crate) async fn get_config(state: State<'_, AppState>) -> Result<RepoConfigPublic, Error> {
+    state.store.config().await.map(RepoConfigPublic::from)
 }
 
 /// Reset all configuration and local data.
@@ -45,9 +87,48 @@ pub(crate) async fn set_commit_identity(
     state: State<'_, AppState>,
     name: Option<String>,
     email: Option<String>,
-) -> Result<RepoConfig, Error> {
+) -> Result<RepoConfigPublic, Error> {
     log::info!("config: set-commit-identity");
-    state.store.set_commit_identity(name, email).await
+    state
+        .store
+        .set_commit_identity(name, email)
+        .await
+        .map(RepoConfigPublic::from)
+}
+
+/// Set the HTTPS personal access token. `null` (or blank/whitespace) clears it.
+/// Returns the updated repo config (PAT masked for display).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_pat(
+    state: State<'_, AppState>,
+    pat: Option<String>,
+) -> Result<RepoConfigPublic, Error> {
+    log::info!("config: set-pat");
+    state.store.set_pat(pat).await.map(RepoConfigPublic::from)
+}
+
+/// Remove the stored SSH key + passphrase. A stored PAT, if any, becomes the
+/// active auth method. Returns the updated repo config (masked).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn clear_ssh_key(state: State<'_, AppState>) -> Result<RepoConfigPublic, Error> {
+    log::info!("config: clear-ssh-key");
+    state
+        .store
+        .clear_ssh_key()
+        .await
+        .map(RepoConfigPublic::from)
+}
+
+/// Validate a PAT against the remote before saving it: a read-only `git fetch`
+/// into a throwaway ref (HEAD untouched). Throws on auth/network failure so the
+/// UI can refuse to save a bad token.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn verify_git_auth(state: State<'_, AppState>, pat: String) -> Result<(), Error> {
+    log::info!("config: verify-git-auth");
+    state.store.verify_pat(pat).await
 }
 
 /// Set the app auto-lock mode (`immediate` / `{ idle: secs }` / `never`).
@@ -169,4 +250,83 @@ pub(crate) async fn set_background_sync(
 #[tauri::command]
 pub(crate) async fn get_commit_identity_default() -> CommitIdentity {
     Store::commit_identity_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(pat: Option<&str>, ssh_key: Option<&str>, passphrase: Option<&str>) -> RepoConfig {
+        RepoConfig {
+            url: "https://example.com/repo.git".to_string(),
+            pat: pat.map(str::to_string),
+            ssh_key: ssh_key.map(str::to_string),
+            ssh_passphrase: passphrase.map(str::to_string),
+            local_path: "/tmp/repo".to_string(),
+            commit_user_name: Some("Alice".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn mask_pat_long_keeps_ends() {
+        // 40-char token: first 4 + mask + last 4.
+        assert_eq!(
+            mask_pat("ghp_0123456789abcdefghijklmnopqrstuvwxyz"),
+            "ghp_••••wxyz"
+        );
+    }
+
+    #[test]
+    fn mask_pat_short_collapses_to_presence() {
+        assert_eq!(mask_pat("short"), PRESENCE_MASK);
+        assert_eq!(mask_pat("12345678"), PRESENCE_MASK); // exactly 8 → presence
+        assert_eq!(mask_pat(""), PRESENCE_MASK);
+    }
+
+    #[test]
+    fn mask_pat_boundary_9_chars_keeps_ends() {
+        // 9 chars: just past the threshold → first 4 + mask + last 4.
+        assert_eq!(mask_pat("abcdefghi"), "abcd••••fghi");
+    }
+
+    #[test]
+    fn repo_config_public_masks_credentials_not_other_fields() {
+        let rc = cfg(
+            Some("ghp_0123456789abcdefghijklmnopqrstuvwxyz"),
+            Some("-----BEGIN KEY-----"),
+            Some("secret"),
+        );
+        let public = RepoConfigPublic::from(rc).0; // inner RepoConfig for the assertion
+        assert_eq!(public.pat.as_deref(), Some("ghp_••••wxyz"));
+        assert_eq!(public.ssh_key.as_deref(), Some(PRESENCE_MASK));
+        assert_eq!(public.ssh_passphrase.as_deref(), Some(PRESENCE_MASK));
+        // Non-secret fields pass through verbatim.
+        assert_eq!(public.url, "https://example.com/repo.git");
+        assert_eq!(public.local_path, "/tmp/repo");
+        assert_eq!(public.commit_user_name.as_deref(), Some("Alice"));
+    }
+
+    #[test]
+    fn repo_config_public_none_credentials_stay_none() {
+        let rc = cfg(None, None, None);
+        let public = RepoConfigPublic::from(rc).0;
+        assert!(public.pat.is_none());
+        assert!(public.ssh_key.is_none());
+        assert!(public.ssh_passphrase.is_none());
+    }
+
+    #[test]
+    fn repo_config_public_serializes_masked_same_shape() {
+        // transparent ⇒ the JSON key set matches RepoConfig, so the frontend
+        // RepoConfig type still parses it — but the full PAT never serializes.
+        let rc = cfg(Some("ghp_token123456789012345678901234567890"), None, None);
+        let json = serde_json::to_string(&RepoConfigPublic::from(rc)).unwrap();
+        assert!(json.contains("\"pat\""), "pat key present: {json}");
+        assert!(
+            !json.contains("ghp_token"),
+            "full PAT must not serialize: {json}"
+        );
+        assert!(json.contains("ghp_••••"), "masked PAT present: {json}");
+    }
 }

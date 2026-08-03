@@ -143,6 +143,11 @@ const routes = [
     component: () => import("./pages/SshKeyPage.vue"),
   },
   {
+    path: "/settings/pat",
+    name: "pat",
+    component: () => import("./pages/PatPage.vue"),
+  },
+  {
     path: "/settings/add-key",
     name: "addKey",
     component: () => import("./pages/AddKeyPage.vue"),

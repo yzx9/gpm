@@ -474,6 +474,22 @@ pub trait StorageBackend: Send + Sync {
     /// [`ErrorCode::NoRepo`] if no repo at `repo_path`;
     /// [`ErrorCode::PullFfFailed`] if HEAD is unborn.
     async fn current_head(&self, repo_path: &Path) -> Result<String, Error>;
+
+    /// Read-only connectivity + auth probe: contact `origin` without moving HEAD
+    /// (the git backend fetches into a throwaway ref). Used to validate a
+    /// credential before persisting it. Backends that can't reach a remote
+    /// default to "unsupported".
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::CloneFailed`] on an auth failure, [`ErrorCode::NetworkError`]
+    /// on a network problem; an unsupported backend returns [`ErrorCode::StoreError`].
+    async fn verify_auth(&self, _ctx: &StorageCtx<'_>) -> Result<(), Error> {
+        Err(Error::new(
+            ErrorCode::StoreError,
+            "Connection testing is not supported by this storage backend.",
+        ))
+    }
 }
 
 /// Read-only view of repo working-tree files, bound to a specific `repo_path`.

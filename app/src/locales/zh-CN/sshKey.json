@@ -7,5 +7,10 @@
   "privateVisible": "私钥现已可见。请将其复制到安全位置并关闭此页面。",
   "hidePrivate": "隐藏私钥",
   "publicFailed": "获取公钥失败",
-  "exportFailed": "导出私钥失败"
+  "exportFailed": "导出私钥失败",
+  "noKey": "尚未为该仓库配置 SSH 密钥。",
+  "remove": "移除密钥",
+  "removeConfirm": "移除已存储的 SSH 密钥？如果同时存储了个人访问令牌，它将变为当前认证方式；否则同步将需要新的凭据。",
+  "removedToast": "SSH 密钥已移除",
+  "removeFailed": "移除 SSH 密钥失败"
 }

@@ -1,0 +1,19 @@
+{
+  "title": "个人访问令牌",
+  "description": "通过 HTTPS 向 git 仓库认证 gpm。令牌会被保存；此处仅显示遮蔽后的预览。",
+  "previewLabel": "当前令牌",
+  "noToken": "尚未配置令牌。",
+  "loadFailed": "加载配置失败",
+  "maskedHelp": "仅显示开头和结尾的字符。如需完整令牌，请在 git 托管平台上重新创建。",
+  "replaceLabel": "新令牌",
+  "replacePlaceholder": "粘贴令牌",
+  "replace": "替换令牌",
+  "verifying": "验证中…",
+  "replaceToast": "令牌已更新",
+  "replaceFailed": "更新令牌失败",
+  "verifyFailed": "无法使用该令牌认证。请检查令牌是否有效且未过期，然后重试。",
+  "clear": "清除令牌",
+  "clearConfirm": "移除已存储的令牌？同步将需要新令牌或 SSH 密钥才能推送。",
+  "clearToast": "令牌已移除",
+  "clearFailed": "移除令牌失败"
+}

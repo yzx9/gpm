@@ -45,7 +45,27 @@ const config = ref<RepoConfig | null>(null);
 const loading = ref(false);
 const error = ref("");
 
-const isSsh = ref(false);
+// Active git auth method, derived from config the same way the backend's
+// `to_git_auth` does (ssh_key > pat > none). Shown prominently on the Git
+// Authentication card so the user always knows how they're authenticating.
+const authMethod = computed<"ssh" | "pat" | "none">(() => {
+  const c = config.value;
+  if (!c) return "none";
+  if (c.ssh_key) return "ssh";
+  if (c.pat) return "pat";
+  return "none";
+});
+/** The inactive credential that is ALSO stored (so the card can surface it —
+ * without this a dormant PAT/SSH key would sit unseen under the active method). */
+const alsoStored = computed<"pat" | null>(() => {
+  const c = config.value;
+  if (!c) return null;
+  // SSH is active and a PAT is also stored → the PAT is dormant. (The mirror
+  // case — PAT active + SSH stored — is impossible: PAT is active only when no
+  // SSH key is stored, per the to_git_auth precedence.)
+  if (authMethod.value === "ssh" && c.pat) return "pat";
+  return null;
+});
 
 // ── Commit identity state ────────────────────────────────────────────────
 const commitName = ref("");
@@ -58,7 +78,6 @@ async function loadConfig() {
   error.value = "";
   try {
     config.value = await getConfig();
-    isSsh.value = config.value.ssh_key !== null;
     commitName.value = config.value.commit_user_name ?? "";
     commitEmail.value = config.value.commit_user_email ?? "";
     // The default-identity hint is a nicety (the form works without it); a
@@ -325,15 +344,6 @@ onMounted(() => {
             {{ t("settings.repo.title") }}
           </h2>
           <div class="text-sm text-muted break-all">{{ config.url }}</div>
-          <div class="text-xs text-muted mt-1">
-            {{
-              isSsh
-                ? t("settings.repo.auth.ssh")
-                : config.pat
-                  ? t("settings.repo.auth.pat")
-                  : t("settings.repo.auth.none")
-            }}
-          </div>
         </BaseCard>
 
         <!-- Commit identity -->
@@ -394,15 +404,85 @@ onMounted(() => {
           </BaseButton>
         </BaseCard>
 
-        <!-- SSH key management — the key view/export lives on its own route so
-           Android back returns here instead of the settings hub. -->
-        <BaseCard as="section" v-if="isSsh">
-          <h2 class="text-sm font-medium mb-3">
-            {{ t("settings.ssh.title") }}
+        <!-- Git authentication — always shown so the user sees the active method
+             and can manage it. Method derivation mirrors the backend `to_git_auth`
+             (ssh_key > pat > none); clearing the active credential (on the SSH or
+             PAT page) lets the other stored one take over. -->
+        <BaseCard as="section">
+          <h2 class="text-sm font-medium mb-2">
+            {{ t("settings.gitAuth.title") }}
           </h2>
-          <BaseButton variant="action" @click="router.push({ name: 'sshKey' })">
-            <BaseIcon :icon="KeyRound" /> {{ t("settings.ssh.manage") }}
-          </BaseButton>
+          <div class="text-sm mb-1">
+            <BaseIcon
+              :icon="KeyRound"
+              :size="14"
+              class="inline-block align-middle"
+            />
+            <span class="align-middle ml-1">{{
+              authMethod === "ssh"
+                ? t("settings.gitAuth.ssh")
+                : authMethod === "pat"
+                  ? t("settings.gitAuth.pat")
+                  : t("settings.gitAuth.none")
+            }}</span>
+          </div>
+          <div class="text-xs text-muted mb-2">
+            {{
+              authMethod === "ssh"
+                ? t("settings.gitAuth.sshHint")
+                : authMethod === "pat"
+                  ? t("settings.gitAuth.patHint")
+                  : t("settings.gitAuth.noneHint")
+            }}
+          </div>
+
+          <!-- Masked PAT preview (the backend masks; the full token never reaches
+               the WebView). -->
+          <code
+            v-if="authMethod === 'pat' && config.pat"
+            class="auth-preview block mb-2"
+            >{{ config.pat }}</code
+          >
+
+          <!-- Surface a dormant credential so it isn't invisible under the active
+               method (relevant now that methods can be cleared to switch). -->
+          <p v-if="alsoStored === 'pat'" class="text-xs text-muted mb-2">
+            {{ t("settings.gitAuth.alsoPat") }}
+          </p>
+
+          <div class="flex flex-col gap-2">
+            <BaseButton
+              v-if="authMethod === 'ssh'"
+              variant="action"
+              @click="router.push({ name: 'sshKey' })"
+            >
+              <BaseIcon :icon="KeyRound" /> {{ t("settings.ssh.manage") }}
+            </BaseButton>
+            <BaseButton
+              v-else-if="authMethod === 'pat'"
+              variant="action"
+              @click="router.push({ name: 'pat' })"
+            >
+              <BaseIcon :icon="KeyRound" />
+              {{ t("settings.gitAuth.managePat") }}
+            </BaseButton>
+            <BaseButton
+              v-else
+              variant="action"
+              @click="router.push({ name: 'pat' })"
+            >
+              <BaseIcon :icon="KeyRound" /> {{ t("settings.gitAuth.setUpPat") }}
+            </BaseButton>
+
+            <!-- Reach the inactive credential's management when both are stored. -->
+            <BaseButton
+              v-if="alsoStored === 'pat'"
+              variant="secondary"
+              @click="router.push({ name: 'pat' })"
+            >
+              {{ t("settings.gitAuth.managePat") }}
+            </BaseButton>
+          </div>
         </BaseCard>
 
         <!-- Repository authenticity -->
@@ -541,6 +621,16 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.auth-preview {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  font-family: monospace;
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
 .key-row {
   display: flex;
   align-items: center;

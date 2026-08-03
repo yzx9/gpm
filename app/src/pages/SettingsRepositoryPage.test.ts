@@ -88,27 +88,33 @@ describe("SettingsRepositoryPage", () => {
       expect(wrapper.text()).toContain("git@github.com:user/repo.git");
     });
 
-    it("shows SSH Key auth type for SSH config", async () => {
+    it("shows the SSH method on the Git auth card for SSH config", async () => {
       when("get_config", sshConfig);
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(wrapper.text()).toContain("Auth: SSH Key");
+      expect(wrapper.text()).toContain("Git Authentication");
+      expect(wrapper.text()).toContain("SSH key");
+      expect(wrapper.text()).toContain("Manage SSH Key");
     });
 
-    it("shows PAT auth type for HTTPS config with token", async () => {
+    it("shows the PAT method + masked preview on the Git auth card", async () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(wrapper.text()).toContain("Auth: PAT");
+      expect(wrapper.text()).toContain("Personal access token");
+      expect(wrapper.text()).toContain("Manage token");
+      // config.pat is rendered (the mock bypasses backend masking).
+      expect(wrapper.text()).toContain("ghp_token123");
     });
 
-    it("shows None auth type for public HTTPS config", async () => {
+    it("shows the No-credentials state for a public HTTPS config", async () => {
       when("get_config", { ...httpsConfig, pat: null });
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(wrapper.text()).toContain("Auth: None (public)");
+      expect(wrapper.text()).toContain("No credentials");
+      expect(wrapper.text()).toContain("Set up token");
     });
 
     it("shows error when config loading fails", async () => {
@@ -130,6 +136,69 @@ describe("SettingsRepositoryPage", () => {
       await flushPromises();
 
       expect(wrapper.text()).toContain("Loading...");
+    });
+  });
+
+  describe("git authentication card routing", () => {
+    it("routes to the SSH key page when SSH is active", async () => {
+      when("get_config", sshConfig);
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const btn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Manage SSH Key"));
+      expect(btn).toBeDefined();
+      await btn!.trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "sshKey" });
+    });
+
+    it("routes to the PAT page when PAT is active", async () => {
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const btn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Manage token"));
+      expect(btn).toBeDefined();
+      await btn!.trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "pat" });
+    });
+
+    it("routes to the PAT page from the No-credentials state", async () => {
+      when("get_config", { ...httpsConfig, pat: null });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const btn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Set up token"));
+      expect(btn).toBeDefined();
+      await btn!.trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "pat" });
+    });
+
+    it("surfaces a dormant PAT when both credentials are stored", async () => {
+      // SSH takes precedence (active); a stored PAT is dormant but visible.
+      when("get_config", {
+        ...sshConfig,
+        pat: "ghp_dormant123456789012345678901234567890",
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("personal access token is also stored");
+      expect(
+        wrapper
+          .findAll("button")
+          .filter((b) => b.text().includes("Manage token")).length,
+      ).toBeGreaterThanOrEqual(1);
     });
   });
 

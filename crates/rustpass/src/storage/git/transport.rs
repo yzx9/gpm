@@ -351,12 +351,17 @@ pub(super) fn classify_push_error(msg: &str) -> Error {
 
 /// Classify a git2 error message into the appropriate [`Error`].
 pub(super) fn classify_git_error(msg: &str) -> Error {
-    if msg.contains("authentication")
+    // Keyword classification uses the pre-redaction text; the message itself is
+    // redacted below so a credentialed URL (e.g. `https://user:pat@host`) echoed
+    // by libgit2 never reaches the WebView or the logs. Mirrors classify_push_error.
+    let is_auth = msg.contains("authentication")
         || msg.contains("unsupported URL")
-        || msg.contains("SSH key error")
-    {
+        || msg.contains("SSH key error");
+    let is_network = msg.contains("unable to connect") || msg.contains("timeout");
+    let msg = crate::config::redact_url(msg);
+    if is_auth {
         Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
-    } else if msg.contains("unable to connect") || msg.contains("timeout") {
+    } else if is_network {
         Error::new(ErrorCode::NetworkError, format!("Network error: {msg}"))
     } else {
         Error::new(ErrorCode::CloneFailed, format!("Clone failed: {msg}"))
@@ -456,6 +461,25 @@ mod tests {
     fn classify_git_error_generic() {
         let err = classify_git_error("some unknown error");
         assert_eq!(err.code, "CLONE_FAILED");
+    }
+
+    #[test]
+    fn classify_git_error_redacts_embedded_credential() {
+        // libgit2 can echo the remote URL (with an embedded PAT) into a
+        // fetch/clone error; classify_git_error must scrub it (verify_remote_auth
+        // routes here, so the credential must never reach the WebView).
+        let msg = "fetch of https://user:secret-token@host.example/repo.git failed";
+        let err = classify_git_error(msg);
+        assert!(
+            !err.message.contains("secret-token"),
+            "credential leaked into git error: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains("user:secret-token@"),
+            "userinfo leaked into git error: {}",
+            err.message
+        );
     }
 
     #[test]

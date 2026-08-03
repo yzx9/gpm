@@ -30,12 +30,19 @@
     "failed": "Couldn't save theme — try again"
   },
   "repo": {
-    "title": "Repository",
-    "auth": {
-      "ssh": "Auth: SSH Key",
-      "pat": "Auth: PAT",
-      "none": "Auth: None (public)"
-    }
+    "title": "Repository"
+  },
+  "gitAuth": {
+    "title": "Git Authentication",
+    "ssh": "SSH key",
+    "sshHint": "Authenticating to the remote with an SSH key.",
+    "pat": "Personal access token",
+    "patHint": "Authenticating to the remote with a personal access token over HTTPS.",
+    "none": "No credentials",
+    "noneHint": "No git credentials are set. Pulls from a public repository still work; pushing requires a personal access token or SSH key.",
+    "managePat": "Manage token",
+    "setUpPat": "Set up token",
+    "alsoPat": "A personal access token is also stored."
   },
   "commit": {
     "title": "Commit Identity",

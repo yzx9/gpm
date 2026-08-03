@@ -77,6 +77,23 @@ pub(super) fn pull_repo(
     transport::cancelled_or(pull_verified(&repo, &mut remote, callbacks, policy), cancel)
 }
 
+/// Read-only auth/connectivity probe: fetch `origin`'s current branch into a
+/// throwaway temp ref (HEAD untouched) to prove `auth` works, then delete the
+/// ref. Used to validate a credential before persisting it. A failed fetch is
+/// re-classified through [`transport::classify_git_error`] so any credentialed
+/// URL embedded in the libgit2 message is redacted before it reaches the caller.
+pub(super) fn verify_remote_auth(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|e| transport::classify_git_error(&format!("Failed to open repository: {e}")))?;
+    transport::ensure_https_ca_for_origin(&repo)?;
+    let (_branch, temp_ref, _oid) = transport::fetch_remote_into_temp(&repo, auth)
+        .map_err(|e| transport::classify_git_error(&format!("{e}")))?;
+    // Best-effort cleanup of the probe ref; a leftover under refs/gpm/probe/ is
+    // harmless (never pushed, never read again after this).
+    let _ = repo.find_reference(&temp_ref).and_then(|mut r| r.delete());
+    Ok(())
+}
+
 /// An empty authenticity result for a given mode (Off pull, no-op pull).
 fn empty_authenticity(mode: VerifyMode) -> AuthenticityResult {
     AuthenticityResult {
