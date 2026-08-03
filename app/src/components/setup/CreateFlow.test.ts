@@ -296,6 +296,19 @@ describe("CreateFlow", () => {
 
   // ── validation ─────────────────────────────────────────────────────────
 
+  it("leaves the URL field un-required so a local-only store can be created", async () => {
+    // jsdom does not enforce HTML5 constraint validation, so a bare `required`
+    // on the URL `<input>` passes every unit test yet blocks an empty-URL
+    // submit in a real WebView. The create flow must opt out of it so a store
+    // with no remote is creatable. Assert the rendered attribute directly.
+    mockInvoke({ generate_identity: () => "age1r" });
+    const wrapper = mount(CreateFlow);
+    await flushPromises();
+    expect(
+      wrapper.find('input[id="repo-url"]').attributes("required"),
+    ).toBeUndefined();
+  });
+
   it("requires an identity before creating", async () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();

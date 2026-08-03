@@ -35,8 +35,12 @@ withDefaults(
     showKeygen?: boolean;
     /** Disable all inputs (wired to the parent's loading flag). */
     disabled?: boolean;
+    /** Require a URL (native HTML5 validation). Clone needs one; Create passes
+     *  false so the store can be local-only (no remote). jsdom skips HTML5
+     *  validation, so the create-flow test asserts the attribute directly. */
+    urlRequired?: boolean;
   }>(),
-  { showKeygen: true, disabled: false },
+  { showKeygen: true, disabled: false, urlRequired: true },
 );
 
 // Whether the current URL is an SSH remote (delegates to the shared helper so
@@ -96,7 +100,7 @@ async function copyPublicKey() {
       v-model="repoUrl"
       type="url"
       :placeholder="t('setup.auth.repoUrlPlaceholder')"
-      required
+      :required="urlRequired"
       autocomplete="off"
       :disabled="disabled"
     />

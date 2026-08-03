@@ -351,6 +351,7 @@ async function onCreate() {
           v-model:ssh-key="sshKey"
           v-model:ssh-passphrase="sshPassphrase"
           :show-keygen="false"
+          :url-required="false"
           :disabled="loading"
         />
       </div>

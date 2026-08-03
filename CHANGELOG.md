@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The diagnostic log now records the app's own activity — each screen you open, and any operation that fails (a copy, reveal, sync, create, and so on) — alongside the existing backend trace, so a failure leaves a clue in **Settings → Logs** instead of disappearing. A failed copy, for example, used to leave no trace at all; the log now captures what went wrong.
 - The many small buttons throughout the app — copy, close, show/hide, cancel, back, retry, and so on — now share one consistent look and the same tap, hover, and keyboard-focus feedback, instead of each screen having its own slightly different version. A few inline destructive actions (removing a trusted signing key, removing a picked identity file, and retrying a failed entry-list load) are now a quiet red link rather than a generic chip, so they read clearly without competing with the main action.
 
+### Fixed
+
+- Creating a new store without a remote now works: the repository-URL field in setup was marked required, so leaving it empty silently blocked the **Create** button in the real app — even though the on-screen hint already said a remote was optional. You can now skip the URL and keep the store entirely local.
+
 ## [v0.15.1] - 2026-08-02
 
 ### Changed
