@@ -1,19 +1,22 @@
 ---
 pm: Zexin Yuan
 created: 2026-07-15
-version: 1.0.0
+version: 1.1.0
 scope: entries
 ---
 
-# 001 — Entry Access (finding & using a password)
+# 001 — Entry Access (finding & using a secret)
 
-> Status: Shipped · Last verified: 2026-07-28
+> Status: Shipped · Last verified: 2026-08-03
 
 ## 1. Introduction
 
 The read-access loop: browse / search → decrypt → copy or show a password. This is
 the most frequent thing users do. The password stays out of the UI whenever it can —
-copy is the default, and what's copied is cleared right after.
+copy is the default, and what's copied is cleared right after. An entry may also be a
+**binary attachment** (a file stored via gopass `fscopy`) rather than a password;
+"using" it means exporting the decoded file to a chosen location, again without the
+bytes reaching the UI.
 
 ## 2. Motivation / Objective
 
@@ -52,11 +55,15 @@ the UI), and showing is a secondary action that clears itself on a timer.
 - The clipboard auto-clears after a copy and a clear-notification is posted; entries
   with a second factor can copy the current code; the password-show screen blocks
   screenshots / screen recording.
+- A binary-attachment entry shows its filename + decoded size and offers Export to a
+  chosen file (decoded bytes never reach the UI); copy/show are hidden for it since it
+  has no password.
 
 ### Compatibility
 
 - Entry format and 2FA both interoperate with gopass — what desktop gopass writes, the
-  phone reads, and vice versa.
+  phone reads, and vice versa. Binary attachments interoperate too: gpm reads the
+  gopass `fscopy` AKV+base64 format and decodes it byte-identically.
 
 ### Interactive
 
@@ -88,5 +95,7 @@ See <./security.md>.
 ## 6. Roadmap
 
 - **Shipped:** browse / search / decrypt, copy / show + auto-clear, clear-notification,
-  show-screen screen-capture block, copying the 2FA code.
-- **Future:** component-level screen-capture block.
+  show-screen screen-capture block, copying the 2FA code, binary-attachment export +
+  metadata display.
+- **Future:** component-level screen-capture block; attachment preview (R068) and
+  attachment write/replace (R067).
