@@ -1,0 +1,49 @@
+# Keeps third-party dependencies current. Watches the three ecosystems GitHub
+# can manage here: the Rust workspace (Cargo.lock), the pnpm workspace
+# (pnpm-lock.yaml, covered by the "npm" ecosystem), and the pinned actions used
+# in .github/workflows + .github/actions. The Nix flake is intentionally
+# excluded — it already auto-updates via .github/workflows/update-flake-lock.yaml.
+#
+# Minor + patch bumps are grouped per ecosystem to cut PR noise; major bumps each
+# open their own PR so breaking changes get individual review.
+version: 2
+
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore(deps)"
