@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.16.0] - 2026-08-03
+
 ### Added
 
 - On the **Permissions & data** screen, the biometric row now says **Enabled** when fingerprint/face unlock is on (and **Ready** when the hardware is set up but it isn't), and a link takes you to **Lock & Identity** to turn it on or off. Landing there scrolls to the biometric card and briefly highlights it so you can find it.
@@ -403,7 +405,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.16.0...HEAD
+[v0.16.0]: https://github.com/yzx9/gpm/compare/v0.15.1...v0.16.0
 [v0.15.1]: https://github.com/yzx9/gpm/compare/v0.15.0...v0.15.1
 [v0.15.0]: https://github.com/yzx9/gpm/compare/v0.14.2...v0.15.0
 [v0.14.2]: https://github.com/yzx9/gpm/compare/v0.14.1...v0.14.2
