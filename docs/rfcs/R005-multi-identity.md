@@ -51,6 +51,6 @@ When multi-identity lands, add a gate: refuse to overwrite a remote entry whose 
 
 ~1-2 days (human) / ~45 min (CC)
 
-## Depends on
+## Depends on / Supersedes
 
-0004-reconfiguration-flow.md (reconfiguration should land first so the identity type system handles both formats from the start)
+None — independent of other RFCs. (R004 was previously listed as a dependency, on the assumption it would establish the identity type system first; R004 is now scoped to git-credential rotation only and touches no identity work, so the two are independent.)

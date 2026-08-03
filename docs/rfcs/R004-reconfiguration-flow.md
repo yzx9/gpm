@@ -1,4 +1,4 @@
-# Add re-configuration flow
+# Rotate git credentials without re-setup
 
 **Priority:** P2
 **Status:** Draft
@@ -6,45 +6,32 @@
 
 ## What
 
-Allow users to change their repo URL, PAT, or age identity without re-running the full setup flow (which clears the local repo and re-clones). Provide a settings mechanism that updates config in-place.
+Let a configured user rotate the git auth credential used to sync their password store — the HTTPS PAT, or the SSH private key and its optional passphrase — in place, without clearing the local repo, re-cloning, or re-entering the age identity. This is the credential-rotation slice of the broader "re-configuration" idea; the other two slices (repo URL, age identity) are deferred to other work (see Context).
 
 ## Why
 
-Currently changing anything requires the full setup flow: enter new URL + PAT + identity → clone fresh. If a user rotates their PAT or switches to a different age identity, they must re-download the entire password store. This is a friction point for routine credential rotation.
+Credential rotation is routine security hygiene — a PAT expires or is revoked, an SSH key is rotated — yet today the only lever a configured user has is the destructive "Reset All Data": wipe the local store and identity, then re-run the full setup (re-enter URL + new credential + identity, and re-clone the entire password store). That is wildly disproportionate to changing a single token. Rotating just the credential should be a one-field edit that re-writes the stored repo auth and leaves the clone, the identity, and all other config untouched.
 
 ## Context
 
-### Current flow
+The git auth credential (PAT, or SSH key + passphrase) lives in the repo-scoped config alongside the repo URL and the local clone path. The setup flow writes it once at clone time; there is no path to update it afterward, so any change routes through the full reset. The clone and the age identity are both independent of the auth credential — a credential change needs neither a fresh clone nor any identity work — so an in-place update is safe and self-contained.
 
-```
-SetupPage → configure() → clear_all() → save_identity() → clone_repo()
-```
+Before committing a new credential, probe it against the existing remote (a probe fetch / ls-remote) so a typo'd or revoked token is rejected up front rather than failing on the next sync; a failed probe leaves the prior credential intact (atomic swap). The natural UI home is the existing repository settings view, where the repo URL and current auth method are already shown — the credential becomes editable there.
 
-`clear_all()` deletes the local repo and all config. There's no way to update individual settings.
+### Scope deferred to other work
 
-### Implementation options
+- **Repo URL change + re-clone.** A different URL is a different repository, so a fresh clone is inherent to the operation. "Point at a different repo" is better served by the planned multi-repository feature, which will own repo lifecycle wholesale, so URL re-pointing is deferred there rather than built as a one-off here. (No multi-repo RFC yet.)
+- **Age identity change.** Swapping the decryption identity is only meaningful once gpm has identity _management_ — and that belongs with multi-recipient support (R005), where identities become first-class (add / remove / label). A single-identity swap here would be throwaway work subsumed by R005.
 
-1. **Add a Settings page** — New Vue page accessible from EntryListPage (gear icon). Sections for repo config and identity config. Changes save individually without clearing the repo.
+## Alternatives considered
 
-2. **Modify SetupPage** — Detect if config already exists and show "Update" instead of "Set up". Allow partial updates (just identity, just PAT, etc.) without re-cloning.
-
-3. **Keep SetupPage + add "Update identity" shortcut** — Minimal change. Add a button on EntryListPage that opens a dialog for identity update only.
-
-### Recommended approach
-
-Option 2 (modify SetupPage). Least new code. If config exists, pre-fill the form fields and show "Update configuration" button. Add a checkbox: "Re-clone repository (clears local data)" — unchecked by default. If only the identity changed, skip clone. If the repo URL changed, force re-clone.
-
-### Edge cases
-
-- Changing repo URL: must re-clone (different repo entirely)
-- Changing PAT only: no re-clone needed, just update credential
-- Changing identity: no re-clone needed, but entries that were encrypted to the old identity's public key won't decrypt with the new one. Consider warning the user.
-- Corrupted state: if update fails midway, existing config should remain valid
+- **Keep funneling everything through full reset + re-setup.** Rejected — it is the exact friction this RFC exists to remove, and it needlessly re-downloads the whole store and re-enters the identity for a one-field credential change.
+- **A general "edit any repo-config field" control.** Rejected for now — URL and identity edits each carry their own concerns (re-clone; identity management) that are handled elsewhere, so a broad editor would pull in deferred scope. A credential-only control is the slice that stands cleanly on its own today.
 
 ## Effort
 
-~0.5-1 day (human) / ~20 min (CC)
+~0.5 day (human) / ~15 min (CC)
 
-## Depends on
+## Depends on / Supersedes
 
-None — independent of other rfcs.
+None — independent of other RFCs. R005 previously depended on this one to establish the identity type system first; with identity work moved entirely to R005 that rationale no longer holds, so the two are now independent.
