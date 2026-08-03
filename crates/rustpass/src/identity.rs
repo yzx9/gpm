@@ -8,8 +8,6 @@
 //! an age identity (x25519, SSH ed25519, SSH RSA, or age-encrypted) from its
 //! byte content. This eliminates prefix-check duplication across call sites.
 
-use std::str;
-
 use serde::Serialize;
 
 use crate::error::{Error, ErrorCode};

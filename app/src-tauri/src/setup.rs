@@ -357,7 +357,7 @@ pub(crate) async fn pick_identity_file(
         .await
         .map_err(map_file_picker_error)?;
 
-    let text = std::str::from_utf8(&picked.bytes).map_err(|_| {
+    let text = str::from_utf8(&picked.bytes).map_err(|_| {
         Error::new(
             ErrorCode::InvalidIdentity,
             "Identity file is not valid UTF-8",
@@ -495,7 +495,7 @@ pub(crate) async fn verify_picked(
             })
             .await
             .map_err(|e| Error::new(ErrorCode::StoreError, e.to_string()))??;
-            let bare_str = std::str::from_utf8(&bare).map_err(|_| {
+            let bare_str = str::from_utf8(&bare).map_err(|_| {
                 Error::new(
                     ErrorCode::InvalidIdentity,
                     "Decrypted identity is not valid UTF-8",
@@ -694,10 +694,10 @@ pub(crate) fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::{Arc, Mutex};
 
-    use rustpass::{KeyType, Store};
+    use rustpass::{KeyType, LockMode, Store};
 
     use crate::AppState;
 
@@ -713,14 +713,14 @@ mod tests {
             app_config: crate::app_config::AppConfigStore::new(dir.path()),
             lock_timer: crate::identity::IdleTimer::new(),
             pending_identity: Mutex::new(None),
-            lock_mode: Mutex::new(rustpass::LockMode::default()),
+            lock_mode: Mutex::new(LockMode::default()),
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
             clipboard_clear_handle: Mutex::new(None),
             clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
-            app_lock_enabled: std::sync::atomic::AtomicBool::new(false),
-            app_locked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            app_lock_enabled: AtomicBool::new(false),
+            app_locked: Arc::new(AtomicBool::new(false)),
             gate_idle_timer: crate::identity::IdleTimer::new(),
-            identity_coupled: std::sync::atomic::AtomicBool::new(false),
+            identity_coupled: AtomicBool::new(false),
             seal_migrate_state: std::sync::atomic::AtomicU8::new(0),
             backend_resolve_state: std::sync::atomic::AtomicU8::new(0),
             active_cancel_slot: Arc::new(Mutex::new(None)),

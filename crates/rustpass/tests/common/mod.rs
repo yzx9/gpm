@@ -4,15 +4,17 @@
 
 //! Shared test helpers used across integration test files.
 
+use std::fs;
 use std::io::Write;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 #[allow(dead_code)] // only some test crates exercise the orchestrators
 /// A fresh, never-armed cancel slot for tests that exercise the orchestrators
 /// (`autosync_write` / `sync_repo` / `resolve_sync_divergence`) without testing
 /// cancellation itself. Passed by `&` — the temporary lives through the `.await`.
 pub fn cancel_slot() -> rustpass::CancelSlot {
-    std::sync::Arc::new(std::sync::Mutex::new(None))
+    Arc::new(Mutex::new(None))
 }
 
 use age::secrecy::ExposeSecret;
@@ -184,7 +186,7 @@ pub fn create_test_git_repo_with(
             std::fs::create_dir_all(parent).unwrap();
         }
         let encrypted = encrypt_to_recipient(content, recipient_str);
-        std::fs::write(&file_path, encrypted).unwrap();
+        fs::write(&file_path, encrypted).unwrap();
     }
 
     // Write plaintext files verbatim (recipients file, templates, …)

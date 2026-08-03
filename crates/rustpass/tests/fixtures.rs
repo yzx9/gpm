@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::fs;
+
 use common::*;
 use rustpass::crypto;
 use rustpass::secret::Secret;
@@ -50,7 +52,7 @@ fn test_list_entries_skips_git_dir() {
     let dir = create_test_store(vec![("real.age", b"password")], &recipient);
     // Create a .git directory with a fake .age file inside
     std::fs::create_dir_all(dir.path().join(".git")).unwrap();
-    std::fs::write(dir.path().join(".git/config.age"), b"should-be-skipped").unwrap();
+    fs::write(dir.path().join(".git/config.age"), b"should-be-skipped").unwrap();
 
     let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);

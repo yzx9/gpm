@@ -309,7 +309,7 @@ mod tests {
         let wrapped: String = b64
             .as_bytes()
             .chunks(76)
-            .map(|c| std::str::from_utf8(c).unwrap())
+            .map(|c| str::from_utf8(c).unwrap())
             .collect::<Vec<_>>()
             .join("\n");
         let body = format!("\nContent-Transfer-Encoding: Base64\n{wrapped}");

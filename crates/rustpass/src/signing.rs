@@ -1067,7 +1067,7 @@ mod tests {
         let armor = ssh_sig.to_pem(LineEnding::LF).expect("ssh-sig to_pem");
 
         // Attach the signature → signed commit object.
-        let content = std::str::from_utf8(&buffer).expect("buffer utf8");
+        let content = str::from_utf8(&buffer).expect("buffer utf8");
         repo.commit_signed(content, &armor, None)
             .expect("commit_signed")
     }
@@ -1421,11 +1421,7 @@ mod tests {
             String::from_utf8_lossy(&s).into_owned()
         };
         let tampered = repo
-            .commit_signed(
-                std::str::from_utf8(&buffer).unwrap(),
-                &original_sig_armor,
-                None,
-            )
+            .commit_signed(str::from_utf8(&buffer).unwrap(), &original_sig_armor, None)
             .unwrap();
         // Silence unused-binding lint for `dir` (kept to hold the tempdir).
         let _ = &dir;
@@ -1737,7 +1733,7 @@ mod tests {
         let armor = detached
             .to_armored_string(ArmorOptions::default())
             .expect("armor sig");
-        let content = std::str::from_utf8(&buffer).expect("buffer utf8");
+        let content = str::from_utf8(&buffer).expect("buffer utf8");
         repo.commit_signed(content, &armor, None)
             .expect("commit_signed")
     }
@@ -1821,11 +1817,7 @@ mod tests {
             .commit_create_buffer(&gpg_sig, &gpg_sig, "DIFFERENT message", &tree, &[&parent])
             .unwrap();
         let tampered = repo
-            .commit_signed(
-                std::str::from_utf8(&buffer).unwrap(),
-                &original_sig_armor,
-                None,
-            )
+            .commit_signed(str::from_utf8(&buffer).unwrap(), &original_sig_armor, None)
             .unwrap();
         let _ = &dir;
 

@@ -625,7 +625,7 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
         ];
 
         let bytes = serialize_recipients(&recipients);
-        let content = std::str::from_utf8(&bytes).unwrap();
+        let content = str::from_utf8(&bytes).unwrap();
         let read_back = parse_recipients(content);
         assert_eq!(
             read_back.len(),

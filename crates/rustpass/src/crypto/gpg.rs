@@ -103,7 +103,7 @@ impl CryptoBackend for GpgBackend {
             validate_recipients_index_liveness(repo_path, GPG_RECIPIENTS_FILE).await?
         {
             let bytes = view.read(GPG_RECIPIENTS_FILE).await?;
-            let content = std::str::from_utf8(&bytes).map_err(|e| {
+            let content = str::from_utf8(&bytes).map_err(|e| {
                 Error::new(
                     ErrorCode::StoreError,
                     format!(".gpg-id is not valid UTF-8: {e}"),
@@ -146,7 +146,7 @@ impl CryptoBackend for GpgBackend {
                     e
                 }
             })?;
-            let armor = std::str::from_utf8(&bytes).map_err(|e| {
+            let armor = str::from_utf8(&bytes).map_err(|e| {
                 Error::new(
                     ErrorCode::InvalidIdentity,
                     format!("recipient {token} pubkey is not valid UTF-8: {e}"),

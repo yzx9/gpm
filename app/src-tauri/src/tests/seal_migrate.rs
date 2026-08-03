@@ -11,7 +11,8 @@
 //! Pending → Done, and a second call is a no-op. They build a keyed `AppState`
 //! directly (no biometric-keystore mock needed).
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::fs;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rustpass::Store;
@@ -32,7 +33,7 @@ fn keyed_state(dir: &std::path::Path) -> AppState {
         lock_mode: Mutex::new(rustpass::LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
         clipboard_clear_handle: Mutex::new(None),
-        clipboard_clear_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(false),
         app_locked: Arc::new(AtomicBool::new(false)),
         gate_idle_timer: crate::identity::IdleTimer::new(),
@@ -41,22 +42,22 @@ fn keyed_state(dir: &std::path::Path) -> AppState {
         backend_resolve_state: AtomicU8::new(0),
         active_cancel_slot: Arc::new(Mutex::new(None)),
         verbose_timer: Mutex::new(None),
-        verbose_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        verbose_generation: Arc::new(AtomicU64::new(0)),
     }
 }
 
 #[tokio::test]
 async fn run_seal_migrate_once_wraps_plaintext_and_marks_done() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path()).unwrap();
+    fs::create_dir_all(dir.path()).unwrap();
     let state = keyed_state(dir.path());
 
     // Plant a plaintext repo.json (pre-seal shape).
     let plaintext = br#"{"url":"https://x/repo","pat":"secret"}"#;
     let repo_json = dir.path().join("repo.json");
-    std::fs::write(&repo_json, plaintext).unwrap();
+    fs::write(&repo_json, plaintext).unwrap();
     assert!(
-        !rustpass::seal::is_envelope(&std::fs::read(&repo_json).unwrap()),
+        !rustpass::seal::is_envelope(&fs::read(&repo_json).unwrap()),
         "precondition: plaintext"
     );
 
@@ -67,7 +68,7 @@ async fn run_seal_migrate_once_wraps_plaintext_and_marks_done() {
         2,
         "state should be Done after a successful migrate"
     );
-    let raw = std::fs::read(&repo_json).unwrap();
+    let raw = fs::read(&repo_json).unwrap();
     assert!(
         rustpass::seal::is_envelope(&raw),
         "plaintext should now be sealed"
@@ -102,12 +103,12 @@ async fn run_seal_migrate_once_snaps_back_to_pending_on_failure() {
     // next app_unlock retries, and the file must be left untouched (a failed
     // re-wrap never overwrites prior bytes). Pins the recovery contract.
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path()).unwrap();
+    fs::create_dir_all(dir.path()).unwrap();
     let state = keyed_state(dir.path());
 
     let corrupt_legacy = b"GPMATR1\xff\x00\x00"; // magic + 3 bytes < 20-byte header
     let repo_json = dir.path().join("repo.json");
-    std::fs::write(&repo_json, corrupt_legacy).unwrap();
+    fs::write(&repo_json, corrupt_legacy).unwrap();
     assert!(
         rustpass::seal::is_envelope(corrupt_legacy),
         "precondition: recognized as an envelope"
@@ -120,7 +121,7 @@ async fn run_seal_migrate_once_snaps_back_to_pending_on_failure() {
         "Err must snap state to Pending so the next unlock retries"
     );
     assert_eq!(
-        std::fs::read(&repo_json).unwrap(),
+        fs::read(&repo_json).unwrap(),
         corrupt_legacy,
         "failed re-wrap leaves the file untouched"
     );

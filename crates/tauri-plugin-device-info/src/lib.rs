@@ -12,6 +12,8 @@
 //! diagnostics-export command calls [`DeviceInfoExt::device_info`] to obtain the
 //! handle, then [`DeviceInfoHandle::read`] to gather the snapshot.
 
+use std::marker::PhantomData;
+
 #[cfg(target_os = "android")]
 use tauri::plugin::mobile::PluginInvokeError;
 use tauri::plugin::{Builder, TauriPlugin};
@@ -201,7 +203,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             }
             #[cfg(not(target_os = "android"))]
             {
-                app.manage(DeviceInfoHandle::<R>(std::marker::PhantomData));
+                app.manage(DeviceInfoHandle::<R>(PhantomData));
             }
             Ok(())
         })

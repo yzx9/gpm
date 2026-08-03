@@ -58,6 +58,7 @@
 //! re-setting up the repo does not reset the user's language, timers, autosync,
 //! or app-lock choice.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -695,7 +696,7 @@ pub(crate) fn locale_init_script() -> String {
 /// dispatching on the file shape should check [`rustpass::seal::is_envelope`]
 /// first to tell a sealed slot apart from a plaintext legacy file.
 fn load_legacy_app_json_at(path: &Path) -> Option<LegacyAppConfig> {
-    let s = std::fs::read_to_string(path).ok()?;
+    let s = fs::read_to_string(path).ok()?;
     serde_json::from_str::<LegacyAppConfig>(&s).ok()
 }
 
@@ -757,7 +758,7 @@ impl AppConfigStore {
         // legacy file still carries behavior pre-split). schema_version is
         // preserved (the registry bumps it as migrations run).
         let (pref, behavior) = if pref_path.exists() {
-            let pref = match std::fs::read_to_string(&pref_path) {
+            let pref = match fs::read_to_string(&pref_path) {
                 Ok(s) => serde_json::from_str::<PrefConfig>(&s).unwrap_or_else(|e| {
                     log::warn!("app-config: corrupt pref.json, using defaults: {e}");
                     PrefConfig::default()
@@ -836,7 +837,7 @@ impl AppConfigStore {
     /// each migration to read its own source-version snapshot. Sync — the read
     /// is tiny and [`AppConfigStore::new`] already reads synchronously.
     pub(crate) fn read_app_json_as<T: serde::de::DeserializeOwned>(&self) -> Result<T, Error> {
-        let s = std::fs::read_to_string(&self.app_json_path)?;
+        let s = fs::read_to_string(&self.app_json_path)?;
         Ok(serde_json::from_str(&s)?)
     }
 
@@ -849,13 +850,13 @@ impl AppConfigStore {
     pub(crate) fn peek_schema_version(&self) -> Option<u32> {
         // Post-split (pref.json exists) — schema_version lives there.
         if self.pref_path.exists()
-            && let Ok(s) = std::fs::read_to_string(&self.pref_path)
+            && let Ok(s) = fs::read_to_string(&self.pref_path)
             && let Ok(p) = serde_json::from_str::<SchemaVersionPeek>(&s)
         {
             return Some(p.schema_version);
         }
         // Pre-split OR pref.json corrupt/missing — fall back to app.json.
-        let s = std::fs::read_to_string(&self.app_json_path).ok()?;
+        let s = fs::read_to_string(&self.app_json_path).ok()?;
         serde_json::from_str::<SchemaVersionPeek>(&s)
             .ok()
             .map(|p| p.schema_version)
@@ -895,7 +896,7 @@ impl AppConfigStore {
         // swapped the cache; re-reading keeps this robust if a future migration
         // path ever skips that swap). pref.json is always present here.
         if self.pref_path.exists() {
-            let s = std::fs::read_to_string(&self.pref_path)?;
+            let s = fs::read_to_string(&self.pref_path)?;
             let pref: PrefConfig = serde_json::from_str(&s)?;
             *self.pref.lock().expect("pref lock poisoned") = pref;
         }
@@ -1364,7 +1365,7 @@ mod tests {
     #[tokio::test]
     async fn corrupt_file_defaults_sensitive_mode() {
         let dir = tempdir().expect("tempdir");
-        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{not json").unwrap();
+        fs::write(dir.path().join(APP_CONFIG_FILE), "{not json").unwrap();
         assert!(
             store_at(dir.path()).get().secure_screen_mode.is_none(),
             "corrupt app.json must fall back to the default, not panic"
@@ -1404,7 +1405,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("locale"),
             "locale key must be absent when None; got: {on_disk}"
@@ -1416,7 +1417,7 @@ mod tests {
         // An app.json written before the locale field existed must still parse,
         // with locale defaulting to None (backward compatibility).
         let dir = tempdir().expect("tempdir");
-        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
+        fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
         assert!(store_at(dir.path()).get().locale.is_none());
     }
 
@@ -1468,7 +1469,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("theme_mode"),
             "theme_mode key must be absent when None; got: {on_disk}"
@@ -1481,7 +1482,7 @@ mod tests {
         // theme_mode defaulting to None (backward compatibility — adding the
         // optional field is non-breaking, like locale).
         let dir = tempdir().expect("tempdir");
-        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
+        fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
         assert!(store_at(dir.path()).get().theme_mode.is_none());
     }
 
@@ -1520,7 +1521,7 @@ mod tests {
     #[test]
     fn app_config_store_new_corrupt_json_uses_defaults() {
         let dir = tempdir().expect("tempdir");
-        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{not valid json").unwrap();
+        fs::write(dir.path().join(APP_CONFIG_FILE), "{not valid json").unwrap();
         let store = AppConfigStore::new(dir.path());
         assert_eq!(
             store.get().schema_version,
@@ -1534,7 +1535,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         // A non-default value round-trips: secure_screen_mode "off" (default is
         // None / Sensitive).
-        std::fs::write(
+        fs::write(
             dir.path().join(APP_CONFIG_FILE),
             serde_json::json!({ "secure_screen_mode": "off" }).to_string(),
         )
@@ -1570,7 +1571,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = store_at(dir.path());
         store.save_pref(&PrefConfig::default()).await.unwrap();
-        let on_disk = std::fs::read_to_string(dir.path().join(PREF_FILE)).unwrap();
+        let on_disk = fs::read_to_string(dir.path().join(PREF_FILE)).unwrap();
         assert!(
             !on_disk.contains("verbose_until"),
             "verbose_until key must be absent when None; got: {on_disk}"
@@ -1759,7 +1760,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("secure_screen_mode"),
             "secure_screen_mode must be absent when None; got: {on_disk}",
@@ -1914,7 +1915,7 @@ mod tests {
             .save_behavior(&BehaviorConfig::default())
             .await
             .unwrap();
-        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("gate_idle"),
             "gate_idle must be absent at default; got: {on_disk}",
@@ -1966,9 +1967,9 @@ mod tests {
     async fn pref_json_preferred_over_legacy_app_json_when_present() {
         let dir = tempdir().expect("tempdir");
         // Stale legacy file (would lift different values if used).
-        std::fs::write(dir.path().join(APP_CONFIG_FILE), r#"{"locale":"en"}"#).unwrap();
+        fs::write(dir.path().join(APP_CONFIG_FILE), r#"{"locale":"en"}"#).unwrap();
         // pref.json wins.
-        std::fs::write(
+        fs::write(
             dir.path().join(PREF_FILE),
             r#"{"locale":"zh-CN","schema_version":4}"#,
         )

@@ -20,10 +20,10 @@
 //! types also live here (relocated from `git.rs`) so the RCS trait methods can
 //! name them without a `storage → git` dependency.
 
-use std::fmt;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, mpsc};
+use std::{fmt, io};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -102,7 +102,7 @@ pub type CancelToken = Arc<AtomicBool>;
 /// overwrite the running op's token (the pre-R032 stomp, RFC 0032 bug #1). The
 /// `cancel_git` command `take`s/sets it. `Arc`'d so the src-tauri command layer
 /// can clone it into the orchestrator (mirrors `lock_generation`).
-pub type CancelSlot = Arc<std::sync::Mutex<Option<CancelToken>>>;
+pub type CancelSlot = Arc<Mutex<Option<CancelToken>>>;
 
 /// Progress data reported by git2 during a transfer. Sent over a synchronous
 /// [`ProgressSender`] from inside git2's C callbacks (which run on the blocking
@@ -129,7 +129,7 @@ pub struct GitProgress {
 
 /// Synchronous sender for [`GitProgress`], safe to call from git2's C callbacks
 /// running on the blocking thread.
-pub type ProgressSender = std::sync::mpsc::Sender<GitProgress>;
+pub type ProgressSender = mpsc::Sender<GitProgress>;
 
 /// A local-side `.age` entry to replay onto the remote tip during a "keep mine"
 /// divergence resolution: its worktree-relative path plus its ciphertext blob at
@@ -580,7 +580,7 @@ pub async fn validate_recipients_index_liveness(
         // but-missing checkout (repo_path itself gone → hard error): the latter
         // must NOT read as empty, or `save_identity` would accept any identity
         // against a store whose checkout it can't even see.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
             if fs::symlink_metadata(repo_path).await.is_err() {
                 return Err(Error::new(
                     ErrorCode::StoreError,

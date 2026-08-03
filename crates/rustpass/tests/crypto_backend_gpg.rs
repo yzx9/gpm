@@ -28,7 +28,7 @@ async fn gpg_store_decrypts_through_store_facade() {
     // The fixture key's gopass recipient id (0x + last 16 hex of fingerprint),
     // derived the same way `Store::save_identity` will derive it.
     let recipient = GpgBackend
-        .identity_recipient(std::str::from_utf8(FIXTURE_SECRET).unwrap(), None)
+        .identity_recipient(str::from_utf8(FIXTURE_SECRET).unwrap(), None)
         .expect("derive fixture recipient id");
 
     // A working git repo carrying a GPG-encrypted secret plus a `.gpg-id`
@@ -63,7 +63,7 @@ async fn gpg_store_decrypts_through_store_facade() {
     store.resolve_storage().await.unwrap();
     store.resolve_crypto().await.expect("crypto=gpg resolves");
     store
-        .save_identity(std::str::from_utf8(FIXTURE_SECRET).unwrap(), None)
+        .save_identity(str::from_utf8(FIXTURE_SECRET).unwrap(), None)
         .await
         .expect("save_identity accepts the PGP key matching .gpg-id");
     store

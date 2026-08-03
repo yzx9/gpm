@@ -365,9 +365,10 @@ pub(super) fn classify_git_error(msg: &str) -> Error {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::Path;
-    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, mpsc};
 
     use crate::storage::git::test_support::test_signature;
 
@@ -528,7 +529,7 @@ mod tests {
     fn bare_repo_with_file() -> tempfile::TempDir {
         let work = tempfile::tempdir().expect("work dir");
         let repo = Repository::init(work.path()).expect("init work");
-        std::fs::write(work.path().join("f.age"), b"secret").expect("write file");
+        fs::write(work.path().join("f.age"), b"secret").expect("write file");
         let mut index = repo.index().expect("index");
         index.add_path(Path::new("f.age")).expect("add path");
         index.write().expect("index write");
@@ -572,7 +573,7 @@ mod tests {
     fn transfer_progress_reports_objects_over_fetch_transport() {
         let bare = bare_repo_with_file();
         let dest = tempfile::tempdir().expect("dest dir");
-        let (tx, rx) = std::sync::mpsc::channel::<GitProgress>();
+        let (tx, rx) = mpsc::channel::<GitProgress>();
         clone_via_fetch(bare.path(), dest.path(), None, Some(&tx))
             .expect("clone via fetch transport should succeed");
         drop(tx); // close the channel so the drain terminates

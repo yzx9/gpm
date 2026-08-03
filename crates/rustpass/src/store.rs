@@ -9,20 +9,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::{fmt, str};
 
-use nucleo_matcher::{
-    Matcher, Utf32Str,
-    pattern::{CaseMatching, Normalization, Pattern},
-};
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Matcher, Utf32Str};
 use tokio::fs;
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use zeroize::Zeroizing;
 
-use crate::config::{Config, LockMode, RepoConfig};
-use crate::crypto::{AgeBackend, CryptoBackend, GpgBackend, SecretExt};
+use crate::config::{self, Config, LockMode, RepoConfig};
+use crate::crypto::{AgeBackend, CryptoBackend, GpgBackend, SecretExt, openpgp};
 use crate::entry::Entry;
 use crate::error::{Error, ErrorCode};
-use crate::identity::{IdentityType, classify_identity, validate_identity_format};
+use crate::identity::{self, IdentityType, classify_identity, validate_identity_format};
 use crate::recipient::{Recipient, serialize_recipients};
 use crate::secret::Secret;
 use crate::signing::{
@@ -33,7 +31,7 @@ use crate::storage::{
     CancelSlot, CancelToken, CommitKind, GitAuth, KeepLocalOutcome, KeepLocalPlan, ProgressSender,
     RepoFiles, StorageBackend, StorageCtx, StorageRegistry,
 };
-use crate::template;
+use crate::{RepoLock, StoreBuilder, template};
 
 /// Default `Idle` auto-lock timeout in seconds (5 minutes). Used as the
 /// `Idle` preset's fallback and the fail-safe when the lock-mode cache can't be
@@ -208,7 +206,7 @@ impl Store {
     /// [`storage`](Self::storage)() returns [`ErrorCode::BackendNotAvailable`].
     #[must_use]
     pub fn new(config_dir: PathBuf, master_key: Option<[u8; 32]>) -> Self {
-        crate::storage::StoreBuilder::new().build(config_dir, master_key)
+        StoreBuilder::new().build(config_dir, master_key)
     }
 
     /// Construct a `Store` with an injected backend registry. The crate-private
@@ -253,22 +251,20 @@ impl Store {
             .clone();
         match backend {
             Some(b) => Ok(b),
-            None => {
-                // No backend — surface the stashed resolve error if any (the
-                // specific reason: unregistered ext:, tampered config, …),
-                // else a generic "not resolved".
-                Err(self
-                    .resolve_err
-                    .lock()
-                    .ok()
-                    .and_then(|g| g.clone())
-                    .unwrap_or_else(|| {
-                        Error::new(
-                            ErrorCode::BackendNotAvailable,
-                            "storage backend not resolved (awaiting app unlock)",
-                        )
-                    }))
-            }
+            // No backend — surface the stashed resolve error if any (the
+            // specific reason: unregistered ext:, tampered config, …),
+            // else a generic "not resolved".
+            None => Err(self
+                .resolve_err
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .unwrap_or_else(|| {
+                    Error::new(
+                        ErrorCode::BackendNotAvailable,
+                        "storage backend not resolved (awaiting app unlock)",
+                    )
+                })),
         }
     }
 
@@ -888,7 +884,7 @@ impl Store {
     ) -> Result<(), Error> {
         // age-keygen writes # comment lines before the key; keep only the key
         // so it is parsed and stored consistently with the paste path.
-        let identity = crate::identity::normalize_identity_text(identity);
+        let identity = identity::normalize_identity_text(identity);
         let identity_bytes = identity.as_bytes();
         validate_identity_format(identity_bytes)?;
 
@@ -992,7 +988,7 @@ impl Store {
     ) -> Result<(), Error> {
         // age-keygen writes # comment lines before the key; keep only the key
         // so it is parsed and stored consistently with the paste path.
-        let identity = crate::identity::normalize_identity_text(identity);
+        let identity = identity::normalize_identity_text(identity);
         let identity_bytes = identity.as_bytes();
         validate_identity_format(identity_bytes)?;
 
@@ -1744,8 +1740,8 @@ impl Store {
     /// Callers already hold `write_mu` (this is called right after acquiring
     /// it), so the only contention is cross-instance — a background Worker vs
     /// the foreground app during cold-start overlap.
-    fn repo_lock(&self) -> Result<crate::repo_lock::RepoLock, Error> {
-        crate::repo_lock::RepoLock::try_acquire(self.config.config_dir())
+    fn repo_lock(&self) -> Result<RepoLock, Error> {
+        RepoLock::try_acquire(self.config.config_dir())
     }
 
     /// Pull latest changes from the remote (fast-forward only).
@@ -2099,8 +2095,8 @@ impl Store {
     #[must_use]
     pub fn commit_identity_default() -> CommitIdentity {
         CommitIdentity {
-            name: crate::config::DEFAULT_COMMIT_NAME.to_string(),
-            email: crate::config::DEFAULT_COMMIT_EMAIL.to_string(),
+            name: config::DEFAULT_COMMIT_NAME.to_string(),
+            email: config::DEFAULT_COMMIT_EMAIL.to_string(),
         }
     }
 
@@ -2188,8 +2184,8 @@ impl Store {
                 ),
             ));
         }
-        let key = crate::crypto::openpgp::parse_armored_public_key(armored_public_key)?;
-        let fingerprint = crate::crypto::openpgp::primary_fingerprint(&key);
+        let key = openpgp::parse_armored_public_key(armored_public_key)?;
+        let fingerprint = openpgp::primary_fingerprint(&key);
 
         let mut rc = self.config.load_repo_config().await?;
         if let Some(existing) = rc
@@ -2249,7 +2245,7 @@ impl Store {
             .trusted_gpg_keys
             .iter()
             .map(|k| k.armored_public_key.as_str());
-        let (_keys, warnings) = crate::crypto::openpgp::parse_trusted_keys(armored);
+        let (_keys, warnings) = openpgp::parse_trusted_keys(armored);
         Ok(warnings)
     }
 
@@ -2651,6 +2647,8 @@ mod tests {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
+
+    use crate::crypto::{self, BackendKind};
 
     use super::*;
 
@@ -3143,10 +3141,7 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf(), None);
         store.resolve_and_set_crypto(None).unwrap();
         let crypto = store.crypto().unwrap();
-        assert_eq!(
-            crypto.profile().backend_kind,
-            crate::crypto::BackendKind::Age
-        );
+        assert_eq!(crypto.profile().backend_kind, BackendKind::Age);
         assert_eq!(crypto.profile().secret_extension.as_str(), ".age");
     }
 
@@ -3156,10 +3151,7 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf(), None);
         store.resolve_and_set_crypto(Some("gpg")).unwrap();
         let crypto = store.crypto().unwrap();
-        assert_eq!(
-            crypto.profile().backend_kind,
-            crate::crypto::BackendKind::Gpg
-        );
+        assert_eq!(crypto.profile().backend_kind, BackendKind::Gpg);
         assert_eq!(crypto.profile().secret_extension.as_str(), ".gpg");
     }
 
@@ -3205,10 +3197,7 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf(), None);
         store.resolve_and_set_crypto(Some("age")).unwrap();
         let crypto = store.crypto().unwrap();
-        assert_eq!(
-            crypto.profile().backend_kind,
-            crate::crypto::BackendKind::Age
-        );
+        assert_eq!(crypto.profile().backend_kind, BackendKind::Age);
         assert_eq!(crypto.profile().secret_extension.as_str(), ".age");
     }
 
@@ -3296,7 +3285,7 @@ mod tests {
             "cached SSH identity must be an OpenSSH PEM"
         );
         assert!(
-            !crate::crypto::is_ssh_identity_encrypted(pem.as_bytes()),
+            !crypto::is_ssh_identity_encrypted(pem.as_bytes()),
             "cached SSH PEM must parse as Unencrypted (no KDF)"
         );
         assert!(

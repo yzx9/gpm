@@ -83,7 +83,7 @@ fn stage_gpg_key_from_bytes(
             ),
         ));
     }
-    let armored = std::str::from_utf8(bytes).map_err(|_| {
+    let armored = str::from_utf8(bytes).map_err(|_| {
         Error::new(
             ErrorCode::SshKeyInvalid,
             "GPG key file is not valid UTF-8 text — not an armored public key.",

@@ -200,8 +200,9 @@ impl StoreBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
 
     /// `None` (the default — a config written before the `backend` field existed)
     /// resolves to the git built-in natively.

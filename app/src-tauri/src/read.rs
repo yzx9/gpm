@@ -6,8 +6,9 @@
 //! read side of the store, mirroring [`crate::write`] on the write side.
 
 use std::fmt;
-
+use std::fs;
 use std::path::Path;
+use std::time::SystemTime;
 
 use rustpass::{AttachmentMeta, Entry, Error, ErrorCode, RankedPage};
 use serde::Serialize;
@@ -312,7 +313,7 @@ pub(crate) async fn copy_totp(
             cleared_after_secs: 0,
         });
     };
-    let code = rustpass::totp::generate_at(&otp, std::time::SystemTime::now())
+    let code = rustpass::totp::generate_at(&otp, SystemTime::now())
         .inspect_err(|e| log::warn!("copy-totp failed: generate: {entry_name}: {e}"))?;
     let cleared_after_secs = crate::clipboard::write_and_schedule_clear(
         &state,
@@ -434,8 +435,7 @@ pub(crate) async fn export_attachment_core<R: Runtime>(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600))
-        {
+        if let Err(e) = fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600)) {
             log::warn!("export-attachment: stage perms 0600 failed: {e}");
         }
     }
@@ -510,13 +510,13 @@ struct StageGuard<'a> {
 }
 impl<'a> StageGuard<'a> {
     fn new(path: &'a Path) -> Self {
-        let _ = std::fs::remove_file(path); // best-effort wipe of a stranded prior stage
+        let _ = fs::remove_file(path); // best-effort wipe of a stranded prior stage
         Self { path }
     }
 }
 impl Drop for StageGuard<'_> {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(self.path);
+        let _ = fs::remove_file(self.path);
     }
 }
 
@@ -528,7 +528,7 @@ pub(crate) fn sweep_attachment_stage<R: Runtime>(app: &AppHandle<R>) {
     let Ok(cache_dir) = app.path().app_cache_dir() else {
         return;
     };
-    let _ = std::fs::remove_file(cache_dir.join(STAGE_FILENAME));
+    let _ = fs::remove_file(cache_dir.join(STAGE_FILENAME));
 }
 
 #[cfg(test)]
@@ -692,7 +692,7 @@ mod tests {
         {
             let _guard = StageGuard::new(&path);
             // Simulate the stage write that happens after construction.
-            std::fs::write(&path, b"decoded bytes").unwrap();
+            fs::write(&path, b"decoded bytes").unwrap();
             assert!(path.exists(), "stage exists while guard is held");
         }
         assert!(!path.exists(), "StageGuard::drop must wipe the staged file");
@@ -704,7 +704,7 @@ mod tests {
         let path = dir.path().join("gpm-attachment.bin");
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = StageGuard::new(&path);
-            std::fs::write(&path, b"decoded bytes").unwrap();
+            fs::write(&path, b"decoded bytes").unwrap();
             panic!("simulated mid-export panic");
         }));
         assert!(result.is_err(), "the panic should propagate");

@@ -11,6 +11,7 @@
 mod common;
 
 mod tests {
+    use std::fs;
     use std::path::Path;
 
     use rustpass::recipient;
@@ -52,7 +53,7 @@ mod tests {
 
         let recipients_path = config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE);
         let recipients_content =
-            std::fs::read_to_string(&recipients_path).expect("recipients file exists");
+            fs::read_to_string(&recipients_path).expect("recipients file exists");
         assert!(
             recipients_content.trim() == recipient,
             ".age-recipients should hold exactly the seeded recipient"

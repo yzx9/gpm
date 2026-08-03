@@ -11,6 +11,8 @@
 //! targets the plugin is registered but inert (schedule/cancel are no-ops;
 //! the foreground sync covers desktop).
 
+use std::marker::PhantomData;
+
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
 
@@ -105,7 +107,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             }
             #[cfg(not(target_os = "android"))]
             {
-                app.manage(BackgroundSync::<R>(std::marker::PhantomData));
+                app.manage(BackgroundSync::<R>(PhantomData));
             }
             Ok(())
         })

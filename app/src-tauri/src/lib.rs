@@ -19,7 +19,7 @@
     clippy::pedantic
 )]
 
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
+use std::sync::atomic::{self, AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
@@ -322,10 +322,7 @@ fn init_state<R: tauri::Runtime>(app: &tauri::App<R>) -> AppState {
     // persisted values. Skipped under app-lock (the load soft-fails to defaults;
     // the app_unlock path runs its own reload + reseed after biometric injects
     // the key). Best-effort.
-    if !app_state
-        .app_lock_enabled
-        .load(std::sync::atomic::Ordering::SeqCst)
-    {
+    if !app_state.app_lock_enabled.load(atomic::Ordering::SeqCst) {
         tauri::async_runtime::block_on(app_state.app_config.reload_behavior()).ok();
         app_state
             .store

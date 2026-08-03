@@ -624,6 +624,7 @@ mod tests {
     //!   and the multi-recipient keyring shape. No `gpg` binary is needed except
     //!   the `#[ignore]` reverse-interop tests (they spawn `gpg` + `gpg-agent`).
 
+    use std::fs;
     use std::io::Write as _;
     use std::process::{Command, Stdio};
 
@@ -982,7 +983,7 @@ mod tests {
         assert!(status.success(), "gpg import failed");
 
         let ct_path = home.path().join("rpgp.gpg");
-        std::fs::write(&ct_path, &ciphertext).expect("write ciphertext");
+        fs::write(&ct_path, &ciphertext).expect("write ciphertext");
         let out = Command::new("gpg")
             .env("GNUPGHOME", home.path())
             .args([
@@ -1037,7 +1038,7 @@ mod tests {
         assert!(status.success(), "gpg import failed");
 
         let ct_path = home.path().join("rpgp.gpg");
-        std::fs::write(&ct_path, &ciphertext).expect("write ciphertext");
+        fs::write(&ct_path, &ciphertext).expect("write ciphertext");
         let out = Command::new("gpg")
             .env("GNUPGHOME", home.path())
             .args([

@@ -720,6 +720,8 @@ impl RepoConfig {
 mod tests {
     use super::*;
 
+    use std::{fs, sync::Mutex};
+
     #[test]
     fn debug_redacts_credentials_and_url() {
         let cfg = RepoConfig {
@@ -876,7 +878,6 @@ mod tests {
     /// emits and asserts the embedded token never reaches the persisted line.
     #[test]
     fn redacted_url_log_line_omits_credentials() {
-        use std::sync::Mutex;
         static CAPTURED: Mutex<Vec<String>> = Mutex::new(Vec::new());
         struct Capture;
         impl log::Log for Capture {
@@ -1212,10 +1213,10 @@ mod tests {
         let (config, _dir) = create_config();
 
         // Simulate old config JSON without ssh_key/ssh_passphrase fields
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let old_json =
             r#"{"url":"https://example.com/repo.git","pat":"my-token","local_path":"/local/path"}"#;
-        std::fs::write(config.repo_config_path(), old_json).unwrap();
+        fs::write(config.repo_config_path(), old_json).unwrap();
 
         let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.url, "https://example.com/repo.git");
@@ -1347,7 +1348,7 @@ mod tests {
             .unwrap();
 
         // Read raw JSON to verify ssh fields are omitted
-        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        let json = fs::read_to_string(config.repo_config_path()).unwrap();
         assert!(
             !json.contains("ssh_key"),
             "ssh_key should not appear in JSON when None"
@@ -1362,7 +1363,7 @@ mod tests {
     async fn repo_config_commit_identity_roundtrip() {
         let (config, _dir) = create_config();
 
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let rc = RepoConfig {
             url: "https://example.com/repo.git".to_string(),
             pat: None,
@@ -1385,10 +1386,10 @@ mod tests {
         let (config, _dir) = create_config();
 
         // Old config JSON written before commit identity existed.
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let old_json =
             r#"{"url":"https://example.com/repo.git","pat":"my-token","local_path":"/local/path"}"#;
-        std::fs::write(config.repo_config_path(), old_json).unwrap();
+        fs::write(config.repo_config_path(), old_json).unwrap();
 
         let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(cfg.commit_user_name, None);
@@ -1410,7 +1411,7 @@ mod tests {
             .await
             .unwrap();
 
-        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        let json = fs::read_to_string(config.repo_config_path()).unwrap();
         assert!(!json.contains("commit_user_name"));
         assert!(!json.contains("commit_user_email"));
     }
@@ -1418,7 +1419,7 @@ mod tests {
     #[tokio::test]
     async fn repo_config_backend_round_trip() {
         let (config, _dir) = create_config();
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let rc = RepoConfig {
             url: "https://x/repo".to_string(),
             local_path: "/p".to_string(),
@@ -1438,7 +1439,7 @@ mod tests {
             .await
             .unwrap();
         // No master key ⇒ passthrough, so the JSON is readable plaintext.
-        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        let json = fs::read_to_string(config.repo_config_path()).unwrap();
         assert!(
             !json.contains("backend"),
             "backend must not be serialized when None (git default)"
@@ -1452,9 +1453,9 @@ mod tests {
         // A config written before the `backend` field existed deserializes as
         // None (git) — backward compat.
         let (config, _dir) = create_config();
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let old_json = r#"{"url":"https://x/repo","local_path":"/p"}"#;
-        std::fs::write(config.repo_config_path(), old_json).unwrap();
+        fs::write(config.repo_config_path(), old_json).unwrap();
         let cfg = config.load_repo_config().await.unwrap();
         assert_eq!(
             cfg.backend, None,
@@ -1482,11 +1483,11 @@ mod tests {
         let key = crate::seal::generate_master_key().unwrap();
 
         // Simulate a pre-migration plaintext repo.json on disk.
-        std::fs::create_dir_all(dir.path()).unwrap();
+        fs::create_dir_all(dir.path()).unwrap();
         let plaintext = r#"{"url":"https://x/repo","pat":"secret","local_path":"/p"}"#;
-        std::fs::write(dir.path().join("repo.json"), plaintext).unwrap();
+        fs::write(dir.path().join("repo.json"), plaintext).unwrap();
         assert!(
-            !crate::seal::is_envelope(&std::fs::read(dir.path().join("repo.json")).unwrap()),
+            !crate::seal::is_envelope(&fs::read(dir.path().join("repo.json")).unwrap()),
             "precondition: plaintext file"
         );
 
@@ -1494,7 +1495,7 @@ mod tests {
         cfg.migrate_seal().await.unwrap();
 
         // The file is now an seal envelope, and still loads correctly.
-        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        let raw = fs::read(dir.path().join("repo.json")).unwrap();
         assert!(
             crate::seal::is_envelope(&raw),
             "repo.json should be wrapped"
@@ -1515,21 +1516,21 @@ mod tests {
         // still verifies and this faithfully reproduces an old file.
         let dir = tempfile::tempdir().unwrap();
         let key = crate::seal::generate_master_key().unwrap();
-        std::fs::create_dir_all(dir.path()).unwrap();
+        fs::create_dir_all(dir.path()).unwrap();
 
         let plaintext = br#"{"url":"https://x/repo","pat":"secret","local_path":"/p"}"#;
         let sealer = Seal::new(Some(key));
         let mut legacy = sealer.seal("repo_config", plaintext).unwrap();
         assert!(legacy.starts_with(b"GPMSEL1"));
         legacy.get_mut(..7).unwrap().copy_from_slice(b"GPMATR1");
-        std::fs::write(dir.path().join("repo.json"), &legacy).unwrap();
+        fs::write(dir.path().join("repo.json"), &legacy).unwrap();
         assert!(crate::seal::is_legacy_envelope(&legacy));
 
         let cfg = Config::new(dir.path().to_path_buf(), Some(key));
         cfg.migrate_seal().await.unwrap();
 
         // Re-wrapped to the current magic, still decryptable to the same bytes.
-        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        let raw = fs::read(dir.path().join("repo.json")).unwrap();
         assert!(
             raw.starts_with(b"GPMSEL1"),
             "should be re-wrapped to GPMSEL1"
@@ -1551,13 +1552,13 @@ mod tests {
         // key arrives. Regression for the App-Lock cold-start timing.
         let dir = tempfile::tempdir().unwrap();
         let key = crate::seal::generate_master_key().unwrap();
-        std::fs::create_dir_all(dir.path()).unwrap();
+        fs::create_dir_all(dir.path()).unwrap();
 
         let plaintext = br#"{"url":"https://x/repo","pat":"secret","local_path":"/p"}"#;
         let sealer = Seal::new(Some(key));
         let mut legacy = sealer.seal("repo_config", plaintext).unwrap();
         legacy.get_mut(..7).unwrap().copy_from_slice(b"GPMATR1");
-        std::fs::write(dir.path().join("repo.json"), &legacy).unwrap();
+        fs::write(dir.path().join("repo.json"), &legacy).unwrap();
 
         // Config built WITHOUT the key (App Lock deferred at cold start).
         let cfg = Config::new(dir.path().to_path_buf(), None);
@@ -1565,7 +1566,7 @@ mod tests {
         cfg.migrate_seal().await.unwrap();
 
         // File untouched — still the legacy envelope, readable later via dual-read.
-        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        let raw = fs::read(dir.path().join("repo.json")).unwrap();
         assert!(
             crate::seal::is_legacy_envelope(&raw),
             "soft-skip leaves the file untouched"
@@ -1581,7 +1582,7 @@ mod tests {
             .await
             .unwrap();
         cfg.migrate_seal().await.unwrap();
-        let raw = std::fs::read(dir.path().join("repo.json")).unwrap();
+        let raw = fs::read(dir.path().join("repo.json")).unwrap();
         assert!(
             !crate::seal::is_envelope(&raw),
             "passthrough must not wrap files"
@@ -1635,7 +1636,7 @@ mod tests {
     #[tokio::test]
     async fn repo_config_unlock_identity_with_app_roundtrip() {
         let (config, _dir) = create_config();
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let rc = RepoConfig {
             url: "https://example.com/repo.git".to_string(),
             local_path: "/local/path".to_string(),
@@ -1651,7 +1652,7 @@ mod tests {
     #[tokio::test]
     async fn repo_config_unlock_identity_with_app_omitted_when_false() {
         let (config, _dir) = create_config();
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let rc = RepoConfig {
             url: "https://example.com/repo.git".to_string(),
             local_path: "/local/path".to_string(),
@@ -1660,7 +1661,7 @@ mod tests {
         };
         config.save_repo_config_full(&rc).await.unwrap();
 
-        let json = std::fs::read_to_string(config.repo_config_path()).unwrap();
+        let json = fs::read_to_string(config.repo_config_path()).unwrap();
         assert!(
             !json.contains("unlock_identity_with_app"),
             "false flag must not be serialized"
@@ -1671,9 +1672,9 @@ mod tests {
     async fn repo_config_unlock_identity_with_app_default_false_for_old_config() {
         let (config, _dir) = create_config();
         // A config written before the flag existed.
-        std::fs::create_dir_all(&config.config_dir).unwrap();
+        fs::create_dir_all(&config.config_dir).unwrap();
         let old_json = r#"{"url":"https://example.com/repo.git","pat":"t","local_path":"/p"}"#;
-        std::fs::write(config.repo_config_path(), old_json).unwrap();
+        fs::write(config.repo_config_path(), old_json).unwrap();
 
         let cfg = config.load_repo_config().await.unwrap();
         assert!(!cfg.unlock_identity_with_app);

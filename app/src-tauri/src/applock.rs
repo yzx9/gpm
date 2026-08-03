@@ -488,7 +488,7 @@ async fn try_identity_auto_unlock<R: Runtime>(
         return false; // slot absent, or the master key is somehow unavailable
     };
     // age passphrases are UTF-8; an invalid sequence means a corrupt slot.
-    let Ok(s) = std::str::from_utf8(pass_bytes.as_slice()) else {
+    let Ok(s) = str::from_utf8(pass_bytes.as_slice()) else {
         log::debug!("auto-unlock: corrupt slot UTF-8, skipping");
         return false;
     };

@@ -132,13 +132,15 @@ pub(crate) async fn run_headless_sync(
 // ---------------------------------------------------------------------------
 #[cfg(target_os = "android")]
 mod jni {
-    use super::BackgroundSyncResult;
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
     use jni::JNIEnv;
     use jni::objects::{JClass, JString};
     use jni::sys::jstring;
-    use std::path::PathBuf;
-    use std::sync::OnceLock;
     use tokio::runtime::Runtime;
+
+    use super::BackgroundSyncResult;
 
     /// A single-threaded tokio runtime owned by the JNI entry. WorkManager's
     /// `ExistingPeriodicWorkPolicy::KEEP`/`REPLACE` prevents concurrent
@@ -207,8 +209,9 @@ mod jni {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::app_config::BackgroundSyncCadence;
+
+    use super::*;
 
     #[tokio::test]
     async fn skips_when_disabled() {

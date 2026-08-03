@@ -9,6 +9,8 @@
 
 mod common;
 
+use std::fs;
+
 use rustpass::crypto::{AgeBackend, CryptoBackend};
 use rustpass::storage::{GitStorage, RepoFiles};
 
@@ -32,7 +34,7 @@ async fn encrypt_ensures_our_recipient_when_absent_from_index() {
     );
 
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join(TEST_RECIPIENTS_FILE), index).unwrap();
+    fs::write(dir.path().join(TEST_RECIPIENTS_FILE), index).unwrap();
 
     let backend = AgeBackend;
     let view = RepoFiles::new(&GitStorage, dir.path());

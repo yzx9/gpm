@@ -9,9 +9,10 @@
 
 mod common;
 
+use std::fs;
 use std::path::Path;
 
-use git2::Repository;
+use git2::{Repository, Signature};
 use ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey, rand_core::OsRng};
 
 use rustpass::signing::{CommitSigStatus, VerifyMode, fingerprint_of_public_key};
@@ -65,12 +66,11 @@ fn add_signed_commit_to_bare(
     let repo =
         Repository::clone(bare_path.to_str().expect("utf8"), work_dir.path()).expect("clone");
 
-    let sig =
-        git2::Signature::new("Signer", "signer@example.com", &git2::Time::new(0, 0)).expect("sig");
+    let sig = Signature::new("Signer", "signer@example.com", &git2::Time::new(0, 0)).expect("sig");
 
     // Touch a file so the tree actually changes (avoids an empty diff commit).
     let marker = work_dir.path().join(".touch");
-    std::fs::write(&marker, recipient_str.as_bytes()).expect("write");
+    fs::write(&marker, recipient_str.as_bytes()).expect("write");
     let mut index = repo.index().expect("index");
     index
         .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
@@ -89,7 +89,7 @@ fn add_signed_commit_to_bare(
         .sign("git", HashAlg::Sha512, &buffer)
         .expect("ssh-key sign");
     let armor = ssh_sig.to_pem(LineEnding::LF).expect("pem");
-    let content = std::str::from_utf8(&buffer).expect("utf8");
+    let content = str::from_utf8(&buffer).expect("utf8");
     let signed_oid = repo
         .commit_signed(content, &armor, None)
         .expect("commit_signed");

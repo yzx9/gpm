@@ -25,6 +25,7 @@ mod common;
 
 mod tests {
     use super::common::{encrypt_to_recipients, generate_test_keypair};
+    use std::fs;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
@@ -66,12 +67,12 @@ done
     /// TTY-needing pinentry and bypasses our mock.
     fn install_mock_pinentry(home: &Path) {
         let bin = home.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&bin).unwrap();
         let mock = bin.join("pinentry");
-        std::fs::write(&mock, MOCK_PINENTRY).unwrap();
+        fs::write(&mock, MOCK_PINENTRY).unwrap();
         let mut perm = std::fs::metadata(&mock).unwrap().permissions();
         perm.set_mode(0o755);
-        std::fs::set_permissions(&mock, perm).unwrap();
+        fs::set_permissions(&mock, perm).unwrap();
 
         let gnupg = home.join("gnupg");
         std::fs::create_dir_all(&gnupg).unwrap();

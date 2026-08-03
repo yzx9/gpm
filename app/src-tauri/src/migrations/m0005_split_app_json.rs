@@ -37,6 +37,7 @@
 //! injected but BEFORE `app_locked` is cleared (so `app_locked` is still
 //! `true` even though the key is now in memory).
 
+use std::fs;
 use std::sync::atomic::Ordering;
 
 use rustpass::Error;
@@ -80,7 +81,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
 
     // 2. Read raw app.json bytes from disk.
     let app_json_path = state.app_config.app_json_path();
-    let bytes = match std::fs::read(app_json_path) {
+    let bytes = match fs::read(app_json_path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             // 3. Missing — fresh install / post-reset. Nothing to split; bump
