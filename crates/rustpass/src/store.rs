@@ -1033,50 +1033,21 @@ impl Store {
         Ok(())
     }
 
-    /// List all `.age` entries in the configured repository.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the store is not configured or the repo path
-    /// does not exist.
-    pub async fn list(&self) -> Result<Vec<Entry>, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path);
-        self.storage()?.list(repo_path, self.secret_ext()?).await
-    }
-
     /// Fuzzy-search the configured repository's entries by `query`, ranked by
-    /// relevance: best match first, ties broken by `path`. An empty query
-    /// returns every entry (identical to [`list`](Store::list)).
+    /// relevance: best match first, ties broken by `path`. Returns one page of
+    /// up to `limit` entries starting at `offset`, plus the **total** match
+    /// count (independent of the slice). An empty query matches every entry
+    /// (alpha-sorted) — equivalent to [`list`](Store::list).
     ///
     /// Ranking is a stable strict total order — score descending, then unique
-    /// `path` ascending — so paginating a fixed entry set by offset never
-    /// splits a tie or reorders between requests.
+    /// `path` ascending — so paging a fixed entry set by offset never splits a
+    /// tie or reorders between requests.
     ///
     /// # Errors
     ///
     /// Returns an error if the store is not configured or the repo path
     /// does not exist.
-    pub async fn search(&self, query: &str) -> Result<Vec<Entry>, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage()?.list(&repo_path, self.secret_ext()?).await?;
-        let q = query.to_string();
-        Ok(spawn_blocking(move || rank_entries(entries, &q)).await?)
-    }
-
-    /// One page of [`search`](Store::search) results: up to `limit` entries
-    /// starting at `offset`, plus the **total** match count (independent of the
-    /// slice). Ranking is the same stable strict total order as
-    /// [`search`](Store::search), so paging a fixed entry set by offset is
-    /// stable across requests — no tie is split, no entry reorders between
-    /// pages. [`list_page`](Store::list_page) is this with an empty query.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the store is not configured or the repo path
-    /// does not exist.
-    pub async fn search_page(
+    pub async fn search(
         &self,
         query: &str,
         offset: usize,
@@ -1089,16 +1060,16 @@ impl Store {
         Ok(spawn_blocking(move || slice_page(rank_entries(entries, &q), offset, limit)).await?)
     }
 
-    /// One page of [`list`](Store::list) results —
-    /// [`search_page`](Store::search_page) with an empty query, since an empty
-    /// query ranks to the alpha-sorted full set (identical to [`list`](Store::list)).
+    /// One page of the configured repository's entries, alpha-sorted —
+    /// [`search`](Store::search) with an empty query, since an empty query ranks
+    /// to the alpha-sorted full set.
     ///
     /// # Errors
     ///
     /// Returns an error if the store is not configured or the repo path
     /// does not exist.
-    pub async fn list_page(&self, offset: usize, limit: usize) -> Result<RankedPage, Error> {
-        self.search_page("", offset, limit).await
+    pub async fn list(&self, offset: usize, limit: usize) -> Result<RankedPage, Error> {
+        self.search("", offset, limit).await
     }
 
     /// Decrypt and return a secret by entry name.
@@ -2506,22 +2477,6 @@ pub fn rank_entries(entries: Vec<Entry>, query: &str) -> Vec<Entry> {
     // score desc, then path asc (path is unique → strict total order)
     scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.path.cmp(&b.1.path)));
     scored.into_iter().map(|(_, e)| e).collect()
-}
-
-/// Walk the store at `repo_path` and return its entries fuzzy-ranked by `query`
-/// (empty query → all entries, alpha-sorted, like [`list_entries`]). A thin
-/// wrapper over [`list_entries`] + [`rank_entries`] for callers that want search
-/// semantics directly off a path (and for tests).
-///
-/// # Errors
-///
-/// Returns an error if the repository path does not exist (via [`list_entries`]).
-pub fn search_entries_in(
-    repo_path: &Path,
-    ext: SecretExt,
-    query: &str,
-) -> Result<Vec<Entry>, Error> {
-    Ok(rank_entries(list_entries(repo_path, ext)?, query))
 }
 
 /// One page of a ranked entry set: a slice of up to `limit` entries starting at

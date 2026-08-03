@@ -135,16 +135,13 @@ pub(crate) async fn list_entries(
     offset: usize,
     limit: usize,
 ) -> Result<EntryPage, Error> {
-    page_from(
-        state.store.list_page(offset, clamp_limit(limit)).await,
-        offset,
-    )
+    page_from(state.store.list(offset, clamp_limit(limit)).await, offset)
 }
 
 /// Fuzzy-search `.age` entries by `query`, ranked by relevance (best score
 /// first; ties broken by `path`), and return one page starting at `offset` of
 /// up to `limit` entries. An empty query behaves like [`list_entries`].
-/// Ranking is computed server-side via [`Store::search_page`](rustpass::Store::search_page).
+/// Ranking is computed server-side via [`Store::search`](rustpass::Store::search).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn search_entries(
@@ -154,10 +151,7 @@ pub(crate) async fn search_entries(
     limit: usize,
 ) -> Result<EntryPage, Error> {
     page_from(
-        state
-            .store
-            .search_page(&query, offset, clamp_limit(limit))
-            .await,
+        state.store.search(&query, offset, clamp_limit(limit)).await,
         offset,
     )
 }

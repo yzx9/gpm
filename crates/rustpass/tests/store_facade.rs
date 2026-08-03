@@ -41,7 +41,11 @@ async fn store_facade_full_lifecycle() {
     assert!(store.is_configured(), "should be configured after setup");
 
     // 3. List
-    let entries = store.list().await.expect("list should succeed");
+    let entries = store
+        .list(0, usize::MAX)
+        .await
+        .expect("list should succeed")
+        .entries;
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().any(|e| e.name == "cloud/aws/root"));
     assert!(entries.iter().any(|e| e.name == "email/gmail"));
@@ -215,7 +219,11 @@ async fn store_facade_reconfigure() {
         )
         .await
         .expect("first configure should succeed");
-    let entries1 = store.list().await.expect("list should succeed");
+    let entries1 = store
+        .list(0, usize::MAX)
+        .await
+        .expect("list should succeed")
+        .entries;
     assert!(entries1.iter().any(|e| e.name == "first"));
 
     // Reconfigure with different repo and identity
@@ -231,9 +239,10 @@ async fn store_facade_reconfigure() {
         .await
         .expect("reconfigure should succeed");
     let entries2 = store
-        .list()
+        .list(0, usize::MAX)
         .await
-        .expect("list after reconfigure should succeed");
+        .expect("list after reconfigure should succeed")
+        .entries;
     assert!(
         entries2.iter().any(|e| e.name == "second"),
         "should see entries from new repo"
@@ -347,7 +356,11 @@ async fn store_facade_list_empty_store() {
         .await
         .expect("configure should succeed");
 
-    let entries = store.list().await.expect("list should succeed");
+    let entries = store
+        .list(0, usize::MAX)
+        .await
+        .expect("list should succeed")
+        .entries;
     assert!(entries.is_empty(), "empty store should return no entries");
 }
 
@@ -399,7 +412,11 @@ async fn store_facade_sync_then_list_updated() {
         .expect("configure should succeed");
 
     // Initially only one entry
-    let entries = store.list().await.expect("list should succeed");
+    let entries = store
+        .list(0, usize::MAX)
+        .await
+        .expect("list should succeed")
+        .entries;
     assert_eq!(entries.len(), 1);
 
     // Add a new commit to bare (upstream)
@@ -415,7 +432,11 @@ async fn store_facade_sync_then_list_updated() {
     assert!(sync_result.changed, "sync should detect upstream changes");
 
     // List should now show 2 entries
-    let entries = store.list().await.expect("list after sync should succeed");
+    let entries = store
+        .list(0, usize::MAX)
+        .await
+        .expect("list after sync should succeed")
+        .entries;
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().any(|e| e.name == "initial"));
     assert!(entries.iter().any(|e| e.name == "new_entry"));

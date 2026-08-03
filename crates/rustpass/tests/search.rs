@@ -5,9 +5,28 @@
 mod common;
 
 mod tests {
-    use rustpass::store;
+    use std::path::Path;
+
+    use rustpass::crypto::SecretExt;
+    use rustpass::entry::Entry;
+    use rustpass::error::Error;
+    use rustpass::storage::git::list_entries;
+    use rustpass::store::rank_entries;
 
     use super::common::*;
+
+    /// Walk the store at `repo_path` and return its entries fuzzy-ranked by
+    /// `query` (empty query → all entries, alpha-sorted). A thin wrapper over
+    /// `list_entries` + `rank_entries` — the path-based search semantics these
+    /// tests exercise. (Was a `rustpass::store` free fn; moved here once it had
+    /// no non-test callers.)
+    fn search_entries_in(
+        repo_path: &Path,
+        ext: SecretExt,
+        query: &str,
+    ) -> Result<Vec<Entry>, Error> {
+        Ok(rank_entries(list_entries(repo_path, ext)?, query))
+    }
 
     #[test]
     fn search_entries_empty_query_returns_all_alpha_sorted() {
@@ -22,8 +41,7 @@ mod tests {
         );
 
         // Empty query → every entry, alpha-sorted by name (mirrors list_entries).
-        let entries =
-            store::search_entries_in(dir.path(), rustpass::crypto::SecretExt::AGE, "").unwrap();
+        let entries = search_entries_in(dir.path(), SecretExt::AGE, "").unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["bank", "cloud/aws/root", "email/personal"]);
     }
@@ -41,9 +59,7 @@ mod tests {
         );
 
         // "awsroot" matches only cloud/aws/root, as a non-contiguous subsequence.
-        let entries =
-            store::search_entries_in(dir.path(), rustpass::crypto::SecretExt::AGE, "awsroot")
-                .unwrap();
+        let entries = search_entries_in(dir.path(), SecretExt::AGE, "awsroot").unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries.first().unwrap().path, "cloud/aws/root.age");
     }
@@ -54,8 +70,7 @@ mod tests {
         let dir = create_test_store(vec![("cloud/aws/root.age", b"x")], &recipient);
 
         // Uppercase query still matches (search is case-insensitive, not "smart").
-        let entries =
-            store::search_entries_in(dir.path(), rustpass::crypto::SecretExt::AGE, "AWS").unwrap();
+        let entries = search_entries_in(dir.path(), SecretExt::AGE, "AWS").unwrap();
         assert!(entries.iter().any(|e| e.path == "cloud/aws/root.age"));
     }
 
@@ -65,7 +80,7 @@ mod tests {
         let dir = create_test_store(vec![("cloud/aws/root.age", b"x")], &recipient);
 
         assert!(
-            store::search_entries_in(dir.path(), rustpass::crypto::SecretExt::AGE, "zzznomatch")
+            search_entries_in(dir.path(), SecretExt::AGE, "zzznomatch")
                 .unwrap()
                 .is_empty()
         );
@@ -76,9 +91,6 @@ mod tests {
         let missing = std::path::Path::new("/tmp/gpm_no_such_search_dir_12345");
         assert!(!missing.exists());
         // Propagates list_entries' NO_REPO (search_entries_in delegates to it).
-        assert!(
-            store::search_entries_in(missing, rustpass::crypto::SecretExt::AGE, "anything")
-                .is_err()
-        );
+        assert!(search_entries_in(missing, SecretExt::AGE, "anything").is_err());
     }
 }

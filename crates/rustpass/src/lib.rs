@@ -18,7 +18,7 @@
 //! let store = Store::new(PathBuf::from("/path/to/config"), None);
 //! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...", None).await?;
 //!
-//! for entry in store.list().await? {
+//! for entry in store.list(0, 100).await?.entries {
 //!     println!("{}", entry.name);
 //! }
 //!

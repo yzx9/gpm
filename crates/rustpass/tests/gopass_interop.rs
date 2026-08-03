@@ -260,9 +260,10 @@ done
 
         // Structural compat: gpm lists exactly the entries gopass wrote.
         let entries: Vec<String> = store
-            .list()
+            .list(0, usize::MAX)
             .await
             .expect("gpm lists the cloned gopass store")
+            .entries
             .into_iter()
             .map(|e| e.name)
             .collect();
