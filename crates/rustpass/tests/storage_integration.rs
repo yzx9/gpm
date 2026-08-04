@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use rustpass::Config;
+use rustpass::{Config, GitAuth};
 
 fn create_config() -> (Config, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("failed to create temp dir");
@@ -22,9 +22,7 @@ async fn full_setup_save_load_cycle() {
     config
         .save_repo_config(
             "https://example.com/repo.git",
-            Some("pat-token-123"),
-            None,
-            None,
+            &GitAuth::from_pat("pat-token-123"),
             "/local/repo/path",
         )
         .await
@@ -56,9 +54,7 @@ async fn clear_all_then_reconfigure() {
     config
         .save_repo_config(
             "https://first.example.com/repo.git",
-            Some("first-pat"),
-            None,
-            None,
+            &GitAuth::from_pat("first-pat"),
             "/first",
         )
         .await
@@ -78,9 +74,7 @@ async fn clear_all_then_reconfigure() {
     config
         .save_repo_config(
             "https://second.example.com/repo.git",
-            None,
-            None,
-            None,
+            &GitAuth::None,
             "/second",
         )
         .await

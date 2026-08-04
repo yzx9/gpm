@@ -28,7 +28,7 @@ use crate::signing::{
 use crate::storage::git::passfile_rel;
 use crate::storage::{
     CancelSlot, CancelToken, CommitKind, GitAuth, KeepLocalOutcome, KeepLocalPlan, ProgressSender,
-    RepoFiles, StorageBackend, StorageCtx, StorageRegistry,
+    RepoFiles, StorageBackend, StorageCtx, StorageRegistry, pick_auth,
 };
 use crate::{RepoLock, StoreBuilder, template};
 
@@ -798,7 +798,7 @@ impl Store {
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
-            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)
+            .save_repo_config(repo_url, &auth, &local_path)
             .await?;
 
         Ok(())
@@ -889,7 +889,7 @@ impl Store {
 
             let local_path = repo_dir.to_string_lossy().to_string();
             self.config
-                .save_repo_config(url, pat, ssh_key, ssh_passphrase, &local_path)
+                .save_repo_config(url, &pick_auth(pat, ssh_key, ssh_passphrase), &local_path)
                 .await?;
             // TODO(0016-recipients-pinning): TOFU-pin the seeded recipient on first write.
             Ok::<(), Error>(())
@@ -1090,7 +1090,7 @@ impl Store {
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
-            .save_repo_config(repo_url, pat, ssh_key, ssh_passphrase, &local_path)
+            .save_repo_config(repo_url, &auth, &local_path)
             .await?;
 
         Ok(())

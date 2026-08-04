@@ -55,7 +55,12 @@ pub use registry::StoreBuilder;
 // until its RCS bodies fold into `storage/git` and the `git` module disappears.
 
 /// Credentials for Git remote authentication.
+///
+/// Construct with [`GitAuth::from_pat`] / [`GitAuth::from_ssh`], or resolve
+/// sparse optional fields via [`pick_auth`]. `#[non_exhaustive]` so a future
+/// variant (SSH agent, OAuth, …) isn't a breaking change for the app.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum GitAuth {
     /// No authentication (public repo).
     None,
@@ -87,6 +92,108 @@ impl fmt::Debug for GitAuth {
                 .field("passphrase", &"[REDACTED]")
                 .finish(),
         }
+    }
+}
+
+impl GitAuth {
+    /// HTTPS personal-access-token auth.
+    #[must_use]
+    pub fn from_pat(pat: &str) -> GitAuth {
+        GitAuth::Pat(pat.to_string())
+    }
+
+    /// SSH-key auth. The username defaults to `"git"` — the git-over-SSH
+    /// convention used by GitHub/GitLab/Gitea and most self-hosted servers. A
+    /// username embedded in the remote URL (e.g. `deploy@host:…`) overrides
+    /// this default at transport time (see `build_remote_callbacks`). This is
+    /// the sanctioned way to build the SSH variant: `RepoConfig` does not
+    /// persist `username`, so a non-default username set here is not stored.
+    #[must_use]
+    pub fn from_ssh(ssh_key: &str, ssh_passphrase: Option<&str>) -> GitAuth {
+        GitAuth::Ssh {
+            username: "git".to_string(),
+            private_key: ssh_key.to_string(),
+            passphrase: ssh_passphrase.map(String::from),
+        }
+    }
+}
+
+/// Resolve sparse optional credential fields to a [`GitAuth`], applying the
+/// git-over-SSH convention that an SSH key wins over a PAT when both are
+/// supplied. The single policy site, shared by
+/// [`RepoConfig::to_git_auth`](crate::config::RepoConfig::to_git_auth) and the
+/// app's IPC boundary. Arg order `(pat, ssh_key, ssh_passphrase)` matches the
+/// historical facade/IPC order for minimal call-site translation.
+#[must_use]
+pub fn pick_auth(
+    pat: Option<&str>,
+    ssh_key: Option<&str>,
+    ssh_passphrase: Option<&str>,
+) -> GitAuth {
+    if let Some(key) = ssh_key {
+        GitAuth::from_ssh(key, ssh_passphrase)
+    } else if let Some(token) = pat {
+        GitAuth::from_pat(token)
+    } else {
+        GitAuth::None
+    }
+}
+
+#[cfg(test)]
+mod git_auth_tests {
+    use super::*;
+
+    #[test]
+    fn from_pat_builds_pat() {
+        match GitAuth::from_pat("ghp_token") {
+            GitAuth::Pat(t) => assert_eq!(t, "ghp_token"),
+            other => panic!("expected Pat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_ssh_defaults_git_username_and_threads_passphrase() {
+        match GitAuth::from_ssh("KEY", Some("pass")) {
+            GitAuth::Ssh {
+                username,
+                private_key,
+                passphrase,
+            } => {
+                assert_eq!(
+                    username, "git",
+                    "default username is the git-over-SSH convention"
+                );
+                assert_eq!(private_key, "KEY");
+                assert_eq!(passphrase.as_deref(), Some("pass"));
+            }
+            other => panic!("expected Ssh, got {other:?}"),
+        }
+        match GitAuth::from_ssh("KEY", None) {
+            GitAuth::Ssh { passphrase, .. } => assert!(passphrase.is_none()),
+            other => panic!("expected Ssh, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pick_auth_ssh_wins_over_pat() {
+        let auth = pick_auth(Some("pat"), Some("ssh-key"), Some("pass"));
+        assert!(
+            matches!(auth, GitAuth::Ssh { .. }),
+            "SSH key takes priority: {auth:?}"
+        );
+    }
+
+    #[test]
+    fn pick_auth_pat_when_no_ssh_key() {
+        match pick_auth(Some("token"), None, None) {
+            GitAuth::Pat(t) => assert_eq!(t, "token"),
+            other => panic!("expected Pat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pick_auth_none_when_no_credentials() {
+        assert!(matches!(pick_auth(None, None, None), GitAuth::None));
     }
 }
 

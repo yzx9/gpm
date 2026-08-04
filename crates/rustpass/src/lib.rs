@@ -93,7 +93,9 @@ pub use signing::{
     AuthenticityConfig, CommitSigInfo, CommitSigPage, CommitSigStatus, IgnoredIssue, RevisionPage,
     TrustedGpgKey, TrustedKey, VerifyMode, fingerprint_of_public_key,
 };
-pub use storage::{CancelSlot, CancelToken, GitProgress, ProgressSender, StoreBuilder};
+pub use storage::{
+    CancelSlot, CancelToken, GitAuth, GitProgress, ProgressSender, StoreBuilder, pick_auth,
+};
 pub use store::{
     CommitIdentity, DivergenceChoice, RankedPage, RevisionContent, Store, SyncDivergence,
     SyncOutcome, SyncResult, WriteOutcome, WriteResult, clamp_lock_mode, normalize_clear_secs,

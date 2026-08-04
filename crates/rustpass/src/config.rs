@@ -13,7 +13,7 @@ use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity};
 use crate::seal::Seal;
 use crate::signing::AuthenticityConfig;
-use crate::storage::GitAuth;
+use crate::storage::{GitAuth, pick_auth};
 
 /// Default commit author name used when none is configured. Single source of
 /// the value — read by the commit fallback and surfaced to the UI for display.
@@ -488,11 +488,24 @@ impl Config {
     pub async fn save_repo_config(
         &self,
         url: &str,
-        pat: Option<&str>,
-        ssh_key: Option<&str>,
-        ssh_passphrase: Option<&str>,
+        auth: &GitAuth,
         local_path: &str,
     ) -> Result<(), Error> {
+        // Decompose the in-memory auth into the persisted flat fields. The
+        // single `GitAuth → RepoConfig fields` site (the reverse of
+        // `to_git_auth`, which resolves through `pick_auth`); the serialized
+        // shape stays flat `pat`/`ssh_key`/`ssh_passphrase`, so no on-disk
+        // migration. `username` is intentionally not persisted — see
+        // `GitAuth::from_ssh`.
+        let (pat, ssh_key, ssh_passphrase) = match auth {
+            GitAuth::None => (None, None, None),
+            GitAuth::Pat(token) => (Some(token.as_str()), None, None),
+            GitAuth::Ssh {
+                private_key,
+                passphrase,
+                ..
+            } => (None, Some(private_key.as_str()), passphrase.as_deref()),
+        };
         let config = RepoConfig {
             url: url.to_string(),
             pat: pat.map(String::from),
@@ -853,20 +866,15 @@ pub fn redact_url(url: &str) -> String {
 impl RepoConfig {
     /// Build a [`GitAuth`](crate::storage::GitAuth) from stored credentials.
     ///
-    /// SSH key takes priority if both PAT and SSH key are present.
+    /// Delegates to [`pick_auth`](crate::storage::pick_auth): SSH key takes
+    /// priority if both PAT and SSH key are present.
     #[must_use]
     pub fn to_git_auth(&self) -> GitAuth {
-        if let Some(key) = &self.ssh_key {
-            GitAuth::Ssh {
-                username: "git".to_string(),
-                private_key: key.clone(),
-                passphrase: self.ssh_passphrase.clone(),
-            }
-        } else if let Some(token) = &self.pat {
-            GitAuth::Pat(token.clone())
-        } else {
-            GitAuth::None
-        }
+        pick_auth(
+            self.pat.as_deref(),
+            self.ssh_key.as_deref(),
+            self.ssh_passphrase.as_deref(),
+        )
     }
 
     /// Build a [`RedactedRepoConfig`] safe to ship in a diagnostics export:
@@ -1304,9 +1312,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                Some("pat-token"),
-                None,
-                None,
+                &GitAuth::from_pat("pat-token"),
                 "/local/repo",
             )
             .await
@@ -1325,9 +1331,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                Some("my-secret-pat"),
-                None,
-                None,
+                &GitAuth::from_pat("my-secret-pat"),
                 "/local/path",
             )
             .await
@@ -1344,9 +1348,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                None,
-                None,
-                None,
+                &GitAuth::None,
                 "/local/path",
             )
             .await
@@ -1398,9 +1400,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                None,
-                None,
-                None,
+                &GitAuth::None,
                 "/local/path",
             )
             .await
@@ -1417,9 +1417,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                Some("pat"),
-                None,
-                None,
+                &GitAuth::from_pat("pat"),
                 "/local/path",
             )
             .await
@@ -1467,9 +1465,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                None,
-                None,
-                None,
+                &GitAuth::None,
                 "/local/path",
             )
             .await
@@ -1487,9 +1483,10 @@ mod tests {
         config
             .save_repo_config(
                 "git@github.com:user/repo.git",
-                None,
-                Some("-----BEGIN OPENSSH PRIVATE KEY-----\ntest-key\n-----END OPENSSH PRIVATE KEY-----"),
-                Some("passphrase123"),
+                &GitAuth::from_ssh(
+                    "-----BEGIN OPENSSH PRIVATE KEY-----\ntest-key\n-----END OPENSSH PRIVATE KEY-----",
+                    Some("passphrase123"),
+                ),
                 "/local/path",
             )
             .await
@@ -1617,9 +1614,7 @@ mod tests {
         config
             .save_repo_config(
                 "git@github.com:user/repo.git",
-                None,
-                Some("test-key"),
-                None,
+                &GitAuth::from_ssh("test-key", None),
                 "/local/path",
             )
             .await
@@ -1637,9 +1632,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                Some("pat"),
-                None,
-                None,
+                &GitAuth::from_pat("pat"),
                 "/local/path",
             )
             .await
@@ -1701,9 +1694,7 @@ mod tests {
         config
             .save_repo_config(
                 "https://example.com/repo.git",
-                Some("pat"),
-                None,
-                None,
+                &GitAuth::from_pat("pat"),
                 "/local/path",
             )
             .await
@@ -1733,7 +1724,7 @@ mod tests {
     async fn repo_config_backend_omitted_when_none() {
         let (config, _dir) = create_config();
         config
-            .save_repo_config("https://x/repo", None, None, None, "/p")
+            .save_repo_config("https://x/repo", &GitAuth::None, "/p")
             .await
             .unwrap();
         // No master key ⇒ passthrough, so the JSON is readable plaintext.
@@ -1876,7 +1867,7 @@ mod tests {
     async fn passthrough_migrate_is_noop_on_plaintext() {
         // No master key ⇒ migration must leave plaintext files untouched.
         let (cfg, dir) = create_config();
-        cfg.save_repo_config("https://x/repo", Some("pat"), None, None, "/p")
+        cfg.save_repo_config("https://x/repo", &GitAuth::from_pat("pat"), "/p")
             .await
             .unwrap();
         cfg.migrate_seal().await.unwrap();
