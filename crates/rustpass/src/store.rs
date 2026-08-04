@@ -28,7 +28,7 @@ use crate::signing::{
 use crate::storage::git::passfile_rel;
 use crate::storage::{
     CancelSlot, CancelToken, CommitKind, GitAuth, KeepLocalOutcome, KeepLocalPlan, ProgressSender,
-    RepoFiles, StorageBackend, StorageCtx, StorageRegistry, pick_auth,
+    RepoFiles, StorageBackend, StorageCtx, StorageRegistry,
 };
 use crate::{RepoLock, StoreBuilder, template};
 
@@ -743,15 +743,8 @@ impl Store {
     /// # Errors
     ///
     /// Returns an error if the clone fails or the config cannot be persisted.
-    pub async fn clone_only(
-        &self,
-        repo_url: &str,
-        pat: Option<&str>,
-        ssh_key: Option<&str>,
-        ssh_passphrase: Option<&str>,
-    ) -> Result<(), Error> {
-        self.clone_only_with(repo_url, pat, ssh_key, ssh_passphrase, None, None)
-            .await
+    pub async fn clone_only(&self, repo_url: &str, auth: &GitAuth) -> Result<(), Error> {
+        self.clone_only_with(repo_url, auth, None, None).await
     }
 
     /// Cancellable, progress-reporting variant of [`clone_only`](Store::clone_only).
@@ -767,22 +760,10 @@ impl Store {
     pub async fn clone_only_with(
         &self,
         repo_url: &str,
-        pat: Option<&str>,
-        ssh_key: Option<&str>,
-        ssh_passphrase: Option<&str>,
+        auth: &GitAuth,
         cancel: Option<CancelToken>,
         progress: Option<ProgressSender>,
     ) -> Result<(), Error> {
-        let auth = match (ssh_key, pat) {
-            (Some(key), _) => GitAuth::Ssh {
-                username: "git".to_string(),
-                private_key: key.to_string(),
-                passphrase: ssh_passphrase.map(String::from),
-            },
-            (_, Some(token)) => GitAuth::Pat(token.to_string()),
-            _ => GitAuth::None,
-        };
-
         let repo_dir = self.config.config_dir().join("repo");
         self.config.clear_all().await?;
 
@@ -793,12 +774,12 @@ impl Store {
         self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
         self.resolve_and_set_crypto(None)?;
         self.storage()?
-            .clone_repo(&auth, repo_url, &repo_dir, cancel, progress)
+            .clone_repo(auth, repo_url, &repo_dir, cancel, progress)
             .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
-            .save_repo_config(repo_url, &auth, &local_path)
+            .save_repo_config(repo_url, auth, &local_path)
             .await?;
 
         Ok(())
@@ -820,8 +801,8 @@ impl Store {
     /// locally (the orphan-recipient hole). If no `repo_url` is given the store
     /// is local-only and never pushed.
     ///
-    /// Auth (`pat`/`ssh_key`) is ignored when no `repo_url` is given, so a stray
-    /// credential can never be persisted against an empty URL.
+    /// Auth is ignored when no `repo_url` is given, so a stray credential can
+    /// never be persisted against an empty URL.
     ///
     /// On any failure after `git init`, the partial repo directory and any
     /// config are removed so the next attempt starts clean.
@@ -834,9 +815,7 @@ impl Store {
     pub async fn create_store(
         &self,
         repo_url: Option<&str>,
-        pat: Option<&str>,
-        ssh_key: Option<&str>,
-        ssh_passphrase: Option<&str>,
+        auth: &GitAuth,
         recipient: &str,
     ) -> Result<(), Error> {
         if recipient.trim().is_empty() {
@@ -847,15 +826,13 @@ impl Store {
         }
 
         // No URL → local-only store: ignore any stray auth (defensive; the
-        // frontend also validates). Persisting url="" + pat would silently
-        // discard the credential on every future no-op sync.
+        // frontend also validates), persisting no credentials against an empty
+        // URL. `none_auth` is named so the borrow outlives the awaited
+        // `bootstrap` block below (a throwaway `&GitAuth::None` would not).
         let has_url = repo_url.is_some_and(|u| !u.trim().is_empty());
         let url = repo_url.unwrap_or("");
-        let (pat, ssh_key, ssh_passphrase) = if has_url {
-            (pat, ssh_key, ssh_passphrase)
-        } else {
-            (None, None, None)
-        };
+        let none_auth = GitAuth::None;
+        let auth = if has_url { auth } else { &none_auth };
 
         let repo_dir = self.config.config_dir().join("repo");
         // Remove the repo dir first, then clear the config — mirroring the
@@ -888,9 +865,7 @@ impl Store {
             }
 
             let local_path = repo_dir.to_string_lossy().to_string();
-            self.config
-                .save_repo_config(url, &pick_auth(pat, ssh_key, ssh_passphrase), &local_path)
-                .await?;
+            self.config.save_repo_config(url, auth, &local_path).await?;
             // TODO(0016-recipients-pinning): TOFU-pin the seeded recipient on first write.
             Ok::<(), Error>(())
         };
@@ -1007,23 +982,12 @@ impl Store {
     pub async fn configure(
         &self,
         repo_url: &str,
-        pat: Option<&str>,
-        ssh_key: Option<&str>,
-        ssh_passphrase: Option<&str>,
+        auth: &GitAuth,
         identity: &str,
         identity_passphrase: Option<&str>,
     ) -> Result<(), Error> {
-        self.configure_with(
-            repo_url,
-            pat,
-            ssh_key,
-            ssh_passphrase,
-            identity,
-            identity_passphrase,
-            None,
-            None,
-        )
-        .await
+        self.configure_with(repo_url, auth, identity, identity_passphrase, None, None)
+            .await
     }
 
     /// Cancellable, progress-reporting variant of [`configure`](Store::configure).
@@ -1036,13 +1000,10 @@ impl Store {
     ///
     /// Returns an error if the identity format is invalid, the clone fails,
     /// or the config cannot be persisted.
-    #[allow(clippy::too_many_arguments)] // mirrors configure + cancel/progress hooks
     pub async fn configure_with(
         &self,
         repo_url: &str,
-        pat: Option<&str>,
-        ssh_key: Option<&str>,
-        ssh_passphrase: Option<&str>,
+        auth: &GitAuth,
         identity: &str,
         identity_passphrase: Option<&str>,
         cancel: Option<CancelToken>,
@@ -1064,16 +1025,6 @@ impl Store {
             .crypto()?
             .identity_recipient(identity, identity_passphrase)?;
 
-        let auth = match (ssh_key, pat) {
-            (Some(key), _) => GitAuth::Ssh {
-                username: "git".to_string(),
-                private_key: key.to_string(),
-                passphrase: ssh_passphrase.map(String::from),
-            },
-            (_, Some(token)) => GitAuth::Pat(token.to_string()),
-            _ => GitAuth::None,
-        };
-
         let repo_dir = self.config.config_dir().join("repo");
         self.config.clear_all().await?;
 
@@ -1085,12 +1036,12 @@ impl Store {
 
         self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
         self.storage()?
-            .clone_repo(&auth, repo_url, &repo_dir, cancel, progress)
+            .clone_repo(auth, repo_url, &repo_dir, cancel, progress)
             .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();
         self.config
-            .save_repo_config(repo_url, &auth, &local_path)
+            .save_repo_config(repo_url, auth, &local_path)
             .await?;
 
         Ok(())

@@ -14,7 +14,7 @@ mod common;
 
 use common::*;
 use rustpass::store;
-use rustpass::{Entry, Store};
+use rustpass::{Entry, GitAuth, Store};
 
 // ---------------------------------------------------------------------------
 // slice_page — the pure pagination-slicing core (no Store, no ranking).
@@ -102,9 +102,7 @@ async fn store_with(entries: Vec<(&str, &[u8])>) -> (tempfile::TempDir, Store) {
     store
         .configure(
             bare.path().to_str().unwrap(),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

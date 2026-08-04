@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use rustpass::store::Store;
+use rustpass::{GitAuth, store::Store};
 
 /// Round-trip with an encrypted ed25519 SSH identity:
 /// configure → unlock (caches the decrypted key) → get twice (cache hit, no
@@ -39,9 +39,7 @@ async fn ssh_identity_unlock_get_set_round_trip() {
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &private_key,
             Some(passphrase),
         )

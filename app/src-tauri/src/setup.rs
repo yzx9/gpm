@@ -164,15 +164,13 @@ pub(crate) async fn clone_repo(
         // Setup-time op (single in-flight, no `write_mu`): arm up-front so the
         // clone is cancellable. The guard disarms when the future drops.
         let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
+        let auth = rustpass::pick_auth(
+            pat.as_deref(),
+            ssh_key.as_deref(),
+            ssh_passphrase.as_deref(),
+        );
         store
-            .clone_only_with(
-                &repo_url,
-                pat.as_deref(),
-                ssh_key.as_deref(),
-                ssh_passphrase.as_deref(),
-                Some(cancel),
-                Some(tx),
-            )
+            .clone_only_with(&repo_url, &auth, Some(cancel), Some(tx))
             .await
     })
     .await
@@ -275,15 +273,14 @@ pub(crate) async fn create_store(
     recipient: String,
 ) -> Result<(), Error> {
     log::info!("setup: create-store");
+    let auth = rustpass::pick_auth(
+        pat.as_deref(),
+        ssh_key.as_deref(),
+        ssh_passphrase.as_deref(),
+    );
     state
         .store
-        .create_store(
-            repo_url.as_deref(),
-            pat.as_deref(),
-            ssh_key.as_deref(),
-            ssh_passphrase.as_deref(),
-            &recipient,
-        )
+        .create_store(repo_url.as_deref(), &auth, &recipient)
         .await
         .inspect_err(|e| log::warn!("setup: create-store failed: {e}"))
 }
@@ -632,12 +629,15 @@ pub(crate) async fn setup(
         // Setup-time op (single in-flight, no `write_mu`): arm up-front so the
         // configure (clone + first push) is cancellable.
         let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
+        let auth = rustpass::pick_auth(
+            pat.as_deref(),
+            ssh_key.as_deref(),
+            ssh_passphrase.as_deref(),
+        );
         store
             .configure_with(
                 &repo_url,
-                pat.as_deref(),
-                ssh_key.as_deref(),
-                ssh_passphrase.as_deref(),
+                &auth,
                 &identity,
                 identity_passphrase.as_deref(),
                 Some(cancel),

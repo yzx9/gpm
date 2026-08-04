@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use rustpass::store::Store;
+use rustpass::{GitAuth, store::Store};
 
 /// Full lifecycle: create → configure → list → get → sync → config → reset.
 #[tokio::test]
@@ -30,9 +30,7 @@ async fn store_facade_full_lifecycle() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -86,9 +84,7 @@ async fn set_commit_identity_persists_trims_and_clears() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -135,9 +131,7 @@ async fn set_pat_persists_trims_and_clears() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -178,9 +172,10 @@ async fn clear_ssh_key_clears_key_and_passphrase() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            Some("-----BEGIN OPENSSH PRIVATE KEY-----\ndummy\n-----END OPENSSH PRIVATE KEY-----"),
-            Some("ssh-pass"),
+            &GitAuth::from_ssh(
+                "-----BEGIN OPENSSH PRIVATE KEY-----\ndummy\n-----END OPENSSH PRIVATE KEY-----",
+                Some("ssh-pass"),
+            ),
             &identity,
             None,
         )
@@ -213,9 +208,7 @@ async fn verify_pat_ok_on_reachable_remote() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -240,9 +233,7 @@ async fn set_commit_identity_rejects_invalid_characters() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -280,9 +271,7 @@ async fn store_facade_get_same_entry_twice() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -314,9 +303,7 @@ async fn store_facade_reconfigure() {
     store
         .configure(
             bare_dir1.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity1,
             None,
         )
@@ -333,9 +320,7 @@ async fn store_facade_reconfigure() {
     store
         .configure(
             bare_dir2.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity2,
             None,
         )
@@ -372,9 +357,7 @@ async fn store_facade_invalid_identity() {
     let result = store
         .configure(
             "https://example.com/repo.git",
-            None,
-            None,
-            None,
+            &GitAuth::None,
             "not-a-valid-identity",
             None,
         )
@@ -399,9 +382,7 @@ async fn store_facade_get_nonexistent_entry() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -424,9 +405,7 @@ async fn store_facade_get_path_traversal() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -450,9 +429,7 @@ async fn store_facade_list_empty_store() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -478,9 +455,7 @@ async fn store_facade_sync_no_changes() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -505,9 +480,7 @@ async fn store_facade_sync_then_list_updated() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -566,9 +539,7 @@ async fn store_identity_auto_unlock_flag_and_passphrase_slot_persist() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

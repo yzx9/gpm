@@ -16,7 +16,7 @@ use git2::{Repository, Signature};
 use ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey, rand_core::OsRng};
 
 use rustpass::signing::{CommitSigStatus, VerifyMode, fingerprint_of_public_key};
-use rustpass::store::Store;
+use rustpass::{GitAuth, store::Store};
 
 /// A signing keypair + its public-key string + fingerprint (test fixture).
 struct SigningFixture {
@@ -117,7 +117,7 @@ fn store_cloned_from_bare(bare_path: &Path) -> (tempfile::TempDir, Store) {
     let config_dir = tempfile::tempdir().expect("config dir");
     let store = Store::new(config_dir.path().to_path_buf(), None);
     let bare_url = bare_path.to_str().expect("utf8").to_string();
-    block_on(store.clone_only(&bare_url, None, None, None)).expect("clone_only");
+    block_on(store.clone_only(&bare_url, &GitAuth::None)).expect("clone_only");
     (config_dir, store)
 }
 

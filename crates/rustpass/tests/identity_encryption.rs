@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use rustpass::store::Store;
+use rustpass::{GitAuth, store::Store};
 
 /// Configure with encrypted identity → unlock → get → lock.
 #[tokio::test]
@@ -26,9 +26,7 @@ async fn encrypted_identity_full_lifecycle() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -103,9 +101,7 @@ async fn two_step_setup_with_passphrase() {
     store
         .clone_only(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
         )
         .await
         .expect("clone_only should succeed");
@@ -143,9 +139,7 @@ async fn change_passphrase_flow() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -194,9 +188,7 @@ async fn reset_clears_cache() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -227,9 +219,7 @@ async fn unlock_is_idempotent() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -263,9 +253,7 @@ async fn lock_is_idempotent() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -294,9 +282,7 @@ async fn set_passphrase_rejects_already_encrypted() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -321,9 +307,7 @@ async fn change_passphrase_rejects_not_encrypted() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -349,9 +333,7 @@ async fn plaintext_identity_no_unlock_needed() {
     store
         .configure(
             bare_dir.path().to_str().expect("valid utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

@@ -22,7 +22,7 @@ use age::ssh;
 use age::x25519::{Identity, Recipient};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
-use rustpass::{SyncOutcome, SyncResult};
+use rustpass::{GitAuth, SyncOutcome, SyncResult};
 
 /// 1-permit serializer guarding identity-crypto round-trips in this test binary.
 ///
@@ -333,9 +333,7 @@ pub async fn store_with_base(
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

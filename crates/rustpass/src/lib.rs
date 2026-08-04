@@ -10,13 +10,16 @@
 //! # Quick start
 //!
 //! ```no_run
+//! use rustpass::GitAuth;
 //! use rustpass::Store;
 //! use std::path::PathBuf;
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), rustpass::Error> {
 //! let store = Store::new(PathBuf::from("/path/to/config"), None);
-//! store.configure("https://example.com/repo.git", None, None, None, "AGE-SECRET-KEY-...", None).await?;
+//! store
+//!     .configure("https://example.com/repo.git", &GitAuth::None, "AGE-SECRET-KEY-...", None)
+//!     .await?;
 //!
 //! for entry in store.list(0, 100).await?.entries {
 //!     println!("{}", entry.name);

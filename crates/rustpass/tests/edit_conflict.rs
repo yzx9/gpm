@@ -17,7 +17,7 @@ mod common;
 use std::path::Path;
 
 use common::*;
-use rustpass::store::Store;
+use rustpass::{GitAuth, store::Store};
 
 /// Configure a store against a fresh bare repo carrying a recipients file with
 /// the store's own key. (Mirrors `write_conflict.rs`.)
@@ -35,9 +35,7 @@ async fn store_with_recipients() -> (tempfile::TempDir, tempfile::TempDir, Store
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

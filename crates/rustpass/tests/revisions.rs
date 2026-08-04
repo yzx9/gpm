@@ -12,7 +12,7 @@ use common::{
     TEST_RECIPIENTS_FILE, add_commit_to_bare, create_test_git_repo_with, crypto_permit,
     generate_test_keypair, store_with_base,
 };
-use rustpass::{RevisionContent, Store};
+use rustpass::{GitAuth, RevisionContent, Store};
 
 /// `set("foo")` 3× builds a 3-commit history; a `set("bar")` commit touching a
 /// different file must NOT appear in foo's list (proves the pathspec filter, not
@@ -102,9 +102,7 @@ async fn undecryptable_for_recipient_swapped_old_revision() {
     store
         .configure(
             bare.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &id_a,
             None,
         )

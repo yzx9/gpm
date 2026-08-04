@@ -16,7 +16,7 @@ mod tests {
 
     use rustpass::recipient;
     use rustpass::ssh;
-    use rustpass::store::Store;
+    use rustpass::{GitAuth, store::Store};
 
     use super::common::*;
 
@@ -40,7 +40,7 @@ mod tests {
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
         store
-            .create_store(None, None, None, None, &recipient)
+            .create_store(None, &GitAuth::None, &recipient)
             .await
             .expect("local-only create_store");
 
@@ -107,7 +107,7 @@ mod tests {
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
         store
-            .create_store(Some(&remote_url), None, None, None, &recipient)
+            .create_store(Some(&remote_url), &GitAuth::None, &recipient)
             .await
             .expect("create_store with a remote");
 
@@ -160,7 +160,7 @@ mod tests {
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
         store
-            .create_store(None, None, None, None, &recipient)
+            .create_store(None, &GitAuth::None, &recipient)
             .await
             .expect("create_store with SSH recipient");
 
@@ -194,7 +194,7 @@ mod tests {
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
         let err = store
-            .create_store(None, None, None, None, "  ")
+            .create_store(None, &GitAuth::None, "  ")
             .await
             .expect_err("empty recipient must be rejected");
         assert_eq!(err.code, "INVALID_IDENTITY");
@@ -225,7 +225,7 @@ mod tests {
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
         store
-            .create_store(None, None, None, None, &recipient)
+            .create_store(None, &GitAuth::None, &recipient)
             .await
             .unwrap();
         store.save_identity(&identity, None).await.unwrap();
@@ -297,7 +297,7 @@ mod tests {
         std::fs::create_dir(config_dir.path().join("repo.tmp")).unwrap();
 
         let err = store
-            .create_store(None, None, None, None, &recipient)
+            .create_store(None, &GitAuth::None, &recipient)
             .await
             .expect_err("create_store must fail when config persist fails");
         let _ = err;

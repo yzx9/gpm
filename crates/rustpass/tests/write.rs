@@ -7,6 +7,7 @@ mod common;
 use std::path::Path;
 
 use common::*;
+use rustpass::GitAuth;
 use rustpass::VerifyMode;
 use rustpass::store::{AuthenticityResult, SyncDivergence};
 use rustpass::store::{DivergenceChoice, Store, WriteOutcome, WriteResult};
@@ -48,9 +49,7 @@ async fn writable_store() -> (tempfile::TempDir, tempfile::TempDir, Store, Vec<u
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -79,9 +78,7 @@ async fn set_writes_encrypts_and_commits_locally() {
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -226,9 +223,7 @@ async fn set_encrypts_to_all_recipients_and_stays_readable_by_us() {
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

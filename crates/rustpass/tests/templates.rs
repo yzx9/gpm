@@ -9,8 +9,8 @@ mod common;
 use std::collections::HashMap;
 
 use common::*;
-use rustpass::store::Store;
 use rustpass::template;
+use rustpass::{GitAuth, store::Store};
 
 /// Configure a store against a bare repo carrying a recipients file and an
 /// optional root `.pass-template`. Returns `(bare_dir, config_dir, store)`
@@ -32,9 +32,7 @@ async fn templated_store(
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
@@ -109,9 +107,7 @@ async fn lookup_template_nearest_wins() {
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

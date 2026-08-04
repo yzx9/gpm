@@ -31,7 +31,7 @@ mod tests {
     use std::path::Path;
     use std::process::{Command, Stdio};
 
-    use rustpass::store::Store;
+    use rustpass::{GitAuth, store::Store};
 
     /// Passphrase the mock pinentry hands back to gopass, and that gopass uses to
     /// protect the throwaway identity it generates. Its value is irrelevant; it
@@ -247,14 +247,7 @@ done
         let config_dir = tempfile::tempdir().unwrap();
         let store = Store::new(config_dir.path().to_path_buf(), None);
         store
-            .configure(
-                store_dir.to_str().unwrap(),
-                None,
-                None,
-                None,
-                &identity,
-                None,
-            )
+            .configure(store_dir.to_str().unwrap(), &GitAuth::None, &identity, None)
             .await
             .expect("gpm clones and configures the gopass store");
 
@@ -422,14 +415,7 @@ done
         let config_dir = tempfile::tempdir().unwrap();
         let store = Store::new(config_dir.path().to_path_buf(), None);
         store
-            .configure(
-                store_dir.to_str().unwrap(),
-                None,
-                None,
-                None,
-                &identity,
-                None,
-            )
+            .configure(store_dir.to_str().unwrap(), &GitAuth::None, &identity, None)
             .await
             .expect("gpm clones and configures the gopass store");
 
@@ -522,14 +508,7 @@ done
         let config_dir = tempfile::tempdir().unwrap();
         let store = Store::new(config_dir.path().to_path_buf(), None);
         store
-            .configure(
-                store_dir.to_str().unwrap(),
-                None,
-                None,
-                None,
-                &identity,
-                None,
-            )
+            .configure(store_dir.to_str().unwrap(), &GitAuth::None, &identity, None)
             .await
             .expect("gpm clones and configures the gopass store");
 

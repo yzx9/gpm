@@ -17,6 +17,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use common::*;
+use rustpass::GitAuth;
 use rustpass::SyncOutcome;
 use rustpass::crypto;
 use rustpass::store::{DivergenceChoice, Store};
@@ -657,9 +658,7 @@ async fn autosync_silently_clobbers_remote_same_name_change() {
     store
         .configure(
             bare_dir.path().to_str().expect("utf-8"),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )

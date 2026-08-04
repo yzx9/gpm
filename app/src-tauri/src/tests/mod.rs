@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 
 use age::secrecy::ExposeSecret;
 use age::x25519::{Identity, Recipient};
-use rustpass::Store;
+use rustpass::{GitAuth, Store};
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
@@ -149,9 +149,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
     store
         .configure(
             bare_dir.path().to_str().unwrap(),
-            None,
-            None,
-            None,
+            &GitAuth::None,
             &identity,
             None,
         )
