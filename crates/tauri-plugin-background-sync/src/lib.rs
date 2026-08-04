@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Tauri plugin that schedules the periodic Android background sync via
-//! WorkManager, and cancels it when the cadence is turned `Off`.
+//! `WorkManager`, and cancels it when the cadence is turned `Off`.
 //!
 //! **Backend-only** from the capability standpoint: the frontend never calls
 //! `plugin:background-sync|*` directly. App commands in `src-tauri/src/`
@@ -30,9 +30,15 @@ const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.backgroundsync";
 /// plugin handle; on other targets it is an inert stub. `PhantomData<fn() -> R>`
 /// keeps the stub `Send + Sync` unconditionally so it can live in app state.
 #[cfg(target_os = "android")]
+#[derive(Debug)]
 pub struct BackgroundSync<R: Runtime>(PluginHandle<R>);
 
+/// Handle to the background-sync scheduler — inert stub on non-Android targets.
+///
+/// `PhantomData<fn() -> R>` keeps the stub `Send + Sync` unconditionally so it
+/// can live in app state on every target.
 #[cfg(not(target_os = "android"))]
+#[derive(Debug)]
 pub struct BackgroundSync<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
@@ -72,9 +78,11 @@ impl<R: Runtime> BackgroundSync<R> {
 
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> BackgroundSync<R> {
-    /// Inert no-op (no WorkManager on desktop; the foreground sync covers it).
+    /// Inert no-op (no `WorkManager` on desktop; the foreground sync covers it).
+    #[expect(clippy::unused_async)]
     pub async fn schedule(&self, _interval_hours: u64, _config_dir: String) {}
     /// Inert no-op.
+    #[expect(clippy::unused_async)]
     pub async fn cancel(&self) {}
 }
 
@@ -97,6 +105,7 @@ impl<R: Runtime, T: Manager<R>> BackgroundSyncExt<R> for T {
 /// On Android, registers the Kotlin `BackgroundSyncPlugin` and manages the
 /// handle. On desktop, manages an inert stub so [`BackgroundSyncExt`] is always
 /// callable.
+#[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("background-sync")
         .setup(|app, #[allow(unused_variables)] api| {

@@ -45,15 +45,20 @@ const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.clipboardnotify";
 /// native layer never localizes. `body_template` carries a `{secs}` hole
 /// resolved against the auto-clear window at post time ([`Self::resolve_body`]).
 /// Deserialized from the frontend's `{ title, bodyTemplate, channelName,
-/// channelDescription }` shape (Tauri converts camelCase → snake_case at the
+/// channelDescription }` shape (Tauri converts camelCase → `snake_case` at the
 /// boundary, so the field names match).
 #[derive(Debug, Clone, Deserialize)]
 pub struct NotifyText {
+    /// Notification title.
     pub title: Option<String>,
+    /// Notification body template carrying a `{secs}` hole resolved against the
+    /// auto-clear window at post time.
     #[serde(rename = "bodyTemplate")]
     pub body_template: Option<String>,
+    /// Android notification channel display name.
     #[serde(rename = "channelName")]
     pub channel_name: Option<String>,
+    /// Android notification channel description (shown in system settings).
     #[serde(rename = "channelDescription")]
     pub channel_description: Option<String>,
 }
@@ -63,6 +68,7 @@ impl NotifyText {
     /// window → the final notification body. Pure (no platform code), so it's
     /// unit-testable on desktop. `None` when no template was supplied (the
     /// native layer then falls back to a generic safety body).
+    #[must_use]
     pub fn resolve_body(&self, secs: u64) -> Option<String> {
         self.body_template
             .as_ref()
@@ -79,9 +85,14 @@ impl NotifyText {
 /// succeed as no-ops. `PhantomData<fn() -> R>` keeps the stub `Send + Sync`
 /// unconditionally so it can live in app state on every target.
 #[cfg(target_os = "android")]
+#[derive(Debug)]
 pub struct ClipboardNotify<R: Runtime>(PluginHandle<R>);
 
+/// Handle to the clipboard-notify plugin — inert stub on non-Android targets
+/// whose operations succeed as no-ops. `PhantomData<fn() -> R>` keeps the stub
+/// `Send + Sync` unconditionally so it can live in app state on every target.
 #[cfg(not(target_os = "android"))]
+#[derive(Debug)]
 pub struct ClipboardNotify<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
@@ -199,23 +210,29 @@ impl<R: Runtime> ClipboardNotify<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> ClipboardNotify<R> {
     /// Inert: always reports enabled so the frontend never prompts on desktop.
+    #[expect(clippy::unused_async)]
     pub async fn are_enabled(&self) -> bool {
         true
     }
     /// Inert: always reports granted on desktop.
+    #[expect(clippy::unused_async)]
     pub async fn request_permission(&self) -> bool {
         true
     }
     /// Inert: nothing to open on desktop; reports `true` so a (never-shown on
     /// desktop) row never toasts a spurious failure.
+    #[expect(clippy::unused_async)]
     pub async fn open_notification_settings(&self) -> bool {
         true
     }
     /// Inert no-op.
+    #[expect(clippy::unused_async)]
     pub async fn post_notification(&self, _secs: u64, _text: Option<&NotifyText>) {}
     /// Inert no-op.
+    #[expect(clippy::unused_async)]
     pub async fn dismiss(&self) {}
     /// Inert: reports no manual clear on desktop.
+    #[expect(clippy::unused_async)]
     pub async fn consume_manual_clear_flag(&self) -> bool {
         false
     }
@@ -249,6 +266,7 @@ impl<R: Runtime, T: Manager<R>> ClipboardNotifyExt<R> for T {
 /// On Android, registers the Kotlin `ClipboardNotifyPlugin` and manages the
 /// handle. On desktop, manages an inert stub so `ClipboardNotifyExt` is always
 /// callable.
+#[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("clipboard-notify")
         .setup(|app, #[allow(unused_variables)] api| {

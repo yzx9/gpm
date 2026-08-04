@@ -2,6 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// API-surface lints (missing_docs, pedantic, …) target library code; tests opt out.
+#![allow(
+    missing_docs,
+    unused_qualifications,
+    trivial_casts,
+    trivial_numeric_casts,
+    clippy::pedantic,
+    clippy::indexing_slicing
+)]
+
 //! Secret revision history (R027) — `Store::list_revisions` +
 //! `Store::get_at_revision`. Covers the path-bound walk, the HEAD==live
 //! invariant, recipient-rotation (`Undecryptable`), a delete-commit

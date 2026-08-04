@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(missing_docs)]
+
 const COMMANDS: &[&str] = &[
     "are_notifications_enabled",
     "request_notifications_permission",

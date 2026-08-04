@@ -2,6 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// API-surface lints (missing_docs, pedantic, …) target library code; tests opt out.
+#![allow(
+    missing_docs,
+    unused_qualifications,
+    trivial_casts,
+    trivial_numeric_casts,
+    clippy::pedantic,
+    clippy::indexing_slicing
+)]
+
 //! End-to-end coverage for SSH-key identities — the one identity shape with no
 //! prior integration test. Exercises the SSH-identity cache (unlock decrypts the
 //! key once; `get` skips the bcrypt KDF) and the write path (`set` derives our

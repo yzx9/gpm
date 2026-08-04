@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(missing_docs)]
+
 const COMMANDS: &[&str] = &[
     "is_available",
     "open_security_settings",

@@ -2,6 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// API-surface lints (missing_docs, pedantic, …) target library code; tests opt out.
+#![allow(
+    missing_docs,
+    unused_qualifications,
+    trivial_casts,
+    trivial_numeric_casts,
+    clippy::pedantic,
+    clippy::indexing_slicing
+)]
+
 //! Pagination — the slicing + ranking + `total` semantics of
 //! [`Store::list`] / [`Store::search`] (and the pure
 //! [`store::slice_page`] they reduce to). These are the bits the entry-list

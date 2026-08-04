@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(missing_docs)]
+
 fn main() {
-    tauri_build::build()
+    tauri_build::build();
 }

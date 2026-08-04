@@ -4,21 +4,6 @@
 
 //! GPM — age-only gopass password manager client built with Tauri v2.
 
-#![warn(
-    trivial_casts,
-    trivial_numeric_casts,
-    missing_copy_implementations,
-    missing_debug_implementations,
-    missing_docs,
-    unsafe_code,
-    unstable_features,
-    unused_import_braces,
-    unused_qualifications,
-    clippy::dbg_macro,
-    clippy::indexing_slicing,
-    clippy::pedantic
-)]
-
 use std::sync::atomic::{self, AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 

@@ -2,6 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// API-surface lints (missing_docs, pedantic, …) target library code; tests opt out.
+#![allow(
+    missing_docs,
+    unused_qualifications,
+    trivial_casts,
+    trivial_numeric_casts,
+    clippy::pedantic,
+    clippy::indexing_slicing
+)]
+
 //! Integration tests for the create-store-from-scratch flow:
 //! `Store::create_store` + the deferred first push. Covers the local-only happy
 //! path, the bare-remote first push, the orphan-recipient atomicity guarantee,

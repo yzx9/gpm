@@ -16,3 +16,6 @@ tokio = { workspace = true, features = ["fs"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri-plugin-dialog = "2"
+
+[lints]
+workspace = true

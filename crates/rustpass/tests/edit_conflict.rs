@@ -2,6 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// API-surface lints (missing_docs, pedantic, …) target library code; tests opt out.
+#![allow(
+    missing_docs,
+    unused_qualifications,
+    trivial_casts,
+    trivial_numeric_casts,
+    clippy::pedantic,
+    clippy::indexing_slicing
+)]
+
 //! Secret edit (`Store::update`) — **local-only**: overwrite an existing entry's
 //! raw body via `Store::set` (no template re-applied) and commit locally. No
 //! sync, no push. The autosync orchestrator (`Store::autosync_write`) wraps this

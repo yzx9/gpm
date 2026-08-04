@@ -2,6 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// API-surface lints (missing_docs, pedantic, …) target library code; tests opt out.
+#![allow(
+    missing_docs,
+    unused_qualifications,
+    trivial_casts,
+    trivial_numeric_casts,
+    clippy::pedantic,
+    clippy::indexing_slicing
+)]
+
 //! Secret deletion (`Store::delete`) — **local-only**: remove `<name>.age` and
 //! commit the removal on the current branch. No sync, no push, no rollback. The
 //! autosync orchestrator (`Store::autosync_write`) wraps this in pull → delete →

@@ -16,6 +16,7 @@ const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.safearea";
 /// On Android, registers the Kotlin `SafeAreaPlugin` class.
 /// On desktop, this is a no-op — frontend calls reject gracefully
 /// and CSS `var()` fallbacks of `0px` apply.
+#[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("safe-area")
         .setup(|_app, #[allow(unused_variables)] api| {

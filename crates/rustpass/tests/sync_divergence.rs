@@ -2,6 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// API-surface lints (missing_docs, pedantic, …) target library code; tests opt out.
+#![allow(
+    missing_docs,
+    unused_qualifications,
+    trivial_casts,
+    trivial_numeric_casts,
+    clippy::pedantic,
+    clippy::indexing_slicing
+)]
+
 //! Pull/sync divergence detection + resolution (plan 0012). `Store::sync`
 //! returns `SyncOutcome::Diverged` instead of a hard `PullFfFailed`, carrying
 //! the full local-side change preview; `Store::resolve_sync_divergence` adopts

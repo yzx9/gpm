@@ -59,3 +59,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 # unifies this with the [dependencies] tauri, so it adds the feature only for
 # test builds.
 tauri = { version = "2", features = ["test"] }
+
+[lints]
+workspace = true

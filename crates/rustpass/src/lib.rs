@@ -31,21 +31,6 @@
 //! # }
 //! ```
 
-#![warn(
-    trivial_casts,
-    trivial_numeric_casts,
-    missing_copy_implementations,
-    missing_debug_implementations,
-    missing_docs,
-    unsafe_code,
-    unstable_features,
-    unused_import_braces,
-    unused_qualifications,
-    clippy::dbg_macro,
-    clippy::indexing_slicing,
-    clippy::pedantic
-)]
-
 /// gopass binary attachment detection + base64 decode (gopass `internal/action/binary`).
 pub mod attachment;
 /// Configuration and identity persistence.

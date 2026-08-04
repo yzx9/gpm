@@ -4,7 +4,7 @@
 
 //! Backend-only device-info plugin for gpm's diagnostics export: surfaces the
 //! Android hardware/OS build fields (`Build.MANUFACTURER`/`MODEL`/`BRAND`,
-//! `VERSION.SDK_INT`/`RELEASE`, `SUPPORTED_ABIS`), the WebView user-agent, and
+//! `VERSION.SDK_INT`/`RELEASE`, `SUPPORTED_ABIS`), the `WebView` user-agent, and
 //! the display metrics to Rust. Desktop gets a minimal OS/arch/version fallback
 //! (it is a development surface, not the target).
 //!
@@ -25,7 +25,7 @@ use tauri::{Manager, Runtime};
 const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.deviceinfo";
 
 /// Display metrics snapshot (non-secret).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct DisplayMetrics {
     /// Screen width in physical pixels.
     pub width_px: u32,
@@ -51,7 +51,7 @@ pub struct DeviceInfo {
     pub release: Option<String>,
     /// `Build.SUPPORTED_ABIS` (Android only).
     pub abis: Vec<String>,
-    /// WebView user-agent (Android only).
+    /// `WebView` user-agent (Android only).
     pub user_agent: Option<String>,
     /// Screen metrics (Android only).
     pub display: Option<DisplayMetrics>,
@@ -101,16 +101,22 @@ fn map_invoke_err(err: PluginInvokeError) -> DeviceInfoError {
 /// Handle to the device-info probe. On Android it wraps the mobile plugin
 /// handle; on other targets it is an inert stub (desktop uses `std::env`).
 #[cfg(target_os = "android")]
+#[derive(Debug)]
 pub struct DeviceInfoHandle<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 /// Handle to the device-info probe — inert on non-Android targets.
 #[cfg(not(target_os = "android"))]
+#[derive(Debug)]
 pub struct DeviceInfoHandle<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> DeviceInfoHandle<R> {
     /// Gather the device-info snapshot: Android build fields + WebView UA +
     /// display metrics from Kotlin, plus OS/arch/version from Rust.
+    ///
+    /// # Errors
+    ///
+    /// [`DeviceInfoError`] only if the mobile-plugin invoke itself fails.
     pub async fn read(&self) -> Result<DeviceInfo, DeviceInfoError> {
         #[derive(serde::Deserialize)]
         struct Resp {
@@ -150,6 +156,11 @@ impl<R: Runtime> DeviceInfoHandle<R> {
 impl<R: Runtime> DeviceInfoHandle<R> {
     /// Gather the device-info snapshot: minimal OS/arch/version fallback
     /// (desktop is a development surface, not the target).
+    ///
+    /// # Errors
+    ///
+    /// Inert stub: always returns `Ok`; never errors.
+    #[expect(clippy::unused_async)]
     pub async fn read(&self) -> Result<DeviceInfo, DeviceInfoError> {
         Ok(DeviceInfo {
             manufacturer: None,
@@ -194,6 +205,7 @@ impl<R: Runtime, T: Manager<R>> DeviceInfoExt<R> for T {
 /// On Android, registers the Kotlin `DeviceInfoPlugin` and manages the handle.
 /// On other targets, manages an inert handle that returns the OS/arch/version
 /// fallback.
+#[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("device-info")
         .setup(|app, #[allow(unused_variables)] api| {

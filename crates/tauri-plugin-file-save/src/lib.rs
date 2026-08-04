@@ -15,7 +15,7 @@
 //! This is a **backend-only** plugin: the frontend never calls it directly. The
 //! diagnostics-export command calls [`FileSaveExt::file_save`] and then
 //! [`FileSaveHandle::save`]; only the staged file path crosses to Kotlin, never
-//! the bundle bytes through the WebView (Kotlin streams the staged file to the
+//! the bundle bytes through the `WebView` (Kotlin streams the staged file to the
 //! chosen destination).
 
 #[cfg(not(target_os = "android"))]
@@ -81,11 +81,13 @@ fn extension_of(filename: &str) -> Option<String> {
 /// other targets it wraps the [`tauri::AppHandle`] used to drive
 /// `tauri-plugin-dialog`.
 #[cfg(target_os = "android")]
+#[derive(Debug)]
 pub struct FileSaveHandle<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 /// Handle to the file save — wraps the [`tauri::AppHandle`] on non-Android
 /// targets so the desktop `save` can drive `tauri-plugin-dialog`.
 #[cfg(not(target_os = "android"))]
+#[derive(Debug)]
 pub struct FileSaveHandle<R: Runtime>(tauri::AppHandle<R>);
 
 #[cfg(target_os = "android")]
@@ -95,6 +97,11 @@ impl<R: Runtime> FileSaveHandle<R> {
     /// suggested name; `mime_type` is the picker's MIME filter (e.g.
     /// `application/zip`, `application/octet-stream`). Returns `CANCELLED` if
     /// the user dismisses the picker.
+    ///
+    /// # Errors
+    ///
+    /// [`FileSaveError`] with `CANCELLED` (dismissed) or `SAVE_FAILED`
+    /// (invoke failure).
     pub async fn save(
         &self,
         filename: String,
@@ -138,6 +145,11 @@ impl<R: Runtime> FileSaveHandle<R> {
     /// (more specific than a MIME on a native dialog); `mime_type` is accepted
     /// for signature parity with Android but unused here. Returns `CANCELLED` if
     /// the user dismisses it.
+    ///
+    /// # Errors
+    ///
+    /// [`FileSaveError`] with `CANCELLED` (dismissed), `IO_ERROR` (write
+    /// failure), or `SAVE_FAILED` (dialog task failure).
     pub async fn save(
         &self,
         filename: String,
@@ -204,6 +216,7 @@ impl<R: Runtime, T: Manager<R>> FileSaveExt<R> for T {
 ///
 /// On Android, registers the Kotlin `FileSavePlugin` and manages the handle. On
 /// other targets, manages a handle that drives `tauri-plugin-dialog`.
+#[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("file-save")
         .setup(|app, #[allow(unused_variables)] api| {

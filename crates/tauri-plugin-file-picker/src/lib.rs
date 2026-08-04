@@ -9,7 +9,7 @@
 //! This is a **backend-only** plugin: the frontend never calls it directly.
 //! App-layer commands call [`FilePickerExt::file_picker`] to obtain the handle
 //! and then `pick` — the file contents flow Kotlin → Rust (or dialog → Rust on
-//! desktop) and never reach the WebView.
+//! desktop) and never reach the `WebView`.
 
 #[cfg(target_os = "android")]
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -73,17 +73,24 @@ fn map_invoke_err(err: PluginInvokeError) -> FilePickerError {
 /// other targets it wraps the [`tauri::AppHandle`] used to drive
 /// `tauri-plugin-dialog`.
 #[cfg(target_os = "android")]
+#[derive(Debug)]
 pub struct FilePicker<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 /// Handle to the file picker — wraps the [`tauri::AppHandle`] on non-Android
 /// targets so the desktop `pick` can drive `tauri-plugin-dialog`.
 #[cfg(not(target_os = "android"))]
+#[derive(Debug)]
 pub struct FilePicker<R: Runtime>(tauri::AppHandle<R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> FilePicker<R> {
     /// Open the SAF picker, read the picked file via `ContentResolver`, and
     /// return its bytes (base64 on the Kotlin → Rust hop, decoded here).
+    ///
+    /// # Errors
+    ///
+    /// [`FilePickerError`] with `CANCELLED` (user dismissed the picker),
+    /// `DECODE_FAILED` (bad base64), or `PICK_FAILED` (invoke failure).
     pub async fn pick(&self) -> Result<PickedFile, FilePickerError> {
         #[derive(serde::Deserialize)]
         struct Resp {
@@ -114,6 +121,11 @@ impl<R: Runtime> FilePicker<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> FilePicker<R> {
     /// Open the native file dialog, read the picked file, and return its bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`FilePickerError`] with `CANCELLED` (dismissed), `INVALID_PATH`,
+    /// `IO_ERROR` (read failure), or `PICK_FAILED` (dialog task failure).
     pub async fn pick(&self) -> Result<PickedFile, FilePickerError> {
         let handle = self.0.clone();
         // `blocking_pick_file` drives the dialog on the main thread and blocks
@@ -174,6 +186,7 @@ impl<R: Runtime, T: Manager<R>> FilePickerExt<R> for T {
 ///
 /// On Android, registers the Kotlin `FilePickerPlugin` and manages the handle.
 /// On other targets, manages a handle that drives `tauri-plugin-dialog`.
+#[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("file-picker")
         .setup(|app, #[allow(unused_variables)] api| {

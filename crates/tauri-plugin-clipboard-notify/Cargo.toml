@@ -13,3 +13,6 @@ tauri-plugin = { version = "2", features = ["build"] }
 tauri = "2"
 serde = { workspace = true }
 log = { workspace = true }
+
+[lints]
+workspace = true

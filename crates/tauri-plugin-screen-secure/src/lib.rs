@@ -20,6 +20,7 @@ const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.screensecure";
 /// On desktop, this is a no-op — the frontend gates calls on the app's
 /// `screen_secure_available()` command (which returns `false` off-Android),
 /// so no invoke ever reaches a command that does not exist.
+#[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("screen-secure")
         .setup(|_app, #[allow(unused_variables)] api| {

@@ -10,6 +10,22 @@ authors = ["Zexin Yuan"]
 edition = "2024"
 license = "Apache-2.0"
 
+[workspace.lints.rust]
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+missing_copy_implementations = "warn"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+unsafe_code = "warn"
+unstable_features = "warn"
+unused_import_braces = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+indexing_slicing = "warn"
+pedantic = "warn"
+
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
