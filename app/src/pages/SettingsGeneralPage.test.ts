@@ -222,9 +222,31 @@ describe("SettingsGeneralPage", () => {
       ).toBe(true);
     });
 
-    it("'system' resolves through the backend and clears the override", async () => {
-      when("get_app_config", { locale: "en" });
-      when("resolved_locale", "zh-CN");
+    it("'system' clears the override before resolving the system locale", async () => {
+      // Pinned to zh-CN while the device system locale is English. The
+      // backend's `resolved_locale` honors a pinned override, so it must be
+      // queried AFTER the override is cleared — otherwise it returns the
+      // stale pinned zh-CN (not the system en) and the switch is invisible.
+      when("get_app_config", { locale: "zh-CN" });
+      let overrideCleared = false;
+      vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+        if (cmd === "resolved_locale") {
+          return Promise.resolve(overrideCleared ? "en" : "zh-CN");
+        }
+        if (
+          cmd === "set_locale_pref" &&
+          (args as { locale?: unknown })?.locale === null
+        ) {
+          overrideCleared = true;
+          return Promise.resolve({});
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
       const wrapper = mountPage();
       await flushPromises();
 
@@ -232,9 +254,78 @@ describe("SettingsGeneralPage", () => {
       picker.vm.$emit("change", "system");
       await flushPromises();
 
-      expect(invoke).toHaveBeenCalledWith("resolved_locale");
-      expect(setLocale).toHaveBeenCalledWith("zh-CN"); // normalizeSupported passthrough
       expect(invoke).toHaveBeenCalledWith("set_locale_pref", { locale: null });
+      expect(invoke).toHaveBeenCalledWith("resolved_locale");
+      // Resolved after clearing, so the system locale (en) wins — not the
+      // stale pinned zh-CN.
+      expect(setLocale).toHaveBeenCalledWith("en");
+    });
+
+    it("'system' restores the prior pin when the post-clear apply fails", async () => {
+      // The system branch clears the override before applying. If the
+      // resolve/apply then throws, the override must be re-pinned to prev so
+      // a failed switch doesn't silently drop the saved language on restart.
+      when("get_app_config", { locale: "zh-CN" });
+      vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+        if (cmd === "set_locale_pref") {
+          const locale = (args as { locale?: unknown })?.locale;
+          return Promise.resolve(locale === null ? {} : { locale });
+        }
+        if (cmd === "resolved_locale") {
+          return Promise.reject({ code: "CONFIG_ERROR", message: "boom" });
+        }
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const picker = findLanguagePicker(wrapper)!;
+      picker.vm.$emit("change", "system");
+      await flushPromises();
+
+      // Cleared (null) on entering the system branch, then re-pinned to prev
+      // (zh-CN) on failure so the saved language survives the failed switch.
+      expect(invoke).toHaveBeenCalledWith("set_locale_pref", { locale: null });
+      expect(invoke).toHaveBeenCalledWith("set_locale_pref", {
+        locale: "zh-CN",
+      });
+      expect(picker?.props("modelValue")).toBe("zh-CN"); // rolled back
+    });
+
+    it("drops a second rapid tap while a locale switch is in flight", async () => {
+      // BaseSelect emits change synchronously with no debounce, so two rapid
+      // taps fire overlapping switches. The guard drops the in-flight second
+      // tap so the last IPC can't win regardless of resolution order.
+      when("get_app_config", { locale: "en" });
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "resolved_locale") return Promise.resolve("en");
+        if (cmd === "set_locale_pref") return Promise.resolve({});
+        if (cmd in overrides) {
+          const o = overrides[cmd];
+          if (o && o.reject !== undefined) return Promise.reject(o.reject);
+          return Promise.resolve(o ? o.value : defaults[cmd]);
+        }
+        return Promise.resolve(defaults[cmd]);
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const picker = findLanguagePicker(wrapper)!;
+      picker.vm.$emit("change", "system"); // starts the switch, sets the guard
+      picker.vm.$emit("change", "zh-CN"); // in flight — dropped by the guard
+      await flushPromises();
+
+      // The second tap never reached the backend; the first (system) won.
+      expect(invoke).toHaveBeenCalledWith("set_locale_pref", { locale: null });
+      expect(invoke).not.toHaveBeenCalledWith("set_locale_pref", {
+        locale: "zh-CN",
+      });
+      expect(picker?.props("modelValue")).toBe("system");
     });
   });
 

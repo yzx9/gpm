@@ -56,16 +56,24 @@ async function loadLocalePref(): Promise<void> {
   }
 }
 
+// Guards the picker against rapid taps firing concurrent set_locale_pref
+// calls — without it, the last IPC to resolve wins regardless of tap order
+// (the same get→mutate→save race themeLoading guards on the theme toggle).
+const localeLoading = ref(false);
+
 async function onLocaleChange(selection: string): Promise<void> {
+  if (localeLoading.value) return;
   const prev = localeSelection.value;
+  localeLoading.value = true;
   try {
-    // Apply the locale in-memory first and persist only on success, so a
-    // failure can't leave app.json pinned to a locale the picker reverted to.
     if (selection === "system") {
-      // "Track system" resolves through the backend, which normalizes the
-      // device locale — apply that immediately so the switch is visible.
-      await setLocale(normalizeSupported(await resolvedLocale()));
+      // "Track system" resolves the device locale through the backend. The
+      // backend's `resolved_locale` honors a pinned override, so clear the
+      // override FIRST — otherwise it returns the just-pinned locale (e.g.
+      // zh-CN) instead of the system one, and the switch is invisible
+      // (e.g. system = English but the UI stays Chinese after un-pinning).
       await setLocalePref(null);
+      await setLocale(normalizeSupported(await resolvedLocale()));
     } else if (selection === "en" || selection === "zh-CN") {
       await setLocale(selection);
       await setLocalePref(selection);
@@ -75,8 +83,20 @@ async function onLocaleChange(selection: string): Promise<void> {
     localeSelection.value = selection as "system" | "en" | "zh-CN";
     toast.success(t("settings.language.applied"));
   } catch {
+    // The system branch clears the override before applying, so a failure
+    // after the clear would leave pref.json cleared while the picker rolls
+    // back to prev — restore prev's pin so a failed switch leaves no trace.
+    if (selection === "system" && (prev === "en" || prev === "zh-CN")) {
+      try {
+        await setLocalePref(prev);
+      } catch {
+        // Best-effort restore; the failure toast already flags the problem.
+      }
+    }
     localeSelection.value = prev; // roll back the picker on failure
     toast.danger(t("settings.language.failed"));
+  } finally {
+    localeLoading.value = false;
   }
 }
 
@@ -92,7 +112,7 @@ async function onThemeChange(selection: string): Promise<void> {
   if (themeLoading.value) return;
   const prev = themeSelection.value;
   const mode = normalizeThemeMode(selection);
-  // Apply in-memory first and persist only on success, mirroring onLocaleChange.
+  // Apply in-memory first and persist only on success.
   applyTheme(mode);
   themeSelection.value = mode;
   themeLoading.value = true;

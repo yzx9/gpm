@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Text fields and dropdowns throughout the app no longer have a faint gray fill that could make a live setting look disabled or switched off. They now read as active outlined fields. Read-only boxes that display a key, token, or log keep their tinted background, since that signals "display only."
+- Switching the **display language** back to **Follow system** now switches to your device's language right away. It used to stay stuck on the language you'd pinned earlier (for example, Chinese) and only correct itself after restarting the app.
 
 ## [v0.16.1] - 2026-08-04
 
