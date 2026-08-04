@@ -367,7 +367,10 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
                         val iv = authCipher.iv
                         storeCipherData(iv, ciphertext)
                         ciphertext.fill(0)
-                        invoke.resolve(JSObject())
+                        // No-arg resolve() sends "null" → Rust `()`. Passing
+                        // resolve(JSObject()) sends "{}", which fails the `()`
+                        // deserialize (invalid type: map, expected unit).
+                        invoke.resolve()
                     } catch (e: Exception) {
                         invoke.reject(safeName(e), "BIOMETRIC_FAILED")
                     } finally {
@@ -459,6 +462,6 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             // always escape a stuck "enabled" state.
         }
         prefs().edit().clear().apply()
-        invoke.resolve(JSObject())
+        invoke.resolve()
     }
 }

@@ -235,14 +235,16 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         } catch (_: SecurityException) {
             // Notification permission revoked between check and post — degrade silently.
         }
-        invoke.resolve(JSObject())
+        // No-arg resolve() sends "null" → Rust `()`. resolve(JSObject()) sends
+        // "{}", which fails the `()` deserialize (invalid type: map, expected unit).
+        invoke.resolve()
     }
 
     /** Dismiss the sticky notification. */
     @Command
     fun dismissClipboardNotification(invoke: Invoke) {
         NotificationManagerCompat.from(activity).cancel(NOTIFICATION_ID)
-        invoke.resolve(JSObject())
+        invoke.resolve()
     }
 
     /**

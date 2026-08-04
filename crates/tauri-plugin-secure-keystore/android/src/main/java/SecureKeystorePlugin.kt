@@ -440,7 +440,10 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         } finally {
             plain.fill(0)
         }
-        invoke.resolve(JSObject())
+        // No-arg resolve() sends the literal "null", which the Rust handle
+        // deserializes into `()`. `resolve(JSObject())` would send "{}", which
+        // fails that `()` deserialize (invalid type: map, expected unit).
+        invoke.resolve()
     }
 
     /** Delete the auth-free Keystore key and ciphertext (best-effort). */
@@ -455,7 +458,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             // Best-effort: still clear prefs so the app can always reset.
         }
         prefs().edit().clear().apply()
-        invoke.resolve(JSObject())
+        invoke.resolve()
     }
 
     // ── @Command surface: biometric-gated master key (app-lock) ──────────
@@ -569,7 +572,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
                         val ciphertext = authCipher.doFinal(plain)
                         storeCipherData(biometricPrefs(slot), authCipher.iv, ciphertext)
                         ciphertext.fill(0)
-                        invoke.resolve(JSObject())
+                        invoke.resolve()
                     } catch (e: Exception) {
                         invoke.reject(safeName(e), "BIOMETRIC_FAILED")
                     } finally {
@@ -682,6 +685,6 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             // Best-effort: still clear prefs so the app can always reset.
         }
         biometricPrefs(slot).edit().clear().apply()
-        invoke.resolve(JSObject())
+        invoke.resolve()
     }
 }
