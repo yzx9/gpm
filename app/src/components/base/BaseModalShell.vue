@@ -14,8 +14,10 @@ import BaseCard from "./BaseCard.vue";
 
 const props = withDefaults(
   defineProps<{
-    /** `center` = always-centered gate (unlock/app-lock); `sheet` = bottom-sheet on mobile, centered ≥sm. */
-    variant: "center" | "sheet";
+    /** `center` = always-centered gate (unlock/app-lock); `sheet` = bottom-sheet
+     *  on mobile, centered ≥sm; `fullscreen` = an opaque edge-to-edge surface
+     *  (the app-launch lock) that fully occludes underlying content — no card. */
+    variant: "center" | "sheet" | "fullscreen";
     /** Stacking layer — a `Z` tier (`Z.overlay` default) or an explicit number.
      *  AppLockOverlay passes `Z.gate` to sit above every overlay. */
     z?: ZTier | number;
@@ -78,9 +80,16 @@ useScrollLock();
     @click.self="onBackdrop"
   >
     <div class="wrap" :class="variant">
-      <BaseCard :variant="variant === 'center' ? 'raised' : 'flat'">
+      <BaseCard
+        v-if="variant !== 'fullscreen'"
+        :variant="variant === 'center' ? 'raised' : 'flat'"
+      >
         <slot />
       </BaseCard>
+      <!-- fullscreen renders the slot directly on the opaque surface — a card
+           frame would re-introduce the "floating dialog" look the gate replaces,
+           and the slot owns its own center/footer flex layout. -->
+      <slot v-else />
     </div>
   </div>
 </template>
@@ -116,6 +125,22 @@ useScrollLock();
   }
 }
 
+/* Fullscreen opaque gate: a solid page-bg surface that bleeds edge-to-edge and
+   fully occludes underlying app content (the app-launch lock). `.overlay.fullscreen`
+   wins over the base `.overlay`'s translucent backdrop on specificity. The
+   surface covers the whole viewport (notch + gesture bar via safe-area padding);
+   only the inner content column is width-constrained. */
+.overlay.fullscreen {
+  background: var(--color-page);
+  /* stretch so .wrap fills the viewport height and the slot's footer can pin to
+     the bottom; horizontal centering is inherited from the base `.overlay`. */
+  align-items: stretch;
+  padding: 1rem;
+  padding-top: calc(1rem + var(--safe-area-inset-top, 0px));
+  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, 0px));
+  overscroll-behavior: contain;
+}
+
 .wrap {
   width: 100%;
 }
@@ -124,5 +149,13 @@ useScrollLock();
 }
 .wrap.sheet {
   max-width: 30rem; /* max-w-120 */
+}
+.wrap.fullscreen {
+  /* a flex column so the slot's body can `flex: 1` (vertically center the logo
+     / button) while a footer rides the bottom safe-area. */
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 420px;
 }
 </style>

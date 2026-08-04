@@ -8,10 +8,11 @@ import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 
-// Single app-wide dialog renderer. Mounts once in `App.vue` (beside
-// `<ToastHost/>`) and turns the `useDialog()` queue into centered
-// `BaseModalShell` confirms. This is the surface that retires the WebView's
-// native `window.confirm()`: every confirm the user sees is now our UI.
+// Single app-wide dialog renderer. Mounts once in `App.vue` — rendered LAST in
+// `.app-shell`, after the gate overlays — and turns the `useDialog()` queue into
+// centered `BaseModalShell` confirms. This is the surface that retires the
+// WebView's native `window.confirm()`: every confirm the user sees is now our UI.
+// The last position is load-bearing for same-z stacking (see App.vue).
 //
 // Each queued request renders as its own shell at the default overlay tier;
 // a same-z second confirm stacks above a pending first by DOM order, and the
@@ -26,6 +27,7 @@ const { t } = useI18n();
     v-for="req in pending"
     :key="req.id"
     variant="center"
+    :z="req.opts.z"
     role="alertdialog"
     :aria-label="req.opts.title || req.opts.message"
     @close="req.resolve(false)"

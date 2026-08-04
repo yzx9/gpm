@@ -15,6 +15,9 @@
  *   where it lives in the component tree. This is the only cross-tier guarantee
  *   the back key needs — within `overlay`, stacking is by mount/DOM order and
  *   the registry's LIFO tie-break.
+ * - `toast`   — transient toast feedback; sits above every overlay including
+ *   `gate`, so a toast fired from behind a fullscreen gate (e.g. the lock
+ *   screen's diagnostics export) stays visible. NOT a back-consumer.
  * - `chrome`  — sticky in-page chrome (tab bars, transient badges). NOT a
  *   back-consumer; included for completeness. Its CSS consumers (the sync
  *   badge, the About tab bar) still use raw `z-index` today — migrating them to
@@ -24,6 +27,8 @@ export const Z = {
   chrome: 100,
   overlay: 1000,
   gate: 2000,
+  /** Above `gate` so transient feedback is never hidden by an opaque overlay. */
+  toast: 3000,
 } as const;
 
 export type ZTier = (typeof Z)[keyof typeof Z];

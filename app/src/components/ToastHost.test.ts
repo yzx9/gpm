@@ -4,6 +4,7 @@
 
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import { createToast, TOAST_KEY } from "@/composables";
+import { Z } from "@/zTiers";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ToastHost from "./ToastHost.vue";
@@ -24,6 +25,16 @@ describe("ToastHost", () => {
     const { wrapper } = mountHost();
     expect(wrapper.text()).toBe("");
     expect(wrapper.findAllComponents(BaseAlert)).toHaveLength(0);
+  });
+
+  it("binds zIndex Z.toast so toasts paint above every overlay (incl. the gate)", () => {
+    // Without this, a fixed overlay (BaseModalShell) hides the in-flow toast
+    // host. Z.toast sits above Z.gate so a toast fired from the lock screen
+    // stays visible.
+    const { wrapper } = mountHost();
+    expect(wrapper.find(".toast-host").attributes("style")).toContain(
+      `z-index: ${Z.toast}`,
+    );
   });
 
   it("renders one BaseAlert per toast, bound to its variant + message", async () => {

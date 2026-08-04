@@ -109,6 +109,35 @@ describe("BaseModalShell", () => {
     );
   });
 
+  it("fullscreen variant: opaque surface, slot rendered without a BaseCard wrapper", () => {
+    const wrapper = mountShell({
+      props: {
+        variant: "fullscreen",
+        dismissOnBackdrop: false,
+        dismissOnBack: false,
+      },
+      slots: { default: '<div class="slot-marker">body</div>' },
+    });
+    expect(wrapper.find(".overlay.fullscreen").exists()).toBe(true);
+    // The slot is rendered directly on the surface — no BaseCard (.card) frame,
+    // which would re-introduce the floating-dialog look the gate replaces.
+    expect(wrapper.find(".card").exists()).toBe(false);
+    expect(wrapper.find(".slot-marker").exists()).toBe(true);
+  });
+
+  it("center and sheet still wrap content in a BaseCard (fullscreen is additive)", () => {
+    const center = mountShell({
+      props: { variant: "center" },
+      slots: { default: "<p>x</p>" },
+    });
+    expect(center.find(".card").exists()).toBe(true);
+    const sheet = mountShell({
+      props: { variant: "sheet" },
+      slots: { default: "<p>x</p>" },
+    });
+    expect(sheet.find(".card").exists()).toBe(true);
+  });
+
   it("emits `close` on Android back by default (dismissOnBack=true)", async () => {
     const wrapper = mountShell({ props: { variant: "center" } });
     await flushPromises();

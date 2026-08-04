@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import { useToast } from "@/composables";
+import { useToast, Z } from "@/composables";
 import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import BaseAlert from "./base/BaseAlert.vue";
@@ -20,7 +20,11 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <div class="toast-host" :class="{ 'toast-host--empty': !toasts.length }">
+  <div
+    class="toast-host"
+    :class="{ 'toast-host--empty': !toasts.length }"
+    :style="{ zIndex: Z.toast }"
+  >
     <TransitionGroup name="toast">
       <BaseAlert
         v-for="item in toasts"
@@ -45,6 +49,12 @@ const { t } = useI18n();
 
 <style scoped>
 .toast-host {
+  /* `position: relative` so `z-index` (bound to Z.toast in the template)
+     applies — toasts must paint above the fixed overlays, including the opaque
+     Z.gate lock screen, which share this stacking context as `.app-shell`
+     siblings. Without it a fixed overlay (BaseModalShell) hides the in-flow
+     host. */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;

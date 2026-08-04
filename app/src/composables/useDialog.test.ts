@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import { Z } from "@/zTiers";
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { defineComponent } from "vue";
@@ -21,6 +22,18 @@ describe("useDialog", () => {
     expect(req.opts.message).toBe("sure?");
     expect(req.opts.confirmLabel).toBe("Do it");
     expect(req.opts.danger).toBe(true);
+  });
+
+  it("confirm() carries an optional `z` stacking-tier override", () => {
+    // The lock screen passes Z.gate so its confirm stacks above its own opaque
+    // surface; undefined (the default) leaves every other caller at Z.overlay.
+    const d = createDialog();
+    void d.dialog.confirm({ message: "m", z: Z.gate });
+    expect(d.pending.value[0]!.opts.z).toBe(Z.gate);
+
+    const e = createDialog();
+    void e.dialog.confirm({ message: "m" });
+    expect(e.pending.value[0]!.opts.z).toBeUndefined();
   });
 
   it("assigns monotonic ids per host instance", () => {

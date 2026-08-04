@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ZTier } from "@/zTiers";
 import { inject, ref, type InjectionKey, type Ref } from "vue";
 
 /**
@@ -40,6 +41,12 @@ export interface ConfirmOptions {
   cancelLabel?: string;
   /** Style the confirm button as destructive (filled danger). */
   danger?: boolean;
+  /** Stacking tier override forwarded to `BaseModalShell`'s `z`. Set only when a
+   *  confirm is fired from above the default overlay tier — e.g. from the
+   *  Z.gate lock screen, whose opaque surface would otherwise hide a default
+   *  (Z.overlay) confirm. Undefined ⇒ BaseModalShell falls back to Z.overlay,
+   *  so every existing caller is unaffected. */
+  z?: ZTier | number;
 }
 
 /** The kind of dialog a queued request renders. Phase 2 adds `"prompt"`. */

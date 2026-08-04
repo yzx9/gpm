@@ -7,6 +7,7 @@ export * from "./useAppLockState";
 export * from "./useBackHandlerRegistry";
 export * from "./useCancellableSave";
 export * from "./useCommitSignature";
+export * from "./useDiagnosticsExport";
 export * from "./useDialog";
 export * from "./useDivergence";
 export * from "./useForegroundSync";

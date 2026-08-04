@@ -155,9 +155,6 @@ onMounted(() => {
     <!-- Unified toast host: top-of-shell, in-flow. Renders the useToast queue
          once for every caller (pages + app-shell code like the router guard). -->
     <ToastHost />
-    <!-- Unified confirm/prompt dialog host: renders the useDialog() queue once
-         for every caller, retiring the WebView's native window.confirm(). -->
-    <DialogHost />
     <!--
       Foreground-sync attention badge (R060 Tier 1): a passive, persistent
       indicator that a foreground sync hit a divergence / Enforce block. Tap takes
@@ -209,6 +206,14 @@ onMounted(() => {
       :auto-prompt-biometric="shouldAutoPromptBiometric"
       @close="dismissOverlay"
     />
+    <!-- Unified confirm/prompt dialog host: renders the useDialog() queue once
+         for every caller. MUST render LAST in .app-shell — BaseModalShell has no
+         <Teleport>, so a same-z confirm (e.g. the Z.gate confirm the App Lock
+         diagnostics link fires) only paints above the opaque gate if it FOLLOWS
+         it in DOM order (CSS2 §E equal-z tree-order tie-break). Moving this
+         earlier regresses the in-lock confirm behind the gate;
+         AppLockOverlayStacking.test pins the order. -->
+    <DialogHost />
   </div>
 </template>
 

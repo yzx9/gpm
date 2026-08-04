@@ -11,6 +11,7 @@ import {
   DIALOG_KEY,
   SCROLL_LOCK_KEY,
 } from "@/composables";
+import { Z } from "@/zTiers";
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import DialogHost from "./DialogHost.vue";
@@ -123,6 +124,29 @@ describe("DialogHost", () => {
 
     expect(wrapper.findAllComponents(BaseButton)[0]!.props("variant")).toBe(
       "primary",
+    );
+  });
+
+  it("forwards opts.z so a Z.gate confirm can clear the opaque lock screen", async () => {
+    // The lock screen passes z: Z.gate so its confirm stacks above its own
+    // Z.gate surface. If this forwarding regresses, the confirm reverts to
+    // Z.overlay and hides behind the gate.
+    const { wrapper, d } = mountHost();
+    void d.dialog.confirm({ message: "m", z: Z.gate });
+    await flushPromises();
+
+    expect(wrapper.find(".overlay").attributes("style")).toContain(
+      `z-index: ${Z.gate}`,
+    );
+  });
+
+  it("falls back to Z.overlay when no z is passed (every page-level caller)", async () => {
+    const { wrapper, d } = mountHost();
+    void d.dialog.confirm({ message: "m" });
+    await flushPromises();
+
+    expect(wrapper.find(".overlay").attributes("style")).toContain(
+      `z-index: ${Z.overlay}`,
     );
   });
 });

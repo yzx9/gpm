@@ -4,20 +4,14 @@
 
 <script setup lang="ts">
 import type { AppConfig, AppError } from "@/api";
-import {
-  clearLog,
-  exportDiagnostics,
-  getAppConfig,
-  readLog,
-  setVerbose,
-} from "@/api";
+import { clearLog, getAppConfig, readLog, setVerbose } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import { useDialog, useToast } from "@/composables";
+import { useDiagnosticsExport, useDialog, useToast } from "@/composables";
 import { Bug, Download, RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
 import { listen } from "@tauri-apps/api/event";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
@@ -26,12 +20,12 @@ import { useI18n } from "vue-i18n";
 const { t } = useI18n();
 const { toast } = useToast();
 const { dialog } = useDialog();
+const { exporting, runExport } = useDiagnosticsExport();
 
 const logText = ref("");
 const logPre = ref<HTMLPreElement | null>(null);
 const loading = ref(false);
 const clearing = ref(false);
-const exporting = ref(false);
 const error = ref("");
 
 // Verbose (Debug) toggle state. `verbose_until` is a Unix-seconds deadline set
@@ -217,26 +211,6 @@ async function onClear() {
     clearing.value = false;
   }
 }
-
-async function onExport() {
-  const confirmed = await dialog.confirm({
-    message: t("log.exportConfirm"),
-    confirmLabel: t("common.button.export"),
-  });
-  if (!confirmed) return;
-  exporting.value = true;
-  try {
-    await exportDiagnostics();
-    toast.success(t("log.exported"));
-  } catch (e) {
-    const appError = e as AppError;
-    // A dismissed save dialog is a silent cancel, not an error.
-    if (appError?.code === "CANCELLED") return;
-    toast.danger(appError?.message || t("log.exportFailed"));
-  } finally {
-    exporting.value = false;
-  }
-}
 </script>
 
 <template>
@@ -266,7 +240,7 @@ async function onExport() {
             class="flex-1"
             variant="ghost"
             :loading="exporting"
-            @click="onExport"
+            @click="() => runExport()"
           >
             <BaseIcon :icon="Download" :size="16" />
             {{ t("common.button.export") }}
