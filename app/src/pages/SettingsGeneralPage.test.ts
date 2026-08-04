@@ -343,6 +343,56 @@ describe("SettingsGeneralPage", () => {
         toast.toasts.value.some((t) => t.message.includes("every screen")),
       ).toBe(true);
     });
+
+    it("selecting Off confirms before disabling capture protection", async () => {
+      const { wrapper, dialog, secureScreen } =
+        mountWithApp(SettingsGeneralPage);
+      await flushPromises();
+
+      findSecurePicker(wrapper)!.vm.$emit("change", "off");
+      await flushPromises();
+
+      // Confirm fires (danger), and the weakening payload is persisted.
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ danger: true }),
+      );
+      expect(invoke).toHaveBeenCalledWith("set_secure_screen_mode", {
+        mode: "off",
+      });
+      expect(secureScreen.secureScreenMode.value).toBe("off");
+    });
+
+    it("canceling the Off confirm keeps the prior mode", async () => {
+      const { wrapper, dialog, secureScreen } =
+        mountWithApp(SettingsGeneralPage);
+      // mountWithApp defaults confirm to "proceed"; flip it to cancel.
+      vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
+      await flushPromises();
+
+      findSecurePicker(wrapper)!.vm.$emit("change", "off");
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_secure_screen_mode",
+        expect.anything(),
+      );
+      // Never mutated: the controlled pill stays on the seeded "sensitive".
+      expect(secureScreen.secureScreenMode.value).toBe("sensitive");
+    });
+
+    it("selecting a non-off mode does not prompt", async () => {
+      const { wrapper, dialog } = mountWithApp(SettingsGeneralPage);
+      await flushPromises();
+
+      findSecurePicker(wrapper)!.vm.$emit("change", "always");
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).not.toHaveBeenCalled();
+      expect(invoke).toHaveBeenCalledWith("set_secure_screen_mode", {
+        mode: "always",
+      });
+    });
   });
 
   describe("background-sync picker", () => {

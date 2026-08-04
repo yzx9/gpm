@@ -28,7 +28,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSelect from "@/components/base/BaseSelect.vue";
-import { useSecureScreen, useToast, Z } from "@/composables";
+import { useDialog, useSecureScreen, useToast, Z } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
 import { applyTheme, normalizeThemeMode, type ThemeMode } from "@/theme";
 import { Trash2 } from "@lucide/vue";
@@ -38,6 +38,7 @@ import { useRouter } from "vue-router";
 
 const router = useRouter();
 const { toast } = useToast();
+const { dialog } = useDialog();
 const { t } = useI18n();
 
 // Display-language preference: "system" (track the device locale) or a pinned
@@ -138,6 +139,17 @@ async function onSecureScreenChange(selection: string) {
   // (defensive) resolves to "sensitive".
   const mode: SecureScreenMode =
     selection === "off" || selection === "always" ? selection : "sensitive";
+  // Turning capture protection off lets screenshots/recordings grab a revealed
+  // password, so confirm first. The segmented control is modelValue-driven, so
+  // on cancel we simply don't persist and the pill stays on the prior mode.
+  if (mode === "off" && secureScreenMode.value !== "off") {
+    const confirmed = await dialog.confirm({
+      message: t("settings.secureScreen.offConfirm"),
+      confirmLabel: t("common.button.disable"),
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
   secureScreenLoading.value = true;
   try {
     const ok = await setSecureScreenMode(mode);

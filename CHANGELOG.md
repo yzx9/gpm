@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - You can now **browse a secret's past versions** and view or copy an old value. Open any secret and tap **Revisions** to see every change recorded for it, newest first, each with its signature status. Tap a version to reveal it — an old value is always marked as a past version (date and commit) so it can't be mistaken for the current one, and it auto-clears like any revealed password. A version encrypted for an identity you no longer have shows as "can't decrypt" instead of failing, and one that deleted the secret is called out. This is the recovery and audit counterpart to gopass's `history` / `show --revision`.
+- gpm now asks you to confirm before turning off three settings that can expose your secrets: **screen capture protection** (otherwise screenshots or screen recording could capture a revealed password), **Auto-lock → Never** (which keeps the identity unlocked for the whole session), and **clipboard auto-clear** (which leaves a copied password on the clipboard for other apps to read). Each prompt states the consequence and cancelling leaves the setting unchanged — this guards against an accidental toggle, not a decision you've already made.
 
 ## [v0.16.1] - 2026-08-04
 

@@ -675,6 +675,113 @@ describe("SettingsIdentityPage", () => {
       expect(findControl(wrapper, BaseSelect, "lock-idle")).toBeUndefined();
     });
 
+    it("switching to Never confirms before persisting", async () => {
+      when("get_app_config", { lock_mode: { idle: 60 } });
+      when("set_lock_mode", { lock_mode: "never" });
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
+      await flushPromises();
+
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
+        "change",
+        "never",
+      );
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ danger: true }),
+      );
+      expect(invoke).toHaveBeenCalledWith("set_lock_mode", { mode: "never" });
+    });
+
+    it("canceling the Never confirm keeps the current mode", async () => {
+      when("get_app_config", { lock_mode: { idle: 60 } });
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
+      vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
+      await flushPromises();
+
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
+        "change",
+        "never",
+      );
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_lock_mode",
+        expect.objectContaining({ mode: "never" }),
+      );
+      // Controlled pill stays on the prior (idle) mode.
+      expect(
+        findControl(wrapper, BaseSegmentedControl, "lock-mode")!.props(
+          "modelValue",
+        ),
+      ).toBe("idle");
+    });
+
+    it("switching to a non-Never mode does not prompt", async () => {
+      when("get_app_config", { lock_mode: { idle: 60 } });
+      when("set_lock_mode", { lock_mode: "immediate" });
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
+      await flushPromises();
+
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
+        "change",
+        "immediate",
+      );
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).not.toHaveBeenCalled();
+      expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
+        mode: "immediate",
+      });
+    });
+
+    it("turning clipboard-clear off confirms before persisting", async () => {
+      when("get_app_config", { clipboard_clear_secs: null });
+      when("set_clipboard_clear_secs", { clipboard_clear_secs: 0 });
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
+      await flushPromises();
+
+      await findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "clipboard-clear",
+      )!.vm.$emit("change", false);
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ danger: true }),
+      );
+      expect(invoke).toHaveBeenCalledWith("set_clipboard_clear_secs", {
+        secs: 0,
+      });
+    });
+
+    it("canceling the clipboard-clear off confirm keeps it on", async () => {
+      when("get_app_config", { clipboard_clear_secs: null });
+      const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
+      vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
+      await flushPromises();
+
+      await findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "clipboard-clear",
+      )!.vm.$emit("change", false);
+      await flushPromises();
+
+      expect(dialog.dialog.confirm).toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "set_clipboard_clear_secs",
+        expect.objectContaining({ secs: 0 }),
+      );
+      expect(
+        findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!.props(
+          "modelValue",
+        ),
+      ).toBe(true);
+    });
+
     it("view-clear off→on restores the last-used duration, not the default", async () => {
       when("get_app_config", { view_clear_secs: null });
       when("set_view_clear_secs", { view_clear_secs: 180 });

@@ -158,6 +158,7 @@
     "offToast": "Screen capture allowed",
     "sensitiveToast": "Screen capture blocked on sensitive screens",
     "alwaysToast": "Screen capture blocked on every screen",
+    "offConfirm": "Turn off screen capture protection? Screenshots and screen recording will be able to capture revealed passwords and other secrets.",
     "saveFailed": "Couldn't save screen-capture setting — try again"
   },
   "autosync": {
@@ -196,14 +197,16 @@
     "neverHint": "Never auto-lock; the identity stays cached until you lock manually.",
     "idleHint": "Identity stays unlocked, then locks after the idle period.",
     "managedByAppLock": "Ignored while Identity Auto-Unlock is on — gpm follows App Lock timing instead. Turn off Auto-Unlock to set a separate time.",
-    "setModeFailed": "Failed to set auto-lock mode"
+    "setModeFailed": "Failed to set auto-lock mode",
+    "neverConfirm": "Set auto-lock to Never? Your identity stays unlocked for the whole session until you lock manually or restart, so anyone with your device can browse your secrets."
   },
   "clear": {
     "clearAfter": "Clear after",
     "seconds": "{count}s",
     "default": "{count}s · default",
     "setViewFailed": "Failed to set view auto-clear",
-    "setClipboardFailed": "Failed to set clipboard auto-clear"
+    "setClipboardFailed": "Failed to set clipboard auto-clear",
+    "clipboardOffConfirm": "Turn off clipboard auto-clear? Copied passwords stay on the system clipboard until something else overwrites them, and other apps can read it."
   },
   "auth": {
     "title": "Repository Authenticity",

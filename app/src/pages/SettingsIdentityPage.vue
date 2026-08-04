@@ -509,6 +509,19 @@ async function onLockModeChange(mode: LockMode) {
 // which the watcher above keeps synced to the last PERSISTED idle — a failed
 // pick never poisons it, so the round-trip restores the real last choice.
 async function onLockTopChange(top: LockTopMode) {
+  // "Never" caches the identity for the whole session (no auto-wipe), so confirm
+  // before dropping to it. The control is modelValue-driven, so on cancel we
+  // simply don't persist and the pill stays on the prior mode. The idle-duration
+  // picker can't reach here (it only renders under "idle"), so this covers every
+  // path to Never; identityCoupled disables the control entirely.
+  if (top === "never" && lockTopMode.value !== "never") {
+    const confirmed = await dialog.confirm({
+      message: t("settings.lock.neverConfirm"),
+      confirmLabel: t("common.button.confirm"),
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
   await onLockModeChange(top === "idle" ? lastIdle.value : top);
 }
 
@@ -586,6 +599,17 @@ async function onClipboardClearChange(secs: number | null) {
   }
 }
 async function onClipboardClearToggle(enabled: boolean) {
+  // Turning auto-clear off leaves a copied password on the system clipboard
+  // (other apps can read it), so confirm first. On cancel we don't persist and
+  // the pill stays on.
+  if (!enabled) {
+    const confirmed = await dialog.confirm({
+      message: t("settings.clear.clipboardOffConfirm"),
+      confirmLabel: t("common.button.disable"),
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
   await onClipboardClearChange(enabled ? lastClipboardClear.value : 0);
 }
 
