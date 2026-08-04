@@ -441,10 +441,19 @@ fn head_tree(repo: &git2::Repository) -> Result<git2::Tree<'_>, Error> {
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD commit"))?;
     let tree_id = repo
         .find_commit(head)
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Failed to read HEAD commit: {e}")))?
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::StoreError,
+                format!("Failed to read HEAD commit: {e}"),
+            )
+        })?
         .tree_id();
-    repo.find_tree(tree_id)
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("Failed to read HEAD tree: {e}")))
+    repo.find_tree(tree_id).map_err(|e| {
+        Error::new(
+            ErrorCode::StoreError,
+            format!("Failed to read HEAD tree: {e}"),
+        )
+    })
 }
 
 #[cfg(test)]

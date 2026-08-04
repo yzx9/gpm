@@ -836,7 +836,9 @@ async fn autosync_edit_refuses_when_teammate_deleted_entry_resurrection() {
     let bare = git2::Repository::open(bare_dir.path()).expect("open bare");
     let head_tree = bare.head().expect("head").peel_to_tree().expect("tree");
     assert!(
-        head_tree.get_path(std::path::Path::new("entry.age")).is_err(),
+        head_tree
+            .get_path(std::path::Path::new("entry.age"))
+            .is_err(),
         "remote HEAD carries no entry.age — the stale edit did NOT resurrect it"
     );
 }

@@ -504,8 +504,15 @@ fn entry_conflict_resolve_refuses_on_enforce_block() {
         result.authenticity.blocked,
         "Enforce must block the resolve's re-fetch"
     );
-    assert!(!result.changed, "HEAD must not advance / edit must not apply on block");
-    assert_eq!(store_head(&store), head_before, "HEAD unchanged on the Enforce block");
+    assert!(
+        !result.changed,
+        "HEAD must not advance / edit must not apply on block"
+    );
+    assert_eq!(
+        store_head(&store),
+        head_before,
+        "HEAD unchanged on the Enforce block"
+    );
 }
 
 /// The local repo path the Store is backed by.
