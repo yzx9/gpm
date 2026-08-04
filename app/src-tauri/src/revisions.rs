@@ -87,7 +87,7 @@ fn revision_view(content: RevisionContent) -> RevisionView {
     match content {
         RevisionContent::Decrypted(secret) => {
             let body = secret.body();
-            let attachment = rustpass::metadata(body);
+            let attachment = rustpass::metadata(&secret);
             RevisionView::Decrypted {
                 password: Zeroizing::new(secret.password().to_string()),
                 // For an attachment the body is a base64 wall; clear it so the
@@ -99,7 +99,7 @@ fn revision_view(content: RevisionContent) -> RevisionView {
                 } else {
                     Zeroizing::new(body.to_string())
                 },
-                has_totp: rustpass::totp::has_totp(body),
+                has_totp: rustpass::totp::has_totp(&secret),
                 attachment,
             }
         }
@@ -214,9 +214,8 @@ pub(crate) async fn copy_revision(
         }
     };
 
-    let body = secret.body();
-    let has_totp = rustpass::totp::has_totp(body);
-    let has_attachment = rustpass::has_attachment(body);
+    let has_totp = rustpass::totp::has_totp(&secret);
+    let has_attachment = rustpass::has_attachment(&secret);
     if has_attachment {
         // An attachment has no password — don't clobber the clipboard with
         // empty for the auto-clear window. The UI hides copy for attachment

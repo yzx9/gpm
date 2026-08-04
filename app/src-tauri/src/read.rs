@@ -216,9 +216,8 @@ pub(crate) async fn copy_password(
     reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
-    let body = secret.body();
-    let has_totp = rustpass::totp::has_totp(body);
-    let has_attachment = rustpass::has_attachment(body);
+    let has_totp = rustpass::totp::has_totp(&secret);
+    let has_attachment = rustpass::has_attachment(&secret);
     if has_attachment {
         // An attachment has no password — don't clobber the clipboard with empty
         // for the auto-clear window. The UI offers Export instead.
@@ -288,7 +287,7 @@ pub(crate) async fn show_password_core<R: Runtime>(
         log::warn!("show failed: {}: {e}", entry_path.trim_end_matches(".age"));
     })?;
     let body = secret.body();
-    let attachment = rustpass::metadata(body);
+    let attachment = rustpass::metadata(&secret);
     Ok(SensitiveContent {
         password: Zeroizing::new(secret.password().to_string()),
         // For an attachment the body is the attribute lines + a base64 wall;
@@ -299,7 +298,7 @@ pub(crate) async fn show_password_core<R: Runtime>(
         } else {
             Zeroizing::new(body.to_string())
         },
-        has_totp: rustpass::totp::has_totp(body),
+        has_totp: rustpass::totp::has_totp(&secret),
         // A non-UTF-8 secret can't be safely edited as text (the lossy view
         // would be re-encrypted on save, corrupting it) — flag it so the UI
         // edit-blocks. Attachments are base64 (valid UTF-8), so they don't trip
@@ -348,7 +347,7 @@ pub(crate) async fn copy_totp(
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
 
-    let Some(otp) = rustpass::totp::extract(secret.body())
+    let Some(otp) = rustpass::totp::extract(&secret)
         .inspect_err(|e| log::warn!("copy-totp failed: extract: {entry_name}: {e}"))?
     else {
         // No TOTP seed: don't touch the clipboard. A prior copy's auto-clear
@@ -402,10 +401,9 @@ pub(crate) async fn entry_probe(
     reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
     let secret = secret.inspect_err(|e| log::warn!("entry-probe failed: {entry_path}: {e}"))?;
-    let body = secret.body();
     Ok(Some(EntryProbe {
-        has_totp: rustpass::totp::has_totp(body),
-        attachment: rustpass::metadata(body),
+        has_totp: rustpass::totp::has_totp(&secret),
+        attachment: rustpass::metadata(&secret),
         edit_blocked: if secret.is_utf8() {
             None
         } else {
@@ -456,7 +454,7 @@ pub(crate) async fn export_attachment_core<R: Runtime>(
         secret.inspect_err(|e| log::warn!("export-attachment failed: {entry_name}: {e}"))?;
 
     // Detect + decode. Bytes never reach the WebView.
-    let Some(attachment) = rustpass::attachment::extract(secret.body())? else {
+    let Some(attachment) = rustpass::attachment::extract(&secret)? else {
         return Ok(AttachmentExportResult {
             exported: false,
             entry_name,

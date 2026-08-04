@@ -27,6 +27,43 @@ use crate::error::{Error, ErrorCode};
 pub struct Secret {
     password: Zeroizing<Vec<u8>>,
     body: Zeroizing<Vec<u8>>,
+    /// The parsed `Key: Value` attribute region (gopass AKV), as a derived view
+    /// over [`Secret::body`]: every body line containing the gopass `": "`
+    /// separator becomes one [`Attribute`], in order, duplicates preserved. In
+    /// this phase `body()` still returns the raw blob (attributes inline); these
+    /// accessors let the TOTP/attachment detectors stop re-scanning it. Phase 2b
+    /// flips `body()` to free-text-only and makes `attributes` the source of truth.
+    attributes: Vec<Attribute>,
+}
+
+/// One `Key: Value` line from a secret's attribute region (gopass AKV). Both
+/// halves are decrypted content, so both are [`Zeroizing`]; the [`fmt::Debug`]
+/// impl redacts them — never derive it, or a stray log line leaks the pair.
+pub struct Attribute {
+    key: Zeroizing<Vec<u8>>,
+    value: Zeroizing<Vec<u8>>,
+}
+
+impl Attribute {
+    /// The attribute key as raw bytes (byte-exact, never lossy).
+    #[must_use]
+    pub fn key(&self) -> &[u8] {
+        self.key.as_slice()
+    }
+    /// The attribute value as raw bytes (byte-exact, never lossy).
+    #[must_use]
+    pub fn value(&self) -> &[u8] {
+        self.value.as_slice()
+    }
+}
+
+impl fmt::Debug for Attribute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Attribute")
+            .field("key", &"[REDACTED]")
+            .field("value", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// Custom `Debug` that redacts all fields — prevents accidental log leakage.
@@ -35,6 +72,10 @@ impl fmt::Debug for Secret {
         f.debug_struct("Secret")
             .field("password", &"[REDACTED]")
             .field("body", &"[REDACTED]")
+            .field(
+                "attributes",
+                &format!("{} [REDACTED]", self.attributes.len()),
+            )
             .finish()
     }
 }
@@ -95,6 +136,53 @@ impl Secret {
     #[must_use]
     pub fn password_is_utf8(&self) -> bool {
         std::str::from_utf8(self.password.as_slice()).is_ok()
+    }
+
+    /// The parsed attribute region (gopass AKV): every body line of the form
+    /// `Key: Value`, in source order, duplicates preserved.
+    #[must_use]
+    pub fn attributes(&self) -> &[Attribute] {
+        &self.attributes
+    }
+
+    /// The first value for `key` (exact, case-sensitive key match) — gopass `Get`
+    /// parity. gopass's TOTP reader uses exact lowercase keys (`totp`, `otpauth`).
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<&[u8]> {
+        self.attributes
+            .iter()
+            .find(|a| a.key.as_slice() == key.as_bytes())
+            .map(|a| a.value.as_slice())
+    }
+
+    /// The first value for `key`, matching the key case-insensitively — for the
+    /// attachment consumer, where gopass's `isBase64Encoded` accepts both
+    /// `Content-Transfer-Encoding` and `content-transfer-encoding`.
+    #[must_use]
+    pub fn get_ci(&self, key: &str) -> Option<&[u8]> {
+        self.attributes
+            .iter()
+            .find(|a| a.key.as_slice().eq_ignore_ascii_case(key.as_bytes()))
+            .map(|a| a.value.as_slice())
+    }
+
+    /// The first value for `key` (exact) as a UTF-8 view, or `None` when the key
+    /// is absent or its value isn't valid UTF-8.
+    #[must_use]
+    pub fn attribute_str(&self, key: &str) -> Option<&str> {
+        self.get(key).and_then(|v| std::str::from_utf8(v).ok())
+    }
+
+    /// Whether the secret signals a binary attachment: a
+    /// `Content-Transfer-Encoding: base64` attribute (case-insensitive key and
+    /// value, matching gopass's `isBase64Encoded`). A *presence* check, not a
+    /// well-formedness one — a malformed payload still returns `true` so the
+    /// decode error surfaces on export, not on the cheap UI probe.
+    #[must_use]
+    pub fn is_attachment(&self) -> bool {
+        self.get_ci("Content-Transfer-Encoding").is_some_and(|v| {
+            std::str::from_utf8(v).is_ok_and(|s| s.trim().eq_ignore_ascii_case("base64"))
+        })
     }
 
     /// Serialize back to the modern on-disk plaintext: `password\n body`, or
@@ -162,7 +250,11 @@ impl Secret {
             modern_split_bytes(&normalized)
         };
 
-        Ok(Self { password, body })
+        Ok(Self {
+            attributes: parse_attributes(body.as_slice()),
+            password,
+            body,
+        })
     }
 }
 
@@ -206,6 +298,29 @@ fn normalize_bytes(content: &[u8]) -> Vec<u8> {
         out.pop();
     }
     out
+}
+
+/// Parse the `Key: Value` attribute region out of a body blob: every line
+/// containing the gopass `": "` separator becomes one [`Attribute`], in source
+/// order, duplicates preserved. The key is the bytes before the first `": "`,
+/// the value the bytes after it (untrimmed — gopass does not trim attribute
+/// values, see gopass issue #2873). Byte-oriented, so it never needs the body to
+/// be valid UTF-8 — a non-UTF-8 body still yields byte-exact attributes.
+fn parse_attributes(body: &[u8]) -> Vec<Attribute> {
+    body.split(|&b| b == b'\n')
+        .filter_map(|line| {
+            // gopass's kvSep is the literal ": " — find its first occurrence.
+            let pos = line.windows(2).position(|w| w == b": ")?;
+            // `pos` is the colon's index; the matching window ": " occupies
+            // [pos, pos+2), so both split_at calls are in bounds.
+            let (key, sep_and_value) = line.split_at(pos);
+            let value = sep_and_value.split_at(2).1; // drop the ": "
+            Some(Attribute {
+                key: Zeroizing::new(key.to_vec()),
+                value: Zeroizing::new(value.to_vec()),
+            })
+        })
+        .collect()
 }
 
 /// Parse the deprecated `GOPASS-SECRET-1.0` format — read-only compatibility
@@ -678,5 +793,75 @@ mod tests {
         // A non-UTF-8 password: copy is blocked too.
         let secret = Secret::parse(b"\xff\xfe\nbody").unwrap();
         assert!(!secret.password_is_utf8());
+    }
+
+    // ---- attribute region (R069 phase 2a) ----
+
+    #[test]
+    fn attributes_parsed_from_body() {
+        let secret = Secret::parse(b"pw\nuser: alice\nurl: https://example.com\nnotes").unwrap();
+        // `get` is exact-case (gopass `Get` parity).
+        assert_eq!(secret.get("user"), Some(b"alice".as_slice()));
+        assert_eq!(secret.attribute_str("url"), Some("https://example.com"));
+        // A free-text line (no ": ") is not an attribute.
+        assert_eq!(secret.get("notes"), None);
+        // body() still carries the attribute lines (phase-2a compat shim).
+        assert!(secret.body().contains("user: alice"));
+    }
+
+    #[test]
+    fn get_is_case_sensitive_get_ci_is_not() {
+        // The case-sensitivity split that grounds the detectors: TOTP reads
+        // exact lowercase (`get`); attachments read case-insensitively (`get_ci`,
+        // gopass binary.go tries both key casings).
+        let secret = Secret::parse(b"pw\nuser: alice").unwrap();
+        assert_eq!(secret.get("user"), Some(b"alice".as_slice()));
+        assert_eq!(secret.get("USER"), None);
+        assert_eq!(secret.get_ci("USER"), Some(b"alice".as_slice()));
+        assert_eq!(secret.get_ci("UsEr"), Some(b"alice".as_slice()));
+    }
+
+    #[test]
+    fn is_attachment_detects_cte_both_key_cases() {
+        // R066/T5: the legacy parser lowercases the CTE key, so a case-sensitive
+        // lookup would miss it and the base64 body would leak to the WebView.
+        for body in [
+            "\nContent-Transfer-Encoding: base64\nQUJD",
+            "\ncontent-transfer-encoding: base64\nQUJD",
+            "\nCONTENT-TRANSFER-ENCODING: Base64\nQUJD",
+        ] {
+            let secret = Secret::parse(body.as_bytes()).unwrap();
+            assert!(secret.is_attachment(), "should detect: {body}");
+        }
+        // Not base64, or no CTE at all → not an attachment.
+        assert!(
+            !Secret::parse(b"pw\nContent-Transfer-Encoding: 8bit\nQUJD")
+                .unwrap()
+                .is_attachment()
+        );
+        assert!(!Secret::parse(b"pw\nuser: alice").unwrap().is_attachment());
+    }
+
+    #[test]
+    fn attributes_preserve_duplicates_and_order() {
+        // gopass allows duplicate keys (the legacy format leans on it). All are
+        // kept in source order; `get` returns the first.
+        let secret = Secret::parse(b"pw\nnote: one\nnote: two\nx: y").unwrap();
+        let notes: Vec<&[u8]> = secret
+            .attributes()
+            .iter()
+            .filter(|a| a.key() == "note".as_bytes())
+            .map(Attribute::value)
+            .collect();
+        assert_eq!(notes, vec![b"one".as_slice(), b"two".as_slice()]);
+        assert_eq!(secret.get("note"), Some(b"one".as_slice()));
+    }
+
+    #[test]
+    fn attribute_str_none_for_non_utf8_value() {
+        // A non-UTF-8 attribute value: the byte accessor sees it, the str view is None.
+        let secret = Secret::parse(b"pw\nk: \xff\xfe").unwrap();
+        assert_eq!(secret.get("k"), Some(b"\xff\xfe".as_slice()));
+        assert_eq!(secret.attribute_str("k"), None);
     }
 }

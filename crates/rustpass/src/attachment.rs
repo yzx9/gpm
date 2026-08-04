@@ -11,8 +11,9 @@
 //! `Content-Transfer-Encoding: Base64`), and a single-line base64 body. age
 //! encrypts the whole plaintext exactly as for any other secret; the base64 is
 //! *encoding* (so binary can live inside a line-oriented text format), not
-//! encryption. Detection keys off the `Content-Transfer-Encoding: Base64`
-//! attribute, matching gopass's own `isBase64Encoded` (case-insensitive value).
+//! encryption. Detection reads the `Content-Transfer-Encoding` attribute from
+//! the [`Secret`](crate::Secret) model via [`Secret::is_attachment`] (matching
+//! gopass's own `isBase64Encoded`, case-insensitive key + value).
 
 use std::fmt;
 
@@ -20,14 +21,13 @@ use base64::Engine as _;
 use serde::Serialize;
 use zeroize::Zeroizing;
 
+use crate::Secret;
 use crate::error::{Error, ErrorCode};
 
 /// The AKV attribute separator gopass uses to split headers from body. The
 /// base64 alphabet (`A-Za-z0-9+/=`) never contains it, so the attribute/payload
 /// split is unambiguous for any real attachment.
-const KV_SEP: &str = ": ";
-/// The attachment signal attribute key.
-const CTE_KEY: &str = "Content-Transfer-Encoding";
+const KV_SEP: &[u8] = b": ";
 /// The attribute key carrying the suggested filename.
 const CD_KEY: &str = "Content-Disposition";
 
@@ -88,7 +88,7 @@ impl AttachmentMeta {
 
 /// Full attachment decode for export.
 ///
-/// Returns `Ok(None)` when `body` holds no attachment, `Err(AttachmentInvalid)`
+/// Returns `Ok(None)` when `secret` holds no attachment, `Err(AttachmentInvalid)`
 /// when one is detected but its base64 body is undecodable. The filename is
 /// `None` when `Content-Disposition` is absent — CTE-only detection still
 /// treats a lone `Content-Transfer-Encoding: Base64` as an attachment, as
@@ -98,13 +98,14 @@ impl AttachmentMeta {
 ///
 /// [`ErrorCode::AttachmentInvalid`] when the body is signalled as an attachment
 /// but its payload is not valid standard base64.
-pub fn extract(body: &str) -> Result<Option<Attachment>, Error> {
-    let Some(payload) = attachment_payload(body) else {
+pub fn extract(secret: &Secret) -> Result<Option<Attachment>, Error> {
+    if !secret.is_attachment() {
         return Ok(None);
-    };
-    let filename = content_disposition_filename(body);
+    }
+    let payload = attachment_payload(secret.body_bytes());
+    let filename = cd_filename(secret);
     let bytes = base64::engine::general_purpose::STANDARD
-        .decode(payload.as_bytes())
+        .decode(&payload)
         .map_err(|_| {
             Error::new(
                 ErrorCode::AttachmentInvalid,
@@ -117,81 +118,63 @@ pub fn extract(body: &str) -> Result<Option<Attachment>, Error> {
     }))
 }
 
-/// Whether `body` signals a binary attachment — the UI probe, without decoding.
-/// Matches gopass's `isBase64Encoded`: a `Content-Transfer-Encoding: base64`
-/// attribute is present (case-insensitive value). Cheap; safe to call on every
-/// decrypt. Note this is a *presence* check, not a well-formedness check: a
-/// body with the attribute but a malformed payload still returns `true` (the
-/// affordance stays visible and the decode error surfaces on export).
+/// Whether `secret` signals a binary attachment — the UI probe, without
+/// decoding. Delegates to [`Secret::is_attachment`]: a
+/// `Content-Transfer-Encoding: base64` attribute is present (case-insensitive
+/// key and value). Cheap; safe to call on every decrypt. This is a *presence*
+/// check, not a well-formedness check: a body with the attribute but a malformed
+/// payload still returns `true` (the affordance stays visible and the decode
+/// error surfaces on export).
 #[must_use]
-pub fn has_attachment(body: &str) -> bool {
-    is_attachment(body)
+pub fn has_attachment(secret: &Secret) -> bool {
+    secret.is_attachment()
 }
 
 /// Cheap metadata (filename + decoded size) without decoding the payload.
-/// Returns `None` when `body` holds no attachment. `size` matches
+/// Returns `None` when `secret` holds no attachment. `size` matches
 /// [`extract`]'s decoded length for valid base64 (pinned by tests).
 #[must_use]
-pub fn metadata(body: &str) -> Option<AttachmentMeta> {
-    let payload = attachment_payload(body)?;
+pub fn metadata(secret: &Secret) -> Option<AttachmentMeta> {
+    if !secret.is_attachment() {
+        return None;
+    }
+    let payload = attachment_payload(secret.body_bytes());
     Some(AttachmentMeta {
-        filename: content_disposition_filename(body),
+        filename: cd_filename(secret),
         size: decoded_len(&payload),
     })
 }
 
-// ---- shared detection / split (one source of truth) ----
+// ---- payload split (one source of truth) ----
 
-/// True iff a `Content-Transfer-Encoding: base64` attribute is present.
-fn is_attachment(body: &str) -> bool {
-    kv_value(body, CTE_KEY)
-        .map(str::trim)
-        .is_some_and(|v| v.eq_ignore_ascii_case("base64"))
-}
-
-/// The base64 payload of an attachment, or `None` when the body is not an
-/// attachment. Mirrors gopass `Body()`: every line containing the `": "`
-/// attribute separator is dropped; remaining non-empty lines are the payload,
-/// with all ASCII whitespace stripped so wrapped (76-char) base64 — which
-/// gopass's `StdEncoding` tolerates — decodes too.
-fn attachment_payload(body: &str) -> Option<String> {
-    if !is_attachment(body) {
-        return None;
-    }
-    let mut payload = String::new();
-    for line in body.lines() {
-        if line.contains(KV_SEP) || line.trim().is_empty() {
+/// The base64 payload of an attachment body, mirroring gopass `Body()`: every
+/// line containing the `": "` attribute separator is dropped; remaining
+/// non-empty lines are the payload, with all ASCII whitespace stripped so
+/// wrapped (76-char) base64 — which gopass's `StdEncoding` tolerates — decodes
+/// too. The caller has already confirmed this is an attachment via
+/// [`Secret::is_attachment`].
+fn attachment_payload(body: &[u8]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    for line in body.split(|&b| b == b'\n') {
+        // Drop attribute lines (those carrying the `": "` separator) and blanks;
+        // the rest is the base64 payload.
+        let is_attr = line.windows(2).any(|w| w == KV_SEP);
+        let is_blank = line.iter().all(|&b| b.is_ascii_whitespace());
+        if is_attr || is_blank {
             continue;
         }
-        payload.push_str(line);
+        payload.extend_from_slice(line);
     }
-    payload.retain(|c| !c.is_ascii_whitespace());
-    Some(payload)
-}
-
-/// The trimmed value of the first `Key: Value` line for `key`, or `None`.
-///
-/// The key match is case-insensitive: gopass's `isBase64Encoded` accepts both
-/// `Content-Transfer-Encoding` and `content-transfer-encoding` (its own docs
-/// show the lowercase form), so a lowercase-keyed attachment must still be
-/// detected — otherwise its base64 body would slip past detection and reach the
-/// `WebView`.
-fn kv_value<'a>(body: &'a str, key: &str) -> Option<&'a str> {
-    for line in body.lines() {
-        let Some((k, v)) = line.split_once(KV_SEP) else {
-            continue;
-        };
-        if k.eq_ignore_ascii_case(key) {
-            return Some(v);
-        }
-    }
-    None
+    payload.retain(|b| !b.is_ascii_whitespace());
+    payload
 }
 
 /// The `filename="…"` (or bare `filename=…`) value from a `Content-Disposition`
-/// attribute, or `None` when absent/unparseable.
-fn content_disposition_filename(body: &str) -> Option<String> {
-    parse_filename(kv_value(body, CD_KEY)?)
+/// attribute (case-insensitive key, matching gopass's `binary.go`), or `None`
+/// when absent/unparseable.
+fn cd_filename(secret: &Secret) -> Option<String> {
+    let value = secret.get_ci(CD_KEY)?;
+    parse_filename(std::str::from_utf8(value).ok()?)
 }
 
 /// Decode the size of a base64 payload without decoding the bytes:
@@ -200,8 +183,9 @@ fn content_disposition_filename(body: &str) -> Option<String> {
 /// underflow — `metadata()` runs on the read/probe path before `extract`
 /// validates the body, so an underflow would panic (debug) or report a huge
 /// bogus size (release).
-fn decoded_len(payload: &str) -> u64 {
-    let padding = payload.bytes().filter(|b| *b == b'=').count() as u64;
+#[allow(clippy::naive_bytecount)] // payload is a tiny base64 string; SIMD bytecount is pointless here
+fn decoded_len(payload: &[u8]) -> u64 {
+    let padding = payload.iter().filter(|b| **b == b'=').count() as u64;
     let groups = payload.len() as u64 / 4;
     (groups * 3).saturating_sub(padding)
 }
@@ -228,6 +212,11 @@ mod tests {
     use super::*;
     use base64::engine::general_purpose::STANDARD;
 
+    /// Parse a secret plaintext the way the read path does, for detector tests.
+    fn sec(body: &str) -> Secret {
+        Secret::parse(body.as_bytes()).unwrap()
+    }
+
     /// Build a gopass attachment body with the given base64 payload.
     fn attachment_body(b64: &str) -> String {
         format!(
@@ -241,8 +230,9 @@ mod tests {
     fn detects_cte_base64_case_insensitively() {
         for value in ["Base64", "base64", "BASE64"] {
             let body = format!("\nContent-Transfer-Encoding: {value}\nQUJD");
-            assert!(is_attachment(&body), "CTE={value} should detect");
-            assert!(has_attachment(&body));
+            let s = sec(&body);
+            assert!(s.is_attachment(), "CTE={value} should detect");
+            assert!(has_attachment(&s));
         }
     }
 
@@ -250,10 +240,11 @@ mod tests {
     fn detects_lowercase_cte_key_like_gopass() {
         // gopass's isBase64Encoded accepts the lowercase key too (its docs show
         // it); gpm must as well, or the base64 body slips past detection and
-        // reaches the WebView.
+        // reaches the WebView. This is the R066 case the get_ci path fixes.
         let body = "\ncontent-disposition: attachment; filename=\"x.bin\"\ncontent-transfer-encoding: base64\nQUJD";
-        assert!(has_attachment(body));
-        let meta = metadata(body).expect("lowercase-keyed attachment detected");
+        let s = sec(body);
+        assert!(has_attachment(&s));
+        let meta = metadata(&s).expect("lowercase-keyed attachment detected");
         assert_eq!(meta.filename(), Some("x.bin"));
         assert_eq!(meta.size(), 3);
     }
@@ -263,22 +254,25 @@ mod tests {
         // A CTE-signalled body whose payload is just padding must not underflow
         // decoded_len (panic in debug, huge bogus size in release).
         let body = "\nContent-Transfer-Encoding: Base64\n===";
-        let meta = metadata(body).expect("still an attachment (CTE present)");
+        let s = sec(body);
+        let meta = metadata(&s).expect("still an attachment (CTE present)");
         assert_eq!(meta.size(), 0);
         // extract rejects the malformed payload.
-        assert!(extract(body).is_err());
+        assert!(extract(&s).is_err());
     }
 
     #[test]
     fn ignores_unrelated_or_absent_cte() {
         // No CTE at all.
-        assert!(!has_attachment("pw\nusername: alice"));
+        assert!(!has_attachment(&sec("pw\nusername: alice")));
         // CTE present but not base64.
-        assert!(!has_attachment("pw\nContent-Transfer-Encoding: 8bit\nQUJD"));
+        assert!(!has_attachment(&sec(
+            "pw\nContent-Transfer-Encoding: 8bit\nQUJD"
+        )));
         // A body line that merely contains the substring (not a `Key: ` attribute).
-        assert!(!has_attachment(
+        assert!(!has_attachment(&sec(
             "pw\nnotes: see Content-Transfer-Encoding: Base64 docs"
-        ));
+        )));
     }
 
     // ---- decode round-trip (pins the from_utf8_lossy lossless assumption) ----
@@ -292,10 +286,8 @@ mod tests {
         let plaintext = format!(
             "\nContent-Disposition: attachment; filename=\"x.bin\"\nContent-Transfer-Encoding: Base64\n{b64}\n"
         );
-        let secret = crate::Secret::parse(plaintext.as_bytes()).unwrap();
-        let att = extract(secret.body())
-            .unwrap()
-            .expect("should detect attachment");
+        let secret = Secret::parse(plaintext.as_bytes()).unwrap();
+        let att = extract(&secret).unwrap().expect("should detect attachment");
         assert_eq!(att.bytes(), &original[..]);
         assert_eq!(att.filename(), Some("x.bin"));
     }
@@ -313,21 +305,34 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let body = format!("\nContent-Transfer-Encoding: Base64\n{wrapped}");
-        let att = extract(&body).unwrap().expect("attachment");
+        let att = extract(&sec(&body)).unwrap().expect("attachment");
         assert_eq!(att.bytes(), &original[..]);
     }
 
     #[test]
     fn extract_errors_on_malformed_payload() {
         let body = attachment_body("!!!not base64!!!");
-        let err = extract(&body).unwrap_err();
+        let err = extract(&sec(&body)).unwrap_err();
+        assert_eq!(err.code, "ATTACHMENT_INVALID");
+    }
+
+    #[test]
+    fn extract_errors_on_non_utf8_attachment_body() {
+        // Phase 2a regression guard: detection moved to byte-exact attributes
+        // (so is_attachment still fires on a non-UTF-8 body), but the payload
+        // must be read as bytes too — otherwise body() == "" silently exports a
+        // 0-byte file instead of surfacing ATTACHMENT_INVALID.
+        let secret = Secret::parse(b"\nContent-Transfer-Encoding: Base64\nQUJD\n\xff").unwrap();
+        assert!(secret.is_attachment(), "byte-exact detection still fires");
+        let err = extract(&secret).unwrap_err();
         assert_eq!(err.code, "ATTACHMENT_INVALID");
     }
 
     #[test]
     fn extract_none_when_not_an_attachment() {
-        assert!(extract("pw\nusername: alice").unwrap().is_none());
-        assert!(extract("").unwrap().is_none());
+        assert!(extract(&sec("pw\nusername: alice")).unwrap().is_none());
+        // An empty body (password-only secret) is not an attachment.
+        assert!(extract(&sec("pw")).unwrap().is_none());
     }
 
     // ---- metadata size correctness (pins the formula against the real decode) ----
@@ -338,8 +343,9 @@ mod tests {
             let original = vec![0x42u8; n];
             let b64 = STANDARD.encode(&original);
             let body = attachment_body(&b64);
-            let meta = metadata(&body).expect("meta for attachment");
-            let ext = extract(&body).unwrap().expect("extract");
+            let s = sec(&body);
+            let meta = metadata(&s).expect("meta for attachment");
+            let ext = extract(&s).unwrap().expect("extract");
             assert_eq!(
                 meta.size(),
                 ext.bytes().len() as u64,
@@ -351,7 +357,7 @@ mod tests {
 
     #[test]
     fn metadata_none_when_not_an_attachment() {
-        assert!(metadata("pw\nusername: alice").is_none());
+        assert!(metadata(&sec("pw\nusername: alice")).is_none());
     }
 
     // ---- filename parsing ----
@@ -360,7 +366,7 @@ mod tests {
     fn parses_quoted_filename_gopass_form() {
         let body = attachment_body("QUJD");
         assert_eq!(
-            extract(&body).unwrap().unwrap().filename(),
+            extract(&sec(&body)).unwrap().unwrap().filename(),
             Some("photo.png")
         );
     }
@@ -369,7 +375,7 @@ mod tests {
     fn parses_bare_token_filename() {
         let body = "\nContent-Disposition: attachment; filename=report.pdf\nContent-Transfer-Encoding: Base64\nQUJD";
         assert_eq!(
-            extract(body).unwrap().unwrap().filename(),
+            extract(&sec(body)).unwrap().unwrap().filename(),
             Some("report.pdf")
         );
     }
@@ -378,7 +384,7 @@ mod tests {
     fn filename_none_when_content_disposition_absent() {
         // CTE-only: still an attachment, but no filename.
         let body = "\nContent-Transfer-Encoding: Base64\nQUJD";
-        let att = extract(body).unwrap().expect("attachment");
+        let att = extract(&sec(body)).unwrap().expect("attachment");
         assert_eq!(att.filename(), None);
         assert_eq!(att.bytes(), b"ABC");
     }
@@ -389,17 +395,17 @@ mod tests {
     fn has_attachment_tracks_cte_presence() {
         // CTE present (even with a malformed payload) → true; the decode error
         // surfaces only on export, mirroring totp::has_totp's present-but-broken rule.
-        assert!(has_attachment(&attachment_body("!!!bad!!!")));
-        assert!(has_attachment(&attachment_body("QUJD")));
+        assert!(has_attachment(&sec(&attachment_body("!!!bad!!!"))));
+        assert!(has_attachment(&sec(&attachment_body("QUJD"))));
         // No CTE → false.
-        assert!(!has_attachment("pw\nusername: alice"));
+        assert!(!has_attachment(&sec("pw\nusername: alice")));
     }
 
     // ---- redaction ----
 
     #[test]
     fn attachment_debug_redacts_bytes() {
-        let att = extract(&attachment_body("QUJD"))
+        let att = extract(&sec(&attachment_body("QUJD")))
             .unwrap()
             .expect("attachment");
         let s = format!("{att:?}");

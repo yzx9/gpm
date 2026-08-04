@@ -531,7 +531,7 @@ done
                 .get(&entry)
                 .await
                 .expect("gpm decrypts the gopass-written attachment entry");
-            let attachment = rustpass::attachment::extract(secret.body())
+            let attachment = rustpass::attachment::extract(&secret)
                 .expect("attachment body decodes")
                 .expect("the entry is recognized as an attachment");
             assert_eq!(

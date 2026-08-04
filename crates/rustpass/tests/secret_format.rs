@@ -245,6 +245,6 @@ fn secret_legacy_totp_header_detected_after_render() {
         "body should contain a lowercased `totp:` line: {}",
         secret.body()
     );
-    assert!(rustpass::totp::has_totp(secret.body()));
-    assert!(rustpass::totp::extract(secret.body()).unwrap().is_some());
+    assert!(rustpass::totp::has_totp(&secret));
+    assert!(rustpass::totp::extract(&secret).unwrap().is_some());
 }

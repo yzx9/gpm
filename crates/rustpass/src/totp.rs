@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! TOTP (RFC 6238) generation — gopass `pkg/otp` analogue.
 //!
@@ -14,9 +14,10 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use totp_rs::{Algorithm, Secret, TOTP};
+use totp_rs::{Algorithm, TOTP};
 use zeroize::Zeroizing;
 
+use crate::Secret;
 use crate::error::{Error, ErrorCode};
 
 /// A parsed TOTP configuration, ready to mint codes. Wraps a [`totp_rs::TOTP`];
@@ -33,49 +34,52 @@ impl fmt::Debug for Otp {
     }
 }
 
-/// Extract a TOTP configuration from a gopass secret body, in gopass's
-/// priority order (first match wins):
+/// Extract a TOTP configuration from a gopass secret, in gopass's priority
+/// order (first match wins):
 ///
 /// 1. an `otpauth:` key whose value is a full `otpauth://totp/...` URI;
 /// 2. a body line beginning with `otpauth://`;
 /// 3. a `totp:` key whose value is a bare base32 secret (all-default params).
 ///
-/// Returns `Ok(None)` when the body holds no TOTP seed (not an error). HOTP
-/// seeds (`otpauth://hotp/...`, `hotp:` keys) are not TOTP and surface as an
-/// error or `Ok(None)` rather than a silently miscomputed code.
+/// The `otpauth`/`totp` keys are matched exact-case (gopass's `pkg/otp` uses
+/// exact lowercase `Get`), via [`Secret::attribute_str`]. Returns `Ok(None)`
+/// when the body holds no TOTP seed (not an error). HOTP seeds
+/// (`otpauth://hotp/...`, `hotp:` keys) are not TOTP and surface as an error or
+/// `Ok(None)` rather than a silently miscomputed code.
 ///
 /// # Errors
 ///
 /// Returns [`ErrorCode::StoreError`] when a candidate line is present but
 /// malformed, references an unsupported OTP type / encoder / algorithm, or
 /// carries an out-of-range parameter. Messages never contain the seed or URI.
-pub fn extract(body: &str) -> Result<Option<Otp>, Error> {
+pub fn extract(secret: &Secret) -> Result<Option<Otp>, Error> {
     // 1 & 2: an otpauth:// URI — as a key value, then as a standalone body line.
-    if let Some(uri) = kv_value(body, "otpauth")
+    if let Some(uri) = secret
+        .attribute_str("otpauth")
         .map(str::trim)
-        .or_else(|| first_otpauth_line(body))
+        .or_else(|| first_otpauth_line(secret.body_bytes()))
     {
         return Ok(Some(from_uri(uri)?));
     }
     // 3: a bare base32 secret under `totp:`. (`hotp:` is HOTP — not matched.)
-    if let Some(secret) = kv_value(body, "totp").map(str::trim) {
-        if secret.is_empty() {
+    if let Some(secret_str) = secret.attribute_str("totp").map(str::trim) {
+        if secret_str.is_empty() {
             return Err(Error::new(ErrorCode::StoreError, "TOTP seed is empty"));
         }
-        return Ok(Some(from_bare_secret(secret)?));
+        return Ok(Some(from_bare_secret(secret_str)?));
     }
     Ok(None)
 }
 
-/// Whether `body` carries a TOTP seed — the UI's "does this entry have a 2FA
+/// Whether `secret` carries a TOTP seed — the UI's "does this entry have a 2FA
 /// code?" probe, without minting one. Returns `true` whenever [`extract`] finds
 /// a seed (`Ok(Some)`) **or** hits a candidate that failed to parse (`Err`): a
 /// malformed `otpauth:`/`totp:` line still signals 2FA intent, so the affordance
 /// stays visible and the parse error surfaces when the user actually requests a
 /// code. Returns `false` only on a clean `Ok(None)` — no seed at all.
 #[must_use]
-pub fn has_totp(body: &str) -> bool {
-    !matches!(extract(body), Ok(None))
+pub fn has_totp(secret: &Secret) -> bool {
+    !matches!(extract(secret), Ok(None))
 }
 
 /// Produce the current one-time code at `now`. `now` is a parameter (not read
@@ -145,7 +149,9 @@ fn from_bare_secret(secret: &str) -> Result<Otp, Error> {
             "TOTP seed has no base32 characters",
         ));
     }
-    let bytes = Secret::Encoded(normalized).to_bytes().map_err(parse_err)?;
+    let bytes = totp_rs::Secret::Encoded(normalized)
+        .to_bytes()
+        .map_err(parse_err)?;
     TOTP::new(Algorithm::SHA1, 6, 0, 30, bytes, None, "gpm".to_string())
         .map(Otp)
         .map_err(parse_err)
@@ -169,18 +175,12 @@ fn has_query_param(uri: &str, name: &str) -> bool {
         .any(|pair| pair.starts_with(needle.as_str()))
 }
 
-/// The trimmed value of the first `key: value` line for `key`, or `None`.
-fn kv_value<'a>(body: &'a str, key: &str) -> Option<&'a str> {
-    let prefix = format!("{key}: ");
-    body.lines()
-        .find_map(|line| line.strip_prefix(prefix.as_str()))
-}
-
 /// The first body line (trimmed) that begins with `otpauth://`.
-fn first_otpauth_line(body: &str) -> Option<&str> {
-    body.lines()
-        .map(str::trim)
-        .find(|line| line.starts_with("otpauth://"))
+fn first_otpauth_line(body: &[u8]) -> Option<&str> {
+    body.split(|&b| b == b'\n').find_map(|line| {
+        let s = std::str::from_utf8(line.trim_ascii()).ok()?;
+        s.starts_with("otpauth://").then_some(s)
+    })
 }
 
 /// Map any `totp-rs` parse error to a safe [`Error`]. The detail is discarded:
@@ -198,6 +198,11 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    /// Parse a secret plaintext the way the read path does, for detector tests.
+    fn sec(body: &str) -> Secret {
+        Secret::parse(body.as_bytes()).unwrap()
+    }
 
     // ---- generation: RFC 6238 Appendix B vectors (direct construction) ----
 
@@ -233,7 +238,7 @@ mod tests {
 
     #[test]
     fn generate_at_errors_before_epoch() {
-        let bytes = Secret::Encoded("KRSXG5CTMVRXEZLUKN2XAZLSKNSWG4TFOQ".to_string())
+        let bytes = totp_rs::Secret::Encoded("KRSXG5CTMVRXEZLUKN2XAZLSKNSWG4TFOQ".to_string())
             .to_bytes()
             .unwrap();
         let otp = Otp(TOTP::new(Algorithm::SHA1, 6, 0, 30, bytes, None, "t".to_string()).unwrap());
@@ -250,16 +255,22 @@ mod tests {
     #[test]
     fn extract_priority_otpauth_kv_then_body_line_then_totp_kv() {
         assert!(
-            extract(&format!("pw\notpauth: otpauth://totp/Ex:a?secret={SECRET}"))
+            extract(&sec(&format!(
+                "pw\notpauth: otpauth://totp/Ex:a?secret={SECRET}"
+            )))
+            .unwrap()
+            .is_some()
+        );
+        assert!(
+            extract(&sec(&format!("pw\notpauth://totp/Ex:a?secret={SECRET}")))
                 .unwrap()
                 .is_some()
         );
         assert!(
-            extract(&format!("pw\notpauth://totp/Ex:a?secret={SECRET}"))
+            extract(&sec(&format!("pw\ntotp: {SECRET}")))
                 .unwrap()
                 .is_some()
         );
-        assert!(extract(&format!("pw\ntotp: {SECRET}")).unwrap().is_some());
     }
 
     #[test]
@@ -267,8 +278,10 @@ mod tests {
         // Proves the `totp:` path wires the secret correctly, without hand-computing
         // a code: extract must agree with a directly-built TOTP for the same secret.
         let body = format!("pw\ntotp: {SECRET}");
-        let extracted = extract(&body).unwrap().unwrap();
-        let bytes = Secret::Encoded(SECRET.to_string()).to_bytes().unwrap();
+        let extracted = extract(&sec(&body)).unwrap().unwrap();
+        let bytes = totp_rs::Secret::Encoded(SECRET.to_string())
+            .to_bytes()
+            .unwrap();
         let direct =
             Otp(TOTP::new(Algorithm::SHA1, 6, 0, 30, bytes, None, "gpm".to_string()).unwrap());
         let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -282,7 +295,7 @@ mod tests {
     fn extract_normalizes_lowercase_whitespace_and_padding() {
         let lower = SECRET.to_ascii_lowercase();
         let body = format!("pw\ntotp: {lower} ==");
-        let otp = extract(&body)
+        let otp = extract(&sec(&body))
             .unwrap()
             .expect("lowercase/whitespace/padded secret should extract");
         let code = generate_at(&otp, UNIX_EPOCH + Duration::from_secs(1_700_000_000)).unwrap();
@@ -295,7 +308,7 @@ mod tests {
         // digits=8, period=60, SHA256 → a valid 8-digit code.
         let body =
             format!("pw\notpauth://totp/Ex:a?secret={SECRET}&algorithm=SHA256&digits=8&period=60");
-        let otp = extract(&body).unwrap().unwrap();
+        let otp = extract(&sec(&body)).unwrap().unwrap();
         let code = generate_at(&otp, UNIX_EPOCH + Duration::from_mins(1)).unwrap();
         assert_eq!(code.len(), 8);
         assert!(code.bytes().all(|b| b.is_ascii_digit()));
@@ -305,16 +318,25 @@ mod tests {
 
     #[test]
     fn extract_rejects_hotp_uri_and_treats_hotp_kv_as_none() {
-        assert!(extract(&format!("pw\notpauth://hotp/A:x?secret={SECRET}&counter=1")).is_err());
-        assert!(extract(&format!("pw\nhotp: {SECRET}")).unwrap().is_none());
+        assert!(
+            extract(&sec(&format!(
+                "pw\notpauth://hotp/A:x?secret={SECRET}&counter=1"
+            )))
+            .is_err()
+        );
+        assert!(
+            extract(&sec(&format!("pw\nhotp: {SECRET}")))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn extract_rejects_steam_encoder() {
         assert!(
-            extract(&format!(
+            extract(&sec(&format!(
                 "pw\notpauth://totp/A:x?secret={SECRET}&encoder=steam"
-            ))
+            )))
             .is_err()
         );
     }
@@ -322,21 +344,36 @@ mod tests {
     #[test]
     fn extract_rejects_zero_period() {
         // totp-rs accepts period=0 from the URI; we reject before generate divides by zero.
-        assert!(extract(&format!("pw\notpauth://totp/A:x?secret={SECRET}&period=0")).is_err());
+        assert!(
+            extract(&sec(&format!(
+                "pw\notpauth://totp/A:x?secret={SECRET}&period=0"
+            )))
+            .is_err()
+        );
     }
 
     #[test]
     fn extract_rejects_bad_digits_via_totp_rs() {
-        assert!(extract(&format!("pw\notpauth://totp/A:x?secret={SECRET}&digits=4")).is_err());
-        assert!(extract(&format!("pw\notpauth://totp/A:x?secret={SECRET}&digits=99")).is_err());
+        assert!(
+            extract(&sec(&format!(
+                "pw\notpauth://totp/A:x?secret={SECRET}&digits=4"
+            )))
+            .is_err()
+        );
+        assert!(
+            extract(&sec(&format!(
+                "pw\notpauth://totp/A:x?secret={SECRET}&digits=99"
+            )))
+            .is_err()
+        );
     }
 
     #[test]
     fn extract_rejects_unsupported_algorithm_via_totp_rs() {
         assert!(
-            extract(&format!(
+            extract(&sec(&format!(
                 "pw\notpauth://totp/A:x?secret={SECRET}&algorithm=MD5"
-            ))
+            )))
             .is_err()
         );
     }
@@ -346,35 +383,36 @@ mod tests {
         // < 16 bytes (128 bits) → totp-rs SecretSize error. This is the documented
         // gopass divergence: gopass accepts these, gpm does not. The canonical toy
         // secret JBSWY3DPEHPK3PXP (10 bytes) is rejected for the same reason.
-        assert!(extract("pw\ntotp: ABCD").is_err());
-        assert!(extract("pw\ntotp: JBSWY3DPEHPK3PXP").is_err());
+        assert!(extract(&sec("pw\ntotp: ABCD")).is_err());
+        assert!(extract(&sec("pw\ntotp: JBSWY3DPEHPK3PXP")).is_err());
     }
 
     #[test]
     fn extract_none_when_no_seed() {
         assert!(
-            extract("pw\nusername: alice\nurl: example.com")
+            extract(&sec("pw\nusername: alice\nurl: example.com"))
                 .unwrap()
                 .is_none()
         );
-        assert!(extract("just a password").unwrap().is_none());
-        assert!(extract("").unwrap().is_none());
+        assert!(extract(&sec("just a password")).unwrap().is_none());
+        // An empty body (password-only secret) carries no seed.
+        assert!(extract(&sec("pw")).unwrap().is_none());
     }
 
     #[test]
     fn has_totp_tracks_extract_presence() {
         // Clean seed → true (otpauth, bare, all match extract's Some branch).
-        assert!(has_totp(&format!(
+        assert!(has_totp(&sec(&format!(
             "pw\notpauth: otpauth://totp/Ex:a?secret={SECRET}"
-        )));
-        assert!(has_totp(&format!(
+        ))));
+        assert!(has_totp(&sec(&format!(
             "pw\notpauth://totp/Ex:a?secret={SECRET}"
-        )));
-        assert!(has_totp(&format!("pw\ntotp: {SECRET}")));
+        ))));
+        assert!(has_totp(&sec(&format!("pw\ntotp: {SECRET}"))));
         // No seed anywhere → false.
-        assert!(!has_totp("pw\nusername: alice\nurl: example.com"));
-        assert!(!has_totp("just a password"));
-        assert!(!has_totp(""));
+        assert!(!has_totp(&sec("pw\nusername: alice\nurl: example.com")));
+        assert!(!has_totp(&sec("just a password")));
+        assert!(!has_totp(&sec("pw")));
     }
 
     #[test]
@@ -382,15 +420,17 @@ mod tests {
         // A present-but-broken candidate (HOTP URI) is an `Err`, not `Ok(None)`:
         // the entry signals 2FA intent, so the affordance stays visible and the
         // error surfaces on a real copy attempt.
-        assert!(has_totp(&format!(
+        assert!(has_totp(&sec(&format!(
             "pw\notpauth://hotp/A:x?secret={SECRET}&counter=1"
-        )));
-        assert!(has_totp("pw\ntotp: ABCD"));
+        ))));
+        assert!(has_totp(&sec("pw\ntotp: ABCD")));
     }
 
     #[test]
     fn otp_debug_redacts_secret() {
-        let otp = extract(&format!("pw\ntotp: {SECRET}")).unwrap().unwrap();
+        let otp = extract(&sec(&format!("pw\ntotp: {SECRET}")))
+            .unwrap()
+            .unwrap();
         let s = format!("{otp:?}");
         assert!(s.contains("[REDACTED]"));
         assert!(!s.contains(SECRET));
