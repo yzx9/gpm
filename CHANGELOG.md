@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Settings → General** now keeps **AutoSync** and its **Background sync** option together in one card — background sync appears beneath AutoSync only while it's on — instead of two separate cards, and the AutoSync toggle now uses the same On/Off order as every other toggle.
 
+### Fixed
+
+- Text fields and dropdowns throughout the app no longer have a faint gray fill that could make a live setting look disabled or switched off. They now read as active outlined fields. Read-only boxes that display a key, token, or log keep their tinted background, since that signals "display only."
+
 ## [v0.16.1] - 2026-08-04
 
 ### Changed

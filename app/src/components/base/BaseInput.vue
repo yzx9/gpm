@@ -55,7 +55,9 @@ defineExpose({ focus: () => inputRef.value?.focus() });
   border-radius: var(--radius-md);
   font-size: var(--text-base);
   font-family: inherit;
-  background: var(--color-input);
+  /* Transparent — not a gray fill — so the field reads as an active bordered
+     input rather than a disabled/readonly one. Inherits the card surface. */
+  background: transparent;
   color: inherit;
   min-height: 48px;
 }

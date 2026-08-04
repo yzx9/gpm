@@ -202,7 +202,7 @@ function onSheetKeydown(e: KeyboardEvent) {
   border-radius: var(--radius-md);
   font-size: var(--text-base);
   font-family: inherit;
-  background: var(--color-input);
+  background: transparent;
   color: inherit;
   min-height: 48px;
   cursor: pointer;
