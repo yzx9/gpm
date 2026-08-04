@@ -190,8 +190,12 @@ describe("EntryConflictModal", () => {
     expect(wrapper.text()).toContain("This name is already in use");
     const buttons = wrapper.findAll("button");
     // Step-1 labels are op-keyed: keepTheirsCreate + overwriteCreate.
-    expect(buttons.some((b) => b.text().includes("Keep the existing one"))).toBe(true);
-    expect(buttons.some((b) => b.text().includes("Overwrite with mine"))).toBe(true);
+    expect(
+      buttons.some((b) => b.text().includes("Keep the existing one")),
+    ).toBe(true);
+    expect(buttons.some((b) => b.text().includes("Overwrite with mine"))).toBe(
+      true,
+    );
   });
 
   it("renders the delete-specific heading + buttons for a delete conflict", async () => {
@@ -205,8 +209,12 @@ describe("EntryConflictModal", () => {
     expect(wrapper.text()).toContain("This secret was changed elsewhere");
     const buttons = wrapper.findAll("button");
     // Step-1 labels: keepTheirsDelete + deleteAnyway.
-    expect(buttons.some((b) => b.text().includes("Keep their version"))).toBe(true);
-    expect(buttons.some((b) => b.text().includes("Delete it anyway"))).toBe(true);
+    expect(buttons.some((b) => b.text().includes("Keep their version"))).toBe(
+      true,
+    );
+    expect(buttons.some((b) => b.text().includes("Delete it anyway"))).toBe(
+      true,
+    );
   });
 
   it("'Preview their version' surfaces previewError when show_password rejects (undecryptable)", async () => {
@@ -214,7 +222,8 @@ describe("EntryConflictModal", () => {
     // identity — the preview must surface a clear error, not crash the modal, and
     // keep-theirs stays a stated leap of faith.
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "plugin:screen-secure|set_secure") return Promise.resolve(undefined);
+      if (cmd === "plugin:screen-secure|set_secure")
+        return Promise.resolve(undefined);
       if (cmd === "show_password")
         return Promise.reject({
           code: "DECRYPT_FAILED",
@@ -267,7 +276,9 @@ describe("EntryConflictModal", () => {
     expect(wrapper.find(STEP2_KEEPTHEIRS).exists()).toBe(true);
 
     // The step-2 Cancel is the last "Cancel" button (the sheet's cancel renders first).
-    const cancels = wrapper.findAll("button").filter((b) => b.text().includes("Cancel"));
+    const cancels = wrapper
+      .findAll("button")
+      .filter((b) => b.text().includes("Cancel"));
     await cancels[cancels.length - 1].trigger("click");
     await flushPromises();
 
