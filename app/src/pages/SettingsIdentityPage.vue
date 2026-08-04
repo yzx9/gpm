@@ -42,6 +42,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
+import BaseOnOffToggle from "@/components/base/BaseOnOffToggle.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSelect from "@/components/base/BaseSelect.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
@@ -438,13 +439,6 @@ async function onDisableIdentityAutoUnlock() {
 // control writes the behavior pref and syncs the shared security-settings cache
 // (clipboard-clear is the exception — it has no bumper dependency).
 const lockLoading = ref(false);
-
-// Shared On/Off options for the binary primaries (view-clear, clipboard-clear,
-// gate-idle).
-const onOffOptions = computed(() => [
-  { label: t("common.toggle.on"), value: true },
-  { label: t("common.toggle.off"), value: false },
-]);
 
 // Identity auto-lock: a 3-way primary — Immediate (no session caching), After
 // idle (cache + lock after N), Never — with the idle duration revealed only
@@ -856,11 +850,10 @@ onMounted(async () => {
             <p class="text-xs text-muted mb-3">
               {{ t("settings.appLock.gateIdle.description") }}
             </p>
-            <BaseSegmentedControl
+            <BaseOnOffToggle
               name="gate-idle"
               :aria-label="t('settings.appLock.gateIdle.legend')"
               :model-value="gateIdleEnabled"
-              :options="onOffOptions"
               :disabled="appLockLoading"
               @change="onGateIdleToggle"
             >
@@ -874,7 +867,7 @@ onMounted(async () => {
                   }}</template>
                 </p>
               </template>
-            </BaseSegmentedControl>
+            </BaseOnOffToggle>
             <BaseSelect
               v-if="gateIdleEnabled"
               class="mt-3"
@@ -982,12 +975,11 @@ onMounted(async () => {
         />
 
         <!-- Password view auto-clear: on/off + duration -->
-        <BaseSegmentedControl
+        <BaseOnOffToggle
           class="mb-3"
           name="view-clear"
           :legend="t('settings.lock.viewClearLegend')"
           :model-value="viewClearEnabled"
-          :options="onOffOptions"
           :disabled="lockLoading"
           @change="onViewClearToggle"
         />
@@ -1003,11 +995,10 @@ onMounted(async () => {
         />
 
         <!-- Clipboard auto-clear: on/off + duration -->
-        <BaseSegmentedControl
+        <BaseOnOffToggle
           name="clipboard-clear"
           :legend="t('settings.lock.clipboardClearLegend')"
           :model-value="clipboardClearEnabled"
-          :options="onOffOptions"
           :disabled="lockLoading"
           @change="onClipboardClearToggle"
         />

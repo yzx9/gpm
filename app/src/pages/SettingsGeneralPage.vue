@@ -26,6 +26,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
+import BaseOnOffToggle from "@/components/base/BaseOnOffToggle.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSelect from "@/components/base/BaseSelect.vue";
 import { useDialog, useSecureScreen, useToast, Z } from "@/composables";
@@ -249,12 +250,6 @@ async function onBackgroundSyncToggle(enabled: boolean) {
   await onBackgroundSyncChange(enabled ? lastBackgroundSync.value : "off");
 }
 
-// Shared On/Off options for the binary settings primaries.
-const onOffOptions = computed(() => [
-  { label: t("common.toggle.on"), value: true },
-  { label: t("common.toggle.off"), value: false },
-]);
-
 // Reset is gated behind a type-"RESET"-to-confirm modal: a stray tap can't
 // trigger this unrecoverable wipe, and no passphrase is required, so a user
 // who forgot theirs can still reset.
@@ -389,12 +384,11 @@ onMounted(() => {
         <h2 class="text-sm font-medium mb-3">
           {{ t("settings.autosync.title") }}
         </h2>
-        <BaseSegmentedControl
+        <BaseOnOffToggle
           class="mb-3"
           name="autosync"
           :legend="t('settings.autosync.legend')"
           :model-value="autosyncEnabled"
-          :options="onOffOptions"
           :disabled="autosyncLoading"
           @change="onAutosyncChange"
         >
@@ -406,7 +400,7 @@ onMounted(() => {
               <template v-else>{{ t("settings.autosync.offHint") }}</template>
             </p>
           </template>
-        </BaseSegmentedControl>
+        </BaseOnOffToggle>
 
         <!-- Periodic background sync (R061): on/off primary + cadence select. -->
         <div v-if="autosyncEnabled" class="mt-4 pt-4 border-t border-edge">
@@ -416,12 +410,11 @@ onMounted(() => {
           <p class="text-xs text-muted mb-3">
             {{ t("settings.backgroundSync.hint") }}
           </p>
-          <BaseSegmentedControl
+          <BaseOnOffToggle
             class="mb-3"
             name="background-sync-enabled"
             :aria-label="t('settings.backgroundSync.title')"
             :model-value="backgroundSyncEnabled"
-            :options="onOffOptions"
             :disabled="backgroundSyncLoading"
             @change="onBackgroundSyncToggle"
           />
