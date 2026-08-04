@@ -230,11 +230,13 @@ impl Store {
         }
     }
 
-    /// Replace the seal master key at runtime. The app-launch biometric lock
-    /// builds the store without the key (so `repo.json` is unreadable until the
-    /// unlock prompt), injects it via this call after a successful biometric
-    /// unlock, and wipes it (`None`) when the process is backgrounded. See
-    /// [`Config::set_master_key`].
+    /// Replace the **auth-free** master seal key at runtime (R064): gates
+    /// `repo.json` + `app.json`, NOT the identity. The master is permanent and
+    /// auth-free — `startup_master_key` loads it silently at launch (or defers
+    /// it under App Lock until `app_unlock`), and it is **never** wiped on
+    /// background. The identity lives under the separate biometric-gated vault
+    /// key — see [`set_vault_key`](Self::set_vault_key) /
+    /// [`Config::set_vault_key`].
     pub fn set_master_key(&self, master_key: Option<[u8; 32]>) {
         self.config.set_master_key(master_key);
     }

@@ -54,8 +54,11 @@ pub use gpg::GpgBackend;
 /// Which crypto backend a store uses. Phase 0-1 has only [`BackendKind::Age`]
 /// (hardwired in `Store::new`); Phase 3 persists this in `repo.json` for
 /// construction-time selection — which requires late binding, because the
-/// master key is withheld until app unlock so sealed `repo.json` is unreadable
-/// at `Store::new`.
+/// foreground defers loading the auth-free master key until `app_unlock` under
+/// App Lock, so sealed `repo.json` is unreadable at `Store::new` on a locked
+/// cold start. (The master key itself is auth-free — R064 — so the headless
+/// worker reads `repo.json` without a prompt; only the foreground Store defers
+/// it.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
     /// The age (X25519 / SSH) crypto backend.

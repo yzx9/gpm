@@ -4,7 +4,7 @@
 **Status:** Shipped
 **Phase:** Done
 
-**Retained** past the usual ship-and-delete RFC convention: [R063](R063-decouple-at-rest-from-app-lock.md) actively extends this design (it lifts the AppLock-off limitation below), so the rationale stays here as the reference R063 builds on.
+**Retained** past the usual ship-and-delete RFC convention: the AppLock-off limitation documented below was lifted by [R064](R064-background-sync-under-app-lock.md) (which made the git-credential key auth-free), so this rationale stays as the reference for that follow-up.
 
 ## What
 
@@ -26,7 +26,7 @@ This is convergence and UX, not a correctness gap — divergences are already re
 
 - **Foreground sync stays.** A periodic tick is coarse — the platform enforces a minimum interval and is itself opportunistic under Doze — so it cannot guarantee freshness at the moment the user opens the app. Foreground sync owns that "open right now" refresh. The two deliberately tolerate occasional double-runs rather than coordinate a shared last-sync timestamp.
 
-- **AppLock constraint (the limitation R063 lifts).** While the AppLock launch-gate is on, the master key sits behind a biometric prompt a background component cannot show, so the sealed repository config (git remote + credentials) is unreadable and a background tick must skip. Background sync therefore runs only on the auth-free master-key path (AppLock off). Under AppLock, the foreground sync (post-unlock) remains the only automatic path. R063 decouples at-rest encryption from the app-lock biometric precisely so a background tick can run under AppLock too.
+- **AppLock constraint — lifted by R064.** While the AppLock launch-gate was on, the at-rest key sat behind a biometric prompt a background component could not show, so the sealed repository config (git remote + credentials) was unreadable and a background tick had to skip — background sync ran only on the auth-free master-key path (AppLock off), leaving the foreground sync (post-unlock) as the only automatic path under AppLock. R064 decoupled the git-credential key from the app-lock biometric (an auth-free key for `repo.json`, leaving the identity gated), so a background tick now runs under AppLock too.
 
 - **Platform scheduler, not a timer or a foreground service.** A reliable periodic sync needs the platform's deferred, network-constrained, battery-aware primitive — Android WorkManager (periodic, with a network constraint; backed by JobScheduler). A plain in-process timer does not survive the OS suspending or killing the process. A long-running foreground service is the wrong shape here: it needs a persistent notification, drains battery, does not survive a force-kill or reboot, and sits on a known-broken lifecycle seam in the app framework (relaunch and activity-leak defects). It is reserved, at most, for a future "must not be paused mid-push" case that does not exist yet.
 
@@ -38,7 +38,7 @@ This is convergence and UX, not a correctness gap — divergences are already re
 
 - **Cadence.** Off / 1h / 6h / 12h / 1d / 3d, default Off. gopass uses ~3 days; gpm offers the same top end plus finer-grained options. The platform enforces a minimum periodic interval, so the finer cadences land as an opportunistic catch-up rather than a wall-clock guarantee.
 
-- **Defense-in-depth gates.** The Worker re-checks every gate itself (cadence, AppLock-off, repo-ready, AutoSync) rather than trusting the schedule — a stale schedule, a preference change, or an AppLock toggle between enqueue and fire still skips cleanly without touching the network.
+- **Defense-in-depth gates.** The Worker re-checks every gate itself (cadence, repo-ready, AutoSync) rather than trusting the schedule — a stale schedule or a preference change between enqueue and fire still skips cleanly without touching the network. (AppLock is no longer a gate: R064 made the git-credential key auth-free, so the worker runs while AppLock is on.)
 
 ## Alternatives considered
 
@@ -58,4 +58,4 @@ This is convergence and UX, not a correctness gap — divergences are already re
 
 ## Depends on / Supersedes
 
-Builds on the shipped foreground sync (whose rationale now lives in the code) and the manual sync path. Carries forward the not-yet-shipped background-timer rationale of the retired periodic-sync draft. Its AppLock-off limitation is lifted by [R063](R063-decouple-at-rest-from-app-lock.md).
+Builds on the shipped foreground sync (whose rationale now lives in the code) and the manual sync path. Carries forward the not-yet-shipped background-timer rationale of the retired periodic-sync draft. Its AppLock-off limitation was lifted by [R064](R064-background-sync-under-app-lock.md) (the retired R063 proposed full decoupling; R064 took only the auth-free git-credential part).

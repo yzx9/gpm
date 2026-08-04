@@ -70,17 +70,18 @@ pub(crate) struct AppState {
     /// (re)arm. The spawned task self-disarms if a newer arm happened while it
     /// slept.
     pub(crate) clipboard_clear_generation: Arc<AtomicU64>,
-    /// Whether the app-launch biometric gate is enabled (the seal master key
-    /// is sealed in the biometric-gated Keystore). Probed at startup from the
-    /// key's location and updated on enable/disable. Drives whether the frontend
-    /// ever shows the app-lock overlay.
+    /// Whether the app-launch biometric gate is enabled (the **vault key** —
+    /// which seals the identity — is sealed in the biometric-gated Keystore).
+    /// Probed at startup from the key's location and updated on enable/disable.
+    /// Drives whether the frontend ever shows the app-lock overlay.
     pub(crate) app_lock_enabled: AtomicBool,
-    /// Runtime app-lock state: `true` while the master key is NOT in memory —
-    /// cold start with the gate on, or after a background wipe. Cleared by
-    /// `applock::app_unlock`. Drives the frontend app-lock overlay (which
-    /// suppresses the identity overlay while up, so the two never compete).
-    /// `Arc` so the gate idle timer's spawned fire-task can flip it (a plain
-    /// `AtomicBool` can't cross into a `'static` task).
+    /// Runtime app-lock state: `true` while the **vault key** is NOT in memory
+    /// — cold start with the gate on, or after a background wipe. (The auth-free
+    /// master key stays loaded while locked, so only the identity is gated.)
+    /// Cleared by `applock::app_unlock`. Drives the frontend app-lock overlay
+    /// (which suppresses the identity overlay while up, so the two never
+    /// compete). `Arc` so the gate idle timer's spawned fire-task can flip it
+    /// (a plain `AtomicBool` can't cross into a `'static` task).
     pub(crate) app_locked: Arc<AtomicBool>,
     /// Gate in-app idle timer (R057) — a second [`identity::IdleTimer`] that
     /// fires `applock::do_app_lock(Idle)` after the configured foreground-idle
@@ -100,9 +101,10 @@ pub(crate) struct AppState {
     pub(crate) seal_migrate_state: AtomicU8,
     /// One-shot state for the post-unlock storage-backend resolve
     /// (`0` = Pending, `1` = `InFlight`, `2` = Done). The backend type lives in
-    /// sealed `repo.json` (unreadable until app unlock), so the resolve runs
-    /// post-unlock — mirroring `seal_migrate_state`. On a hard failure the
-    /// specific error is stashed in `Store` (not here) so `storage()` surfaces it.
+    /// sealed `repo.json`; the foreground defers loading the auth-free master
+    /// key until `app_unlock`, so the resolve runs post-unlock — mirroring
+    /// `seal_migrate_state`. On a hard failure the specific error is stashed in
+    /// `Store` (not here) so `storage()` surfaces it.
     pub(crate) backend_resolve_state: AtomicU8,
     /// Cancel slot for the in-flight clone/pull/push (if any). Shared by-ref into
     /// the rustpass orchestrator so it arms UNDER `write_mu` (not before),

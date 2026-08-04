@@ -2,23 +2,34 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! App-launch biometric gate (RFC 0028) — an opt-in lock that re-seals the
-//! seal master key behind a biometric-gated Keystore key, so the whole store
-//! is unreadable until the user authenticates on launch/resume.
+//! App-launch biometric gate (RFC 0028) — an opt-in lock that gates the **age
+//! identity** behind a biometric, so the secrets themselves stay unreadable
+//! until the user authenticates on launch/resume.
+//!
+//! R064 split the at-rest seal into two keys, and this gate controls only one:
+//! the **vault key** (biometric-gated when the gate is on), which seals the
+//! `identity` and its passphrase slot (`app_id_pass`). The **auth-free master
+//! key** (the other half of the split) stays permanently retrievable without a
+//! prompt and keeps sealing `repo.json` + `app.json` — so the headless
+//! background worker can read the git credential and pull-sync even while the
+//! gate is locked. The gate therefore locks the *identity*, not the whole store.
 //!
 //! This is a **third**, UI/session-layer lock, deliberately independent of the
 //! identity cache lock (`identity::`) and of the auth-free seal master key:
-//! - Enabling migrates the master key from the auth-free store to the
-//!   biometric-gated store (and back on disable). The key's location IS the
-//!   toggle state — probed non-promptingly at startup, before `repo.json`.
-//! - `app_unlock` retrieves the master key via a biometric prompt and injects
-//!   it into the `Store`; `app_lock` wipes it (and the identity cache) so a
-//!   locked app cannot read the store even from memory.
+//! - Enabling mints a distinct vault key and re-keys the identity + passphrase
+//!   slot under it (and re-keys them back to the auth-free master on disable).
+//!   The vault alias's presence IS the toggle state — probed non-promptingly at
+//!   startup.
+//! - `app_unlock` retrieves the vault key via a biometric prompt and injects it
+//!   into the `Store` (the auth-free master is loaded non-promptingly just
+//!   before); `app_lock` wipes the vault key (and the identity cache) so a
+//!   locked app cannot read the identity even from memory — while the auth-free
+//!   master stays keyed.
 //! - While the gate is active the frontend suppresses the identity overlay, so
 //!   the two never race to show competing prompts.
 //!
 //! The identity-auto-unlock opt-in (one app-unlock also unlocks the identity)
-//! layers on top: the identity passphrase is sealed under the master key, so
+//! layers on top: the identity passphrase is sealed under the vault key, so
 //! `app_unlock` decrypts it with no second prompt when the opt-in is on.
 
 use std::fmt;
@@ -333,7 +344,9 @@ pub(crate) async fn run_seal_migrate_once(state: &AppState) {
 ///
 /// Called by `app_unlock` after the master key is injected (and after
 /// [`run_seal_migrate_once`]): the backend type + root live in sealed
-/// `repo.json`, unreadable until unlock. On a hard failure (unregistered `ext:`,
+/// `repo.json`. (The master key is auth-free — R064 — but the foreground
+/// deliberately defers loading it until `app_unlock`, so this resolves
+/// post-unlock.) On a hard failure (unregistered `ext:`,
 /// tampered config) the specific error is stashed in `Store` so `storage()`
 /// surfaces it; the CAS resets to `Pending` so the next unlock retries (mirrors
 /// `run_seal_migrate_once`). `pub(crate)` so in-crate tests can drive it.
@@ -373,8 +386,9 @@ pub(crate) async fn run_backend_resolve_once(state: &AppState) {
     }
 }
 
-/// Unlock the app: retrieve the master key via a biometric prompt and inject it
-/// into the `Store`. The identity cache is left wiped (re-established lazily by
+/// Unlock the app: retrieve the **vault key** via a biometric prompt and inject
+/// it into the `Store` (the auth-free master key is loaded non-promptingly just
+/// above). The identity cache is left wiped (re-established lazily by
 /// per-operation auth, or by the identity-auto-unlock opt-in); a soft
 /// identity-lock event tells the frontend the next identity-needing op will
 /// re-authenticate WITHOUT raising the identity overlay over the just-unlocked
@@ -610,9 +624,11 @@ async fn try_identity_auto_unlock<R: Runtime>(
 }
 
 /// Core gate-lock logic shared by the [`app_lock`] command (foreground-return
-/// re-lock) and the gate idle timer's fire path. Wipes the master key (the store
-/// becomes unreadable) and the identity cache, marks the gate locked, and emits
-/// the transition with `reason` so the frontend decides whether to auto-prompt.
+/// re-lock) and the gate idle timer's fire path. Wipes the **vault key** (the
+/// identity becomes unreadable; the auth-free master stays keyed so the headless
+/// worker can still read `repo.json`/`app.json`) and the identity cache, marks
+/// the gate locked, and emits the transition with `reason` so the frontend
+/// decides whether to auto-prompt.
 ///
 /// In-flight writes are intentionally allowed to finish: they hold only the
 /// already-captured identity bytes (git ops never touch the seal master key),

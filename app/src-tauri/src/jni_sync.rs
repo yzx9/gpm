@@ -38,9 +38,11 @@ pub(crate) enum BackgroundSyncResult {
 /// dir + a base64 master key the Kotlin Worker retrieved from the Keystore.
 ///
 /// Gates (defense-in-depth, since the Worker also gates): cadence ≠ `Off`
-/// (`pref.json`), AppLock-off (master key present ⇒ `repo.json` readable),
-/// `is_repo_ready`, and `AutoSync`-on (background sync is linked to
-/// `AutoSync`). Then a pull-only `run_best_effort_sync` (the shared private-slot +
+/// (`pref.json`), `is_repo_ready`, and `AutoSync`-on (background sync is linked
+/// to `AutoSync`). Runs under App Lock too (R064): the worker reads only the
+/// auth-free master key — never the biometric-gated vault key — so `repo.json`
+/// (git credential) is readable while the identity stays gated. Then a pull-only
+/// `run_best_effort_sync` (the shared private-slot +
 /// 30s deadline helper). On a divergence or an authenticity-blocked
 /// fast-forward, atomically creates a passive attention marker file (NOT a
 /// `pref.json` field, so the write can't race a foreground pref write) for the

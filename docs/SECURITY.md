@@ -33,8 +33,10 @@ These are explicit non-goals, not gaps to be closed.
   no Keystore equivalent, so private files stay plaintext and the assumption rests on
   the user account not being compromised. (At-rest encryption and App Lock harden this —
   feature-specific, see `specs/007/security.md`.)
-- **Master key in memory for the session** is consistent with the non-goals above — no
-  more sensitive than the git credentials gpm already holds in memory while syncing.
+- **Auth-free master key in memory for the session** is consistent with the non-goals
+  above — no more sensitive than the git credentials gpm already holds in memory while
+  syncing. (R064: the identity sits under a separate vault key that follows the App
+  Lock toggle; only that one is gated.)
 
 ## System-wide measures
 
@@ -80,8 +82,8 @@ nothing worth protecting reaches a log line. And an attacker who can read the
 on-device log file already has filesystem access to the repository, so the
 entry-name metadata a log carries (which entries were copied, and when) gives
 them nothing they did not already have. Encrypting logs would add a key
-lifecycle — necessarily tied to the same master key that protects the real
-secrets — for no meaningful gain, and would couple diagnostics to the unlock
+lifecycle — necessarily tied to an at-rest key that protects the real secrets —
+for no meaningful gain, and would couple diagnostics to the unlock
 lifecycle, breaking the very use case it serves (reading logs to diagnose an
 unlock or setup failure).
 

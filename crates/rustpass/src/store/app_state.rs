@@ -46,7 +46,7 @@ impl Store {
         Ok(rc)
     }
 
-    /// Seal the identity passphrase under the seal master key, for the
+    /// Seal the identity passphrase under the **vault key**, for the
     /// identity-auto-unlock opt-in. See [`Config::save_app_identity_pass`].
     ///
     /// # Errors
@@ -64,7 +64,7 @@ impl Store {
     /// # Errors
     ///
     /// Returns [`ErrorCode::NoIdentity`] if the slot is absent, or an error if
-    /// the AEAD unseal fails (e.g. the master key is wiped).
+    /// the AEAD unseal fails (e.g. the vault key is wiped).
     pub async fn load_app_identity_pass(&self) -> Result<Zeroizing<Vec<u8>>, Error> {
         Ok(Zeroizing::new(self.config.load_app_identity_pass().await?))
     }

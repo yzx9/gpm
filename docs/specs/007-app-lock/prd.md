@@ -13,8 +13,8 @@ scope: lock
 ## 1. Introduction
 
 App-level locking: App Lock (biometric) + Auto-lock (Immediate / Idle / Never) +
-encryption at rest. On lock, the master key is wiped immediately, and no sensitive data
-is left behind.
+encryption at rest. On lock, the vault key (which gates the identity) is wiped
+immediately, and no sensitive data is left behind.
 
 ## 2. Motivation / Objective
 
@@ -24,7 +24,7 @@ encryption at rest means whoever pulls the phone's files only sees ciphertext.
 ## 3. Use Cases
 
 - **Jordan** turns App Lock on and sets Auto-lock to Immediate — they are particular
-  about the master key living in memory only for the single operation in flight. As a
+  about the identity key living in memory only for the single operation in flight. As a
   technical user, they tune the lock timing themselves.
 - **Casey** this is where their "even if I lose the phone, no one flips through my
   passwords" peace of mind comes from — one fingerprint press opens it, and it stays
@@ -36,8 +36,8 @@ encryption at rest means whoever pulls the phone's files only sees ciphertext.
 ### Product Design
 
 - App Lock uses biometrics to gate **the whole app** (not just a single password);
-  Auto-lock has three modes; under Immediate the master key lives in memory only for the
-  duration of a single operation.
+  Auto-lock has three modes; under Immediate the decrypted identity lives in memory only
+  for the duration of a single operation.
 
 ### Functionality
 

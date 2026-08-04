@@ -63,8 +63,10 @@ impl LockMode {
 
 /// Atomic write: write data to a temp file then rename over the target.
 ///
-/// Prevents file corruption if the write fails mid-operation. Used for both
-/// the identity file and `signing.json`, and (via the app shell) for `pref.json`.
+/// Prevents file corruption if the write fails mid-operation. Used for every
+/// sealed slot here (identity, `app_id_pass`, `repo.json`, the `app.json`
+/// behavior slot — each written after its `.seal()`) and, via the app shell,
+/// for the plaintext `pref.json` and `.sync_attention` marker.
 ///
 /// # Errors
 ///
@@ -81,16 +83,19 @@ pub async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
 ///
 /// This is the **sealed-files tier** of gpm's three persistence tiers (RFC
 /// 0038): (1) Git — the age-encrypted repository of secrets; (2) sealed files —
-/// `repo.json` + `identity`, owned here; (3) plaintext files — `app.json`
-/// (owned by the app shell, `src-tauri`). The secrets themselves live in tier
-/// 1 (the on-disk clone this config points at); tiers 2 and 3 are local
-/// metadata that never leave the device.
+/// `repo.json`, `identity`, and the sealed `app.json` behavior slot, owned
+/// here; (3) plaintext files — `pref.json` (owned by the app shell,
+/// `src-tauri`). The secrets themselves live in tier 1 (the on-disk clone this
+/// config points at); tiers 2 and 3 are local metadata that never leave the
+/// device.
 ///
 /// Manages storage of the age identity and repository-scoped configuration in
 /// an app-private directory. On Android, this is app-private storage; on
-/// desktop, it's the standard config directory. `repo.json` and `identity` are
-/// sealed at rest with AEAD where the platform supports it; on desktop the
-/// master key is `None` so the [`Seal`] is a plaintext passthrough.
+/// desktop, it's the standard config directory. R064 splits the seal into two
+/// keys (the `master_seal` / `vault_seal` fields): the auth-free `master_seal`
+/// seals `repo.json` + `app.json`; the biometric-gated `vault_seal` seals
+/// `identity` + `app_id_pass`. On desktop the keys are `None` so both seals
+/// are plaintext passthroughs.
 #[derive(Debug)]
 #[allow(clippy::struct_field_names)] // `config_dir` is a deliberate, clear name
 pub struct Config {
@@ -108,8 +113,10 @@ pub struct Config {
 impl Config {
     /// Create a new config instance rooted at the given directory.
     ///
-    /// `master_key` seals `repo.json`/`identity` at rest (AES-256-GCM); pass
-    /// `None` for plaintext passthrough (desktop / tests).
+    /// `master_key` seeds both seals — it seals `repo.json` + `app.json` via
+    /// `master_seal` and `identity`/`app_id_pass` via `vault_seal` (R064
+    /// initializes both to this same key until a distinct vault key is threaded
+    /// in). Pass `None` for plaintext passthrough (desktop / tests).
     ///
     /// **R064 bridge:** both the auth-free `master_seal` (metadata) and the
     /// auth-gated `vault_seal` (identity) are initialized to the same injected
@@ -262,18 +269,18 @@ impl Config {
 
     /// Path of the optional identity-passphrase slot used by the app-launch
     /// biometric gate's identity-auto-unlock opt-in (RFC 0028). When that opt-in
-    /// is on, the identity passphrase is AEAD-sealed under the seal master
-    /// key here — so a successful app-unlock (which retrieves the master key via
-    /// one biometric prompt) can unlock the identity with NO second prompt. The
-    /// master key (biometric-gated when app-lock is on) gates this slot, so the
+    /// is on, the identity passphrase is AEAD-sealed under the **vault key**
+    /// here — so a successful app-unlock (which retrieves the vault key via one
+    /// biometric prompt) can unlock the identity with NO second prompt. The
+    /// vault key (biometric-gated when app-lock is on) gates this slot, so the
     /// passphrase is effectively behind the single app-unlock biometric.
     fn app_identity_pass_path(&self) -> PathBuf {
         self.config_dir.join("app_id_pass")
     }
 
-    /// Seal `passphrase` under the seal master key into the identity-pass
-    /// slot. No-op-equivalent on desktop (the key is `None` ⇒ passthrough, so
-    /// the slot stores plaintext — acceptable since desktop has no app-lock).
+    /// Seal `passphrase` under the **vault key** into the identity-pass slot.
+    /// No-op-equivalent on desktop (the key is `None` ⇒ passthrough, so the
+    /// slot stores plaintext — acceptable since desktop has no app-lock).
     ///
     /// The caller is responsible for zeroizing `passphrase` after this call.
     ///
