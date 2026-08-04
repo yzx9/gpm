@@ -34,7 +34,7 @@
 mod common;
 
 mod tests {
-    use super::common::{encrypt_to_recipients, generate_test_keypair};
+    use super::common::{encrypt_to_recipients, expect_fast_forwarded, generate_test_keypair};
     use std::fs;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
@@ -207,6 +207,48 @@ done
             .status();
     }
 
+    /// Like [`commit_worktree`] but asserts both git commands succeeded, for the
+    /// load-bearing commits (the dual-recipient commit before a clone/push, the
+    /// planted-ciphertext commit before a gopass read) where a silent no-op would
+    /// violate a test invariant. Forces `commit.gpgsign=false` so a developer
+    /// machine with signing on (plus the test's isolated/empty GNUPGHOME) can't
+    /// fail the commit silently. Callers always have pending changes, so the
+    /// "nothing to commit" no-op path does not arise here.
+    fn commit_worktree_strict(store: &Path) {
+        let add = Command::new("git")
+            .arg("-C")
+            .arg(store)
+            .args(["add", "-A"])
+            .output()
+            .unwrap();
+        assert!(
+            add.status.success(),
+            "git add failed: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let commit = Command::new("git")
+            .arg("-C")
+            .arg(store)
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "user.name=gpm-interop",
+                "-c",
+                "user.email=interop@gpm",
+                "commit",
+                "-m",
+                "gpm interop test",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            commit.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+    }
+
     /// Split a secret plaintext into `(password, body)` the way gpm's parser
     /// will: first line is the password, the remainder is the body. gpm strips
     /// trailing whitespace from the body, so the expected body carries no
@@ -247,6 +289,13 @@ done
             ("team/infra/prod/db", "deep-pw\nenv: prod\nrole: admin"),
             ("svc/api.key", "dot-pw\nscope: read"),
             ("café/login", "uni-pw\nnote: name is non-ASCII"),
+            // Mixed-case AKV keys (the divergent direction): gopass writes them
+            // verbatim, gpm must parse key case byte-exact (`Secret::parse_attributes`,
+            // secret.rs) — pinning that gpm does not lowercase what gopass wrote.
+            (
+                "fwd/casekeys",
+                "Secret\nUserName: alice\nURL: https://example.com",
+            ),
         ];
         for (name, plaintext) in cases {
             gopass_insert(home.path(), name, plaintext);
@@ -289,6 +338,375 @@ done
             assert_eq!(secret.password(), pw, "password mismatch for {name}");
             assert_eq!(secret.body(), body, "body mismatch for {name}");
         }
+    }
+
+    /// **Reverse interop (gpm writes → gopass decrypts):** secrets written by
+    /// gpm's REAL modern writer (`Store::set`) are decrypted and parsed by the
+    /// real `gopass` binary. This is the mirror of the forward test above — it
+    /// pins that gpm's modern-format output is byte/format-compatible with
+    /// gopass's parser, closing the direction the forward test leaves open.
+    ///
+    /// Plant-style (no git transport): gpm writes into its clone of gopass's
+    /// store, the ciphertext bytes are copied into gopass's working store, and
+    /// `gopass show` reads them back. This isolates the FORMAT question (gpm
+    /// writer ↔ gopass parser) from transport — the analogue of the legacy
+    /// plant test, but planting bytes from gpm's real `Store::set` rather than
+    /// from the test helper's encryptor. It is safe because gopass's
+    /// `.gitattributes` filters only `*.gpg`, so a planted `.age` passes
+    /// `git add`/`commit` untransformed (no `clean`/`smudge` filter on `.age`).
+    #[tokio::test]
+    async fn gopass_decrypts_modern_secrets_written_by_gpm() {
+        if !gopass_present() {
+            eprintln!("skipping gopass interop test: `gopass` not on PATH");
+            return;
+        }
+
+        let (identity, recipient) = generate_test_keypair();
+        let (home, store_dir, _gopass_recipient) =
+            provision_gopass_store_with_gopass_recipient(&recipient);
+        // The helper rewrote `.age-recipients` to dual-recipient but did not
+        // commit it; gpm clones HEAD, so commit first or gpm's clone would carry
+        // only gopass's single-recipient file (mirrors provision_shared_bare_interop).
+        commit_worktree_strict(&store_dir);
+
+        // gpm clones gopass's committed store directly (the forward test's
+        // pattern). The dual-recipient file travels with the clone, so gpm's
+        // `set` encrypts to BOTH recipients — gopass's identity can decrypt what
+        // gpm writes.
+        let config_dir = tempfile::tempdir().unwrap();
+        let gpm_repo = config_dir.path().join("repo");
+        let store = Store::new(config_dir.path().to_path_buf(), None);
+        store
+            .configure(store_dir.to_str().unwrap(), &GitAuth::None, &identity, None)
+            .await
+            .expect("gpm clones the gopass store");
+
+        // Several secret shapes gpm writes and gopass must parse back identically
+        // — the reverse twin of the forward test's matrix (password-only, multiline
+        // AKV, non-ASCII, deep nesting, dotted final component, non-ASCII name).
+        // The mixed-case case additionally pins cross-binary AKV key-case
+        // agreement: gpm preserves keys byte-exact (`Secret::parse_attributes`,
+        // secret.rs) and gopass renders them verbatim (its key lookup is
+        // case-sensitive), so a `UserName` key must round-trip unchanged — any
+        // normalization on either side surfaces here.
+        let cases: &[(&str, &str)] = &[
+            ("test/password-only", "s3cret"),
+            (
+                "test/multiline",
+                "hunter2\nuser: alice\nurl: https://example.com",
+            ),
+            ("test/unicode", "pässwörd\nnote: 日本語 emoji 🔑"),
+            ("team/infra/prod/db", "deep-pw\nenv: prod\nrole: admin"),
+            ("svc/api.key", "dot-pw\nscope: read"),
+            ("café/login", "uni-pw\nnote: name is non-ASCII"),
+            // Mixed-case AKV keys: pins that gopass reads gpm's byte-exact keys.
+            (
+                "rev/casekeys",
+                "Secret\nURL: https://example.com\nUserName: alice",
+            ),
+        ];
+        for (name, plaintext) in cases {
+            store
+                .set(name, plaintext.as_bytes())
+                .await
+                .expect("gpm writes the modern-format secret");
+        }
+
+        // Plant each gpm-written ciphertext into gopass's working store — the
+        // only way to get gpm-written bytes in front of gopass's reader without a
+        // shared bare. gopass reads from its own worktree.
+        for (name, _plaintext) in cases {
+            let src = gpm_repo.join(format!("{name}.age"));
+            let dst = store_dir.join(format!("{name}.age"));
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::copy(&src, &dst).unwrap();
+        }
+        commit_worktree_strict(&store_dir);
+
+        for (name, plaintext) in cases {
+            // gopass: real binary, full parse cascade.
+            let gopass_out = gopass_show(home.path(), name);
+            let (gopass_pw, gopass_body) = expected_password_body(&gopass_out);
+
+            // The load-bearing reverse assertion: gopass's parser, fed gpm-written
+            // bytes, yields the same password and body gpm wrote.
+            let (want_pw, want_body) = expected_password_body(plaintext);
+            assert_eq!(
+                gopass_pw, want_pw,
+                "{name}: gopass password from gpm-written bytes"
+            );
+            assert_eq!(
+                gopass_body, want_body,
+                "{name}: gopass body from gpm-written bytes"
+            );
+        }
+    }
+
+    /// A shared bare git remote plus an isolated gopass store wired to it as
+    /// `origin`, used by the git-sync round-trip test. gopass bootstraps the
+    /// bare, so it carries gopass's own initial commit plus a dual-recipient
+    /// `.age-recipients` (gpm's + gopass's). The `TempDir` fields anchor lifetimes.
+    struct SharedBareInterop {
+        _home: TempDir,
+        _bare_dir: TempDir,
+        home_path: PathBuf,
+        bare_path: PathBuf,
+        store_dir: PathBuf,
+        gopass_recipient: String,
+    }
+
+    /// Provision a [`SharedBareInterop`]: a dual-recipient gopass store (gopass's
+    /// own recipient + `gpm_recipient`), an empty bare repo, gopass wired to the
+    /// bare as `origin`, the dual-recipient file committed and pushed so gpm's
+    /// clone of the bare carries the SAME recipients (no recipients-file
+    /// divergence across sync), and the bare HEAD pointed at gopass's branch.
+    ///
+    /// The bare-HEAD re-point is load-bearing: gpm's clone follows the bare's
+    /// HEAD symbolic ref, and gpm's push/pull refspecs derive from its
+    /// checked-out branch (`commit.rs:199` / `pull.rs:152`). A fresh
+    /// `init --bare` defaults HEAD to the git compile-time default branch, which
+    /// may not match gopass's; a silent mismatch makes gpm's push/pull no-op.
+    fn provision_shared_bare_interop(gpm_recipient: &str) -> SharedBareInterop {
+        let (home, store_dir, gopass_recipient) =
+            provision_gopass_store_with_gopass_recipient(gpm_recipient);
+        let store_str = store_dir.to_str().unwrap();
+        // Commit the dual-recipient rewrite so it travels with the bootstrap
+        // push — otherwise gpm clones gopass's single-recipient HEAD and the two
+        // sides' .age-recipients diverge on the first sync.
+        commit_worktree_strict(&store_dir);
+
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare_path = bare_dir.path().to_path_buf();
+        let bare_str = bare_path.to_str().unwrap();
+
+        // Empty bare remote (local file transport — no auth).
+        let init = Command::new("git")
+            .args(["init", "--bare", bare_str])
+            .output()
+            .unwrap();
+        assert!(
+            init.status.success(),
+            "git init --bare failed: {}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+
+        // Wire gopass's store to the bare as origin.
+        let remote = Command::new("git")
+            .arg("-C")
+            .arg(store_str)
+            .args(["remote", "add", "origin", bare_str])
+            .output()
+            .unwrap();
+        assert!(
+            remote.status.success(),
+            "git remote add failed: {}",
+            String::from_utf8_lossy(&remote.stderr)
+        );
+
+        // Detect gopass's branch (do NOT assume main/master).
+        let branch_out = Command::new("git")
+            .arg("-C")
+            .arg(store_str)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(branch_out.status.success(), "rev-parse HEAD failed");
+        let branch = String::from_utf8_lossy(&branch_out.stdout)
+            .trim()
+            .to_owned();
+
+        // Bootstrap push with -u so gopass's local branch tracks origin/<branch>
+        // — needed for gopass's later no-arg `git push` / `git pull` / `sync`.
+        let push = Command::new("git")
+            .arg("-C")
+            .arg(store_str)
+            .args(["push", "-u", "origin", &branch])
+            .output()
+            .unwrap();
+        assert!(
+            push.status.success(),
+            "bootstrap push failed: {}",
+            String::from_utf8_lossy(&push.stderr)
+        );
+
+        // Re-point the bare HEAD at gopass's branch so gpm's clone lands on it.
+        let sym = Command::new("git")
+            .arg("-C")
+            .arg(bare_str)
+            .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
+            .output()
+            .unwrap();
+        assert!(
+            sym.status.success(),
+            "symbolic-ref HEAD failed: {}",
+            String::from_utf8_lossy(&sym.stderr)
+        );
+
+        let home_path = home.path().to_path_buf();
+        SharedBareInterop {
+            _home: home,
+            _bare_dir: bare_dir,
+            home_path,
+            bare_path,
+            store_dir,
+            gopass_recipient,
+        }
+    }
+
+    /// **git-sync round-trip:** gpm and the real `gopass` binary push and pull to
+    /// one shared bare git remote, each via its own sync path. This exercises the
+    /// transport/wire layer — gopass's git conventions (commit messages,
+    /// `.gitattributes`) flowing into gpm's git sync, and gpm's commits flowing
+    /// back into gopass — the drift surface the format-only tests do not cover.
+    ///
+    /// Every step is a clean fast-forward: between any pull and the next push the
+    /// bare advances exactly once, so divergence is unreachable on this path.
+    ///
+    /// ```text
+    /// bare HEAD ─ gopass bootstrap push ─► symbolic-ref ─► gpm clones (gopass's branch)
+    /// Dir 1: gopass insert+push ─► gpm sync() pull ─► list + decrypt   (bare moves once)
+    /// Dir 2: gpm set + push()   ─► gopass git pull  ─► show            (bare moves once)
+    /// sync : gpm set + push()   ─► gopass sync      ─► show            (bare moves once)
+    /// ```
+    ///
+    /// After EVERY gopass operation we assert `.age-recipients` still lists both
+    /// recipients — recipient-file drift is the exact silent failure live-binary
+    /// interop exists to catch. Default signature verification is `VerifyMode::Off`,
+    /// so gopass's unsigned commits fast-forward with no special handling; the
+    /// commit graph is deliberately heterogeneous (gpm-interop test commits plus
+    /// gopass's own identity), which is fine under Off.
+    #[tokio::test]
+    async fn gpm_and_gopass_sync_through_shared_bare_remote() {
+        if !gopass_present() {
+            eprintln!("skipping gopass interop test: `gopass` not on PATH");
+            return;
+        }
+
+        let (identity, gpm_recipient) = generate_test_keypair();
+        let env = provision_shared_bare_interop(&gpm_recipient);
+
+        macro_rules! recipients_intact {
+            () => {{
+                let recips = fs::read_to_string(env.store_dir.join(".age-recipients")).unwrap();
+                assert!(
+                    recips.contains(gpm_recipient.as_str()),
+                    "gpm recipient dropped from .age-recipients:\n{recips}"
+                );
+                assert!(
+                    recips.contains(env.gopass_recipient.as_str()),
+                    "gopass recipient dropped from .age-recipients:\n{recips}"
+                );
+            }};
+        }
+        recipients_intact!();
+
+        // gpm clones the shared bare — lands on bare HEAD (gopass's branch).
+        let config_dir = tempfile::tempdir().unwrap();
+        let store = Store::new(config_dir.path().to_path_buf(), None);
+        store
+            .configure(
+                env.bare_path.to_str().unwrap(),
+                &GitAuth::None,
+                &identity,
+                None,
+            )
+            .await
+            .expect("gpm clones the shared bare");
+
+        // ── Direction 1: gopass writes + pushes → gpm pulls ───────────────────
+        let gopass_entry = "gopass-side/secret";
+        let gopass_plaintext = "from-gopass\nkind: written by real gopass";
+        gopass_insert(env.home_path.as_path(), gopass_entry, gopass_plaintext);
+        let push = gopass(env.home_path.as_path(), &["git", "push"])
+            .output()
+            .unwrap();
+        assert!(
+            push.status.success(),
+            "gopass git push failed: {}",
+            String::from_utf8_lossy(&push.stderr)
+        );
+        recipients_intact!();
+
+        // gpm pulls — fast-forward (gpm's HEAD == bare pre-push tip; bare moved once).
+        let outcome = store.sync().await.expect("gpm pulls");
+        expect_fast_forwarded(outcome);
+
+        // List agreement + cross-decrypt.
+        let entries: Vec<String> = store
+            .list(0, usize::MAX)
+            .await
+            .expect("gpm lists")
+            .entries
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(
+            entries.iter().any(|e| e == gopass_entry),
+            "gpm should list the gopass-pushed entry; got {entries:?}"
+        );
+        let secret = store
+            .get(gopass_entry)
+            .await
+            .expect("gpm decrypts the gopass-pushed entry");
+        let (want_pw, want_body) = expected_password_body(gopass_plaintext);
+        assert_eq!(secret.password(), want_pw);
+        assert_eq!(secret.body(), want_body);
+
+        // ── Direction 2: gpm writes + pushes → gopass pulls ───────────────────
+        // Invariant: gpm's HEAD == bare tip (just pulled) and nothing pushed in
+        // between, so gpm's commit + push is a clean fast-forward.
+        let gpm_entry = "gpm-side/secret";
+        let gpm_plaintext = "from-gpm\nkind: written by gpm Store::set";
+        store
+            .set(gpm_entry, gpm_plaintext.as_bytes())
+            .await
+            .expect("gpm writes");
+        store.push().await.expect("gpm pushes");
+
+        let pull = gopass(env.home_path.as_path(), &["git", "pull"])
+            .output()
+            .unwrap();
+        assert!(
+            pull.status.success(),
+            "gopass git pull failed: {}",
+            String::from_utf8_lossy(&pull.stderr)
+        );
+        recipients_intact!();
+
+        // Cross-decrypt via the real gopass binary — load-bearing: it proves
+        // gopass both resolves and decrypts gpm's pushed entry.
+        let gopass_out = gopass_show(env.home_path.as_path(), gpm_entry);
+        let (got_pw, got_body) = expected_password_body(&gopass_out);
+        let (want_pw, want_body) = expected_password_body(gpm_plaintext);
+        assert_eq!(got_pw, want_pw, "gopass must decrypt gpm-pushed password");
+        assert_eq!(got_body, want_body, "gopass must render gpm-pushed body");
+
+        // ── gopass sync cycle (the user-facing sync path) ─────────────────────
+        // Safe per the pre-implementation probe: age-backend `gopass sync` over a
+        // local-file remote is a near-no-op over git pull/push (no recipient
+        // prune, no keyserver hop), so this exercises gopass's high-level
+        // reconcile path without flakiness.
+        let sync_entry = "sync-cycle/secret";
+        let sync_plaintext = "via-sync\nkind: gopass sync round-trip";
+        store
+            .set(sync_entry, sync_plaintext.as_bytes())
+            .await
+            .expect("gpm writes for sync cycle");
+        store.push().await.expect("gpm pushes for sync cycle");
+        let sync = gopass(env.home_path.as_path(), &["sync"]).output().unwrap();
+        assert!(
+            sync.status.success(),
+            "gopass sync failed: {}",
+            String::from_utf8_lossy(&sync.stderr)
+        );
+        recipients_intact!();
+        let gopass_out = gopass_show(env.home_path.as_path(), sync_entry);
+        let (got_pw, got_body) = expected_password_body(&gopass_out);
+        let (want_pw, want_body) = expected_password_body(sync_plaintext);
+        assert_eq!(got_pw, want_pw, "gopass sync: decrypt password");
+        assert_eq!(got_body, want_body, "gopass sync: render body");
     }
 
     /// Like [`provision_gopass_store`], but captures gopass's own age recipient
@@ -483,7 +901,8 @@ done
     /// decodes it byte-identically):** a file uploaded through gopass's real
     /// binary write path (`gopass fscopy` → `secFromBytes`) is read back by
     /// gpm's attachment decoder. Pins that gpm interprets exactly what gopass
-    /// produced — the gap R053 deferred to the attachment work. Every byte
+    /// produced — a gap the earlier text-only interop tests left to this
+    /// attachment coverage. Every byte
     /// value, a PNG signature, and a multi-KB payload stress the base64 decode.
     #[tokio::test]
     async fn gpm_decodes_attachment_written_by_real_gopass() {

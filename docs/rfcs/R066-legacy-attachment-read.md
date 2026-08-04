@@ -125,5 +125,5 @@ Depends on **R054** (legacy read, which produces the render this RFC detects aga
 the **shipped modern attachment read side** (whose detector/export path this RFC reuses or
 parallels). Related to, but narrower than, that read side: it owns the attachment mechanism
 and the modern layout; R066 owns only the legacy-render interaction it defers. Naturally
-exercised by the live-binary interop tests (R053) driving a real gopass to write an
+exercised by the live-binary interop tests driving a real gopass to write an
 attachment into a legacy fixture.
