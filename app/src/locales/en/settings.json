@@ -164,8 +164,6 @@
   "autosync": {
     "title": "AutoSync",
     "legend": "Publish on every save",
-    "on": "On",
-    "off": "Off",
     "onHint": "Each save pulls, commits, and pushes automatically.",
     "offHint": "Saves stay local until you sync (swipe down on the list). Direct collisions show a resolve prompt; rarely, an edit from an out-of-date view can overwrite a newer change without a prompt — recoverable in git history.",
     "setFailed": "Failed to set AutoSync"

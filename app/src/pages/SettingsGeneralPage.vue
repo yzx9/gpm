@@ -383,7 +383,8 @@ onMounted(() => {
         </BaseSegmentedControl>
       </BaseCard>
 
-      <!-- AutoSync -->
+      <!-- Sync: AutoSync primary, with periodic background sync as a sub-section
+           below (revealed only while AutoSync is on). -->
       <BaseCard as="section">
         <h2 class="text-sm font-medium mb-3">
           {{ t("settings.autosync.title") }}
@@ -393,10 +394,7 @@ onMounted(() => {
           name="autosync"
           :legend="t('settings.autosync.legend')"
           :model-value="autosyncEnabled"
-          :options="[
-            { label: t('settings.autosync.off'), value: false },
-            { label: t('settings.autosync.on'), value: true },
-          ]"
+          :options="onOffOptions"
           :disabled="autosyncLoading"
           @change="onAutosyncChange"
         >
@@ -409,40 +407,39 @@ onMounted(() => {
             </p>
           </template>
         </BaseSegmentedControl>
-      </BaseCard>
 
-      <!-- Periodic background sync (R061) — shown only when AutoSync is on.
-           On/off primary + cadence select (revealed when on). -->
-      <BaseCard v-if="autosyncEnabled" as="section">
-        <h2 class="text-sm font-medium mb-2">
-          {{ t("settings.backgroundSync.title") }}
-        </h2>
-        <p class="text-xs text-muted mb-3">
-          {{ t("settings.backgroundSync.hint") }}
-        </p>
-        <BaseSegmentedControl
-          class="mb-3"
-          name="background-sync-enabled"
-          :aria-label="t('settings.backgroundSync.title')"
-          :model-value="backgroundSyncEnabled"
-          :options="onOffOptions"
-          :disabled="backgroundSyncLoading"
-          @change="onBackgroundSyncToggle"
-        />
-        <BaseSelect
-          v-if="backgroundSyncEnabled"
-          name="background-sync-cadence"
-          :legend="t('settings.backgroundSync.legend')"
-          :model-value="backgroundSyncCadence"
-          :options="
-            backgroundSyncOptions.map((o) => ({
-              label: t(`settings.backgroundSync.${o}`),
-              value: o,
-            }))
-          "
-          :disabled="backgroundSyncLoading"
-          @change="onBackgroundSyncChange"
-        />
+        <!-- Periodic background sync (R061): on/off primary + cadence select. -->
+        <div v-if="autosyncEnabled" class="mt-4 pt-4 border-t border-edge">
+          <h3 class="text-sm font-medium mb-1">
+            {{ t("settings.backgroundSync.title") }}
+          </h3>
+          <p class="text-xs text-muted mb-3">
+            {{ t("settings.backgroundSync.hint") }}
+          </p>
+          <BaseSegmentedControl
+            class="mb-3"
+            name="background-sync-enabled"
+            :aria-label="t('settings.backgroundSync.title')"
+            :model-value="backgroundSyncEnabled"
+            :options="onOffOptions"
+            :disabled="backgroundSyncLoading"
+            @change="onBackgroundSyncToggle"
+          />
+          <BaseSelect
+            v-if="backgroundSyncEnabled"
+            name="background-sync-cadence"
+            :legend="t('settings.backgroundSync.legend')"
+            :model-value="backgroundSyncCadence"
+            :options="
+              backgroundSyncOptions.map((o) => ({
+                label: t(`settings.backgroundSync.${o}`),
+                value: o,
+              }))
+            "
+            :disabled="backgroundSyncLoading"
+            @change="onBackgroundSyncChange"
+          />
+        </div>
       </BaseCard>
 
       <!-- Danger zone -->
