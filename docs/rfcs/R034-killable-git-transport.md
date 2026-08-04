@@ -35,4 +35,4 @@ Large. Desktop is modest (system git usually present, plus process plumbing and 
 
 ## Depends on / Supersedes
 
-- Extends the shipped clone/pull cancellation design, and the push-phase cancellation tracked in `0032-cancellable-saves`; both inherit the same callback-polling limit this RFC addresses.
+- Extends the shipped clone/pull/push cancellation design; all three inherit the same callback-polling limit this RFC addresses.

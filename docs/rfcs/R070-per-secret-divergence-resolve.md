@@ -144,6 +144,7 @@ surface is the bulk of the work. (human: ~2–3 days / CC: ~1 session)
 - Complements `R026` (edit-base-version-aware) — prevent-side vs resolve-side of
   the same clobber.
 - Preserves invariants from `R027` (path-bound per-secret history; plaintext
-  never crosses to the untrusted layer), `R032` (a subset resolve stays
-  cancellable under the same cancel-slot contract), and `R061` (background sync
-  stays non-interactive; the picker is foreground-only).
+  never crosses to the untrusted layer), the shipped cancel-slot contract (a
+  subset resolve stays cancellable under the same lock-scoped token a full sync
+  uses), and `R061` (background sync stays non-interactive; the picker is
+  foreground-only).

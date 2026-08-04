@@ -84,7 +84,7 @@ pub(crate) fn arm_cancel(state: &State<'_, AppState>, token: rustpass::CancelTok
 /// it on drop. Used by setup-time ops (clone/configure — single in-flight, no
 /// `write_mu`) that arm up-front. The save/sync/resolve orchestrators arm UNDER
 /// `write_mu` themselves (in rustpass) via the same slot, so `cancel_git` always
-/// targets the running op — not one queued behind the lock (RFC 0032 bug #1).
+/// targets the running op — not one queued behind the lock.
 pub(crate) struct SlotGuard {
     slot: rustpass::CancelSlot,
 }
@@ -106,7 +106,7 @@ impl Drop for SlotGuard {
 /// `"git-progress"` events, then hands BOTH the token and the shared cancel
 /// `slot` to `op`. `op` is responsible for arming the slot for the duration of
 /// its network phase — the save/sync/resolve orchestrators arm UNDER `write_mu`
-/// (so `cancel_git` targets the running op, RFC 0032 bug #1); setup-time ops arm
+/// (so `cancel_git` targets the running op); setup-time ops arm
 /// up-front via [`SlotGuard`]. This wrapper deliberately does NOT arm itself: an
 /// arm outside the lock is exactly the stomp a queued op would exploit.
 pub(crate) async fn run_cancellable<R, F, Fut, T>(

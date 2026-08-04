@@ -187,8 +187,8 @@ impl RcsCtx {
 
 /// RAII guard that arms a [`CancelSlot`] with a token on construction and clears
 /// it on drop. Constructed INSIDE a `write_mu` critical section so the running
-/// op's token — not a queued op's — is what `cancel_git` targets (RFC 0032 bug
-/// #1). The guard outlives the network phases and disarms before the `write_mu`
+/// op's token — not a queued op's — is what `cancel_git` targets. The guard
+/// outlives the network phases and disarms before the `write_mu`
 /// guard drops.
 struct ArmedSlot {
     slot: CancelSlot,
@@ -1241,8 +1241,9 @@ impl Store {
     ///   (local-ahead is common after any unpushed commit; the write still lands
     ///   on HEAD and the push decides). Only an Enforce authenticity block
     ///   aborts, and it does so before the write runs, so the repo is untouched.
-    ///   The push is **not** cancellable today;
-    ///   it is bounded by git's SSH/HTTP timeout. A `PUSH_REJECTED` is a real
+    ///   The push is cancellable best-effort (the sideband callback aborts on the
+    ///   cancel token; the bulk-upload window has no checkpoint, so a fast push may
+    ///   complete before the abort). A `PUSH_REJECTED` is a real
     ///   divergence; a network failure leaves the local commit in place to sync
     ///   later.
     ///
@@ -1291,7 +1292,7 @@ impl Store {
         }
 
         // Arm the cancel slot UNDER the lock so `cancel_git` targets THIS op, not
-        // one queued behind `write_mu` (RFC 0032 bug #1). Covers the pull + push
+        // one queued behind `write_mu`. Covers the pull + push
         // network phases; the guard disarms (clears the slot) when it drops.
         let _armed = cancel
             .as_ref()
@@ -1433,7 +1434,7 @@ impl Store {
         let _guard = self.write_mu.lock().await;
         let _repo_lock = self.repo_lock()?;
         // Arm under the lock so a cancel during the keep-mine push (the
-        // DivergenceModal "Cancel push" affordance) targets this resolve — RFC 0032.
+        // DivergenceModal "Cancel push" affordance) targets this resolve.
         let _armed = cancel
             .as_ref()
             .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
@@ -1582,7 +1583,7 @@ impl Store {
         let _guard = self.write_mu.lock().await;
         let _repo_lock = self.repo_lock()?;
         // Arm under the lock so a cancel during the keep-mine push targets this
-        // resolve, not one queued behind write_mu (RFC 0032, mirrors autosync_write).
+        // resolve, not one queued behind write_mu (mirrors autosync_write).
         let _armed = cancel
             .as_ref()
             .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
@@ -2013,7 +2014,8 @@ impl Store {
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
         let _repo_lock = self.repo_lock()?;
-        // Arm under the lock — RFC 0032 bug #1 (mirrors autosync_write).
+        // Arm under the lock so `cancel_git` targets this running op, not one
+        // queued behind `write_mu` (mirrors autosync_write).
         let _armed = cancel
             .as_ref()
             .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
@@ -2086,7 +2088,8 @@ impl Store {
     ) -> Result<SyncOutcome, Error> {
         let _guard = self.write_mu.lock().await;
         let _repo_lock = self.repo_lock()?;
-        // Arm under the lock — RFC 0032 bug #1 (mirrors autosync_write).
+        // Arm under the lock so `cancel_git` targets this running op, not one
+        // queued behind `write_mu` (mirrors autosync_write).
         let _armed = cancel
             .as_ref()
             .map(|t| ArmedSlot::arm(slot.clone(), t.clone()));
@@ -3002,7 +3005,7 @@ mod tests {
 
     #[test]
     fn armed_slot_arms_on_construct_clears_on_drop() {
-        // The load-bearing contract for the RFC 0032 bug #1 fix: the slot holds
+        // The load-bearing contract for the lock-scoped arming: the slot holds
         // the running op's token only while the guard lives, then clears — so a
         // queued op arming under the next critical section isn't clobbered.
         let slot: CancelSlot = Arc::new(Mutex::new(None));

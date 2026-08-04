@@ -206,7 +206,7 @@ pub type CancelToken = Arc<AtomicBool>;
 /// Shared slot holding the in-flight op's [`CancelToken`]. The orchestrator arms
 /// it UNDER `Store::write_mu` (right after acquiring the lock) and clears it when
 /// the critical section ends — so a second op queued behind the lock cannot
-/// overwrite the running op's token (the pre-R032 stomp, RFC 0032 bug #1). The
+/// overwrite the running op's token. The
 /// `cancel_git` command `take`s/sets it. `Arc`'d so the src-tauri command layer
 /// can clone it into the orchestrator (mirrors `lock_generation`).
 pub type CancelSlot = Arc<Mutex<Option<CancelToken>>>;

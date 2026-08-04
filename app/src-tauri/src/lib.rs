@@ -106,8 +106,8 @@ pub(crate) struct AppState {
     pub(crate) backend_resolve_state: AtomicU8,
     /// Cancel slot for the in-flight clone/pull/push (if any). Shared by-ref into
     /// the rustpass orchestrator so it arms UNDER `write_mu` (not before),
-    /// eliminating the pre-R032 stomp where a queued op overwrote the running
-    /// op's token. `cancel_git` `take`s/sets it.
+    /// eliminating the stomp where a queued op overwrote the running op's
+    /// token. `cancel_git` `take`s/sets it.
     pub(crate) active_cancel_slot: rustpass::CancelSlot,
     /// Verbose deadline timer handle — cancel-and-respawn pattern, same shape
     /// as `clipboard_clear_handle`. Holds the in-flight revert task so a fresh

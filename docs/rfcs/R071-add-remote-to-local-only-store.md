@@ -75,8 +75,9 @@ background pull runs only post-unlock — but the transition from "never syncs" 
 add the remote.
 
 **Cancellation blind spot (inherited).** A mistyped URL during add-remote
-contacts an unverified host, and the push has no cancel path until R032 / R034
-land. This is the same first-run-to-an-unverified-host pain the create flow
+contacts an unverified host, and the first push to it is only best-effort
+cancellable — the bulk-upload window has no abort checkpoint until `R034`
+lands. This is the same first-run-to-an-unverified-host pain the create flow
 already has; add-remote inherits it, it is not new.
 
 **Local-only is not a first-class UI state.** The only signal that a store has
@@ -136,6 +137,6 @@ hard parts — sync gating, divergence resolve, the sealed-config mutation patte
   `R004` (reconfiguration flow), which stays the umbrella for change-URL /
   change-credentials.
 - Side effect on `R061` (background sync begins targeting the new remote).
-- Inherits the cancellation blind spot from `R032` / `R034` (an uncancellable
-  first push to an unverified host).
+- Inherits the remaining cancellation blind spot from `R034` (the bulk-upload
+  window of a first push to an unverified host has no abort checkpoint).
 - Reuses the push-only first-publish pattern the create flow established.
