@@ -15,13 +15,12 @@ import { getAppConfig } from "@/api";
  * and a pinned Light opts out of the dark media query (`:root:not([data-theme=
  * "light"])`).
  *
- * JS therefore only ever sets or clears that one attribute. `reconcile` reads
- * the persisted preference after mount and applies it; the System case needs no
- * JS at all. A pinned preference can flash for ~one frame at cold start before
- * the config is read — the same trade-off the locale feature makes for a pinned
- * language (see `src/i18n`), and inherent here because `app.json` is unreadable
- * at the only pre-paint hook (the Tauri init script, whose content is fixed at
- * Tauri Builder time on Android).
+ * JS therefore only ever sets or clears that one attribute. The pinned
+ * preference no longer flashes at cold start: the Rust setup closure reads
+ * `pref.json` and bakes `data-theme` into a per-window init script that runs
+ * before first paint (see `theme_init_script` in `app_config.rs`). `reconcile`
+ * is the post-mount authoritative correction — it confirms the init script's
+ * value and fixes the rare case where `pref.json` was unreadable at setup.
  */
 
 /** A theme the settings picker offers: track the OS, or pin light/dark. */
@@ -58,10 +57,12 @@ export function applyTheme(mode: ThemeMode): void {
 }
 
 /**
- * Read the persisted `theme_mode` from the backend and apply it. Called once
- * after mount so a pinned preference lands within a frame of first paint.
- * Failures (no backend in pure-Vite dev, IPC blip) are swallowed so the app
- * keeps the CSS-driven System default rather than blanking.
+ * Read the persisted `theme_mode` from the backend and apply it. The Rust
+ * setup closure already baked the pinned theme into a pre-paint init script,
+ * so this is an authoritative safety net — it confirms that value and corrects
+ * the rare case where `pref.json` was unreadable at setup (corrupt file, first
+ * launch). Failures (no backend in pure-Vite dev, IPC blip) are swallowed so
+ * the app keeps the CSS-driven System default rather than blanking.
  */
 export async function reconcileThemeFromBackend(): Promise<void> {
   try {

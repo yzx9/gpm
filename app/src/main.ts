@@ -258,9 +258,10 @@ void (async () => {
   await loadBundle(boot, "native").catch(() => {});
   app.mount("#app");
   void reconcileLocaleFromBackend();
-  // Apply a pinned color-scheme preference within a frame of first paint. The
-  // System default needs no JS (the CSS media query owns it), so this is only
-  // load-bearing for a pinned Light/Dark — and like the locale reconcile, a
-  // pinned theme can flash for ~one frame before this resolves.
+  // Safety net: the Rust setup closure already baked the pinned theme into the
+  // WebView's pre-paint init script (see theme_init_script in app_config.rs), so
+  // frame 0 is correctly themed. This reconcile corrects the rare case where
+  // pref.json was unreadable at setup — flipping the CSS-driven System default
+  // to the pinned value within a frame.
   void reconcileThemeFromBackend();
 })();

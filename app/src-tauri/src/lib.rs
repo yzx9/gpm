@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use rustpass::Store;
-use tauri::Manager;
+use tauri::{Manager, WebviewWindowBuilder};
 use tauri_plugin_secure_keystore::{SecureKeystore, SecureKeystoreExt};
 use tokio::task::JoinHandle;
 
@@ -208,15 +208,24 @@ async fn startup_master_key<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> (Optio
 // App entry point
 // ---------------------------------------------------------------------------
 
-/// Build the initial [`AppState`] during Tauri setup: resolve the config dir,
-/// load (or defer, when app-lock is on) the seal master key, run the one-time
-/// plaintext→envelope migration, and assemble the state. Extracted from
-/// [`run`] so the entry point stays a thin builder.
+/// Build the initial [`AppState`] during Tauri setup: load (or defer, when
+/// app-lock is on) the seal master key, run the one-time plaintext→envelope
+/// migration, and assemble the state. Extracted from [`run`] so the entry
+/// point stays a thin builder.
+///
+/// `config_dir` and `app_config` are resolved in `run`'s setup closure (not
+/// here) so the pinned `theme_mode` can be read from `pref.json` and baked
+/// into the main window's init script before the window is created.
 ///
 /// # Panics
 ///
-/// Panics if the config directory cannot be determined.
-fn init_state(app: &tauri::App<tauri::Wry>) -> AppState {
+/// Panics if the config directory cannot be determined (the `.expect` lives in
+/// the setup closure, before this is called).
+fn init_state(
+    app: &tauri::App<tauri::Wry>,
+    config_dir: std::path::PathBuf,
+    app_config: app_config::AppConfigStore,
+) -> AppState {
     // Cold-start banner: version first (the thing bug reports most need to
     // pin), then build profile + target so a trace distinguishes dev vs
     // release and android vs desktop at a glance. Emitted BEFORE the keystore
@@ -232,11 +241,6 @@ fn init_state(app: &tauri::App<tauri::Wry>) -> AppState {
         std::env::consts::OS,
         std::env::consts::ARCH,
     );
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .expect("Cannot determine app config directory");
-
     // At-rest master key + app-lock state. When the biometric-gated master key
     // exists (app-lock on), the key is NOT loaded here — it is injected after
     // the app-unlock biometric prompt — so `repo.json` stays unreadable until
@@ -252,9 +256,8 @@ fn init_state(app: &tauri::App<tauri::Wry>) -> AppState {
         config_dir.display(),
         app_lock_enabled,
     );
-    // App-shell (non-repo) preferences — primarily the screen-capture master
-    // toggle. Borrows `config_dir` before it is moved into `Store` below.
-    let app_config = tauri::async_runtime::block_on(app_config::AppConfigStore::new(&config_dir));
+    // `app_config` is passed in: the setup closure builds it once so the pinned
+    // `theme_mode` can be read for the window's init script before creation.
     // Apply the persisted log level NOW (right after app.json loads and the log
     // plugin has initialized). The plugin is capped at Debug (see `run()`), so
     // this `set_max_level` is the runtime gate — a live `verbose_until` ⇒ Debug,
@@ -455,7 +458,37 @@ pub fn run() {
         // Best-effort display language baked in pre-paint; `resolved_locale` IPC reconciles a pinned preference after mount (see `app_config`).
         .append_invoke_initialization_script(app_config::locale_init_script())
         .setup(|app| {
-            let state = init_state(app);
+            // Resolve the config dir + read pref.json synchronously so the pinned
+            // `theme_mode` can be baked into the main window's init script before
+            // the window is created (eliminates the cold-start theme flash on a
+            // pinned Light/Dark). Both are then handed to `init_state` so
+            // pref.json is read exactly once. Done BEFORE `init_state`'s heavy
+            // work (keystore IPC, seal migration, migrations) so the WebView can
+            // paint a correctly-themed frame 0 while that work runs.
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .expect("Cannot determine app config directory");
+            let app_config =
+                tauri::async_runtime::block_on(app_config::AppConfigStore::new(&config_dir));
+            let theme_script =
+                app_config::theme_init_script(app_config.get_pref().theme_mode.as_deref());
+            // `create: false` in tauri.conf.json keeps Tauri from auto-creating
+            // the main window; build it here with the per-window theme init
+            // script. The global locale init script still applies (Tauri
+            // prepends global init scripts to every webview). The "main" label
+            // must match the capabilities scope in capabilities/{default,mobile}.json.
+            let main_window = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .expect("main window config missing (tauri.conf.json)");
+            WebviewWindowBuilder::from_config(app.handle(), main_window)?
+                .initialization_script(theme_script)
+                .build()?;
+            let state = init_state(app, config_dir, app_config);
             // Apply the persisted background-sync cadence on launch
             // (enqueue/cancel the WorkManager periodic work).
             #[cfg(target_os = "android")]

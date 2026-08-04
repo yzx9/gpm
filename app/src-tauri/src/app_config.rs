@@ -681,9 +681,45 @@ pub(crate) fn init_script_locale() -> String {
 /// `__TAURI_INTERNALS__`.
 pub(crate) fn locale_init_script() -> String {
     let locale = init_script_locale();
+    let locale_json = serde_json::to_string(&locale)
+        .expect("locale always serializes to a JS string literal")
+        // Escape `</` so a planted locale can't break out of the HTML <script>
+        // Tauri injects on Android WebViews without addDocumentStartJavaScript
+        // (serde_json doesn't escape `/`; `<\/` is JSON-valid, JS-equivalent).
+        .replace("</", "<\\/");
+    format!("window.__GPM_LOCALE__ = {locale_json};")
+}
+
+/// The JavaScript snippet that bakes the pinned color-scheme preference into
+/// the `WebView` as `<html data-theme>` **before first paint**, eliminating the
+/// one-frame flash a pinned Light/Dark would otherwise show (the CSS
+/// `color-scheme` and app-color variables both key off `[data-theme]`).
+///
+/// Unlike [`locale_init_script`], this is registered per-window (on the
+/// `WebviewWindowBuilder` inside `.setup()`), not globally on the Builder —
+/// because it can only be composed once `pref.json` has been read, which needs
+/// the running app's config dir (unreadable at Tauri `Builder` time on
+/// Android). The global locale script still applies to the same window (Tauri
+/// prepends global init scripts ahead of per-window ones).
+///
+/// `None` (track system) clears any stale `data-theme` — defensive, since the
+/// attribute starts absent on a fresh document. `Some("light")`/`Some("dark")`
+/// set it so the matching `:root[data-theme="..."]` rule (and its
+/// `color-scheme`) apply from frame 0. The script runs pre-HTML-parse (document
+/// start); `document.documentElement` already exists then, but the `if (d)`
+/// guard keeps it a harmless no-op if it ever does not (the post-mount
+/// `reconcile` then owns the value). Only `light`/`dark` are whitelisted inside
+/// the JS — a garbage value (a corrupt `pref.json`) degrades to system instead
+/// of poisoning frame 0, mirroring `normalize_theme_mode`.
+pub(crate) fn theme_init_script(theme_mode: Option<&str>) -> String {
+    let mode_json = serde_json::to_string(&theme_mode)
+        .expect("theme_mode serializes to a JS value (string or null)")
+        // Escape `</` so a planted theme_mode can't break out of the HTML
+        // <script> Tauri injects on Android WebViews without
+        // addDocumentStartJavaScript (serde_json doesn't escape `/`).
+        .replace("</", "<\\/");
     format!(
-        "window.__GPM_LOCALE__ = {};",
-        serde_json::to_string(&locale).expect("locale always serializes to a JS string literal")
+        "(function(){{var m={mode_json},d=document.documentElement;if(d){{if(m==='light'||m==='dark'){{d.setAttribute('data-theme',m);}}else{{d.removeAttribute('data-theme');}}}}}})();"
     )
 }
 
@@ -1706,6 +1742,54 @@ mod tests {
             is_supported_locale(&resolved),
             "init script locale must be supported, got {resolved}"
         );
+    }
+
+    #[test]
+    fn theme_init_script_pins_data_theme_for_light_and_dark() {
+        // A pinned value bakes `m="<value>"` into the pre-paint init script and
+        // sets `data-theme` to it, so the `:root[data-theme="..."]` rule (and
+        // `color-scheme`) apply from frame 0 — no cold-start flash. Exact-match
+        // locks in the `format!` brace-escaping (a stray/missing brace fails).
+        assert_eq!(
+            theme_init_script(Some("light")),
+            "(function(){var m=\"light\",d=document.documentElement;if(d){if(m==='light'||m==='dark'){d.setAttribute('data-theme',m);}else{d.removeAttribute('data-theme');}}})();"
+        );
+        assert_eq!(
+            theme_init_script(Some("dark")),
+            "(function(){var m=\"dark\",d=document.documentElement;if(d){if(m==='light'||m==='dark'){d.setAttribute('data-theme',m);}else{d.removeAttribute('data-theme');}}})();"
+        );
+    }
+
+    #[test]
+    fn theme_init_script_clears_data_theme_for_system_and_garbage() {
+        // `None` (track system) clears the attribute (defensive; it starts
+        // absent on a fresh document). A garbage value still emits the
+        // `setAttribute` call, but the `if (m === 'light' || m === 'dark')`
+        // guard routes it to `removeAttribute` — degrading to system instead
+        // of poisoning frame 0, mirroring `normalize_theme_mode`.
+        assert_eq!(
+            theme_init_script(None),
+            "(function(){var m=null,d=document.documentElement;if(d){if(m==='light'||m==='dark'){d.setAttribute('data-theme',m);}else{d.removeAttribute('data-theme');}}})();"
+        );
+        assert_eq!(
+            theme_init_script(Some("blue")),
+            "(function(){var m=\"blue\",d=document.documentElement;if(d){if(m==='light'||m==='dark'){d.setAttribute('data-theme',m);}else{d.removeAttribute('data-theme');}}})();"
+        );
+    }
+
+    #[test]
+    fn theme_init_script_escapes_html_script_close_tag() {
+        // A `</script>` in a planted theme_mode must not break out of the HTML
+        // <script> Tauri injects on older Android WebViews. serde_json doesn't
+        // escape `/`, so the function escapes `</` to `<\/` itself (JSON-valid,
+        // JS-equivalent, HTML-safe — `<\/script>` won't match the end-tag rule).
+        let payload = "</script><script>alert(1)</script>";
+        let s = theme_init_script(Some(payload));
+        assert!(
+            !s.contains("</script"),
+            "raw </script must not survive into the inject, got: {s}"
+        );
+        assert!(s.contains("<\\/script"), "must escape </ as <\\/, got: {s}");
     }
 
     #[tokio::test]
