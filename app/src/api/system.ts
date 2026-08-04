@@ -56,6 +56,14 @@ export type BackgroundSyncCadence = "off" | "1h" | "6h" | "12h" | "1d" | "3d";
 /** The canonical gate-idle default (mirrors the backend: absent ⇒ After 300s). */
 export const DEFAULT_GATE_IDLE: GateIdle = { after: 300 };
 
+/** The auto-lock idle duration restored when (re)entering "After idle" with no
+ *  prior idle choice (the install default is Immediate, not an idle value). */
+export const DEFAULT_LOCK_IDLE: LockMode = { idle: 60 };
+
+/** The background-sync cadence used when periodic background sync is first
+ *  enabled (the install default is "off", no cadence chosen). */
+export const DEFAULT_BACKGROUND_SYNC_CADENCE: BackgroundSyncCadence = "6h";
+
 export interface AppConfig {
   /** Persisted-schema version (one-shot migration gate). Absent ⇒ 1. */
   schema_version?: number;

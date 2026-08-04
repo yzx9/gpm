@@ -137,6 +137,7 @@
     },
     "gateIdle": {
       "legend": "静止时重新锁定",
+      "afterLegend": "重新锁定延时",
       "description": "应用保持打开时，闲置一段时间后重新锁定。",
       "off": "关闭",
       "offHint": "仅当离开并返回 gpm 时重新锁定。",
@@ -184,6 +185,8 @@
     "title": "自动锁定与自动清除",
     "description": "控制身份何时锁定，以及机密内容在剪贴板 / 屏幕上的留存时长。",
     "autoLockLegend": "自动锁定",
+    "autoLockAfter": "锁定延时",
+    "afterIdle": "闲置后",
     "viewClearLegend": "密码查看自动清除",
     "clipboardClearLegend": "剪贴板自动清除",
     "immediate": "立即",
@@ -196,6 +199,7 @@
     "setModeFailed": "设置自动锁定模式失败"
   },
   "clear": {
+    "clearAfter": "清除延时",
     "seconds": "{count} 秒",
     "default": "{count} 秒 · 默认",
     "setViewFailed": "设置查看自动清除失败",

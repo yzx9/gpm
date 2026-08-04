@@ -13,6 +13,7 @@ import type {
 } from "@/api";
 import {
   DEFAULT_GATE_IDLE,
+  DEFAULT_LOCK_IDLE,
   asAppLockError,
   changePassphrase,
   disableBiometricAppLock,
@@ -42,6 +43,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import BaseSelect from "@/components/base/BaseSelect.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import {
@@ -437,49 +439,56 @@ async function onDisableIdentityAutoUnlock() {
 // (clipboard-clear is the exception — it has no bumper dependency).
 const lockLoading = ref(false);
 
-const LOCK_PRESETS = computed<{ label: string; value: LockMode }[]>(() => [
-  { label: t("settings.lock.immediate"), value: "immediate" },
+// Shared On/Off options for the binary primaries (view-clear, clipboard-clear,
+// gate-idle).
+const onOffOptions = computed(() => [
+  { label: t("common.toggle.on"), value: true },
+  { label: t("common.toggle.off"), value: false },
+]);
+
+// Identity auto-lock: a 3-way primary — Immediate (no session caching), After
+// idle (cache + lock after N), Never — with the idle duration revealed only
+// under "After idle". `immediate` is a distinct mode, not "idle of zero".
+type LockTopMode = "immediate" | "idle" | "never";
+const LOCK_TOP_OPTIONS = computed<{ label: string; value: LockTopMode }[]>(
+  () => [
+    { label: t("settings.lock.immediate"), value: "immediate" },
+    { label: t("settings.lock.afterIdle"), value: "idle" },
+    { label: t("settings.lock.never"), value: "never" },
+  ],
+);
+const LOCK_IDLE_PRESETS = computed<{ label: string; value: LockMode }[]>(() => [
   { label: t("settings.lock.minutes", { count: 1 }), value: { idle: 60 } },
   { label: t("settings.lock.minutes", { count: 5 }), value: { idle: 300 } },
   { label: t("settings.lock.minutes", { count: 15 }), value: { idle: 900 } },
   { label: t("settings.lock.minutes", { count: 30 }), value: { idle: 1800 } },
-  { label: t("settings.lock.never"), value: "never" },
-]);
-const VIEW_CLEAR_PRESETS = computed<{ label: string; value: number | null }[]>(
-  () => [
-    { label: t("settings.clear.seconds", { count: 10 }), value: 10 },
-    { label: t("settings.clear.default", { count: 45 }), value: null },
-    { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
-    { label: t("settings.lock.never"), value: 0 },
-  ],
-);
-const CLIPBOARD_CLEAR_PRESETS = computed<
-  { label: string; value: number | null }[]
->(() => [
-  { label: t("settings.clear.default", { count: 45 }), value: null },
-  { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
-  { label: t("settings.lock.never"), value: 0 },
 ]);
 
 const rawLockMode = computed<LockMode>(
   () => appConfig.value?.lock_mode ?? "immediate",
 );
-const rawViewClear = computed<number | null>(
-  () => appConfig.value?.view_clear_secs ?? null,
-);
-const rawClipboardClear = computed<number | null>(
-  () => appConfig.value?.clipboard_clear_secs ?? null,
+const lockTopMode = computed<LockTopMode>(() => {
+  const m = rawLockMode.value;
+  return m === "immediate" || m === "never" ? m : "idle";
+});
+// Last-used idle duration, restored when (re)entering "After idle" so an
+// immediate→never→idle round-trip doesn't reset a chosen 15 min. Seeded from
+// DEFAULT_LOCK_IDLE; the watcher below is its sole writer.
+const lastIdle = ref<LockMode>(DEFAULT_LOCK_IDLE);
+watch(
+  rawLockMode,
+  (m) => {
+    if (typeof m === "object") lastIdle.value = m;
+  },
+  { immediate: true },
 );
 
 // Two-arg equality for LockMode (handles the `{ idle }` object presets); passed
-// to BaseSegmentedControl's `by` prop. `lockModeActive` wraps it for hint checks.
+// to BaseSelect's `by` prop for the idle-duration sheet.
 function lockModeEq(a: LockMode, b: LockMode): boolean {
   if (a === b) return true;
   if (typeof a === "object" && typeof b === "object") return a.idle === b.idle;
   return false;
-}
-function lockModeActive(p: LockMode): boolean {
-  return lockModeEq(rawLockMode.value, p);
 }
 
 async function onLockModeChange(mode: LockMode) {
@@ -496,6 +505,34 @@ async function onLockModeChange(mode: LockMode) {
     lockLoading.value = false;
   }
 }
+// Primary: Immediate / After idle / Never. "After idle" restores lastIdle,
+// which the watcher above keeps synced to the last PERSISTED idle — a failed
+// pick never poisons it, so the round-trip restores the real last choice.
+async function onLockTopChange(top: LockTopMode) {
+  await onLockModeChange(top === "idle" ? lastIdle.value : top);
+}
+
+// Password view auto-clear: on/off + duration (0 = never = off).
+const VIEW_CLEAR_DURATION_PRESETS = computed<
+  { label: string; value: number | null }[]
+>(() => [
+  { label: t("settings.clear.seconds", { count: 10 }), value: 10 },
+  { label: t("settings.clear.default", { count: 45 }), value: null },
+  { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
+]);
+const rawViewClear = computed<number | null>(
+  () => appConfig.value?.view_clear_secs ?? null,
+);
+const viewClearEnabled = computed(() => rawViewClear.value !== 0);
+// Last-used duration (null = the 45s default), restored on off→on.
+const lastViewClear = ref<number | null>(null);
+watch(
+  rawViewClear,
+  (v) => {
+    if (v !== 0) lastViewClear.value = v;
+  },
+  { immediate: true },
+);
 
 async function onViewClearChange(secs: number | null) {
   if (!appConfig.value) return;
@@ -511,6 +548,29 @@ async function onViewClearChange(secs: number | null) {
     lockLoading.value = false;
   }
 }
+async function onViewClearToggle(enabled: boolean) {
+  await onViewClearChange(enabled ? lastViewClear.value : 0);
+}
+
+// Clipboard auto-clear: on/off + duration (0 = never = off).
+const CLIPBOARD_CLEAR_DURATION_PRESETS = computed<
+  { label: string; value: number | null }[]
+>(() => [
+  { label: t("settings.clear.default", { count: 45 }), value: null },
+  { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
+]);
+const rawClipboardClear = computed<number | null>(
+  () => appConfig.value?.clipboard_clear_secs ?? null,
+);
+const clipboardClearEnabled = computed(() => rawClipboardClear.value !== 0);
+const lastClipboardClear = ref<number | null>(null);
+watch(
+  rawClipboardClear,
+  (v) => {
+    if (v !== 0) lastClipboardClear.value = v;
+  },
+  { immediate: true },
+);
 
 async function onClipboardClearChange(secs: number | null) {
   if (!appConfig.value) return;
@@ -525,18 +585,25 @@ async function onClipboardClearChange(secs: number | null) {
     lockLoading.value = false;
   }
 }
+async function onClipboardClearToggle(enabled: boolean) {
+  await onClipboardClearChange(enabled ? lastClipboardClear.value : 0);
+}
 
 // ── Re-lock when inactive (app-launch-gate idle timer, R057) ─────────────
 // Only meaningful with the gate on (the control lives in the App Lock card).
 // The gate wipe is a superset of the identity auto-lock (it clears the master
 // key too), so when both run the gate dominates — surfaced via copy, not by
-// suppressing either control.
-const GATE_IDLE_PRESETS = computed<{ label: string; value: GateIdle }[]>(() => [
-  { label: t("settings.appLock.gateIdle.off"), value: "off" },
-  { label: t("settings.lock.minutes", { count: 5 }), value: { after: 300 } },
-  { label: t("settings.lock.minutes", { count: 15 }), value: { after: 900 } },
-  { label: t("settings.lock.minutes", { count: 30 }), value: { after: 1800 } },
-]);
+// suppressing either control. On/off primary + duration select (off = opt-out).
+const GATE_IDLE_AFTER_PRESETS = computed<{ label: string; value: GateIdle }[]>(
+  () => [
+    { label: t("settings.lock.minutes", { count: 5 }), value: { after: 300 } },
+    { label: t("settings.lock.minutes", { count: 15 }), value: { after: 900 } },
+    {
+      label: t("settings.lock.minutes", { count: 30 }),
+      value: { after: 1800 },
+    },
+  ],
+);
 
 // Object-valued (the { after } presets) → === never matches; use a comparator.
 function gateIdleEq(a: GateIdle, b: GateIdle): boolean {
@@ -545,6 +612,18 @@ function gateIdleEq(a: GateIdle, b: GateIdle): boolean {
     return a.after === b.after;
   return false;
 }
+
+const gateIdleEnabled = computed(() => gateIdle.value !== "off");
+// Last-used idle-after duration (default DEFAULT_GATE_IDLE = 5 min), restored on
+// off→on.
+const lastGateAfter = ref<GateIdle>(DEFAULT_GATE_IDLE);
+watch(
+  gateIdle,
+  (g) => {
+    if (typeof g === "object") lastGateAfter.value = g;
+  },
+  { immediate: true },
+);
 
 async function onGateIdleChange(mode: GateIdle) {
   if (!appConfig.value) return;
@@ -559,6 +638,9 @@ async function onGateIdleChange(mode: GateIdle) {
   } finally {
     appLockLoading.value = false;
   }
+}
+async function onGateIdleToggle(enabled: boolean) {
+  await onGateIdleChange(enabled ? lastGateAfter.value : "off");
 }
 
 // Deep-link focus: arriving with ?focus=biometric|passphrase scrolls that card
@@ -752,24 +834,34 @@ onMounted(async () => {
             </p>
             <BaseSegmentedControl
               name="gate-idle"
-              wrap
-              :model-value="gateIdle"
-              :by="gateIdleEq"
-              :options="GATE_IDLE_PRESETS"
+              :aria-label="t('settings.appLock.gateIdle.legend')"
+              :model-value="gateIdleEnabled"
+              :options="onOffOptions"
               :disabled="appLockLoading"
-              @change="onGateIdleChange"
+              @change="onGateIdleToggle"
             >
               <template #hint>
                 <p class="text-xs text-muted mt-1">
-                  <template v-if="gateIdle === 'off'">{{
-                    t("settings.appLock.gateIdle.offHint")
+                  <template v-if="gateIdleEnabled">{{
+                    t("settings.appLock.gateIdle.idleHint")
                   }}</template>
                   <template v-else>{{
-                    t("settings.appLock.gateIdle.idleHint")
+                    t("settings.appLock.gateIdle.offHint")
                   }}</template>
                 </p>
               </template>
             </BaseSegmentedControl>
+            <BaseSelect
+              v-if="gateIdleEnabled"
+              class="mt-3"
+              name="gate-idle-after"
+              :legend="t('settings.appLock.gateIdle.afterLegend')"
+              :model-value="gateIdle"
+              :options="GATE_IDLE_AFTER_PRESETS"
+              :by="gateIdleEq"
+              :disabled="appLockLoading"
+              @change="onGateIdleChange"
+            />
           </div>
 
           <!-- Identity auto-unlock opt-in (req3): when on, the identity follows
@@ -820,19 +912,19 @@ onMounted(async () => {
           {{ t("settings.lock.description") }}
         </p>
 
-        <!-- Identity auto-lock mode (disabled while the identity is coupled to
-             App Lock — the gate then owns its lifecycle; see the note below). -->
+        <!-- Identity auto-lock: 3-way primary (Immediate / After idle / Never);
+             the idle-duration sheet reveals only under "After idle". Disabled
+             while the identity is coupled to App Lock (the gate then owns its
+             lifecycle; see the note below). -->
         <BaseSegmentedControl
           class="mb-3"
           name="lock-mode"
           :legend="t('settings.lock.autoLockLegend')"
-          wrap
-          :model-value="rawLockMode"
-          :by="lockModeEq"
-          :options="LOCK_PRESETS"
+          :model-value="lockTopMode"
+          :options="LOCK_TOP_OPTIONS"
           :disabled="identityCoupled || lockLoading"
           :aria-describedby="identityCoupled ? 'lock-mode-managed' : undefined"
-          @change="onLockModeChange"
+          @change="onLockTopChange"
         >
           <template #hint>
             <p
@@ -843,36 +935,64 @@ onMounted(async () => {
               {{ t("settings.lock.managedByAppLock") }}
             </p>
             <p v-else class="text-xs text-muted mt-1">
-              <template v-if="lockModeActive('immediate')">{{
+              <template v-if="lockTopMode === 'immediate'">{{
                 t("settings.lock.immediateHint")
               }}</template>
-              <template v-else-if="lockModeActive('never')">{{
+              <template v-else-if="lockTopMode === 'never'">{{
                 t("settings.lock.neverHint")
               }}</template>
               <template v-else>{{ t("settings.lock.idleHint") }}</template>
             </p>
           </template>
         </BaseSegmentedControl>
+        <BaseSelect
+          v-if="lockTopMode === 'idle'"
+          class="mb-3"
+          name="lock-idle"
+          :legend="t('settings.lock.autoLockAfter')"
+          :model-value="rawLockMode"
+          :options="LOCK_IDLE_PRESETS"
+          :by="lockModeEq"
+          :disabled="identityCoupled || lockLoading"
+          @change="onLockModeChange"
+        />
 
-        <!-- Password view auto-clear -->
+        <!-- Password view auto-clear: on/off + duration -->
         <BaseSegmentedControl
           class="mb-3"
           name="view-clear"
           :legend="t('settings.lock.viewClearLegend')"
-          wrap
+          :model-value="viewClearEnabled"
+          :options="onOffOptions"
+          :disabled="lockLoading"
+          @change="onViewClearToggle"
+        />
+        <BaseSelect
+          v-if="viewClearEnabled"
+          class="mb-3"
+          name="view-clear-duration"
+          :legend="t('settings.clear.clearAfter')"
           :model-value="rawViewClear"
-          :options="VIEW_CLEAR_PRESETS"
+          :options="VIEW_CLEAR_DURATION_PRESETS"
           :disabled="lockLoading"
           @change="onViewClearChange"
         />
 
-        <!-- Clipboard auto-clear -->
+        <!-- Clipboard auto-clear: on/off + duration -->
         <BaseSegmentedControl
           name="clipboard-clear"
           :legend="t('settings.lock.clipboardClearLegend')"
-          wrap
+          :model-value="clipboardClearEnabled"
+          :options="onOffOptions"
+          :disabled="lockLoading"
+          @change="onClipboardClearToggle"
+        />
+        <BaseSelect
+          v-if="clipboardClearEnabled"
+          name="clipboard-clear-duration"
+          :legend="t('settings.clear.clearAfter')"
           :model-value="rawClipboardClear"
-          :options="CLIPBOARD_CLEAR_PRESETS"
+          :options="CLIPBOARD_CLEAR_DURATION_PRESETS"
           :disabled="lockLoading"
           @change="onClipboardClearChange"
         />

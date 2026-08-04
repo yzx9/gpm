@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The timing pickers in **Settings** — **auto-lock**, **re-lock when inactive**, **background sync**, and the **password-view** and **clipboard auto-clear** timers — now lead with the decision that matters (On/Off, or for auto-lock, Immediate / After idle / Never) and reveal the exact duration as a themed in-app sheet only when it's relevant. They used to be a long, wrapping row of every option at once, or (for background sync) the phone's system dropdown that ignored the app's theme. The **display-language** picker is now the same themed sheet, ready for more languages.
+- Every bottom sheet — the sync-conflict review, the unlock prompt, and the new background-sync picker — now leaves room for the phone's gesture-navigation bar, so its last row is never half-covered or awkward to tap.
+
 ## [v0.16.0] - 2026-08-03
 
 ### Added

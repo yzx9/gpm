@@ -103,10 +103,12 @@ useScrollLock();
   overscroll-behavior: contain;
 }
 
-/* Bottom sheet: docked to the bottom on mobile, centered on ≥640px. */
+/* Bottom sheet: docked to the bottom on mobile, centered on ≥640px. Like .center,
+   it honors the bottom safe-area inset so the last row clears the gesture bar. */
 .sheet {
   align-items: center;
   padding: 1rem;
+  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, 0px));
 }
 @media (max-width: 639px) {
   .sheet {

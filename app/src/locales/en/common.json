@@ -11,6 +11,10 @@
     "remove": "Remove",
     "disable": "Disable"
   },
+  "toggle": {
+    "on": "On",
+    "off": "Off"
+  },
   "toast": {
     "secureScreenFailed": "Couldn't secure screen — try again",
     "copyFailed": "Copy failed",

@@ -11,6 +11,7 @@ import type {
 } from "@/api";
 import {
   resetConfig as apiResetConfig,
+  DEFAULT_BACKGROUND_SYNC_CADENCE,
   getAppConfig,
   resolvedLocale,
   setAutosync,
@@ -26,11 +27,12 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import BaseSelect from "@/components/base/BaseSelect.vue";
 import { useSecureScreen, useToast, Z } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
 import { applyTheme, normalizeThemeMode, type ThemeMode } from "@/theme";
 import { Trash2 } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -167,11 +169,11 @@ async function onAutosyncChange(enabled: boolean) {
   }
 }
 
-// R061: periodic background-sync cadence. Linked to AutoSync — the control is
-// shown only while AutoSync is on; "off" opts out of the periodic background
-// sync (the foreground sync always runs regardless).
+// R061: periodic background-sync. Linked to AutoSync — the card is shown only
+// while AutoSync is on. The on/off primary enables the periodic background sync;
+// when on, the cadence select picks how often. "off" is the opt-out sentinel the
+// backend already accepts (the foreground sync always runs regardless).
 const backgroundSyncOptions: BackgroundSyncCadence[] = [
-  "off",
   "1h",
   "6h",
   "12h",
@@ -181,22 +183,65 @@ const backgroundSyncOptions: BackgroundSyncCadence[] = [
 const backgroundSyncCadence = computed<BackgroundSyncCadence>(
   () => appConfig.value?.background_sync ?? "off",
 );
+const backgroundSyncEnabled = computed(
+  () => backgroundSyncCadence.value !== "off",
+);
+// Last-used cadence, restored when the toggle flips back on. The install default
+// is "off" (no cadence chosen), so the first enable falls back to
+// DEFAULT_BACKGROUND_SYNC_CADENCE. The watcher below is its sole writer.
+const lastBackgroundSync = ref<BackgroundSyncCadence>(
+  DEFAULT_BACKGROUND_SYNC_CADENCE,
+);
+watch(
+  backgroundSyncCadence,
+  (c) => {
+    if (c !== "off") lastBackgroundSync.value = c;
+  },
+  { immediate: true },
+);
 const backgroundSyncLoading = ref(false);
 
-async function onBackgroundSyncChange(e: Event) {
+async function onBackgroundSyncChange(cadence: BackgroundSyncCadence) {
+  // Guard against rapid taps firing concurrent set_background_sync calls —
+  // mirrors the theme/locale/autosync handlers (this one previously lacked it).
+  if (backgroundSyncLoading.value) return;
   if (!appConfig.value) return;
-  const cadence = (e.target as HTMLSelectElement)
-    .value as BackgroundSyncCadence;
+  // Apply in-memory first and persist on success, mirroring onThemeChange: the
+  // trigger reflects the new cadence immediately instead of lagging the IPC, and
+  // a failure rolls the config back.
+  const prev = appConfig.value;
+  appConfig.value = { ...prev, background_sync: cadence };
   backgroundSyncLoading.value = true;
   try {
     appConfig.value = await setBackgroundSync(cadence);
   } catch (err) {
+    // Per-field rollback: a sibling handler (e.g. onAutosyncChange, gated on
+    // autosyncLoading — not backgroundSyncLoading) can resolve its own IPC while
+    // this one is in flight and replace appConfig. Restoring the whole snapshot
+    // would clobber that persisted change; restore only our field.
+    appConfig.value = {
+      ...appConfig.value,
+      background_sync: prev.background_sync,
+    };
     const appError = err as AppError;
     error.value = appError?.message || t("settings.backgroundSync.setFailed");
   } finally {
     backgroundSyncLoading.value = false;
   }
 }
+
+// On/off primary for the periodic background sync; the cadence select only
+// matters when on. lastBackgroundSync carries the chosen interval across an
+// off→on round-trip so toggling doesn't reset a chosen cadence.
+async function onBackgroundSyncToggle(enabled: boolean) {
+  await onBackgroundSyncChange(enabled ? lastBackgroundSync.value : "off");
+}
+
+// Shared On/Off options for the binary settings primaries.
+const onOffOptions = computed(() => [
+  { label: t("common.toggle.on"), value: true },
+  { label: t("common.toggle.off"), value: false },
+]);
 
 // Reset is gated behind a type-"RESET"-to-confirm modal: a stray tap can't
 // trigger this unrecoverable wipe, and no passphrase is required, so a user
@@ -259,7 +304,7 @@ onMounted(() => {
         <p class="text-xs text-muted mb-3">
           {{ t("settings.language.description") }}
         </p>
-        <BaseSegmentedControl
+        <BaseSelect
           name="display-language"
           :legend="t('settings.language.legend')"
           :model-value="localeSelection"
@@ -354,31 +399,38 @@ onMounted(() => {
         </BaseSegmentedControl>
       </BaseCard>
 
-      <!-- Periodic background sync (R061) — shown only when AutoSync is on. -->
+      <!-- Periodic background sync (R061) — shown only when AutoSync is on.
+           On/off primary + cadence select (revealed when on). -->
       <BaseCard v-if="autosyncEnabled" as="section">
-        <h2 class="text-sm font-medium mb-3">
+        <h2 class="text-sm font-medium mb-2">
           {{ t("settings.backgroundSync.title") }}
         </h2>
-        <label
-          for="background-sync-cadence"
-          class="block text-xs text-muted mb-1"
-        >
-          {{ t("settings.backgroundSync.legend") }}
-        </label>
-        <select
-          id="background-sync-cadence"
-          class="w-full rounded border bg-transparent px-3 py-2 text-sm"
-          :value="backgroundSyncCadence"
-          :disabled="backgroundSyncLoading"
-          @change="onBackgroundSyncChange"
-        >
-          <option v-for="opt in backgroundSyncOptions" :key="opt" :value="opt">
-            {{ t(`settings.backgroundSync.${opt}`) }}
-          </option>
-        </select>
-        <p class="text-xs text-muted mt-1">
+        <p class="text-xs text-muted mb-3">
           {{ t("settings.backgroundSync.hint") }}
         </p>
+        <BaseSegmentedControl
+          class="mb-3"
+          name="background-sync-enabled"
+          :aria-label="t('settings.backgroundSync.title')"
+          :model-value="backgroundSyncEnabled"
+          :options="onOffOptions"
+          :disabled="backgroundSyncLoading"
+          @change="onBackgroundSyncToggle"
+        />
+        <BaseSelect
+          v-if="backgroundSyncEnabled"
+          name="background-sync-cadence"
+          :legend="t('settings.backgroundSync.legend')"
+          :model-value="backgroundSyncCadence"
+          :options="
+            backgroundSyncOptions.map((o) => ({
+              label: t(`settings.backgroundSync.${o}`),
+              value: o,
+            }))
+          "
+          :disabled="backgroundSyncLoading"
+          @change="onBackgroundSyncChange"
+        />
       </BaseCard>
 
       <!-- Danger zone -->

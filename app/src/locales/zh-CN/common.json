@@ -11,6 +11,10 @@
     "remove": "移除",
     "disable": "禁用"
   },
+  "toggle": {
+    "on": "开",
+    "off": "关"
+  },
   "toast": {
     "secureScreenFailed": "无法保护屏幕 —— 请重试",
     "copyFailed": "复制失败",

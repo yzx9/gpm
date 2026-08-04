@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import BaseSelect from "@/components/base/BaseSelect.vue";
 import { mountWithApp } from "@/test/appTestUtils";
 import {
   baseDefaults,
@@ -9,7 +11,7 @@ import {
   type Overrides,
 } from "@/test/settingsTestUtils";
 import { invoke } from "@tauri-apps/api/core";
-import { flushPromises } from "@vue/test-utils";
+import { flushPromises, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsIdentityPage from "./SettingsIdentityPage.vue";
 
@@ -80,6 +82,17 @@ describe("SettingsIdentityPage", () => {
 
   function mountPage() {
     return mountWithApp(SettingsIdentityPage).wrapper;
+  }
+
+  // Find a BaseSegmentedControl / BaseSelect by its `name` prop.
+  function findControl(
+    wrapper: ReturnType<typeof mountPage>,
+    Comp: typeof BaseSelect | typeof BaseSegmentedControl,
+    name: string,
+  ) {
+    return (
+      wrapper.findAllComponents(Comp) as unknown as VueWrapper<any>[]
+    ).find((c) => c.props("name") === name);
   }
 
   describe("deep-link focus (?focus=...)", () => {
@@ -528,23 +541,28 @@ describe("SettingsIdentityPage", () => {
   });
 
   describe("auto-lock & auto-clear card", () => {
-    it("renders the three controls", async () => {
+    it("renders the auto-lock 3-way primary defaulting to Immediate (idle select hidden)", async () => {
       const wrapper = mountPage();
       await flushPromises();
 
       expect(wrapper.text()).toContain("Auto-Lock & Auto-Clear");
-      expect(wrapper.findAll('input[name="lock-mode"]')).toHaveLength(6);
-      expect(wrapper.findAll('input[name="view-clear"]')).toHaveLength(4);
-      expect(wrapper.findAll('input[name="clipboard-clear"]')).toHaveLength(3);
+      const lock = findControl(wrapper, BaseSegmentedControl, "lock-mode");
+      expect(lock?.props("modelValue")).toBe("immediate");
+      expect(lock?.props("options")).toHaveLength(3);
+      // The idle-duration select is hidden unless the mode is "After idle".
+      expect(findControl(wrapper, BaseSelect, "lock-idle")).toBeUndefined();
     });
 
-    it("switching the auto-lock mode invokes set_lock_mode", async () => {
+    it("switching auto-lock to After idle persists the restored idle duration", async () => {
       when("set_lock_mode", { lock_mode: { idle: 60 } });
       const wrapper = mountPage();
       await flushPromises();
 
-      // radios[1] is the "1 min" preset ({ idle: 60 }).
-      await wrapper.findAll('input[name="lock-mode"]')[1]!.trigger("change");
+      // "After idle" → restores the default 1 min idle.
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
+        "change",
+        "idle",
+      );
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
@@ -552,35 +570,257 @@ describe("SettingsIdentityPage", () => {
       });
     });
 
-    it("switching the view auto-clear invokes set_view_clear_secs", async () => {
+    it("the idle-duration select persists a new idle and restores it on re-entry", async () => {
+      // Start in "After idle" at 1 min.
+      when("get_app_config", { lock_mode: { idle: 60 } });
+      when("set_lock_mode", { lock_mode: { idle: 900 } });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const idle = findControl(wrapper, BaseSelect, "lock-idle")!;
+      expect(idle).toBeTruthy(); // shown because the mode is idle
+      await idle.vm.$emit("change", { idle: 900 }); // 15 min
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
+        mode: { idle: 900 },
+      });
+
+      // Round-trip Immediate → After idle restores the 15 min, not the default.
+      vi.mocked(invoke).mockClear();
+      when("set_lock_mode", { lock_mode: "immediate" });
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
+        "change",
+        "immediate",
+      );
+      await flushPromises();
+      when("set_lock_mode", { lock_mode: { idle: 900 } });
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
+        "change",
+        "idle",
+      );
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
+        mode: { idle: 900 },
+      });
+    });
+
+    it("view-clear on/off toggles and the duration select persists", async () => {
+      when("get_app_config", { view_clear_secs: null }); // 45s default → on
       when("set_view_clear_secs", { view_clear_secs: 10 });
       const wrapper = mountPage();
       await flushPromises();
 
-      // radios[0] is the "10s" preset (value 10).
-      await wrapper.findAll('input[name="view-clear"]')[0]!.trigger("change");
+      const toggle = findControl(wrapper, BaseSegmentedControl, "view-clear")!;
+      expect(toggle.props("modelValue")).toBe(true);
+      expect(
+        findControl(wrapper, BaseSelect, "view-clear-duration"),
+      ).toBeTruthy();
+
+      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit(
+        "change",
+        10,
+      );
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", { secs: 10 });
+
+      await toggle.vm.$emit("change", false); // off → 0
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", { secs: 0 });
+    });
+
+    it("clipboard-clear on/off toggles and the duration select persists", async () => {
+      when("get_app_config", { clipboard_clear_secs: null });
+      when("set_clipboard_clear_secs", { clipboard_clear_secs: 180 });
+      const wrapper = mountPage();
       await flushPromises();
 
-      expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", { secs: 10 });
+      const toggle = findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "clipboard-clear",
+      )!;
+      expect(toggle.props("modelValue")).toBe(true);
+
+      await findControl(
+        wrapper,
+        BaseSelect,
+        "clipboard-clear-duration",
+      )!.vm.$emit("change", 180);
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_clipboard_clear_secs", {
+        secs: 180,
+      });
+
+      await toggle.vm.$emit("change", false);
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_clipboard_clear_secs", {
+        secs: 0,
+      });
+    });
+
+    it("switching auto-lock to Never persists 'never' and hides the idle select", async () => {
+      when("get_app_config", { lock_mode: { idle: 60 } }); // start in After idle
+      when("set_lock_mode", { lock_mode: "never" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(findControl(wrapper, BaseSelect, "lock-idle")).toBeTruthy();
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
+        "change",
+        "never",
+      );
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_lock_mode", { mode: "never" });
+      expect(findControl(wrapper, BaseSelect, "lock-idle")).toBeUndefined();
+    });
+
+    it("view-clear off→on restores the last-used duration, not the default", async () => {
+      when("get_app_config", { view_clear_secs: null });
+      when("set_view_clear_secs", { view_clear_secs: 180 });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Pick a non-default duration (3 min).
+      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit(
+        "change",
+        180,
+      );
+      await flushPromises();
+      // Toggle off, then back on → must restore 180, not the 45s default.
+      await findControl(wrapper, BaseSegmentedControl, "view-clear")!.vm.$emit(
+        "change",
+        false,
+      );
+      await flushPromises();
+      vi.mocked(invoke).mockClear();
+      await findControl(wrapper, BaseSegmentedControl, "view-clear")!.vm.$emit(
+        "change",
+        true,
+      );
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", {
+        secs: 180,
+      });
+    });
+
+    it("clipboard-clear off→on restores the last-used duration, not the default", async () => {
+      when("get_app_config", { clipboard_clear_secs: null });
+      when("set_clipboard_clear_secs", { clipboard_clear_secs: 180 });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await findControl(
+        wrapper,
+        BaseSelect,
+        "clipboard-clear-duration",
+      )!.vm.$emit("change", 180);
+      await flushPromises();
+      await findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "clipboard-clear",
+      )!.vm.$emit("change", false);
+      await flushPromises();
+      vi.mocked(invoke).mockClear();
+      await findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "clipboard-clear",
+      )!.vm.$emit("change", true);
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_clipboard_clear_secs", {
+        secs: 180,
+      });
+    });
+
+    it("surfaces an error when a view-clear duration pick fails to persist", async () => {
+      when("get_app_config", { view_clear_secs: null });
+      reject("set_view_clear_secs", { code: "CONFIG_ERROR", message: "nope" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit(
+        "change",
+        10,
+      );
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain("nope");
     });
   });
 
   describe("app lock: re-lock when inactive & coupling", () => {
-    it("renders the gate-idle control and invokes set_gate_idle", async () => {
+    it("renders the gate-idle on/off + duration and invokes set_gate_idle", async () => {
       when("is_app_lock_available", true);
       when("get_app_lock_state", { enabled: true, locked: false });
       when("set_gate_idle", { gate_idle: { after: 900 } });
       const wrapper = mountPage();
       await flushPromises();
 
-      // App Lock on → the "Re-lock when inactive" control shows 4 presets.
-      expect(wrapper.findAll('input[name="gate-idle"]')).toHaveLength(4);
-      // radios[2] is the "15 min" preset ({ after: 900 }).
-      await wrapper.findAll('input[name="gate-idle"]')[2]!.trigger("change");
+      // App Lock on → gate-idle shows on/off primary; default {after:300} → on.
+      const toggle = findControl(wrapper, BaseSegmentedControl, "gate-idle");
+      expect(toggle?.props("modelValue")).toBe(true);
+      const after = findControl(wrapper, BaseSelect, "gate-idle-after");
+      expect(after).toBeTruthy();
+
+      await after!.vm.$emit("change", { after: 900 }); // 15 min
+      await flushPromises();
+      expect(invoke).toHaveBeenCalledWith("set_gate_idle", {
+        mode: { after: 900 },
+      });
+    });
+
+    it("gate-idle toggle off persists the off sentinel and hides the after select", async () => {
+      when("is_app_lock_available", true);
+      when("get_app_lock_state", { enabled: true, locked: false });
+      when("set_gate_idle", { gate_idle: "off" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      expect(findControl(wrapper, BaseSelect, "gate-idle-after")).toBeTruthy();
+      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit(
+        "change",
+        false,
+      );
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_gate_idle", { mode: "off" });
+      expect(
+        findControl(wrapper, BaseSelect, "gate-idle-after"),
+      ).toBeUndefined();
+    });
+
+    it("gate-idle off→on restores the last-used after duration, not the default", async () => {
+      when("is_app_lock_available", true);
+      when("get_app_lock_state", { enabled: true, locked: false });
+      when("set_gate_idle", { gate_idle: { after: 1800 } });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Pick 30 min.
+      await findControl(wrapper, BaseSelect, "gate-idle-after")!.vm.$emit(
+        "change",
+        { after: 1800 },
+      );
+      await flushPromises();
+      // Toggle off, then on → restore 1800, not the 5 min default.
+      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit(
+        "change",
+        false,
+      );
+      await flushPromises();
+      vi.mocked(invoke).mockClear();
+      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit(
+        "change",
+        true,
+      );
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_gate_idle", {
-        mode: { after: 900 },
+        mode: { after: 1800 },
       });
     });
 
@@ -638,7 +878,7 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       // gate-idle control still shows; the auto-unlock opt-in does not
-      expect(wrapper.findAll('input[name="gate-idle"]')).toHaveLength(4);
+      expect(wrapper.findAll('input[name="gate-idle"]')).toHaveLength(2);
       expect(
         wrapper.findAll("button").some((b) => b.text().includes("Auto-Unlock")),
       ).toBe(false);

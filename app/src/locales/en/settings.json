@@ -137,6 +137,7 @@
     },
     "gateIdle": {
       "legend": "Re-lock when inactive",
+      "afterLegend": "Re-lock after",
       "description": "Re-lock the app while it stays open, after a period of inactivity.",
       "off": "Off",
       "offHint": "Re-locks only when you leave and return to gpm.",
@@ -184,6 +185,8 @@
     "title": "Auto-Lock & Auto-Clear",
     "description": "Control when the identity locks and how long secrets stay in the clipboard / on screen.",
     "autoLockLegend": "Auto-lock",
+    "autoLockAfter": "Lock after",
+    "afterIdle": "After idle",
     "viewClearLegend": "Password view auto-clear",
     "clipboardClearLegend": "Clipboard auto-clear",
     "immediate": "Immediate",
@@ -196,6 +199,7 @@
     "setModeFailed": "Failed to set auto-lock mode"
   },
   "clear": {
+    "clearAfter": "Clear after",
     "seconds": "{count}s",
     "default": "{count}s · default",
     "setViewFailed": "Failed to set view auto-clear",

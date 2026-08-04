@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import BaseSelect from "@/components/base/BaseSelect.vue";
 import { setLocale } from "@/i18n";
 import { mountWithApp } from "@/test/appTestUtils";
 import {
@@ -181,9 +182,7 @@ describe("SettingsGeneralPage", () => {
   describe("display-language picker", () => {
     function findLanguagePicker(wrapper: ReturnType<typeof mountPage>) {
       return (
-        wrapper.findAllComponents(
-          BaseSegmentedControl,
-        ) as unknown as VueWrapper<any>[]
+        wrapper.findAllComponents(BaseSelect) as unknown as VueWrapper<any>[]
       ).find((c) => c.props("name") === "display-language");
     }
 
@@ -343,6 +342,111 @@ describe("SettingsGeneralPage", () => {
       expect(
         toast.toasts.value.some((t) => t.message.includes("every screen")),
       ).toBe(true);
+    });
+  });
+
+  describe("background-sync picker", () => {
+    function findControl(
+      wrapper: ReturnType<typeof mountPage>,
+      Comp: typeof BaseSelect | typeof BaseSegmentedControl,
+      name: string,
+    ) {
+      return (
+        wrapper.findAllComponents(Comp) as unknown as VueWrapper<any>[]
+      ).find((c) => c.props("name") === name);
+    }
+
+    it("toggling on persists the default cadence and reveals the select", async () => {
+      when("set_background_sync", { background_sync: "6h" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // Default background_sync is "off" → toggle off, cadence select hidden.
+      const toggle = findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "background-sync-enabled",
+      )!;
+      expect(toggle.props("modelValue")).toBe(false);
+      expect(
+        findControl(wrapper, BaseSelect, "background-sync-cadence"),
+      ).toBeUndefined();
+
+      await toggle.vm.$emit("change", true); // on → restore default 6h
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_background_sync", {
+        cadence: "6h",
+      });
+      expect(toggle.props("modelValue")).toBe(true);
+    });
+
+    it("the cadence select persists a new interval when on", async () => {
+      when("get_app_config", { autosync: true, background_sync: "1h" });
+      when("set_background_sync", { background_sync: "12h" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const cadence = findControl(
+        wrapper,
+        BaseSelect,
+        "background-sync-cadence",
+      )!;
+      expect(cadence).toBeTruthy(); // shown because cadence is "1h" (on)
+      await cadence.vm.$emit("change", "12h");
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_background_sync", {
+        cadence: "12h",
+      });
+    });
+
+    it("surfaces an error when persisting fails", async () => {
+      reject("set_background_sync", {
+        code: "CONFIG_ERROR",
+        message: "bg fail",
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const toggle = findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "background-sync-enabled",
+      )!;
+      await toggle.vm.$emit("change", true);
+      await flushPromises();
+
+      expect(wrapper.find("[role='alert']").text()).toContain("bg fail");
+    });
+
+    it("off→on restores the last-used cadence, not the default", async () => {
+      // Load a non-default cadence (12h; default fallback is 6h) so a
+      // wrong-restore would be detectable.
+      when("get_app_config", { autosync: true, background_sync: "12h" });
+      when("set_background_sync", { background_sync: "12h" });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      // lastBackgroundSync is seeded to the loaded 12h by the watcher; toggle
+      // off then on → must restore 12h, not the 6h default.
+      await findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "background-sync-enabled",
+      )!.vm.$emit("change", false);
+      await flushPromises();
+      vi.mocked(invoke).mockClear();
+      await findControl(
+        wrapper,
+        BaseSegmentedControl,
+        "background-sync-enabled",
+      )!.vm.$emit("change", true);
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("set_background_sync", {
+        cadence: "12h",
+      });
     });
   });
 });
