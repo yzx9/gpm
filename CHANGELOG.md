@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.16.1] - 2026-08-04
+
 ### Changed
 
 - The timing pickers in **Settings** — **auto-lock**, **re-lock when inactive**, **background sync**, and the **password-view** and **clipboard auto-clear** timers — now lead with the decision that matters (On/Off, or for auto-lock, Immediate / After idle / Never) and reveal the exact duration as a themed in-app sheet only when it's relevant. They used to be a long, wrapping row of every option at once, or (for background sync) the phone's system dropdown that ignored the app's theme. The **display-language** picker is now the same themed sheet, ready for more languages.
@@ -414,7 +416,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.16.1...HEAD
+[v0.16.1]: https://github.com/yzx9/gpm/compare/v0.16.0...v0.16.1
 [v0.16.0]: https://github.com/yzx9/gpm/compare/v0.15.1...v0.16.0
 [v0.15.1]: https://github.com/yzx9/gpm/compare/v0.15.0...v0.15.1
 [v0.15.0]: https://github.com/yzx9/gpm/compare/v0.14.2...v0.15.0
