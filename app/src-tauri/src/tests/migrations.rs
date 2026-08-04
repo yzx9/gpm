@@ -507,7 +507,7 @@ async fn m0005_completes_when_master_key_injected() {
 #[tokio::test]
 async fn m0007_no_op_on_desktop_advances_schema() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
+    fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
         AppConfigStore::new(dir.path()),
@@ -529,14 +529,12 @@ async fn m0007_no_op_on_desktop_advances_schema() {
 #[tokio::test]
 async fn m0007_pends_under_app_lock_without_vault_key() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
+    fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)), // keyless: vault_seal unkeyed
         AppConfigStore::new(dir.path()),
     );
-    state
-        .app_lock_enabled
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    state.app_lock_enabled.store(true, atomic::Ordering::SeqCst);
 
     run_app_migrations(&state).await;
 
