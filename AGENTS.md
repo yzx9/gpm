@@ -41,6 +41,11 @@ Local Tauri plugin crates. Each follows the standard Tauri mobile-plugin layout:
 - `tauri-plugin-biometric-keystore` — stores the identity passphrase in the Android Keystore (AES/GCM, hardware-backed) and retrieves it through a biometric-gated `BiometricPrompt`
 - `tauri-plugin-secure-keystore` — seals the at-rest master key with an auth-free, hardware-backed Android Keystore AES/GCM key (the biometric-keystore sibling, minus the prompt; survives fingerprint changes) and returns it to Rust so resources can be AEAD-encrypted at rest
 - `tauri-plugin-file-picker` — opens the Android Storage Access Framework picker and reads the picked file's bytes into Rust (backend-only; desktop falls back to `tauri-plugin-dialog`)
+- `tauri-plugin-file-save` — saves a staged file to a user-picked destination via Android SAF `ACTION_CREATE_DOCUMENT`, owning the Kotlin write for a real error path (backend-only; desktop falls back to `tauri-plugin-dialog`'s save)
+- `tauri-plugin-screen-secure` — toggles Android `FLAG_SECURE` for per-route screen-capture protection on sensitive screens (frontend calls `set_secure(bool)`; desktop no-op, gated by `screen_secure_available()`)
+- `tauri-plugin-clipboard-notify` — posts a sticky Android notification while a secret is on the clipboard so the user can tap to clear it early; the tap clears natively and emits `clipboard-cleared` (backend-only; inert no-ops on desktop)
+- `tauri-plugin-device-info` — surfaces Android hardware/OS build fields, the WebView user-agent, and display metrics to Rust for the diagnostics export (backend-only; desktop gets a minimal OS/arch/version fallback)
+- `tauri-plugin-background-sync` — schedules the periodic Android background git sync via `WorkManager` (network-gated) and cancels it when the cadence is `Off` (backend-only; inert no-ops on desktop, where the foreground sync covers it)
 
 ## Security Model
 
