@@ -228,6 +228,21 @@ pub(crate) async fn copy_revision(
             cleared_after_secs: 0,
             has_totp,
             has_attachment,
+            password_non_utf8: false,
+        });
+    }
+
+    // A non-UTF-8 password can't be placed on the (UTF-8) clipboard and can't
+    // be shown or edited — the gopass CLI is the only path. Skip the clipboard
+    // write and tell the UI, mirroring copy_password.
+    if !secret.password_is_utf8() {
+        return Ok(CopyResult {
+            success: true,
+            entry_name,
+            cleared_after_secs: 0,
+            has_totp,
+            has_attachment,
+            password_non_utf8: true,
         });
     }
 
@@ -244,5 +259,6 @@ pub(crate) async fn copy_revision(
         cleared_after_secs,
         has_totp,
         has_attachment,
+        password_non_utf8: false,
     })
 }

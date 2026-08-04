@@ -101,4 +101,29 @@ describe("EntryEditPage", () => {
     // And no edit_secret write was attempted.
     expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
   });
+
+  it("blocks editing for non-UTF-8 content (hint, disabled save, no write)", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "show_password")
+        return Promise.resolve({
+          password: "pw",
+          notes: "",
+          has_totp: false,
+          attachment: null,
+          edit_blocked: "nonUtf8",
+        });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(EntryEditPage).wrapper;
+    await flushPromises();
+
+    // loadBody detected non-UTF-8 content, set the hint, and early-returned.
+    expect(w.text()).toContain("non-UTF-8");
+    // canSave is false — Save stays disabled.
+    expect(
+      w.find('button[type="submit"]').attributes("disabled"),
+    ).toBeDefined();
+    // No edit_secret write was attempted (the lossy view is never saved back).
+    expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
+  });
 });

@@ -26,6 +26,10 @@ use crate::page::clamp_limit;
 
 /// Returned by `copy_password` — no secret data, safe for IPC.
 #[derive(Debug, Clone, Serialize)]
+// Four independent decrypt byproducts cross IPC here (each is a free hint so
+// the UI avoids a second read); they aren't a state machine, so bools beat an
+// enum that would distort the wire shape.
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct CopyResult {
     pub(crate) success: bool,
     pub(crate) entry_name: String,
@@ -38,6 +42,10 @@ pub(crate) struct CopyResult {
     /// attachment, so the UI can switch to the Export affordance without a
     /// second read. No secret data.
     pub(crate) has_attachment: bool,
+    /// A free byproduct of this decrypt: whether the password (first line)
+    /// isn't valid UTF-8, so the UI can refuse the clipboard write and point
+    /// the user at the gopass CLI instead. No secret data.
+    pub(crate) password_non_utf8: bool,
 }
 
 /// Returned by `copy_totp`. Like [`CopyResult`] but distinguishes "copied a
@@ -49,6 +57,16 @@ pub(crate) struct TotpCopyResult {
     copied: bool,
     entry_name: String,
     cleared_after_secs: u32,
+}
+
+/// Why an entry's Edit affordance is disabled. A non-UTF-8 secret can't be
+/// safely round-tripped through a UTF-8 text editor — editing its lossy view
+/// and saving would corrupt the original bytes — so the UI edit-blocks it.
+/// Not secret.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum EditBlockReason {
+    NonUtf8,
 }
 
 /// Returned by `show_password` — contains secrets, strict Vue lifecycle required.
@@ -65,6 +83,9 @@ pub(crate) struct SensitiveContent {
     /// shows Export + this metadata instead. `notes` is cleared in that case so
     /// the base64 body never reaches the `WebView`. Not itself secret.
     pub(crate) attachment: Option<AttachmentMeta>,
+    /// When `Some`, the entry cannot be safely text-edited (e.g. non-UTF-8
+    /// content) and the UI disables Edit with a reason-specific hint. Not secret.
+    pub(crate) edit_blocked: Option<EditBlockReason>,
 }
 
 /// Redacts secrets — mirrors `rustpass::Secret` so `Debug` never leaks plaintext.
@@ -75,6 +96,7 @@ impl fmt::Debug for SensitiveContent {
             .field("notes", &"[REDACTED]")
             .field("has_totp", &self.has_totp)
             .field("attachment", &self.attachment)
+            .field("edit_blocked", &self.edit_blocked)
             .finish()
     }
 }
@@ -87,6 +109,10 @@ impl fmt::Debug for SensitiveContent {
 pub(crate) struct EntryProbe {
     pub(crate) has_totp: bool,
     pub(crate) attachment: Option<AttachmentMeta>,
+    /// When `Some`, the entry can't be safely text-edited (e.g. non-UTF-8
+    /// content); the detail view greys Edit + shows a reason hint, mirroring the
+    /// attachment case. Not secret.
+    pub(crate) edit_blocked: Option<EditBlockReason>,
 }
 
 /// Returned by `export_attachment` — no secret data. `exported == false` means
@@ -202,6 +228,22 @@ pub(crate) async fn copy_password(
             cleared_after_secs: 0,
             has_totp,
             has_attachment,
+            password_non_utf8: false,
+        });
+    }
+
+    // A non-UTF-8 password can't be placed on the (UTF-8) clipboard, and the UI
+    // can't show it (lossy view) or edit it (edit-blocked) — the gopass CLI is
+    // the only path. Skip the clipboard write and tell the UI, rather than
+    // crowning an empty copy with a "Copied!" toast.
+    if !secret.password_is_utf8() {
+        return Ok(CopyResult {
+            success: true,
+            entry_name,
+            cleared_after_secs: 0,
+            has_totp,
+            has_attachment,
+            password_non_utf8: true,
         });
     }
 
@@ -223,6 +265,7 @@ pub(crate) async fn copy_password(
         cleared_after_secs,
         has_totp,
         has_attachment,
+        password_non_utf8: false,
     })
 }
 
@@ -257,6 +300,15 @@ pub(crate) async fn show_password_core<R: Runtime>(
             Zeroizing::new(body.to_string())
         },
         has_totp: rustpass::totp::has_totp(body),
+        // A non-UTF-8 secret can't be safely edited as text (the lossy view
+        // would be re-encrypted on save, corrupting it) — flag it so the UI
+        // edit-blocks. Attachments are base64 (valid UTF-8), so they don't trip
+        // this; they stay blocked via `attachment`.
+        edit_blocked: if secret.is_utf8() {
+            None
+        } else {
+            Some(EditBlockReason::NonUtf8)
+        },
         attachment,
     })
 }
@@ -354,6 +406,11 @@ pub(crate) async fn entry_probe(
     Ok(Some(EntryProbe {
         has_totp: rustpass::totp::has_totp(body),
         attachment: rustpass::metadata(body),
+        edit_blocked: if secret.is_utf8() {
+            None
+        } else {
+            Some(EditBlockReason::NonUtf8)
+        },
     }))
 }
 
@@ -600,10 +657,11 @@ mod tests {
             notes: Zeroizing::new("username: alice".to_string()),
             has_totp: true,
             attachment: None,
+            edit_blocked: None,
         };
         assert_eq!(
             serde_json::to_string(&content).expect("serialize"),
-            r#"{"password":"hunter2","notes":"username: alice","has_totp":true,"attachment":null}"#
+            r#"{"password":"hunter2","notes":"username: alice","has_totp":true,"attachment":null,"edit_blocked":null}"#
         );
         assert!(!format!("{content:?}").contains("hunter2"));
     }

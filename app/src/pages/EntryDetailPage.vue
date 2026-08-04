@@ -14,6 +14,7 @@ import {
   type AppError,
   type AttachmentMeta,
   type DivergenceChoice,
+  type EditBlockReason,
   type PullResult,
 } from "@/api";
 import DivergenceModal from "@/components/DivergenceModal.vue";
@@ -83,6 +84,8 @@ const { cancelling, cancelSave } = useCancellableSave();
 const showTotp = ref<boolean | null>(null);
 const showAttachment = ref<boolean | null>(null);
 const attachmentMeta = ref<AttachmentMeta | null>(null);
+// Why Edit is disabled, if the probe found a reason (e.g. non-UTF-8 content).
+const editBlockedReason = ref<EditBlockReason | null>(null);
 const probing = ref(false);
 
 // A confirmed attachment restructures the page: the password actions are dead
@@ -94,7 +97,9 @@ const probing = ref(false);
 const isAttachment = computed(() => showAttachment.value === true);
 const passwordActionsVisible = computed(() => !isAttachment.value);
 const exportButtonVisible = computed(() => showAttachment.value !== false);
-const editDisabled = computed(() => isAttachment.value);
+const editDisabled = computed(
+  () => isAttachment.value || editBlockedReason.value !== null,
+);
 const totpButtonVisible = computed(() => {
   if (isAttachment.value) return false; // attachments carry no TOTP
   if (showTotp.value === false) return false;
@@ -113,6 +118,7 @@ async function probeEntry() {
       showTotp.value = probe.has_totp;
       showAttachment.value = probe.attachment !== null;
       attachmentMeta.value = probe.attachment;
+      editBlockedReason.value = probe.edit_blocked;
     }
   } catch (e) {
     // Probe failed (rare) — leave unknown; buttons stay as fallbacks.
@@ -217,6 +223,12 @@ async function copyPassword() {
     if (result.has_attachment) {
       // Backend skipped the clipboard write (no password on an attachment).
       toast.info(t("entry.attachmentCopyBlocked"));
+      return;
+    }
+    if (result.password_non_utf8) {
+      // Backend skipped the clipboard write: the password has non-UTF-8 bytes
+      // that can't go on the (UTF-8) clipboard and can't be shown or edited.
+      toast.info(t("entry.nonUtf8CopyBlocked"));
       return;
     }
     toast.success(
@@ -463,7 +475,11 @@ function handleKeydown(e: KeyboardEvent) {
       {{ t("entry.editLabel") }}
     </BaseButton>
     <p v-if="editDisabled" class="text-center text-xs text-muted mb-3">
-      {{ t("entry.attachmentEditDisabledHint") }}
+      {{
+        editBlockedReason === "nonUtf8"
+          ? t("entry.nonUtf8EditDisabledHint")
+          : t("entry.attachmentEditDisabledHint")
+      }}
     </p>
 
     <BaseButton

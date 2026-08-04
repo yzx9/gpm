@@ -40,6 +40,9 @@ export interface CopyResult {
   has_totp: boolean;
   /** Free byproduct of the decrypt: whether the entry is a binary attachment. */
   has_attachment: boolean;
+  /** Free byproduct of the decrypt: the password isn't valid UTF-8, so the
+   *  backend skipped the clipboard write (copy it with the gopass CLI). */
+  password_non_utf8: boolean;
 }
 
 /** Result of `copy_totp`: `copied` is `false` when the entry has no TOTP seed
@@ -56,6 +59,10 @@ export interface AttachmentMeta {
   size: number;
 }
 
+/** Why an entry's Edit affordance is disabled (e.g. `"nonUtf8"` — the secret
+ *  holds non-UTF-8 bytes a text editor can't round-trip without corrupting). */
+export type EditBlockReason = "nonUtf8";
+
 /** Decrypted secret content (password first line, notes the rest). */
 export interface SensitiveContent {
   password: string;
@@ -66,6 +73,8 @@ export interface SensitiveContent {
   /** When set, the entry is a binary attachment: `notes` is empty (the base64
    *  body never crosses IPC) and the UI shows Export + this metadata instead. */
   attachment: AttachmentMeta | null;
+  /** When set, the entry can't be safely text-edited; the UI disables Edit. */
+  edit_blocked: EditBlockReason | null;
 }
 
 /** One-shot entry probe: one decrypt returns both the 2FA-presence signal and
@@ -74,6 +83,9 @@ export interface SensitiveContent {
 export interface EntryProbe {
   has_totp: boolean;
   attachment: AttachmentMeta | null;
+  /** When set, the entry can't be safely text-edited; the detail view greys
+   *  Edit (mirrors the attachment case). */
+  edit_blocked: EditBlockReason | null;
 }
 
 /** Result of `export_attachment`. `exported` is `false` when the entry holds no

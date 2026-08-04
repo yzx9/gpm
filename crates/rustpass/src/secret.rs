@@ -14,10 +14,19 @@ use crate::error::{Error, ErrorCode};
 /// freeform notes). [`Secret::parse`] also reads the deprecated
 /// `GOPASS-SECRET-1.0` format (which carries the password in a `Password:`
 /// header) and normalizes it into this shape; see [`parse_legacy`].
-/// All fields use `Zeroizing<String>` so content is wiped on drop.
+///
+/// Storage is **bytes** (`Zeroizing<Vec<u8>>`), not `String`. gopass's on-disk
+/// format is byte-oriented (Go strings are byte slices) and a secret's body may
+/// contain non-UTF-8 bytes; `String` storage would force `from_utf8_lossy` on
+/// read, silently corrupting such a secret on the next edit-write. Instead the
+/// bytes are preserved and UTF-8 is a layered view — [`Secret::password`] /
+/// [`Secret::body`] return `&str` (empty when the bytes aren't valid UTF-8); use
+/// [`Secret::password_bytes`] / [`Secret::body_bytes`] for byte-exact access.
+/// A non-UTF-8 secret is edit-blocked upstream so its lossy view is display-only
+/// and never written back. See ADR A005.
 pub struct Secret {
-    password: Zeroizing<String>,
-    body: Zeroizing<String>,
+    password: Zeroizing<Vec<u8>>,
+    body: Zeroizing<Vec<u8>>,
 }
 
 /// Custom `Debug` that redacts all fields — prevents accidental log leakage.
@@ -31,19 +40,77 @@ impl fmt::Debug for Secret {
 }
 
 impl Secret {
-    /// Returns the password (first line of the secret).
+    /// Returns the password (first line) as a UTF-8 view.
+    ///
+    /// Returns an empty `&str` when the stored bytes aren't valid UTF-8 — use
+    /// [`Secret::password_bytes`] for byte-exact access in that case.
     #[must_use]
     pub fn password(&self) -> &str {
-        &self.password
+        std::str::from_utf8(self.password.as_slice()).unwrap_or("")
     }
 
-    /// Returns the body (all content after the first line).
+    /// The password as raw bytes (byte-exact, never lossy).
+    #[must_use]
+    pub fn password_bytes(&self) -> &[u8] {
+        self.password.as_slice()
+    }
+
+    /// Returns the body (all content after the first line) as a UTF-8 view.
     ///
-    /// In gopass AKV format, this typically contains `key: value` metadata
-    /// lines followed by optional freeform notes.
+    /// In gopass AKV format this typically contains `key: value` metadata lines
+    /// followed by optional freeform notes. Returns an empty `&str` when the
+    /// stored bytes aren't valid UTF-8 — use [`Secret::body_bytes`] then.
     #[must_use]
     pub fn body(&self) -> &str {
-        &self.body
+        std::str::from_utf8(self.body.as_slice()).unwrap_or("")
+    }
+
+    /// The body as raw bytes (byte-exact, never lossy).
+    #[must_use]
+    pub fn body_bytes(&self) -> &[u8] {
+        self.body.as_slice()
+    }
+
+    /// Whether both the password and body are valid UTF-8.
+    ///
+    /// `false` marks a secret that can't be safely round-tripped through a
+    /// UTF-8 text editor — the UI edit-blocks it so its lossy view is never
+    /// written back. (The legacy `GOPASS-SECRET-1.0` parser is text-based and
+    /// lossy on read, so a non-UTF-8 *legacy* secret is already lossy in storage
+    /// and reports `true` here; modern secrets — the realistic non-UTF-8 case —
+    /// are byte-faithful and detected correctly.)
+    #[must_use]
+    pub fn is_utf8(&self) -> bool {
+        std::str::from_utf8(self.password.as_slice()).is_ok()
+            && std::str::from_utf8(self.body.as_slice()).is_ok()
+    }
+
+    /// Whether the password (first line) is valid UTF-8.
+    ///
+    /// Narrower than [`Secret::is_utf8`] (which requires both password and
+    /// body): `copy_password` only ever places the password on the (UTF-8)
+    /// clipboard, so a UTF-8 password with a non-UTF-8 body is still copyable.
+    /// Editing round-trips the whole secret through a text editor, so the
+    /// edit-block uses the stricter [`Secret::is_utf8`].
+    #[must_use]
+    pub fn password_is_utf8(&self) -> bool {
+        std::str::from_utf8(self.password.as_slice()).is_ok()
+    }
+
+    /// Serialize back to the modern on-disk plaintext: `password\n body`, or
+    /// just `password` when the body is empty. Byte-exact inverse of
+    /// [`Secret::parse`] for modern secrets (the only format gpm writes).
+    #[must_use]
+    pub fn to_bytes(&self) -> Zeroizing<Vec<u8>> {
+        let pw = self.password.as_slice();
+        let bd = self.body.as_slice();
+        let mut out = Vec::with_capacity(pw.len() + 1 + bd.len());
+        out.extend_from_slice(pw);
+        if !bd.is_empty() {
+            out.push(b'\n');
+            out.extend_from_slice(bd);
+        }
+        Zeroizing::new(out)
     }
 
     /// Parse decrypted bytes into a `Secret`.
@@ -55,60 +122,90 @@ impl Secret {
     ///   written mid-2020–v1.13): the password lives in a `Password:` header;
     ///   see [`parse_legacy`].
     ///
-    /// Trailing whitespace is stripped. CRLF is normalized to LF first.
+    /// Trailing ASCII whitespace is stripped and CRLF is normalized to LF.
+    /// Parsing is byte-oriented (no `from_utf8_lossy`), so non-UTF-8 modern
+    /// secrets round-trip byte-exact via [`Secret::to_bytes`].
     ///
     /// # Errors
     ///
     /// Returns an error if the content is empty or contains only whitespace.
     pub fn parse(content: &[u8]) -> Result<Self, Error> {
-        let text = String::from_utf8_lossy(content);
-        let text = text.trim_end();
+        let normalized = normalize_bytes(content);
 
-        if text.is_empty() {
+        if normalized.is_empty() {
             return Err(Error::new(
                 ErrorCode::DecryptFailed,
                 "Decrypted file is empty",
             ));
         }
 
-        // Normalize CRLF to LF for consistent parsing
-        let normalized = text.replace("\r\n", "\n");
-        let normalized = normalized.trim_end();
-
         // The deprecated GOPASS-SECRET-1.0 format carries the password in a
         // `Password:` header rather than the first line; gopass still reads it,
         // so detect the magic and parse it. On a malformed header block gopass
         // falls back to its modern text parse (password = first line = the
         // magic); `parse_legacy` signals that by returning `None`, and we reuse
-        // `modern_split` — the same path non-legacy secrets take.
-        let first_line = normalized.split('\n').next().unwrap_or("");
-        let (password, body) = if first_line.trim() == "GOPASS-SECRET-1.0" {
-            parse_legacy(normalized).unwrap_or_else(|| modern_split(normalized))
+        // `modern_split_bytes` — the same path non-legacy secrets take.
+        let first_line = normalized.split(|&b| b == b'\n').next().unwrap_or(&[]);
+        let (password, body) = if first_line.trim_ascii() == LEGACY_MAGIC {
+            // The MIME header state machine in `parse_legacy` is text-based, so
+            // hand it a (lossy, for rare non-UTF-8 legacy) `&str` view and store
+            // the resulting strings as bytes.
+            let text = String::from_utf8_lossy(&normalized);
+            match parse_legacy(&text) {
+                Some((pw, bd)) => (
+                    Zeroizing::new(pw.as_str().as_bytes().to_vec()),
+                    Zeroizing::new(bd.as_str().as_bytes().to_vec()),
+                ),
+                None => modern_split_bytes(&normalized),
+            }
         } else {
-            modern_split(normalized)
+            modern_split_bytes(&normalized)
         };
 
         Ok(Self { password, body })
     }
 }
 
+/// The deprecated gopass MIME magic line, as bytes.
+const LEGACY_MAGIC: &[u8] = b"GOPASS-SECRET-1.0";
+
 /// Split `normalized` the modern way: first line is the password, everything
-/// after the first `\n` is the body. Lossless inverse of the frontend's
-/// `reassemble(pw, body)` (`${pw}\n${body}`). Also the gopass-parity fallback
-/// for a malformed legacy header block — gopass re-parses the whole input as
-/// its modern text format, so the magic line becomes the password.
-fn modern_split(normalized: &str) -> (Zeroizing<String>, Zeroizing<String>) {
-    if let Some(newline_pos) = normalized.find('\n') {
-        (
-            Zeroizing::new(normalized[..newline_pos].to_string()),
-            Zeroizing::new(normalized[newline_pos + 1..].to_string()),
-        )
+/// after the first `\n` is the body. Byte-exact inverse of [`Secret::to_bytes`].
+/// Also the gopass-parity fallback for a malformed legacy header block — gopass
+/// re-parses the whole input as its modern text format, so the magic line
+/// becomes the password.
+fn modern_split_bytes(normalized: &[u8]) -> (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>) {
+    if let Some(newline_pos) = normalized.iter().position(|&b| b == b'\n') {
+        // `newline_pos` is the '\n': split the password off, then skip the '\n'.
+        let (pw, rest) = normalized.split_at(newline_pos);
+        let body = rest.get(1..).unwrap_or(&[]);
+        (Zeroizing::new(pw.to_vec()), Zeroizing::new(body.to_vec()))
     } else {
         (
-            Zeroizing::new(normalized.to_string()),
-            Zeroizing::new(String::new()),
+            Zeroizing::new(normalized.to_vec()),
+            Zeroizing::new(Vec::new()),
         )
     }
+}
+
+/// Normalize decrypted bytes for parsing: CRLF → LF, then trim trailing ASCII
+/// whitespace. Byte-oriented, so it never needs the bytes to be valid UTF-8.
+fn normalize_bytes(content: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(content.len());
+    let mut iter = content.iter().copied().peekable();
+    while let Some(b) = iter.next() {
+        if b == b'\r' && iter.peek() == Some(&b'\n') {
+            // Drop the '\r', consume the '\n', emit a single '\n'.
+            iter.next();
+            out.push(b'\n');
+        } else {
+            out.push(b);
+        }
+    }
+    while out.last().is_some_and(|&b| b.is_ascii_whitespace()) {
+        out.pop();
+    }
+    out
 }
 
 /// Parse the deprecated `GOPASS-SECRET-1.0` format — read-only compatibility
@@ -123,8 +220,8 @@ fn modern_split(normalized: &str) -> (Zeroizing<String>, Zeroizing<String>) {
 /// Returns `Some(password, body)` on a well-formed legacy parse, or `None` when
 /// the header block is malformed (a header line with no colon, or a continuation
 /// line with no preceding header) — the caller then falls back to
-/// [`modern_split`], matching gopass's cascade (`PermanentError` → `ParseAKV(in)`
-/// → password = the magic line).
+/// [`modern_split_bytes`], matching gopass's cascade (`PermanentError` →
+/// `ParseAKV(in)` → password = the magic line).
 ///
 /// gopass parity (verified against `pkg/gopass/secrets/secparse`):
 /// - The `Password:` header is extracted only when its first value is non-empty;
@@ -515,5 +612,71 @@ mod tests {
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword:\nPassword: second\n").unwrap();
         assert_eq!(secret.password(), "");
         assert_eq!(secret.body(), "password: \npassword: second");
+    }
+
+    // ---- bytes-native (R069 phase 1) ----
+
+    #[test]
+    fn to_bytes_password_only_has_no_newline() {
+        let secret = Secret::parse(b"hunter2").unwrap();
+        assert_eq!(secret.to_bytes().as_slice(), b"hunter2");
+    }
+
+    #[test]
+    fn to_bytes_round_trips_modern() {
+        // parse → to_bytes → parse must yield the same password/body bytes.
+        let original = b"pw\nusername: alice\nurl: example.com\nnotes";
+        let once = Secret::parse(original).unwrap();
+        let bytes = once.to_bytes();
+        let twice = Secret::parse(&bytes).unwrap();
+        assert_eq!(twice.password_bytes(), once.password_bytes());
+        assert_eq!(twice.body_bytes(), once.body_bytes());
+        // And to_bytes is stable (idempotent on the already-normalized form).
+        assert_eq!(twice.to_bytes().as_slice(), bytes.as_slice());
+    }
+
+    #[test]
+    fn to_bytes_round_trips_attachment_layout() {
+        // An attachment's plaintext is an empty password line + attribute lines
+        // + a base64 body; to_bytes must reproduce it byte-for-byte.
+        let original = b"\nContent-Disposition: attachment; filename=\"x.bin\"\nContent-Transfer-Encoding: Base64\nQUJD";
+        let secret = Secret::parse(original).unwrap();
+        assert_eq!(secret.password_bytes(), b"");
+        assert_eq!(secret.to_bytes().as_slice(), original);
+    }
+
+    #[test]
+    fn non_utf8_body_preserved_and_detected() {
+        // The headline phase-1 test: non-UTF-8 body bytes survive parse + to_bytes
+        // bit-identical (no from_utf8_lossy corruption), and is_utf8() flags it so
+        // the UI can edit-block it. body() returns "" (the lossy view) for display.
+        let original = b"pw\n\xff\xfe garbage \x80";
+        let secret = Secret::parse(original).unwrap();
+        assert_eq!(secret.body_bytes(), &original[3..]);
+        assert!(!secret.is_utf8());
+        assert_eq!(secret.body(), "");
+        // Round-trips byte-identical through to_bytes.
+        assert_eq!(secret.to_bytes().as_slice(), original);
+    }
+
+    #[test]
+    fn non_utf8_password_detected() {
+        let secret = Secret::parse(b"\xff\xfe\nbody").unwrap();
+        assert_eq!(secret.password_bytes(), b"\xff\xfe");
+        assert!(!secret.is_utf8());
+        assert_eq!(secret.password(), "");
+    }
+
+    #[test]
+    fn password_is_utf8_distinguishes_password_from_body() {
+        // A UTF-8 password with a non-UTF-8 body: copy touches the password
+        // only, so password_is_utf8() is true (is_utf8() is still false → the
+        // edit-block holds, but the copy path is not blocked).
+        let secret = Secret::parse(b"hunter2\n\xff\xfe body garbage \x80").unwrap();
+        assert!(secret.password_is_utf8());
+        assert!(!secret.is_utf8());
+        // A non-UTF-8 password: copy is blocked too.
+        let secret = Secret::parse(b"\xff\xfe\nbody").unwrap();
+        assert!(!secret.password_is_utf8());
     }
 }

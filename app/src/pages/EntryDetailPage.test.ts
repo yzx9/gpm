@@ -318,6 +318,30 @@ describe("EntryDetailPage", () => {
       ).toBe(true);
     });
 
+    it("shows the non-UTF-8 info toast when the password can't be copied", async () => {
+      // Backend skipped the clipboard write (password isn't valid UTF-8); the
+      // UI must say so instead of crowning an empty copy with "Copied!".
+      vi.mocked(invoke).mockResolvedValue({
+        entry_name: "prod",
+        cleared_after_secs: 0,
+        has_totp: false,
+        has_attachment: false,
+        password_non_utf8: true,
+      });
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
+      await wrapper
+        .find('button[aria-label="Copy password to clipboard"]')
+        .trigger("click");
+      await flushPromises();
+
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("can't be copied")),
+      ).toBe(true);
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("✓ Copied")),
+      ).toBe(false);
+    });
+
     it("swallows AUTH_CANCELLED silently on copyPassword when the auth overlay is dismissed", async () => {
       // unlocked:false → identity NOT cached → copy's runWithAuth parks on the overlay.
       const { wrapper, lock } = mountWithApp(EntryDetailPage, {

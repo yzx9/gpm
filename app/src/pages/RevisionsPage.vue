@@ -199,6 +199,12 @@ async function copyVersion() {
       toast.info(t("revisions.copyBlocked"));
       return;
     }
+    if (result.password_non_utf8) {
+      // The revision's password has non-UTF-8 bytes — the backend skipped the
+      // clipboard write. Mirrors EntryDetailPage.copyPassword's non-UTF-8 branch.
+      toast.info(t("revisions.nonUtf8CopyBlocked"));
+      return;
+    }
     toast.success(
       t("revisions.copyToast", {
         date: formatRelativeTime(relativeNow.value, Date.parse(commit.date)),

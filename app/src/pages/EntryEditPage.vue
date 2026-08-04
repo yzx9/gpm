@@ -67,6 +67,9 @@ const decryptError = ref(false);
 // Set when the entry is a binary attachment — can't be round-tripped through
 // the text editor without destroying it, so editing is blocked at the source.
 const isAttachment = ref(false);
+// Set when the entry holds non-UTF-8 bytes — editing its lossy text view and
+// saving would corrupt the original bytes, so editing is blocked at the source.
+const isNonUtf8 = ref(false);
 const { cancelling, cancelSave } = useCancellableSave();
 
 // R031: the edit form shows decrypted plaintext, so hold a screen-capture claim
@@ -124,6 +127,7 @@ const canSave = computed(
   () =>
     !saving.value &&
     !isAttachment.value &&
+    !isNonUtf8.value &&
     editBody.value.trim() !== "" &&
     editBody.value !== loadedBody.value,
 );
@@ -151,6 +155,13 @@ async function loadBody() {
       // detail page's pre-probe window and direct /edit deep-links alike.
       isAttachment.value = true;
       error.value = t("entry.attachmentEditDisabledHint");
+      return;
+    }
+    if (claimed.edit_blocked === "nonUtf8") {
+      // Non-UTF-8 bytes can't round-trip through a UTF-8 text editor without
+      // corruption; block at the source so the lossy view is never saved back.
+      isNonUtf8.value = true;
+      error.value = t("entry.nonUtf8EditDisabledHint");
       return;
     }
     editPassword.value = claimed.password ?? "";
