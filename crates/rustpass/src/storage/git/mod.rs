@@ -34,6 +34,7 @@ mod util;
 mod worktree;
 
 pub use backend::GitStorage;
+pub use transport::init_server_timeouts;
 pub use worktree::{list_entries, resolve_entry_path};
 
 pub(crate) use worktree::passfile_rel;

@@ -407,6 +407,10 @@ pub(crate) async fn cancel_background_sync<R: tauri::Runtime>(app: &tauri::AppHa
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::too_many_lines)] // length is the command-registration list, not logic
 pub fn run() {
+    // libgit2's connect/server timeouts are C globals that must be set before
+    // any thread is spawned, so configure them first — before the Tauri/tokio
+    // runtime starts. Bounds the git handshake/transfer hang (R034).
+    rustpass::storage::git::init_server_timeouts();
     tauri::Builder::default()
         // Logger is registered first so every subsequent plugin/setup line can
         // emit to the rotated file + Android logcat. `Stdout` auto-routes to

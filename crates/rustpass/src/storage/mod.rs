@@ -523,6 +523,7 @@ pub trait StorageBackend: Send + Sync {
         &self,
         ctx: &StorageCtx<'_>,
         expected_remote_oid: &str,
+        cancel: Option<CancelToken>,
     ) -> Result<SyncResult, Error>;
 
     /// Fetch the remote tip and compute the local-vs-remote divergence preview
@@ -531,7 +532,11 @@ pub trait StorageBackend: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the repo/remote can't be opened or the fetch fails.
-    async fn preview_divergence(&self, ctx: &StorageCtx<'_>) -> Result<SyncDivergence, Error>;
+    async fn preview_divergence(
+        &self,
+        ctx: &StorageCtx<'_>,
+        cancel: Option<CancelToken>,
+    ) -> Result<SyncDivergence, Error>;
 
     /// Compute the "keep mine" replay plan: which local `.age` entries to
     /// re-encrypt onto the reviewed remote tip. Returns CIPHERTEXT blobs —
@@ -546,6 +551,7 @@ pub trait StorageBackend: Send + Sync {
         &self,
         ctx: &StorageCtx<'_>,
         expected_remote_oid: &str,
+        cancel: Option<CancelToken>,
     ) -> Result<KeepLocalOutcome, Error>;
 
     /// Advance HEAD + worktree to the already-fetched `fetched_oid` (no re-fetch
@@ -591,7 +597,11 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// [`ErrorCode::CloneFailed`] on an auth failure, [`ErrorCode::NetworkError`]
     /// on a network problem; an unsupported backend returns [`ErrorCode::StoreError`].
-    async fn verify_auth(&self, _ctx: &StorageCtx<'_>) -> Result<(), Error> {
+    async fn verify_auth(
+        &self,
+        _ctx: &StorageCtx<'_>,
+        _cancel: Option<CancelToken>,
+    ) -> Result<(), Error> {
         Err(Error::new(
             ErrorCode::StoreError,
             "Connection testing is not supported by this storage backend.",

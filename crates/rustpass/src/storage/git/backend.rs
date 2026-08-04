@@ -262,31 +262,43 @@ impl StorageBackend for GitStorage {
         &self,
         ctx: &StorageCtx<'_>,
         expected_remote_oid: &str,
+        cancel: Option<CancelToken>,
     ) -> Result<SyncResult, Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
         let policy = ctx.policy.clone();
         let expected = expected_remote_oid.to_string();
-        spawn_blocking(move || pull::adopt_remote(&repo_path, &auth, &policy, &expected)).await?
+        spawn_blocking(move || {
+            pull::adopt_remote(&repo_path, &auth, &policy, &expected, cancel.as_ref())
+        })
+        .await?
     }
 
-    async fn preview_divergence(&self, ctx: &StorageCtx<'_>) -> Result<SyncDivergence, Error> {
+    async fn preview_divergence(
+        &self,
+        ctx: &StorageCtx<'_>,
+        cancel: Option<CancelToken>,
+    ) -> Result<SyncDivergence, Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
-        spawn_blocking(move || divergence::preview_divergence(&repo_path, &auth)).await?
+        spawn_blocking(move || divergence::preview_divergence(&repo_path, &auth, cancel.as_ref()))
+            .await?
     }
 
     async fn keep_local_plan(
         &self,
         ctx: &StorageCtx<'_>,
         expected_remote_oid: &str,
+        cancel: Option<CancelToken>,
     ) -> Result<KeepLocalOutcome, Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
         let policy = ctx.policy.clone();
         let expected = expected_remote_oid.to_string();
-        spawn_blocking(move || divergence::keep_local_plan(&repo_path, &auth, &policy, &expected))
-            .await?
+        spawn_blocking(move || {
+            divergence::keep_local_plan(&repo_path, &auth, &policy, &expected, cancel.as_ref())
+        })
+        .await?
     }
 
     async fn keep_local_advance(&self, repo_path: &Path, fetched_oid: &str) -> Result<(), Error> {
@@ -341,10 +353,14 @@ impl StorageBackend for GitStorage {
         .await?
     }
 
-    async fn verify_auth(&self, ctx: &StorageCtx<'_>) -> Result<(), Error> {
+    async fn verify_auth(
+        &self,
+        ctx: &StorageCtx<'_>,
+        cancel: Option<CancelToken>,
+    ) -> Result<(), Error> {
         let repo_path = ctx.repo_path.to_path_buf();
         let auth = ctx.auth.clone();
-        spawn_blocking(move || pull::verify_remote_auth(&repo_path, &auth)).await?
+        spawn_blocking(move || pull::verify_remote_auth(&repo_path, &auth, cancel.as_ref())).await?
     }
 
     async fn blob_at_revision(

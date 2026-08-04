@@ -82,12 +82,24 @@ pub(super) fn pull_repo(
 /// ref. Used to validate a credential before persisting it. A failed fetch is
 /// re-classified through [`transport::classify_git_error`] so any credentialed
 /// URL embedded in the libgit2 message is redacted before it reaches the caller.
-pub(super) fn verify_remote_auth(repo_path: &Path, auth: &GitAuth) -> Result<(), Error> {
+pub(super) fn verify_remote_auth(
+    repo_path: &Path,
+    auth: &GitAuth,
+    cancel: Option<&CancelToken>,
+) -> Result<(), Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|e| transport::classify_git_error(&format!("Failed to open repository: {e}")))?;
     transport::ensure_https_ca_for_origin(&repo)?;
-    let (_branch, temp_ref, _oid) = transport::fetch_remote_into_temp(&repo, auth)
-        .map_err(|e| transport::classify_git_error(&format!("{e}")))?;
+    let (_branch, temp_ref, _oid) = transport::fetch_remote_into_temp(&repo, auth, cancel)
+        .map_err(|e| {
+            // Preserve a cancel; re-classify any other git error (this redacts any
+            // credentialed URL libgit2 echoed) the way this probe always has.
+            if e.code == "CANCELLED" {
+                e
+            } else {
+                transport::classify_git_error(&format!("{e}"))
+            }
+        })?;
     // Best-effort cleanup of the probe ref; a leftover under refs/gpm/probe/ is
     // harmless (never pushed, never read again after this).
     let _ = repo.find_reference(&temp_ref).and_then(|mut r| r.delete());
@@ -384,6 +396,7 @@ pub(super) fn adopt_remote(
     auth: &GitAuth,
     policy: &AuthenticityConfig,
     expected_remote_oid: &str,
+    cancel: Option<&CancelToken>,
 ) -> Result<SyncResult, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -395,7 +408,7 @@ pub(super) fn adopt_remote(
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot pull"))?
         .to_string();
 
-    let (_branch, temp_ref, fetched_oid) = transport::fetch_remote_into_temp(&repo, auth)?;
+    let (_branch, temp_ref, fetched_oid) = transport::fetch_remote_into_temp(&repo, auth, cancel)?;
     let cleanup = || {
         drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
     };

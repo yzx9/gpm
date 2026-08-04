@@ -123,12 +123,24 @@ pub(crate) async fn clear_ssh_key(state: State<'_, AppState>) -> Result<RepoConf
 
 /// Validate a PAT against the remote before saving it: a read-only `git fetch`
 /// into a throwaway ref (HEAD untouched). Throws on auth/network failure so the
-/// UI can refuse to save a bad token.
+/// UI can refuse to save a bad token. Runs cancellably (R034): a user cancel
+/// during the probe reaches the fetch's credentials/transfer callbacks.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn verify_git_auth(state: State<'_, AppState>, pat: String) -> Result<(), Error> {
+pub(crate) async fn verify_git_auth(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    pat: String,
+) -> Result<(), Error> {
     log::info!("config: verify-git-auth");
-    state.store.verify_pat(pat).await
+    let store = state.store.clone();
+    crate::git::run_cancellable(&state, app, move |cancel, _tx, slot| async move {
+        // Setup-time op (no `write_mu`): arm up-front so the probe is
+        // cancellable. The guard disarms when the future drops.
+        let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
+        store.verify_pat(pat, Some(cancel)).await
+    })
+    .await
 }
 
 /// Set the app auto-lock mode (`immediate` / `{ idle: secs }` / `never`).

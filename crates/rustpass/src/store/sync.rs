@@ -166,7 +166,7 @@ impl Store {
             Err(e) if e.code == "PUSH_REJECTED" => {
                 log::warn!("autosync: push rejected, surfacing divergence");
                 Ok(WriteOutcome::NeedsDivergenceResolve(
-                    self.sync_divergence_preview().await?,
+                    self.sync_divergence_preview(cancel.clone()).await?,
                 ))
             }
             Err(e) => Err(e),
@@ -221,7 +221,9 @@ impl Store {
             DivergenceChoice::AdoptRemote => {
                 let rcs = self.rcs_ctx().await?;
                 let expected = expected_remote_oid.to_string();
-                self.storage()?.adopt_remote(&rcs.ctx(), &expected).await
+                self.storage()?
+                    .adopt_remote(&rcs.ctx(), &expected, cancel.clone())
+                    .await
             }
             DivergenceChoice::KeepMine => self.resolve_keep_mine(expected_remote_oid, cancel).await,
         }
@@ -248,7 +250,7 @@ impl Store {
         //    replay set + conflict detection. Does NOT move HEAD.
         let plan = match self
             .storage()?
-            .keep_local_plan(&rcs.ctx(), &expected)
+            .keep_local_plan(&rcs.ctx(), &expected, cancel.clone())
             .await?
         {
             KeepLocalOutcome::Blocked(result) => return Ok(result),
@@ -469,9 +471,12 @@ impl Store {
     /// # Errors
     ///
     /// Returns an error if the store is not configured or the fetch fails.
-    pub async fn sync_divergence_preview(&self) -> Result<SyncDivergence, Error> {
+    pub async fn sync_divergence_preview(
+        &self,
+        cancel: Option<CancelToken>,
+    ) -> Result<SyncDivergence, Error> {
         let rcs = self.rcs_ctx().await?;
-        self.storage()?.preview_divergence(&rcs.ctx()).await
+        self.storage()?.preview_divergence(&rcs.ctx(), cancel).await
     }
 
     /// Acquire the cross-process repo lock. Non-blocking; on contention
@@ -623,11 +628,13 @@ impl Store {
         // as Diverged with a fresh preview. A network error leaves any local
         // commits to sync later. Push doesn't move local HEAD, so the pull result
         // still reflects the post-sync state.
-        match self.push_locked(cancel, progress).await {
+        match self.push_locked(cancel.clone(), progress).await {
             Ok(()) => Ok(SyncOutcome::FastForwarded(pull_result)),
             Err(e) if e.code == "PUSH_REJECTED" => {
                 log::warn!("sync: push rejected, surfacing divergence");
-                Ok(SyncOutcome::Diverged(self.sync_divergence_preview().await?))
+                Ok(SyncOutcome::Diverged(
+                    self.sync_divergence_preview(cancel).await?,
+                ))
             }
             Err(e) => Err(e),
         }
@@ -693,7 +700,7 @@ impl Store {
     ///
     /// [`ErrorCode::CloneFailed`] on an auth failure, [`ErrorCode::NetworkError`]
     /// on a network problem.
-    pub async fn verify_pat(&self, pat: String) -> Result<(), Error> {
+    pub async fn verify_pat(&self, pat: String, cancel: Option<CancelToken>) -> Result<(), Error> {
         let rc = self.config.load_repo_config().await?;
         let auth = GitAuth::Pat(pat);
         let policy = AuthenticityConfig::default();
@@ -704,6 +711,6 @@ impl Store {
             commit_name: None,
             commit_email: None,
         };
-        self.storage()?.verify_auth(&ctx).await
+        self.storage()?.verify_auth(&ctx, cancel).await
     }
 }

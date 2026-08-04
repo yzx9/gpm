@@ -12,7 +12,6 @@
 
 #[cfg(target_os = "android")]
 use std::ffi::c_int;
-#[cfg(target_os = "android")]
 use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 
@@ -178,9 +177,70 @@ fn add_certs_from_pem(pem: &[u8]) -> Result<usize, Error> {
     })
 }
 
+/// Connect-phase ceiling (ms) for git network ops: bounds DNS/TCP connect and
+/// the HTTPS TLS handshake (libgit2 does both in one `git_stream_connect`), so a
+/// clone against a dead or unreachable host fails fast instead of grinding until
+/// the OS TCP timeout (minutes). R034's "no connect timeout exposed" premise was
+/// false for the vendored libgit2 1.9.6 — `git2::opts` binds this.
+const SERVER_CONNECT_TIMEOUT_MS: i32 = 20_000;
+
+/// Post-connect ceiling (ms): bounds the SSH key-exchange/auth — which run
+/// *after* TCP connect, under `libssh2_session_set_timeout` fed by
+/// `GIT_OPT_SET_SERVER_TIMEOUT` — and any stalled read during transfer. SSH kex
+/// is the long pole on a host that accepts TCP but never answers, so without
+/// this an SSH remote still hangs indefinitely even with the connect ceiling.
+/// The trade: this also aborts a legitimate transfer stalled longer than the
+/// ceiling — acceptable for gpm, whose stores are tiny (KB–MB), so a stalled
+/// read genuinely means stuck, not slow.
+const SERVER_TIMEOUT_MS: i32 = 60_000;
+
+/// Process-global guard so the timeouts are set at most once (a repeat call is
+/// a safe no-op).
+static SERVER_TIMEOUTS_INIT: OnceLock<()> = OnceLock::new();
+
+/// Set libgit2's connect + server timeouts once, eagerly. Both are C globals
+/// (`git2::opts` documents them as "modifying a C global without
+/// synchronization … should only be called before any thread is spawned"), so
+/// the app calls this at the very top of `run()`, before the Tauri/tokio runtime
+/// starts. Not user-tunable: a live setting would mutate the C global while git
+/// ops read it on `spawn_blocking` threads (UB), and Android's at-rest-encrypted
+/// config can't be decrypted that early anyway.
+#[allow(unsafe_code)]
+pub fn init_server_timeouts() {
+    SERVER_TIMEOUTS_INIT.get_or_init(|| {
+        // SAFETY: process-global C mutation; called once before any thread is
+        // spawned (top of `run()`). Both setters are documented as non-failing.
+        let set = || -> Result<(), git2::Error> {
+            unsafe {
+                git2::opts::set_server_connect_timeout_in_milliseconds(SERVER_CONNECT_TIMEOUT_MS)?;
+                git2::opts::set_server_timeout_in_milliseconds(SERVER_TIMEOUT_MS)?;
+            }
+            Ok(())
+        };
+        if let Err(e) = set() {
+            log::warn!("git: failed to set libgit2 server timeouts: {e}");
+        }
+    });
+}
+
 /// `true` if `cancel` is set, signalling the running git operation to abort.
 pub(super) fn cancelled(cancel: Option<&CancelToken>) -> bool {
     cancel.is_some_and(|c| c.load(Ordering::Relaxed))
+}
+
+/// Return the error libgit2 expects to abort the credential callback when the
+/// cancel token is set. A non-zero `cred_acquire_cb` return aborts the op
+/// (verified against libgit2's propagation for both SSH and HTTPS), so honouring
+/// the token here makes the *auth* phase cancellable — the phase between
+/// handshake and the first transfer-progress tick, which the transfer/sideband
+/// callbacks can't reach. Extracted (not inlined in the closures) so the
+/// cancel-on-auth path is unit-testable without a server that challenges auth.
+fn abort_if_cancelled(cancel: Option<&CancelToken>) -> Result<(), git2::Error> {
+    if cancelled(cancel) {
+        Err(git2::Error::from_str("Cancelled before auth"))
+    } else {
+        Ok(())
+    }
 }
 
 /// Map a git2 transfer-progress snapshot onto the serialisable [`GitProgress`].
@@ -225,7 +285,9 @@ pub(super) fn build_remote_callbacks<'a>(
         GitAuth::None => {}
         GitAuth::Pat(token) => {
             let token = token.clone();
+            let cancel_tok = cancel.cloned();
             callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
+                abort_if_cancelled(cancel_tok.as_ref())?;
                 git2::Cred::userpass_plaintext(&token, "")
                     .or_else(|_| git2::Cred::userpass_plaintext("", &token))
             });
@@ -238,7 +300,9 @@ pub(super) fn build_remote_callbacks<'a>(
             let username = username.clone();
             let private_key = private_key.clone();
             let passphrase = passphrase.clone();
+            let cancel_tok = cancel.cloned();
             callbacks.credentials(move |_url, username_from_url, _allowed_types| {
+                abort_if_cancelled(cancel_tok.as_ref())?;
                 let user = username_from_url.unwrap_or(&username);
                 git2::Cred::ssh_key_from_memory(user, None, &private_key, passphrase.as_deref())
                     .map_err(|e| {
@@ -288,6 +352,7 @@ pub(super) fn build_remote_callbacks<'a>(
 pub(super) fn fetch_remote_into_temp(
     repo: &Repository,
     auth: &GitAuth,
+    cancel: Option<&CancelToken>,
 ) -> Result<(String, String, git2::Oid), Error> {
     let branch = repo
         .head()?
@@ -305,8 +370,12 @@ pub(super) fn fetch_remote_into_temp(
         )
     })?;
     let mut fetch_opts = FetchOptions::new();
-    fetch_opts.remote_callbacks(build_remote_callbacks(auth, None, None));
-    remote.fetch(&[&refspec], Some(&mut fetch_opts), None)?;
+    fetch_opts.remote_callbacks(build_remote_callbacks(auth, cancel, None));
+    // The fetch's git2::Error is converted via `From` (callers re-classify through
+    // classify_git_error); we only override to `Cancelled` when the token is set,
+    // so a cancel during this probe fetch aborts instead of completing.
+    let fetched = remote.fetch(&[&refspec], Some(&mut fetch_opts), None);
+    cancelled_or(fetched.map_err(Error::from), cancel)?;
 
     let oid = repo.refname_to_id(&temp_ref).map_err(|e| {
         Error::new(
@@ -540,6 +609,59 @@ mod tests {
         let out: Result<(), Error> = cancelled_or(Err(err), Some(&token));
         let e = out.expect_err("unset token must keep the original error");
         assert_eq!(e.code, "NETWORK_ERROR");
+    }
+
+    // ── server timeouts (Part A) ─────────────────────────────────────────
+
+    #[test]
+    #[allow(unsafe_code)] // git2::opts getters are unsafe C-global reads
+    fn init_server_timeouts_sets_both_ceilings() {
+        // Sets the process-global libgit2 ceilings; the app calls this once at
+        // the top of `run()`. Round-trips the getters so a regression (wrong
+        // constant, option typo, silent no-op) is caught without needing a real
+        // unreachable host. The real fail-fast behaviour is manual-only.
+        init_server_timeouts();
+        // SAFETY: read-only C-global getters.
+        let connect = unsafe { git2::opts::get_server_connect_timeout_in_milliseconds() }
+            .expect("get connect timeout");
+        let server = unsafe { git2::opts::get_server_timeout_in_milliseconds() }
+            .expect("get server timeout");
+        assert_eq!(
+            connect, SERVER_CONNECT_TIMEOUT_MS,
+            "connect ceiling must match the constant"
+        );
+        assert_eq!(
+            server, SERVER_TIMEOUT_MS,
+            "server ceiling must match the constant"
+        );
+        // Idempotent: the OnceLock makes a repeat call a safe no-op.
+        init_server_timeouts();
+    }
+
+    // ── auth-phase cancel (Part B1) ──────────────────────────────────────
+    //
+    // `abort_if_cancelled` is the unit the credentials closures call; testing it
+    // directly covers the auth-phase cancel without a server that challenges
+    // auth (the harness uses GitAuth::None, which registers no credentials
+    // closure to invoke).
+
+    #[test]
+    fn abort_if_cancelled_only_when_token_set() {
+        // No token (e.g. GitAuth::None, or an op that didn't wire cancel): never
+        // abort — supply credentials as usual.
+        assert!(abort_if_cancelled(None).is_ok());
+        // Unset token: the auth phase proceeds.
+        let unset: CancelToken = Arc::new(AtomicBool::new(false));
+        assert!(abort_if_cancelled(Some(&unset)).is_ok());
+        // Set token: abort the credential callback so libgit2 errors the op,
+        // which the leaf then maps to CANCELLED. This is the auth-phase cancel.
+        let set: CancelToken = Arc::new(AtomicBool::new(true));
+        let err = abort_if_cancelled(Some(&set)).expect_err("set token must abort auth");
+        assert!(
+            err.message().contains("Cancelled"),
+            "abort error should name the cancel, got: {}",
+            err.message()
+        );
     }
 
     // ── transfer_progress callback wiring ────────────────────────────────

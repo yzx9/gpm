@@ -454,7 +454,7 @@ async fn sync_divergence_preview_reports_local_changes() {
         "remote diverges",
     );
 
-    let div = store.sync_divergence_preview().await.expect("preview");
+    let div = store.sync_divergence_preview(None).await.expect("preview");
     assert_eq!(div.remote_tip, bare_head_oid(bare_dir.path()));
     assert_eq!(div.local_ahead, 1, "one unpushed local commit");
     assert_eq!(div.remote_ahead, 1, "one remote commit");

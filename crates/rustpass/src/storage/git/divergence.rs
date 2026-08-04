@@ -52,6 +52,7 @@ use super::{transport, util};
 pub(super) fn preview_divergence(
     repo_path: &Path,
     auth: &GitAuth,
+    cancel: Option<&crate::storage::CancelToken>,
 ) -> Result<SyncDivergence, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -60,7 +61,7 @@ pub(super) fn preview_divergence(
         .ok()
         .and_then(|r| r.target())
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD to compute divergence"))?;
-    let (_branch, temp_ref, fetched_oid) = transport::fetch_remote_into_temp(&repo, auth)?;
+    let (_branch, temp_ref, fetched_oid) = transport::fetch_remote_into_temp(&repo, auth, cancel)?;
     let cleanup = || {
         drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
     };
@@ -285,6 +286,7 @@ pub(super) fn keep_local_plan(
     auth: &GitAuth,
     policy: &AuthenticityConfig,
     expected_remote_oid: &str,
+    cancel: Option<&crate::storage::CancelToken>,
 ) -> Result<KeepLocalOutcome, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -296,7 +298,7 @@ pub(super) fn keep_local_plan(
         )
     })?;
 
-    let (_branch, temp_ref, fetched_oid) = transport::fetch_remote_into_temp(&repo, auth)?;
+    let (_branch, temp_ref, fetched_oid) = transport::fetch_remote_into_temp(&repo, auth, cancel)?;
     let cleanup = || {
         drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
     };

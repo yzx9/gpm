@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Settings → General** now keeps **AutoSync** and its **Background sync** option together in one card — background sync appears beneath AutoSync only while it's on — instead of two separate cards, and the AutoSync toggle now uses the same On/Off order as every other toggle.
 - When **Auto-sync** is on, editing, deleting, or creating a secret that collides with another device's change no longer silently overwrites it — you now get a clear per-entry choice (keep your version or theirs); a delete a teammate already did is recognized as "already removed" instead of claiming a commit, and a create that reuses a name another device took asks before overwriting. With Auto-sync off it still surfaces when you manually sync.
+- Cloning a repository, syncing, or testing a connection against a server that never responds no longer hangs for a long time — gpm now gives up after about 20 seconds of trying to connect (about 60 seconds overall, covering the SSH sign-in step) and shows a clear error, instead of waiting out the system's long network timeout. Cancelling while gpm is still signing in, or during a "remote copy exists" check, now also responds promptly instead of only after data starts moving.
 
 ### Fixed
 

@@ -1,8 +1,8 @@
 # Killable git transport — cancel during connection/auth
 
 **Priority:** P3
-**Status:** Draft
-**Phase:** Future
+**Status:** Declined
+**Phase:** Dropped
 
 ## What
 
@@ -22,12 +22,21 @@ The cost is Android-first. Desktop can usually rely on a system `git` already on
 
 Threat-model impact: none beyond the existing trusted-subprocess boundary. Cancellation discards a partial fetch and tears down a network session; it writes nothing and bypasses no authenticity check — the same guarantee the token model already gives for transfer-phase cancels.
 
+## Current state (interim shipped)
+
+Two partial fixes have shipped, shrinking the blind spot without the subprocess:
+
+- **Hardcoded connect/server timeouts.** The original "libgit2 exposes no connect timeout" premise (see _Alternatives considered_) was false for the vendored libgit2 1.9.6 — `git2 0.20.4` binds `GIT_OPT_SET_SERVER_CONNECT_TIMEOUT` (TCP connect + HTTPS TLS handshake) and `GIT_OPT_SET_SERVER_TIMEOUT` (post-connect: SSH key-exchange/auth and any stalled read). gpm sets both once at startup (20s connect / 60s server), so a clone against a dead host fails fast instead of grinding to the OS TCP timeout. `server_timeout` bounds the SSH handshake, which `server_connect_timeout` alone cannot reach; its trade-off is that it can also abort a legitimate slow transfer — acceptable because gpm stores are tiny.
+- **Auth-phase + secondary-fetch cancel.** The cancel token is now honoured in the `credentials` callback (between handshake and the first transfer-progress tick — SSH userauth and HTTPS 401 retry become cancellable) and threaded through the secondary fetches that previously ignored it (divergence preview, keep-mine plan, adopt-remote, PAT verify).
+
+Neither delivers the RFC's titular _instant_ cancel mid-handshake: the timeout is a bounded wait then an error (the user still waits the ceiling), and the `credentials` hook fires _after_ the TLS/SSH handshake. True mid-handshake termination would need a killable subprocess (system git, a libgit2 helper binary, or gix) or a custom libgit2 transport — libgit2's built-in cancel is checkpoint-only and the TLS handshake in `git_stream_connect` has no checkpoint to poll. **That full scope is declined:** the interim above bounds the worst case to ~20–60s, sufficient for gpm's tiny stores, and the subprocess / custom-transport cost is disproportionate. The RFC file is removed in a follow-up commit; this section is the decision record.
+
 ## Alternatives considered
 
-- **Status quo + "Cancelling…" feedback (the interim this RFC follows).** Accepted for now; rejected as the resting state because the blind spot remains for the most common (small-store) case, exactly where users hit it.
-- **A libgit2 connect-phase timeout.** Rejected — libgit2 exposes no connect or handshake timeout to the embedder (only low-speed-transfer timeouts via git config), so the pre-transfer window stays bounded only by the OS-level TCP timeout, which is long.
+- **Status quo + "Cancelling…" feedback.** The original interim; now augmented by the shipped timeouts and auth-phase cancel above, which bound the worst case to ~20–60s instead of minutes.
+- **A libgit2 connect/server timeout.** Originally _rejected_ here on the claim that "libgit2 exposes no connect or handshake timeout to the embedder" — that premise is **false** for the vendored libgit2 1.9.6 (see _Current state_), and the timeout has shipped as the interim ceiling. It bounds the _hang_ but is a timeout, not an _instant cancel_.
 - **Drop the blocking task on cancel.** Rejected — the C call is not interruptible, and the orphaned thread keeps the remote session open and leaks resources until it returns; the cancel is illusory.
-- **Subprocess git transport.** The recorded direction; deferred on the Android packaging scope, not on desirability.
+- **Subprocess git transport.** The recorded direction for the resting state; deferred on the Android packaging scope, not on desirability.
 
 ## Effort
 

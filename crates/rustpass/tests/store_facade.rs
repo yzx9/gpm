@@ -226,7 +226,7 @@ async fn verify_pat_ok_on_reachable_remote() {
         .expect("configure should succeed");
 
     store
-        .verify_pat("ignored-for-file-remote".to_string())
+        .verify_pat("ignored-for-file-remote".to_string(), None)
         .await
         .expect("verify_pat should succeed against the cloned origin");
 }
