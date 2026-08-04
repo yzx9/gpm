@@ -12,24 +12,27 @@
 //! directly (no biometric-keystore mock needed).
 
 use std::fs;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rustpass::Store;
 
 use crate::AppState;
+use crate::app_config::AppConfigStore;
 use crate::applock::run_seal_migrate_once;
+use crate::identity::IdleTimer;
 
 /// Build a minimal `AppState` backed by a keyed `Store` in a temp config dir,
 /// with `seal_migrate_state` Pending.
-fn keyed_state(dir: &std::path::Path) -> AppState {
+fn keyed_state(dir: &Path) -> AppState {
     let key = rustpass::seal::generate_master_key().unwrap();
     let store = Arc::new(Store::new(dir.to_path_buf(), Some(key)));
     AppState {
         store,
-        app_config: crate::app_config::AppConfigStore::new(dir),
+        app_config: AppConfigStore::new(dir),
         app_handle: None,
-        lock_timer: crate::identity::IdleTimer::new(),
+        lock_timer: IdleTimer::new(),
         pending_identity: Mutex::new(None),
         lock_mode: Mutex::new(rustpass::LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
@@ -37,7 +40,7 @@ fn keyed_state(dir: &std::path::Path) -> AppState {
         clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(false),
         app_locked: Arc::new(AtomicBool::new(false)),
-        gate_idle_timer: crate::identity::IdleTimer::new(),
+        gate_idle_timer: IdleTimer::new(),
         identity_coupled: AtomicBool::new(false),
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),

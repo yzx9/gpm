@@ -576,6 +576,7 @@ pub fn is_ssh_identity_encrypted(identity_bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+    use std::path::PathBuf;
     use std::str::FromStr;
 
     use bech32::ToBase32;
@@ -679,7 +680,7 @@ mod tests {
     #[tokio::test]
     async fn decrypt_file_missing_file() {
         let (identity, _recipient) = generate_keypair();
-        let missing = std::path::PathBuf::from("/nonexistent/path/no-such-file.age");
+        let missing = PathBuf::from("/nonexistent/path/no-such-file.age");
 
         let err = decrypt_file(&missing, identity.as_bytes(), None)
             .await

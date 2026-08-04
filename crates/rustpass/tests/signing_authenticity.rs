@@ -133,7 +133,7 @@ fn store_with_repo() -> (tempfile::TempDir, Store) {
 
 fn block_on<F>(f: F) -> F::Output
 where
-    F: std::future::Future,
+    F: Future,
 {
     tokio::runtime::Runtime::new().expect("runtime").block_on(f)
 }
@@ -267,7 +267,7 @@ fn enforce_aborts_pull_on_unsigned_commit_head_unchanged() {
     block_on(store.set_verification_mode(VerifyMode::Enforce)).expect("enforce");
 
     let head_before = store_head(&store);
-    let files_before: Vec<String> = std::fs::read_dir(repo_local_path(&store))
+    let files_before: Vec<String> = fs::read_dir(repo_local_path(&store))
         .expect("read dir")
         .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
         .collect();
@@ -297,7 +297,7 @@ fn enforce_aborts_pull_on_unsigned_commit_head_unchanged() {
         head_after, head_before,
         "HEAD must stay put when Enforce refuses checkout"
     );
-    let files_after: Vec<String> = std::fs::read_dir(repo_local_path(&store))
+    let files_after: Vec<String> = fs::read_dir(repo_local_path(&store))
         .expect("read dir")
         .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
         .collect();

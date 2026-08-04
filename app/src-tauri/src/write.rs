@@ -35,8 +35,8 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rustpass::template::{self, CreatePreset};
@@ -316,7 +316,7 @@ where
     });
     // PRIVATE throwaway slot — never the shared `active_cancel_slot` (the user's
     // pull-to-refresh cancel). Nobody polls this slot; it just satisfies the arm.
-    let private_slot: rustpass::CancelSlot = Arc::new(std::sync::Mutex::new(None));
+    let private_slot: rustpass::CancelSlot = Arc::new(Mutex::new(None));
     let result = op(private_slot, cancel).await;
     deadline.abort(); // settled (ok, err, or deadline-cancelled) — stop the timer
     result

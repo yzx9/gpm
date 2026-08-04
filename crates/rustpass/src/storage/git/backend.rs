@@ -10,6 +10,7 @@
 //! `commit`/`pull`/`divergence` to async via `spawn_blocking`; file ops delegate
 //! to `worktree`.
 
+use std::io;
 use std::path::Path;
 
 use async_trait::async_trait;
@@ -74,7 +75,7 @@ impl StorageBackend for GitStorage {
         assert_within_repo(repo_path, file_path.parent().unwrap_or(Path::new("")))?;
         match fs::remove_file(&file_path).await {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::new(
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Err(Error::new(
                 ErrorCode::EntryNotFound,
                 format!("Entry not found: {passfile}"),
             )),
@@ -89,7 +90,7 @@ impl StorageBackend for GitStorage {
         // the recipient set.
         let file_path = resolve_entry_path(repo_path, rel_path)?;
         fs::read(&file_path).await.map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => Error::new(
+            io::ErrorKind::NotFound => Error::new(
                 ErrorCode::EntryNotFound,
                 format!("File not found: {rel_path}"),
             ),
@@ -117,7 +118,7 @@ impl StorageBackend for GitStorage {
         let dir = resolve_entry_path(repo_path, rel_prefix)?;
         let mut out: Vec<String> = Vec::new();
         let mut entries = fs::read_dir(&dir).await.map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => {
+            io::ErrorKind::NotFound => {
                 Error::new(ErrorCode::EntryNotFound, format!("Not found: {rel_prefix}"))
             }
             _ => Error::new(ErrorCode::IoError, format!("Failed to list dir: {e}")),

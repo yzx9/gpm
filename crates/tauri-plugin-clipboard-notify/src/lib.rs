@@ -18,6 +18,9 @@
 //! is a no-op (`post`/`dismiss` return `Ok(())`, `are_enabled` reports `true`
 //! so the frontend never prompts, `request_permission` reports `true`).
 
+#[cfg(not(target_os = "android"))]
+use std::marker::PhantomData;
+
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
 
@@ -79,7 +82,7 @@ impl NotifyText {
 pub struct ClipboardNotify<R: Runtime>(PluginHandle<R>);
 
 #[cfg(not(target_os = "android"))]
-pub struct ClipboardNotify<R: Runtime>(std::marker::PhantomData<fn() -> R>);
+pub struct ClipboardNotify<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> ClipboardNotify<R> {
@@ -257,7 +260,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             }
             #[cfg(not(target_os = "android"))]
             {
-                app.manage(ClipboardNotify::<R>(std::marker::PhantomData));
+                app.manage(ClipboardNotify::<R>(PhantomData));
             }
             Ok(())
         })

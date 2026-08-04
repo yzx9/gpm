@@ -71,7 +71,7 @@ async fn list_recipients_round_trips_and_treats_missing_as_empty() {
     // Present index → parsed. The round-trip back through encrypt/decrypt above
     // already exercises the parsed-recipients path; here we just confirm count.
     let (_id, recipient) = generate_test_keypair();
-    std::fs::write(
+    fs::write(
         dir.path().join(TEST_RECIPIENTS_FILE),
         format!("{recipient}\n"),
     )
@@ -90,7 +90,7 @@ async fn list_recipients_round_trips_and_treats_missing_as_empty() {
 #[tokio::test]
 async fn list_recipients_rejects_non_utf8_index() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
+    fs::write(
         dir.path().join(TEST_RECIPIENTS_FILE),
         b"age1abc\n\xff\xfe\n",
     )

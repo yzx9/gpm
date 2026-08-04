@@ -195,8 +195,9 @@ fn parse_err<E>(_e: E) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
+
+    use super::*;
 
     // ---- generation: RFC 6238 Appendix B vectors (direct construction) ----
 

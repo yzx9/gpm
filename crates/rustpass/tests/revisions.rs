@@ -8,6 +8,8 @@
 //! (`Deleted`), pagination + the base-oid anchor, and a single-commit history.
 
 mod common;
+use std::collections::HashSet;
+
 use common::{
     TEST_RECIPIENTS_FILE, add_commit_to_bare, create_test_git_repo_with, crypto_permit,
     generate_test_keypair, store_with_base,
@@ -203,8 +205,7 @@ async fn pagination_and_single_commit_history() {
     // Anchored to the same base across pages.
     assert_eq!(p1.base_oid, base);
     // No overlap between the two pages.
-    let p0_hashes: std::collections::HashSet<&str> =
-        p0.commits.iter().map(|c| c.hash.as_str()).collect();
+    let p0_hashes: HashSet<&str> = p0.commits.iter().map(|c| c.hash.as_str()).collect();
     assert!(
         !p1.commits
             .iter()
@@ -244,8 +245,7 @@ async fn pagination_base_oid_anchors_against_mid_walk_head_drift() {
         .expect("anchored page 1");
 
     // No overlap with page 0's window.
-    let p0_hashes: std::collections::HashSet<&str> =
-        p0.commits.iter().map(|c| c.hash.as_str()).collect();
+    let p0_hashes: HashSet<&str> = p0.commits.iter().map(|c| c.hash.as_str()).collect();
     assert!(
         !p1.commits
             .iter()
@@ -259,8 +259,7 @@ async fn pagination_base_oid_anchors_against_mid_walk_head_drift() {
         .list_revisions("foo", 0, 2, None)
         .await
         .expect("new HEAD page");
-    let post_hashes: std::collections::HashSet<&str> =
-        post.commits.iter().map(|c| c.hash.as_str()).collect();
+    let post_hashes: HashSet<&str> = post.commits.iter().map(|c| c.hash.as_str()).collect();
     assert!(
         !p1.commits
             .iter()

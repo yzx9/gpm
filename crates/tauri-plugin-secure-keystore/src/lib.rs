@@ -31,6 +31,9 @@
 //! `is_available` reads `false`, `retrieve` returns `None`, so the app falls
 //! back to plaintext at-rest storage (documented asymmetry).
 
+#[cfg(not(target_os = "android"))]
+use std::marker::PhantomData;
+
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "android")]
 use tauri::plugin::mobile::PluginInvokeError;
@@ -169,7 +172,7 @@ pub struct SecureKeystore<R: Runtime>(tauri::plugin::PluginHandle<R>);
 /// `fn() -> R` variance does not inherit R's auto-trait bounds), so it can be
 /// managed as app state on every target.
 #[cfg(not(target_os = "android"))]
-pub struct SecureKeystore<R: Runtime>(std::marker::PhantomData<fn() -> R>);
+pub struct SecureKeystore<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> SecureKeystore<R> {
@@ -441,7 +444,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             }
             #[cfg(not(target_os = "android"))]
             {
-                app.manage(SecureKeystore::<R>(std::marker::PhantomData));
+                app.manage(SecureKeystore::<R>(PhantomData));
             }
             Ok(())
         })

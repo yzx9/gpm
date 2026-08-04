@@ -17,8 +17,10 @@
 //! on drop AND automatically if the process dies — no stale-lockfile problem
 //! (the empty lockfile may persist on disk harmlessly; it carries no data).
 
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::path::Path;
+use std::time::Duration;
+use std::{io, thread};
 
 use fs2::FileExt;
 
@@ -55,7 +57,7 @@ impl RepoLock {
     pub fn try_acquire(config_dir: &Path) -> Result<Self, Error> {
         // The config dir normally exists by the time any Store is constructed;
         // create it best-effort so a fresh worker can open the lockfile.
-        let _ = std::fs::create_dir_all(config_dir);
+        let _ = fs::create_dir_all(config_dir);
         let path = config_dir.join(REPO_LOCK_FILE);
         let file = OpenOptions::new()
             .create(true)
@@ -71,11 +73,9 @@ impl RepoLock {
         for attempt in 0..=REPO_LOCK_RETRIES {
             match file.try_lock_exclusive() {
                 Ok(()) => return Ok(Self { file: Some(file) }),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                     if attempt < REPO_LOCK_RETRIES {
-                        std::thread::sleep(std::time::Duration::from_millis(
-                            REPO_LOCK_RETRY_SLEEP_MS,
-                        ));
+                        thread::sleep(Duration::from_millis(REPO_LOCK_RETRY_SLEEP_MS));
                     }
                 }
                 Err(e) => return Err(Error::new(ErrorCode::IoError, format!("repo lock: {e}"))),

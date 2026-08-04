@@ -25,13 +25,17 @@ mod read_commands;
 mod seal_migrate;
 mod setup_flow;
 
+use std::fs;
 use std::io::Write;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 
+use age::Encryptor;
 use age::secrecy::ExposeSecret;
 use age::x25519::{Identity, Recipient};
+use git2::build::RepoBuilder;
+use git2::{IndexAddOption, Repository, Signature};
 use rustpass::{GitAuth, Store};
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -70,7 +74,7 @@ pub(super) fn generate_test_keypair() -> (String, String) {
 fn encrypt_to_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
     let recipient = Recipient::from_str(recipient_str).unwrap();
     let recipient_dyn: &dyn age::Recipient = &recipient;
-    let encryptor = age::Encryptor::with_recipients(std::iter::once(recipient_dyn)).unwrap();
+    let encryptor = Encryptor::with_recipients(std::iter::once(recipient_dyn)).unwrap();
     let mut encrypted = Vec::new();
     let mut writer = encryptor.wrap_output(&mut encrypted).unwrap();
     writer.write_all(plaintext).unwrap();
@@ -85,20 +89,20 @@ fn create_bare_repo(entries: &[(&str, &[u8])], recipient_str: &str) -> tempfile:
     let work_dir = tempfile::tempdir().unwrap();
     let bare_dir = tempfile::tempdir().unwrap();
 
-    let repo = git2::Repository::init(work_dir.path()).unwrap();
-    let sig = git2::Signature::new("test", "test@test.com", &git2::Time::new(0, 0)).unwrap();
+    let repo = Repository::init(work_dir.path()).unwrap();
+    let sig = Signature::new("test", "test@test.com", &git2::Time::new(0, 0)).unwrap();
 
     for (path, content) in entries {
         let file_path = work_dir.path().join(path);
         if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent).unwrap();
+            fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(&file_path, encrypt_to_recipient(content, recipient_str)).unwrap();
+        fs::write(&file_path, encrypt_to_recipient(content, recipient_str)).unwrap();
     }
 
     let mut index = repo.index().unwrap();
     index
-        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
         .unwrap();
     index.write().unwrap();
     let tree_id = index.write_tree().unwrap();
@@ -106,7 +110,7 @@ fn create_bare_repo(entries: &[(&str, &[u8])], recipient_str: &str) -> tempfile:
     repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
         .unwrap();
 
-    let mut builder = git2::build::RepoBuilder::new();
+    let mut builder = RepoBuilder::new();
     builder.bare(true);
     builder
         .clone(work_dir.path().to_str().unwrap(), bare_dir.path())

@@ -17,7 +17,10 @@
 //! logging for the threat model). The viewer route is intentionally NOT marked
 //! secure: entry-name metadata carries no secret, like the entry list.
 
-use std::path::Path;
+use std::{
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 use rustpass::{Error, ErrorCode};
 use tauri::{AppHandle, Manager};
@@ -29,7 +32,7 @@ const MAX_LOG_BYTES: usize = 256 * 1024;
 
 /// Resolve the log directory (`app_log_dir()`), mapping a path error to
 /// `StoreError` so the command returns a sanitized `rustpass::Error`.
-pub(crate) fn log_dir(app: &AppHandle) -> Result<std::path::PathBuf, Error> {
+pub(crate) fn log_dir(app: &AppHandle) -> Result<PathBuf, Error> {
     app.path()
         .app_log_dir()
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("log dir unavailable: {e}")))
@@ -51,11 +54,8 @@ pub(crate) fn log_base(app: &AppHandle) -> String {
 /// cannot drift on what counts as a log segment or in what order it ships.
 ///
 /// Best-effort: a missing/unreadable directory yields an empty set (not an error).
-async fn discover_log_files(
-    dir: &Path,
-    base: &str,
-) -> Vec<(std::path::PathBuf, std::time::SystemTime)> {
-    let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = Vec::new();
+async fn discover_log_files(dir: &Path, base: &str) -> Vec<(PathBuf, SystemTime)> {
+    let mut files: Vec<(PathBuf, SystemTime)> = Vec::new();
     if let Ok(mut rd) = tokio::fs::read_dir(dir).await {
         while let Ok(Some(entry)) = rd.next_entry().await {
             let name = entry.file_name();
@@ -77,7 +77,7 @@ async fn discover_log_files(
 }
 
 /// Concatenate the discovered log files (mtime-ordered) into a single buffer.
-async fn concat_log_files(files: &[(std::path::PathBuf, std::time::SystemTime)]) -> Vec<u8> {
+async fn concat_log_files(files: &[(PathBuf, SystemTime)]) -> Vec<u8> {
     let mut buf = Vec::new();
     for (path, _) in files {
         if let Ok(bytes) = tokio::fs::read(path).await {

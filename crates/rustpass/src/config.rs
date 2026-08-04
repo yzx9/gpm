@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fmt;
 use std::path::{Path, PathBuf};
+use std::{fmt, io};
 
 use serde_json;
 use tokio::fs;
@@ -412,7 +412,7 @@ impl Config {
         ] {
             let raw = match fs::read(&path).await {
                 Ok(raw) => raw,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
                 Err(e) => return Err(e.into()),
             };
             let plain = match from.unseal(name, &raw) {

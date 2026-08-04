@@ -21,6 +21,7 @@
 //! layers on top: the identity passphrase is sealed under the master key, so
 //! `app_unlock` decrypts it with no second prompt when the opt-in is on.
 
+use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine;
@@ -28,7 +29,7 @@ use rustpass::Error;
 use rustpass::error::ErrorCode;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
-use tauri_plugin_secure_keystore::SecureKeystoreExt;
+use tauri_plugin_secure_keystore::{BiometricSlot, SecureKeystoreExt};
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -79,8 +80,8 @@ impl From<tauri_plugin_secure_keystore::SecureKeystoreError> for AppLockError {
     }
 }
 
-impl std::fmt::Display for AppLockError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for AppLockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
     }
 }
@@ -206,12 +207,8 @@ pub(crate) async fn enable_biometric_app_lock(
 
     // Create the vault alias FIRST (ENCRYPT prompt). Crash-safe: the vault key
     // is recoverable BEFORE identity moves under it.
-    ks.store_biometric(
-        &vault_b64,
-        tauri_plugin_secure_keystore::BiometricSlot::Vault,
-        prompt_text.as_ref(),
-    )
-    .await?;
+    ks.store_biometric(&vault_b64, BiometricSlot::Vault, prompt_text.as_ref())
+        .await?;
     // Re-key identity + app_id_pass master→vault. Both seals keyed: master_seal
     // reads, the just-injected vault_seal writes.
     state.store.set_master_key(Some(master));
@@ -249,12 +246,9 @@ pub(crate) async fn disable_biometric_app_lock(
     let ks = app.secure_keystore();
     // Retrieve the vault key (DECRYPT prompt) — the biometric key post-R064.
     let vault_b64 = Zeroizing::new(
-        ks.retrieve_biometric(
-            tauri_plugin_secure_keystore::BiometricSlot::Vault,
-            prompt_text.as_ref(),
-        )
-        .await?
-        .ok_or_else(|| AppLockError::failed("No vault key to migrate back"))?,
+        ks.retrieve_biometric(BiometricSlot::Vault, prompt_text.as_ref())
+            .await?
+            .ok_or_else(|| AppLockError::failed("No vault key to migrate back"))?,
     );
     let vault = decode_master_key(&vault_b64)
         .ok_or_else(|| AppLockError::failed("Vault key is malformed"))?;
@@ -275,8 +269,7 @@ pub(crate) async fn disable_biometric_app_lock(
     // collapse vault_seal onto the master (post-disable there is no separate
     // vault — identity lives under the master).
     state.store.rekey_identity_to_master().await?;
-    ks.delete_biometric(tauri_plugin_secure_keystore::BiometricSlot::Vault)
-        .await?;
+    ks.delete_biometric(BiometricSlot::Vault).await?;
     state.store.set_vault_key(Some(master));
     state.app_config.set_biometric_app_lock(false).await?;
     // The identity-auto-unlock opt-in is meaningless without the gate (app_unlock
@@ -420,10 +413,7 @@ pub(crate) async fn app_unlock(
     // alias is absent (BIOMETRIC_NOT_SET, non-prompting) — the legacy master
     // (upgrader pre-m0007, until m0007 relocates it). Either way one DECRYPT.
     let (key, from_vault) = match ks
-        .retrieve_biometric(
-            tauri_plugin_secure_keystore::BiometricSlot::Vault,
-            prompt_text.as_ref(),
-        )
+        .retrieve_biometric(BiometricSlot::Vault, prompt_text.as_ref())
         .await
     {
         Ok(Some(b64)) => {
@@ -438,17 +428,14 @@ pub(crate) async fn app_unlock(
         Err(e) if e.code == "BIOMETRIC_NOT_SET" => {
             // Vault absent → upgrader: the master is trapped in the legacy alias.
             let b64 = Zeroizing::new(
-                ks.retrieve_biometric(
-                    tauri_plugin_secure_keystore::BiometricSlot::Legacy,
-                    prompt_text.as_ref(),
-                )
-                .await
-                .map_err(|err| {
-                    let ae: AppLockError = err.into();
-                    log::warn!("app-lock: unlock (legacy) failed: {ae}");
-                    ae
-                })?
-                .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
+                ks.retrieve_biometric(BiometricSlot::Legacy, prompt_text.as_ref())
+                    .await
+                    .map_err(|err| {
+                        let ae: AppLockError = err.into();
+                        log::warn!("app-lock: unlock (legacy) failed: {ae}");
+                        ae
+                    })?
+                    .ok_or_else(|| AppLockError::failed("No biometric master key stored"))?,
             );
             // R064: relocate the legacy master to the auth-free alias NOW (the
             // bytes are in hand here) so it becomes the permanent auth-free

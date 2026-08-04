@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -1542,7 +1543,7 @@ impl Store {
     ///
     /// Returns `InvalidEntryName` if the preset is unknown or a required field
     /// is missing, or whatever [`Store::create`] returns.
-    pub async fn create_from_preset<S: ::std::hash::BuildHasher>(
+    pub async fn create_from_preset<S: BuildHasher>(
         &self,
         preset_id: &str,
         fields: &HashMap<&str, String, S>,
@@ -2747,9 +2748,9 @@ pub fn clamp_lock_mode(mode: LockMode) -> LockMode {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
+    use std::{fs, time::Instant};
 
     use crate::crypto::{self, BackendKind};
 
@@ -3059,7 +3060,7 @@ mod tests {
                 name: format!("dir/entry-{i}"),
             })
             .collect();
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let r = rank_entries(entries, "entry-42");
         let elapsed = start.elapsed();
         eprintln!("rank_entries 5k: {elapsed:?}");

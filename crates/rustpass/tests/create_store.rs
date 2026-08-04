@@ -13,6 +13,7 @@ mod common;
 mod tests {
     use std::fs;
     use std::path::Path;
+    use std::process::Command;
 
     use rustpass::recipient;
     use rustpass::ssh;
@@ -165,8 +166,7 @@ mod tests {
             .expect("create_store with SSH recipient");
 
         let recipients_content =
-            std::fs::read_to_string(config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE))
-                .unwrap();
+            fs::read_to_string(config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE)).unwrap();
         assert!(
             recipients_content.starts_with("ssh-ed25519 "),
             "recipients file should hold the SSH recipient"
@@ -211,11 +211,7 @@ mod tests {
     /// gracefully when `age` isn't on PATH — CI (nix shell) provides it.
     #[tokio::test]
     async fn created_store_secret_decrypts_with_bare_age_cli() {
-        if std::process::Command::new("age")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
+        if Command::new("age").arg("--version").output().is_err() {
             eprintln!("skipping interop test: `age` CLI not on PATH");
             return;
         }
@@ -236,10 +232,10 @@ mod tests {
 
         // Write the private identity to a temp file `age -d -i` can consume.
         let id_file = config_dir.path().join("interop-identity");
-        std::fs::write(&id_file, identity.as_bytes()).unwrap();
+        fs::write(&id_file, identity.as_bytes()).unwrap();
         let entry = config_dir.path().join("repo/interop/entry.age");
 
-        let output = std::process::Command::new("age")
+        let output = Command::new("age")
             .arg("-d")
             .arg("-i")
             .arg(&id_file)
@@ -248,7 +244,7 @@ mod tests {
             .expect("spawn age");
 
         // Best-effort wipe of the on-disk plaintext identity.
-        let _ = std::fs::remove_file(&id_file);
+        let _ = fs::remove_file(&id_file);
 
         assert!(
             output.status.success(),
@@ -294,7 +290,7 @@ mod tests {
         // Sabotage the FINAL bootstrap step: `save_repo_config` writes its atomic
         // temp to `repo.tmp`, so a directory there makes the persist fail AFTER
         // git init + recipients write + the initial commit have already landed.
-        std::fs::create_dir(config_dir.path().join("repo.tmp")).unwrap();
+        fs::create_dir(config_dir.path().join("repo.tmp")).unwrap();
 
         let err = store
             .create_store(None, &GitAuth::None, &recipient)

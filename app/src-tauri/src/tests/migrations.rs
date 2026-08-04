@@ -14,6 +14,7 @@
 //! behavior-load discriminator.
 
 use std::fs;
+use std::path::Path;
 use std::sync::atomic::{self, AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 
@@ -60,7 +61,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
 /// plaintext display half; the sealed behavior half is loaded post-unlock via
 /// `reload_behavior`. Tests that assert behavior fields after a run must go
 /// through here to verify true on-disk persistence.
-async fn reload_at(dir: &std::path::Path, store: &Arc<Store>) -> AppConfig {
+async fn reload_at(dir: &Path, store: &Arc<Store>) -> AppConfig {
     let ac = AppConfigStore::new(dir);
     ac.set_store(Arc::clone(store));
     ac.reload_behavior().await.ok();

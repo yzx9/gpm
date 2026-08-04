@@ -28,10 +28,11 @@ mod tests {
     use std::fs;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
 
     use rustpass::{GitAuth, store::Store};
+    use tempfile::TempDir;
 
     /// Passphrase the mock pinentry hands back to gopass, and that gopass uses to
     /// protect the throwaway identity it generates. Its value is irrelevant; it
@@ -70,15 +71,15 @@ done
         fs::create_dir_all(&bin).unwrap();
         let mock = bin.join("pinentry");
         fs::write(&mock, MOCK_PINENTRY).unwrap();
-        let mut perm = std::fs::metadata(&mock).unwrap().permissions();
+        let mut perm = fs::metadata(&mock).unwrap().permissions();
         perm.set_mode(0o755);
         fs::set_permissions(&mock, perm).unwrap();
 
         let gnupg = home.join("gnupg");
-        std::fs::create_dir_all(&gnupg).unwrap();
-        let mut gperm = std::fs::metadata(&gnupg).unwrap().permissions();
+        fs::create_dir_all(&gnupg).unwrap();
+        let mut gperm = fs::metadata(&gnupg).unwrap().permissions();
         gperm.set_mode(0o700);
-        std::fs::set_permissions(&gnupg, gperm).unwrap();
+        fs::set_permissions(&gnupg, gperm).unwrap();
     }
 
     /// Build a `gopass` command fully isolated into `home`: its config and data
@@ -103,7 +104,7 @@ done
     /// `recipient`, so every secret gopass inserts is decryptable by the holder
     /// of the matching identity (gpm). Returns the temp home (which pins the
     /// lifetimes of everything under it) and the store directory.
-    fn provision_gopass_store(recipient: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    fn provision_gopass_store(recipient: &str) -> (TempDir, PathBuf) {
         let home = tempfile::tempdir().unwrap();
         install_mock_pinentry(home.path());
 
@@ -146,7 +147,7 @@ done
         // Rewrite the recipients file to gpm's recipient (gopass's own format:
         // one recipient per line, trailing newline). gopass honors this on every
         // insert and does not normalize it away.
-        std::fs::write(store_dir.join(".age-recipients"), format!("{recipient}\n")).unwrap();
+        fs::write(store_dir.join(".age-recipients"), format!("{recipient}\n")).unwrap();
 
         (home, store_dir)
     }
@@ -286,7 +287,7 @@ done
     /// the store dir plus gopass's recipient string.
     fn provision_gopass_store_with_gopass_recipient(
         gpm_recipient: &str,
-    ) -> (tempfile::TempDir, std::path::PathBuf, String) {
+    ) -> (TempDir, PathBuf, String) {
         let home = tempfile::tempdir().unwrap();
         install_mock_pinentry(home.path());
 
@@ -327,7 +328,7 @@ done
         // gopass wrote its own recipient during init; capture it before any
         // rewrite. The holder of the matching identity (gopass) can decrypt a
         // file encrypted to it, independent of the store's recipients list.
-        let gopass_recipient = std::fs::read_to_string(store_dir.join(".age-recipients"))
+        let gopass_recipient = fs::read_to_string(store_dir.join(".age-recipients"))
             .unwrap()
             .lines()
             .find(|l| !l.trim().is_empty())
@@ -336,7 +337,7 @@ done
             .to_owned();
 
         // List both so either side can decrypt planted files.
-        std::fs::write(
+        fs::write(
             store_dir.join(".age-recipients"),
             format!("{gpm_recipient}\n{gopass_recipient}\n"),
         )
@@ -353,9 +354,9 @@ done
     fn plant_legacy_entry(store: &Path, name: &str, plaintext: &[u8], recipients: &[&str]) {
         let file = store.join(format!("{name}.age"));
         if let Some(parent) = file.parent() {
-            std::fs::create_dir_all(parent).unwrap();
+            fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(&file, encrypt_to_recipients(plaintext, recipients)).unwrap();
+        fs::write(&file, encrypt_to_recipients(plaintext, recipients)).unwrap();
     }
 
     /// `gopass show <name>`: decrypt through gopass's real parse cascade
@@ -498,7 +499,7 @@ done
         let work = tempfile::tempdir().unwrap();
         for (i, &(fname, bytes)) in cases.iter().enumerate() {
             let path = work.path().join(fname);
-            std::fs::write(&path, bytes).unwrap();
+            fs::write(&path, bytes).unwrap();
             gopass_fscopy(home.path(), &path, &format!("att/{i}"));
         }
         commit_worktree(&store_dir);

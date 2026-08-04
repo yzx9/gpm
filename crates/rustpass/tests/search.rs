@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn search_entries_missing_repo_errors() {
-        let missing = std::path::Path::new("/tmp/gpm_no_such_search_dir_12345");
+        let missing = Path::new("/tmp/gpm_no_such_search_dir_12345");
         assert!(!missing.exists());
         // Propagates list_entries' NO_REPO (search_entries_in delegates to it).
         assert!(search_entries_in(missing, SecretExt::AGE, "anything").is_err());

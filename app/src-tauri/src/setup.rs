@@ -694,12 +694,14 @@ pub(crate) fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
     use std::sync::{Arc, Mutex};
 
     use rustpass::{KeyType, LockMode, Store};
 
     use crate::AppState;
+    use crate::app_config::AppConfigStore;
+    use crate::identity::IdleTimer;
 
     use super::{CreateIdentityKind, generate_identity_core};
 
@@ -710,9 +712,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let state = AppState {
             store: Arc::new(Store::new(dir.path().to_path_buf(), None)),
-            app_config: crate::app_config::AppConfigStore::new(dir.path()),
+            app_config: AppConfigStore::new(dir.path()),
             app_handle: None,
-            lock_timer: crate::identity::IdleTimer::new(),
+            lock_timer: IdleTimer::new(),
             pending_identity: Mutex::new(None),
             lock_mode: Mutex::new(LockMode::default()),
             clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
@@ -720,10 +722,10 @@ mod tests {
             clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
             app_lock_enabled: AtomicBool::new(false),
             app_locked: Arc::new(AtomicBool::new(false)),
-            gate_idle_timer: crate::identity::IdleTimer::new(),
+            gate_idle_timer: IdleTimer::new(),
             identity_coupled: AtomicBool::new(false),
-            seal_migrate_state: std::sync::atomic::AtomicU8::new(0),
-            backend_resolve_state: std::sync::atomic::AtomicU8::new(0),
+            seal_migrate_state: AtomicU8::new(0),
+            backend_resolve_state: AtomicU8::new(0),
             active_cancel_slot: Arc::new(Mutex::new(None)),
             verbose_timer: Mutex::new(None),
             verbose_generation: Arc::new(AtomicU64::new(0)),

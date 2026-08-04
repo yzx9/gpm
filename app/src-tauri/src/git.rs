@@ -12,7 +12,11 @@
 //! [`cancel_git`] command flips the active token to abort an in-flight clone or
 //! pull.
 
-use std::sync::{Arc, atomic::Ordering, mpsc};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 
 use rustpass::{Error, GitProgress, ProgressSender};
 use tauri::{Emitter, Runtime, State};
@@ -60,7 +64,7 @@ pub(crate) fn spawn_progress_drain<R: Runtime>(
 
 /// A fresh, unset cancel token for an upcoming clone/pull.
 pub(crate) fn fresh_cancel_token() -> rustpass::CancelToken {
-    Arc::new(std::sync::atomic::AtomicBool::new(false))
+    Arc::new(AtomicBool::new(false))
 }
 
 /// Publish `token` as the active cancel token so [`cancel_git`] can abort the

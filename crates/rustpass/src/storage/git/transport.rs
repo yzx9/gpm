@@ -10,10 +10,11 @@
 //! leaf: [`commit`](super::commit)/[`pull`](super::pull)/[`divergence`](super::divergence)
 //! all pull callbacks, the fetch primitive, and error mapping from here.
 
-use std::sync::atomic::Ordering;
-
 #[cfg(target_os = "android")]
 use std::ffi::c_int;
+#[cfg(target_os = "android")]
+use std::sync::OnceLock;
+use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "android")]
 use foreign_types::ForeignType;
@@ -77,7 +78,7 @@ const GIT_OPT_ADD_SSL_X509_CERT: c_int = 45;
 /// runs the load at most once process-wide and makes repeats a safe no-op
 /// returning the cached outcome.
 #[cfg(target_os = "android")]
-static CA_LOAD_RESULT: std::sync::OnceLock<Result<(), Error>> = std::sync::OnceLock::new();
+static CA_LOAD_RESULT: OnceLock<Result<(), Error>> = OnceLock::new();
 
 /// Load [`EMBEDDED_CA_BUNDLE`] into libgit2's trust store, once. Android only.
 ///

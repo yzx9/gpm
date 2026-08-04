@@ -35,6 +35,7 @@
 //! defend a local **write** attacker (notably one who tampers the cloned
 //! `repo/`).
 
+use std::fmt;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -131,8 +132,8 @@ pub(crate) struct Seal {
     ever_keyed: AtomicBool,
 }
 
-impl std::fmt::Debug for Seal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Seal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let redacted = self
             .key
             .read()

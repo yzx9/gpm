@@ -7,6 +7,7 @@
 //! exit-on-drop contract that the cancellable commands depend on.
 
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use tauri::Manager;
 
@@ -75,7 +76,7 @@ async fn progress_drain_exits_when_sender_drops() {
     let _ = tx.send(rustpass::GitProgress::default());
     drop(tx); // close the channel → drain's recv() returns Err → task exits
 
-    tokio::time::timeout(std::time::Duration::from_secs(2), drain)
+    tokio::time::timeout(Duration::from_secs(2), drain)
         .await
         .expect("drain must terminate within 2s of the sender dropping")
         .expect("drain task must not panic");

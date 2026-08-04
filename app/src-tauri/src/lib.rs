@@ -25,8 +25,10 @@ use std::sync::{Arc, Mutex};
 use base64::Engine;
 use rustpass::Store;
 use tauri::Manager;
-use tauri_plugin_secure_keystore::SecureKeystoreExt;
+use tauri_plugin_secure_keystore::{SecureKeystore, SecureKeystoreExt};
 use tokio::task::JoinHandle;
+
+use crate::app_config::BackgroundSyncCadence;
 
 mod app_config;
 mod applock;
@@ -163,9 +165,7 @@ pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
 /// on the upgrader path (the auth-free alias is absent pre-m0007) without minting a new
 /// master that would orphan every existing envelope. First-run provisioning is
 /// [`provision_master`]'s job, called explicitly by [`startup_master_key`].
-async fn retrieve_master_or_none<R: tauri::Runtime>(
-    ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
-) -> Option<[u8; 32]> {
+async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[u8; 32]> {
     if !ks.is_available().await.unwrap_or(false) {
         return None;
     }
@@ -178,9 +178,7 @@ async fn retrieve_master_or_none<R: tauri::Runtime>(
 /// Returns `None` on desktop (no Keystore) or if generation/sealing fails. A key that
 /// cannot be sealed is discarded rather than used unpersisted, so it can never orphan
 /// later envelopes behind a key the next run won't have.
-async fn provision_master<R: tauri::Runtime>(
-    ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
-) -> Option<[u8; 32]> {
+async fn provision_master<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[u8; 32]> {
     if !ks.is_available().await.unwrap_or(false) {
         return None;
     }
@@ -204,9 +202,7 @@ async fn provision_master<R: tauri::Runtime>(
 /// biometric prompt — so `repo.json` stays unreadable until the user
 /// authenticates. Otherwise the auth-free master key loads silently (the
 /// pre-app-lock path). Returns `(master_key, app_lock_enabled)`.
-async fn startup_master_key<R: tauri::Runtime>(
-    ks: &tauri_plugin_secure_keystore::SecureKeystore<R>,
-) -> (Option<[u8; 32]>, bool) {
+async fn startup_master_key<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> (Option<[u8; 32]>, bool) {
     if ks.has_stored_biometric().await.unwrap_or(false) {
         (None, true)
     } else {
@@ -376,7 +372,7 @@ fn init_state(app: &tauri::App<tauri::Wry>) -> AppState {
 #[allow(clippy::unused_async)] // the Android branch awaits; the desktop branch is a no-op.
 pub(crate) async fn reschedule_background_sync<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    cadence: app_config::BackgroundSyncCadence,
+    cadence: BackgroundSyncCadence,
 ) {
     #[cfg(target_os = "android")]
     {

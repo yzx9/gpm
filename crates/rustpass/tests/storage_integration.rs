@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs;
+
 use rustpass::{Config, GitAuth};
 
 fn create_config() -> (Config, tempfile::TempDir) {
@@ -104,8 +106,7 @@ async fn corrupted_repo_config_errors() {
     let (config, dir) = create_config();
 
     let repo_json_path = dir.path().join("repo.json");
-    std::fs::write(&repo_json_path, "{{{{not valid json!!!!")
-        .expect("failed to write corrupted config");
+    fs::write(&repo_json_path, "{{{{not valid json!!!!").expect("failed to write corrupted config");
 
     let err = config
         .load_repo_config()

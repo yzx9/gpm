@@ -279,6 +279,8 @@ mod tests {
     //! id form, fingerprint-based matching across id forms, and a system-`gpg`
     //! fixture for interop.
 
+    use std::fs;
+
     use super::*;
     use crate::crypto::openpgp::{
         armor_public_key, armor_secret_key, generate_keypair, primary_fingerprint,
@@ -324,14 +326,14 @@ mod tests {
     fn gpg_store(keys: &[&Key]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let public_keys_dir = dir.path().join(GPG_PUBLIC_KEYS_DIR);
-        std::fs::create_dir(&public_keys_dir).unwrap();
+        fs::create_dir(&public_keys_dir).unwrap();
         let mut id = String::new();
         for k in keys {
             id.push_str(&k.recipient);
             id.push('\n');
-            std::fs::write(public_keys_dir.join(&k.recipient), &k.pubkey).unwrap();
+            fs::write(public_keys_dir.join(&k.recipient), &k.pubkey).unwrap();
         }
-        std::fs::write(dir.path().join(GPG_RECIPIENTS_FILE), id).unwrap();
+        fs::write(dir.path().join(GPG_RECIPIENTS_FILE), id).unwrap();
         dir
     }
 
@@ -416,7 +418,7 @@ mod tests {
     async fn list_recipients_parses_gpg_id_forms() {
         let dir = tempfile::tempdir().unwrap();
         let long_fp = "ABCD0123456789ABCDEF0123456789ABCDEF0123";
-        std::fs::write(
+        fs::write(
             dir.path().join(GPG_RECIPIENTS_FILE),
             format!("# comment\n\n0x0123456789ABCDEF\n{long_fp}\n# tail\n"),
         )
@@ -447,7 +449,7 @@ mod tests {
     #[tokio::test]
     async fn list_recipients_rejects_non_utf8_index() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(GPG_RECIPIENTS_FILE), b"0xabc\n\xff\xfe\n").unwrap();
+        fs::write(dir.path().join(GPG_RECIPIENTS_FILE), b"0xabc\n\xff\xfe\n").unwrap();
         let view = RepoFiles::new(&GitStorage, dir.path());
         let err = GpgBackend
             .list_recipients(&view)
@@ -465,14 +467,14 @@ mod tests {
         let me = gen_key(Some(PASSPHRASE));
         let dir = tempfile::tempdir().unwrap();
         let public_keys_dir = dir.path().join(GPG_PUBLIC_KEYS_DIR);
-        std::fs::create_dir(&public_keys_dir).unwrap();
+        fs::create_dir(&public_keys_dir).unwrap();
         // .gpg-id + .public-keys/<full-fp> use the full fingerprint as the token.
-        std::fs::write(
+        fs::write(
             dir.path().join(GPG_RECIPIENTS_FILE),
             format!("{}\n", me.fingerprint),
         )
         .unwrap();
-        std::fs::write(public_keys_dir.join(&me.fingerprint), &me.pubkey).unwrap();
+        fs::write(public_keys_dir.join(&me.fingerprint), &me.pubkey).unwrap();
 
         let backend = GpgBackend;
         let view = RepoFiles::new(&GitStorage, dir.path());

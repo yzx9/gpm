@@ -5,11 +5,13 @@
 //! Biometric unlock commands — seal/retrieve the identity passphrase behind the
 //! Android Keystore's biometric-gated `BiometricPrompt`.
 
+use std::fmt;
+
 use rustpass::Error;
 use rustpass::error::ErrorCode;
 use serde::Serialize;
 use tauri::{AppHandle, State};
-use tauri_plugin_biometric_keystore::KeystoreExt;
+use tauri_plugin_biometric_keystore::{BiometricState, KeystoreError, KeystoreExt};
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -42,8 +44,8 @@ impl From<Error> for BiometricError {
     }
 }
 
-impl From<tauri_plugin_biometric_keystore::KeystoreError> for BiometricError {
-    fn from(e: tauri_plugin_biometric_keystore::KeystoreError) -> Self {
+impl From<KeystoreError> for BiometricError {
+    fn from(e: KeystoreError) -> Self {
         Self {
             code: e.code,
             message: e.message,
@@ -51,8 +53,8 @@ impl From<tauri_plugin_biometric_keystore::KeystoreError> for BiometricError {
     }
 }
 
-impl std::fmt::Display for BiometricError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for BiometricError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
     }
 }
@@ -69,7 +71,7 @@ impl std::fmt::Display for BiometricError {
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn is_biometric_available(
     app: AppHandle,
-) -> Result<tauri_plugin_biometric_keystore::BiometricState, BiometricError> {
+) -> Result<BiometricState, BiometricError> {
     Ok(app.keystore().is_available().await?)
 }
 

@@ -105,7 +105,7 @@ pub struct DeviceInfoHandle<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 /// Handle to the device-info probe — inert on non-Android targets.
 #[cfg(not(target_os = "android"))]
-pub struct DeviceInfoHandle<R: Runtime>(std::marker::PhantomData<fn() -> R>);
+pub struct DeviceInfoHandle<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> DeviceInfoHandle<R> {

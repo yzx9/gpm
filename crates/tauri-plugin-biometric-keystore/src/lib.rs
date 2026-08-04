@@ -17,6 +17,9 @@
 //! `is_available`/`has_stored` read `false` and the UI falls back to the
 //! passphrase form.
 
+#[cfg(not(target_os = "android"))]
+use std::marker::PhantomData;
+
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "android")]
 use tauri::plugin::mobile::PluginInvokeError;
@@ -130,7 +133,7 @@ pub struct Keystore<R: Runtime>(tauri::plugin::PluginHandle<R>);
 /// `fn() -> R` variance does not inherit R's auto-trait bounds), so it can be
 /// managed as app state on every target.
 #[cfg(not(target_os = "android"))]
-pub struct Keystore<R: Runtime>(std::marker::PhantomData<fn() -> R>);
+pub struct Keystore<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> Keystore<R> {
@@ -329,7 +332,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             }
             #[cfg(not(target_os = "android"))]
             {
-                app.manage(Keystore::<R>(std::marker::PhantomData));
+                app.manage(Keystore::<R>(PhantomData));
             }
             Ok(())
         })

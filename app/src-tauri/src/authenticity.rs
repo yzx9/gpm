@@ -5,6 +5,8 @@
 //! Repository authenticity commands — commit-signature verification, trusted
 //! signing keys, and the Off / Audit / Enforce verification modes.
 
+use std::path::Path;
+
 use rustpass::{
     AuthenticityConfig, CommitSigInfo, CommitSigStatus, Error, ErrorCode, TrustedGpgKey,
     TrustedKey, VerifyMode,
@@ -94,7 +96,7 @@ fn stage_gpg_key_from_bytes(
         // the raw filename, then a generic default.
         filename
             .and_then(|f| {
-                std::path::Path::new(f)
+                Path::new(f)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .map(str::to_string)

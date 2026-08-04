@@ -217,6 +217,8 @@ mod jni {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use crate::app_config::BackgroundSyncCadence;
     use base64::Engine;
 
@@ -268,7 +270,7 @@ mod tests {
             .expect("set cadence");
         let master = rustpass::seal::generate_master_key().unwrap();
         let master_b64 = crate::B64.encode(master);
-        std::fs::write(dir.path().join("identity"), b"plaintext-identity").unwrap();
+        fs::write(dir.path().join("identity"), b"plaintext-identity").unwrap();
 
         let res = run_headless_sync(dir.path().to_path_buf(), master_b64).await;
 
@@ -282,7 +284,7 @@ mod tests {
             "pull-only worker should skip cleanly, not error on vault-tier files"
         );
         assert_eq!(
-            std::fs::read(dir.path().join("identity")).unwrap(),
+            fs::read(dir.path().join("identity")).unwrap(),
             b"plaintext-identity",
             "headless worker must not touch vault-tier identity"
         );

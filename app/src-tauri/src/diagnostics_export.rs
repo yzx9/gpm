@@ -22,13 +22,15 @@
 //! at rest) and the manifest says why; the log, prefs, and device info always
 //! ship, so the bundle works even when the bug is an unlock/startup failure.
 
-use std::io::Write;
 use std::sync::atomic::Ordering;
+use std::time;
+use std::{io::Write, time::SystemTime};
 
 use rustpass::{Error, ErrorCode};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_device_info::DeviceInfoExt;
 use tauri_plugin_file_save::FileSaveExt;
+use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 use crate::{AppState, logging};
 
@@ -45,9 +47,8 @@ struct BundleEntry {
 /// `State`/`AppHandle`) so the assembly is unit-testable with constructed
 /// entries.
 fn build_bundle(entries: &[BundleEntry]) -> Result<Vec<u8>, Error> {
-    let mut zw = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let mut zw = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for e in entries {
         zw.start_file(e.name, opts)
             .map_err(|e| Error::new(ErrorCode::StoreError, format!("zip start_file: {e}")))?;
@@ -64,8 +65,8 @@ fn build_bundle(entries: &[BundleEntry]) -> Result<Vec<u8>, Error> {
 /// (Unix seconds, UTC), app-lock state, the entry list, the repo-config status,
 /// and the redaction note.
 fn build_manifest(app_locked: bool, repo_status: &str, entry_names: &[&str]) -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let list: String = entry_names.iter().fold(String::new(), |mut acc, n| {
         acc.push_str("  - ");
@@ -256,11 +257,11 @@ pub(crate) async fn export_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
+    use std::io::{self, Read};
 
     /// Read a single entry back out of a zip (for round-trip assertions).
     fn read_entry(zip_bytes: &[u8], name: &str) -> Vec<u8> {
-        let mut za = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).expect("valid zip");
+        let mut za = zip::ZipArchive::new(io::Cursor::new(zip_bytes)).expect("valid zip");
         let mut f = za.by_name(name).expect("entry exists");
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).expect("read entry");
@@ -287,7 +288,7 @@ mod tests {
     #[test]
     fn build_bundle_empty_entries_is_a_valid_empty_zip() {
         let zip = build_bundle(&[]).expect("build");
-        let za = zip::ZipArchive::new(std::io::Cursor::new(zip)).expect("valid zip");
+        let za = zip::ZipArchive::new(io::Cursor::new(zip)).expect("valid zip");
         assert_eq!(za.len(), 0, "no entries");
     }
 

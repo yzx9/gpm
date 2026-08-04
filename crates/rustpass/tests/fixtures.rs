@@ -39,7 +39,7 @@ fn test_list_entries_skips_gpg_files() {
     let (_identity, recipient) = generate_test_keypair();
     let dir = create_test_store(vec![("valid.age", b"password")], &recipient);
     // Add a .gpg file
-    std::fs::write(dir.path().join("legacy.gpg"), b"encrypted-gpg-data").unwrap();
+    fs::write(dir.path().join("legacy.gpg"), b"encrypted-gpg-data").unwrap();
 
     let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);
@@ -51,7 +51,7 @@ fn test_list_entries_skips_git_dir() {
     let (_identity, recipient) = generate_test_keypair();
     let dir = create_test_store(vec![("real.age", b"password")], &recipient);
     // Create a .git directory with a fake .age file inside
-    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
     fs::write(dir.path().join(".git/config.age"), b"should-be-skipped").unwrap();
 
     let entries = store::list_entries(dir.path(), rustpass::crypto::SecretExt::AGE).unwrap();

@@ -892,6 +892,8 @@ pub enum DivergenceChoice {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -947,8 +949,7 @@ mod tests {
     /// store whose checkout it can't see.
     #[tokio::test]
     async fn liveness_missing_checkout_errors() {
-        let missing =
-            std::path::PathBuf::from("/tmp/gpm_no_such_checkout_liveness_test_recipients");
+        let missing = PathBuf::from("/tmp/gpm_no_such_checkout_liveness_test_recipients");
         assert!(!missing.exists());
         let err = validate_recipients_index_liveness(&missing, ".age-recipients")
             .await
@@ -965,6 +966,7 @@ mod tests {
     #[tokio::test]
     async fn liveness_dangling_symlink_errors() {
         use std::os::unix::fs::symlink;
+
         let dir = tempfile::tempdir().unwrap();
         symlink(
             "/nonexistent/gpm-dangling-liveness",
@@ -987,6 +989,7 @@ mod tests {
     #[tokio::test]
     async fn liveness_escaping_symlink_errors() {
         use std::os::unix::fs::symlink;
+
         let dir = tempfile::tempdir().unwrap();
         let external = tempfile::tempdir().unwrap();
         let victim = external.path().join("victim");

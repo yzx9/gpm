@@ -33,7 +33,7 @@ const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.backgroundsync";
 pub struct BackgroundSync<R: Runtime>(PluginHandle<R>);
 
 #[cfg(not(target_os = "android"))]
-pub struct BackgroundSync<R: Runtime>(std::marker::PhantomData<fn() -> R>);
+pub struct BackgroundSync<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> BackgroundSync<R> {

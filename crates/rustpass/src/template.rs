@@ -25,6 +25,7 @@
 //! fields). Pipe functions (`{{ .Content | md5sum }}`, …) are not yet supported
 //! and are reported as an error rather than silently mis-rendered.
 
+use std::hash::BuildHasher;
 use std::path::Path;
 use std::{collections::HashMap, fs};
 
@@ -300,7 +301,7 @@ fn sanitize_name_part(s: &str) -> String {
 ///
 /// Returns `InvalidEntryName` if a required `name_from` field is missing or
 /// empty (so the generated name would be degenerate).
-pub fn preset_name<S: ::std::hash::BuildHasher>(
+pub fn preset_name<S: BuildHasher>(
     preset: &CreatePreset,
     fields: &HashMap<&str, String, S>,
 ) -> Result<String, Error> {
@@ -325,7 +326,7 @@ pub fn preset_name<S: ::std::hash::BuildHasher>(
 /// # Errors
 ///
 /// Returns `InvalidEntryName` if the required `password` field is missing.
-pub fn preset_body<S: ::std::hash::BuildHasher>(
+pub fn preset_body<S: BuildHasher>(
     preset: &CreatePreset,
     fields: &HashMap<&str, String, S>,
 ) -> Result<Vec<u8>, Error> {
@@ -354,6 +355,8 @@ pub fn preset_body<S: ::std::hash::BuildHasher>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     #[test]
@@ -536,7 +539,7 @@ mod tests {
     fn builtin_presets_have_unique_ids() {
         let presets = builtin_presets();
         let ids: Vec<_> = presets.iter().map(|p| p.id).collect();
-        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        let unique: HashSet<_> = ids.iter().collect();
         assert_eq!(ids.len(), unique.len(), "preset ids must be unique");
         assert!(
             presets

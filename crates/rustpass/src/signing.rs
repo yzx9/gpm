@@ -27,6 +27,7 @@
 //! (`["ed25519", "encryption", "rand_core", "std"]`) covers `SshSig` parse +
 //! `PublicKey::verify` (both gated by `alloc`, implied by `std`).
 
+use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
@@ -88,12 +89,12 @@ pub enum CommitSigStatus {
     Unknown,
 }
 
-impl std::fmt::Debug for CommitSigStatus {
+impl fmt::Debug for CommitSigStatus {
     // Redacts the signer key fingerprint (`signer_fp`) — identity material that
     // must never reach a log/panic/assert message (SECURITY.md § Diagnostics
     // logging). Only the verification outcome kind is surfaced; the `format`
     // tag of `UnsupportedFormat` is kept (it names a non-secret format string).
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Verified { .. } => f.debug_tuple("Verified").field(&"[REDACTED]").finish(),
             Self::UntrustedKey { .. } => {
@@ -280,7 +281,7 @@ pub struct CommitSigInfo {
     pub ignored: bool,
 }
 
-impl std::fmt::Debug for CommitSigInfo {
+impl fmt::Debug for CommitSigInfo {
     // Redacts `author` (a git `Name <email>` — PII) and `subject` (the commit
     // message first line; gopass-format `Save secret <entry-path>: …`, which
     // would enumerate secret names in bulk). Keeps structural identity —
@@ -290,7 +291,7 @@ impl std::fmt::Debug for CommitSigInfo {
     // the containers that embed this (`AuthenticityResult`, `SyncResult`,
     // `SyncOutcome`) are safe transitively via their derived Debug. SECURITY.md
     // § Diagnostics logging: identity material never reaches the logger.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CommitSigInfo")
             .field("hash", &self.hash)
             .field("short_hash", &self.short_hash)
@@ -1082,6 +1083,8 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use pgp::composed::{ArmorOptions, DetachedSignature, KeyType, SecretKeyParamsBuilder};
     use pgp::crypto::hash::HashAlgorithm;
     use pgp::types::Password;
@@ -1268,7 +1271,7 @@ mod tests {
         msg: &str,
     ) -> Oid {
         let workdir = repo.workdir().expect("repo has a workdir");
-        std::fs::write(workdir.join(path), content).expect("write file");
+        fs::write(workdir.join(path), content).expect("write file");
         let mut index = repo.index().expect("index");
         index.add_path(Path::new(path)).expect("add path");
         index.write().expect("write index");
