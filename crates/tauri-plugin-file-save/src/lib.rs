@@ -18,7 +18,9 @@
 //! the bundle bytes through the WebView (Kotlin streams the staged file to the
 //! chosen destination).
 
-use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
+use std::path::Path;
+use std::path::PathBuf;
 
 #[cfg(target_os = "android")]
 use tauri::plugin::mobile::PluginInvokeError;
@@ -62,6 +64,7 @@ fn map_invoke_err(err: PluginInvokeError) -> FileSaveError {
 /// Lowercase filename extension without the dot, or `None` when the name has
 /// none. Labels the desktop save-dialog filter; the Android path uses the
 /// caller-supplied MIME type instead.
+#[cfg(not(target_os = "android"))]
 fn extension_of(filename: &str) -> Option<String> {
     Path::new(filename)
         .extension()

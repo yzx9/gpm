@@ -11,6 +11,7 @@
 //! targets the plugin is registered but inert (schedule/cancel are no-ops;
 //! the foreground sync covers desktop).
 
+#[cfg(not(target_os = "android"))]
 use std::marker::PhantomData;
 
 use tauri::plugin::{Builder, TauriPlugin};

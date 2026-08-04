@@ -12,6 +12,7 @@
 //! diagnostics-export command calls [`DeviceInfoExt::device_info`] to obtain the
 //! handle, then [`DeviceInfoHandle::read`] to gather the snapshot.
 
+#[cfg(not(target_os = "android"))]
 use std::marker::PhantomData;
 
 #[cfg(target_os = "android")]
