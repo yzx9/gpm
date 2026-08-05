@@ -16,19 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Settings → General** now keeps **AutoSync** and its **Background sync** option together in one card — background sync appears beneath AutoSync only while it's on — instead of two separate cards, and the AutoSync toggle now uses the same On/Off order as every other toggle.
+- When **Auto-sync** is on, editing, deleting, or creating a secret that collides with another device's change no longer silently overwrites it — you now get a clear per-entry choice (keep your version or theirs); a delete a teammate already did is recognized as "already removed" instead of claiming a commit, and a create that reuses a name another device took asks before overwriting. With Auto-sync off it still surfaces when you manually sync.
 
 ### Fixed
 
 - Text fields and dropdowns throughout the app no longer have a faint gray fill that could make a live setting look disabled or switched off. They now read as active outlined fields. Read-only boxes that display a key, token, or log keep their tinted background, since that signals "display only."
 - Switching the **display language** back to **Follow system** now switches to your device's language right away. It used to stay stuck on the language you'd pinned earlier (for example, Chinese) and only correct itself after restarting the app.
 - Secrets whose content isn't valid text (for example, one whose body somehow holds raw bytes) used to be silently corrupted if you opened and saved them in gpm — the save rewrote them with mangled characters. gpm now refuses to edit such a secret and points you to the gopass command line instead, so the original is never damaged. Reading and syncing these secrets is unchanged. A secret whose password itself isn't valid text likewise can't be copied in gpm (it would only copy an empty string); copying it now shows a hint to use the gopass command line instead.
-
-### Changed
-
-- When **Auto-sync** is on, editing, deleting, or creating a secret that collides with another device's change no longer silently overwrites it — you now get a clear per-entry choice (keep your version or theirs); a delete a teammate already did is recognized as "already removed" instead of claiming a commit, and a create that reuses a name another device took asks before overwriting. With Auto-sync off it still surfaces when you manually sync.
-
-### Fixed
-
 - Bottom sheets (the edit/delete conflict and sync-divergence prompts, and other bottom-sheet dialogs) no longer tuck their lowest button under the Android gesture-navigation bar — they now respect the bottom safe-area inset so every button stays tappable.
 
 ## [v0.16.1] - 2026-08-04
