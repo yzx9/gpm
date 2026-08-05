@@ -29,7 +29,6 @@
 //! ```
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::Component;
 use std::path::Path;
 
@@ -428,9 +427,9 @@ pub(super) fn keep_local_finalize(
         rel_within_repo(rel)?;
         let file_path = repo_path.join(rel);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)?;
         }
-        fs::write(&file_path, ciphertext)?;
+        std::fs::write(&file_path, ciphertext)?;
         index.add_path(Path::new(rel)).map_err(|e| {
             Error::new(ErrorCode::StoreError, format!("Failed to stage {rel}: {e}"))
         })?;
@@ -439,7 +438,7 @@ pub(super) fn keep_local_finalize(
         rel_within_repo(rel)?;
         let file_path = repo_path.join(rel);
         if file_path.exists() {
-            fs::remove_file(&file_path)?;
+            std::fs::remove_file(&file_path)?;
         }
         // Tolerate an already-gone index entry: the remote may have deleted it
         // too (both-deleted agreement). remove_path errors on an untracked path.

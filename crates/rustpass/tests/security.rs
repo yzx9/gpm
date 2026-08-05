@@ -14,7 +14,6 @@
 
 mod common;
 
-use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 
@@ -62,7 +61,7 @@ fn path_traversal_encoded_dots() {
 fn path_traversal_symlink_escape() {
     let external_dir = tempfile::tempdir().unwrap();
     let external_file = external_dir.path().join("target.txt");
-    fs::write(&external_file, b"external-secret").unwrap();
+    std::fs::write(&external_file, b"external-secret").unwrap();
 
     let repo_dir = tempfile::tempdir().unwrap();
     let link_path = repo_dir.path().join("escape.age");

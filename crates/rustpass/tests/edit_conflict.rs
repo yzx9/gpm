@@ -24,7 +24,7 @@
 
 mod common;
 
-use std::{fs, path::Path};
+use std::path::Path;
 
 use common::*;
 use rustpass::{GitAuth, store::Store};
@@ -62,8 +62,8 @@ async fn update_overwrites_existing_locally() {
     let repo_path = store.config().await.expect("config").local_path;
 
     // A template that WOULD apply on create to anything under `sites/`.
-    fs::create_dir_all(Path::new(&repo_path).join("sites")).unwrap();
-    fs::write(
+    std::fs::create_dir_all(Path::new(&repo_path).join("sites")).unwrap();
+    std::fs::write(
         Path::new(&repo_path).join("sites/.pass-template"),
         "PREFIX:{{ .Content }}",
     )

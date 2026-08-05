@@ -19,7 +19,6 @@
 
 mod common;
 
-use std::fs;
 use std::path::Path;
 
 use git2::{Repository, Signature};
@@ -80,7 +79,7 @@ fn add_signed_commit_to_bare(
 
     // Touch a file so the tree actually changes (avoids an empty diff commit).
     let marker = work_dir.path().join(".touch");
-    fs::write(&marker, recipient_str.as_bytes()).expect("write");
+    std::fs::write(&marker, recipient_str.as_bytes()).expect("write");
     let mut index = repo.index().expect("index");
     index
         .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
@@ -277,7 +276,7 @@ fn enforce_aborts_pull_on_unsigned_commit_head_unchanged() {
     block_on(store.set_verification_mode(VerifyMode::Enforce)).expect("enforce");
 
     let head_before = store_head(&store);
-    let files_before: Vec<String> = fs::read_dir(repo_local_path(&store))
+    let files_before: Vec<String> = std::fs::read_dir(repo_local_path(&store))
         .expect("read dir")
         .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
         .collect();
@@ -307,7 +306,7 @@ fn enforce_aborts_pull_on_unsigned_commit_head_unchanged() {
         head_after, head_before,
         "HEAD must stay put when Enforce refuses checkout"
     );
-    let files_after: Vec<String> = fs::read_dir(repo_local_path(&store))
+    let files_after: Vec<String> = std::fs::read_dir(repo_local_path(&store))
         .expect("read dir")
         .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
         .collect();

@@ -7,7 +7,6 @@
 //! All blocking, adapted to async by [`backend::GitStorage`](super::backend::GitStorage)'s
 //! `StorageBackend` impl via `spawn_blocking`.
 
-use std::fs;
 use std::path::Path;
 
 use git2::Repository;
@@ -38,7 +37,7 @@ pub(super) fn clone_repo(
     }
     // Remove existing directory if present (re-clone)
     if dest.exists() {
-        fs::remove_dir_all(dest)?;
+        std::fs::remove_dir_all(dest)?;
     }
 
     let callbacks = transport::build_remote_callbacks(auth, cancel, progress);
@@ -53,7 +52,7 @@ pub(super) fn clone_repo(
         // A failed or cancelled clone leaves a partial `dest` on disk (notably
         // `config_dir/repo` after a user cancel). Remove it so the next attempt
         // starts clean, mirroring `Store::create_store`'s failure cleanup.
-        if let Err(cleanup) = fs::remove_dir_all(dest) {
+        if let Err(cleanup) = std::fs::remove_dir_all(dest) {
             log::warn!("clone: post-failure cleanup failed: {cleanup}");
         }
         return Err(if transport::cancelled(cancel) {
@@ -341,7 +340,7 @@ mod tests {
         init_repo(dir.path()).expect("init_repo");
 
         // Write a recipients file, then make the no-parent initial commit.
-        fs::write(dir.path().join(RECIPIENTS_FILE), "age1abc\n").unwrap();
+        std::fs::write(dir.path().join(RECIPIENTS_FILE), "age1abc\n").unwrap();
         let message = "Initialized Store for age1abc";
         let head = commit_initial(dir.path(), &[RECIPIENTS_FILE.to_string()], message)
             .expect("commit_initial");
@@ -361,7 +360,7 @@ mod tests {
         assert!(tree.get_path(Path::new(RECIPIENTS_FILE)).is_ok());
 
         // A follow-up commit (which needs a parent HEAD) works after the initial.
-        fs::write(dir.path().join("foo.age"), b"x").unwrap();
+        std::fs::write(dir.path().join("foo.age"), b"x").unwrap();
         let second = commit(dir.path(), &["foo.age".to_string()], "second", None, None).unwrap();
         assert_ne!(second, head);
     }

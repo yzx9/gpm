@@ -21,7 +21,6 @@
 mod common;
 
 mod tests {
-    use std::fs;
     use std::path::Path;
     use std::process::Command;
 
@@ -64,7 +63,7 @@ mod tests {
 
         let recipients_path = config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE);
         let recipients_content =
-            fs::read_to_string(&recipients_path).expect("recipients file exists");
+            std::fs::read_to_string(&recipients_path).expect("recipients file exists");
         assert!(
             recipients_content.trim() == recipient,
             ".age-recipients should hold exactly the seeded recipient"
@@ -176,7 +175,8 @@ mod tests {
             .expect("create_store with SSH recipient");
 
         let recipients_content =
-            fs::read_to_string(config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE)).unwrap();
+            std::fs::read_to_string(config_dir.path().join("repo").join(TEST_RECIPIENTS_FILE))
+                .unwrap();
         assert!(
             recipients_content.starts_with("ssh-ed25519 "),
             "recipients file should hold the SSH recipient"
@@ -242,7 +242,7 @@ mod tests {
 
         // Write the private identity to a temp file `age -d -i` can consume.
         let id_file = config_dir.path().join("interop-identity");
-        fs::write(&id_file, identity.as_bytes()).unwrap();
+        std::fs::write(&id_file, identity.as_bytes()).unwrap();
         let entry = config_dir.path().join("repo/interop/entry.age");
 
         let output = Command::new("age")
@@ -254,7 +254,7 @@ mod tests {
             .expect("spawn age");
 
         // Best-effort wipe of the on-disk plaintext identity.
-        let _ = fs::remove_file(&id_file);
+        let _ = std::fs::remove_file(&id_file);
 
         assert!(
             output.status.success(),
@@ -300,7 +300,7 @@ mod tests {
         // Sabotage the FINAL bootstrap step: `save_repo_config` writes its atomic
         // temp to `repo.tmp`, so a directory there makes the persist fail AFTER
         // git init + recipients write + the initial commit have already landed.
-        fs::create_dir(config_dir.path().join("repo.tmp")).unwrap();
+        std::fs::create_dir(config_dir.path().join("repo.tmp")).unwrap();
 
         let err = store
             .create_store(None, &GitAuth::None, &recipient)

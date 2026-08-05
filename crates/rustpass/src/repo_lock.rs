@@ -17,7 +17,6 @@
 //! on drop AND automatically if the process dies — no stale-lockfile problem
 //! (the empty lockfile may persist on disk harmlessly; it carries no data).
 
-use std::fs::{self, File, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
 use std::{io, thread};
@@ -38,7 +37,7 @@ const REPO_LOCK_RETRY_SLEEP_MS: u64 = 25;
 pub struct RepoLock {
     /// The locked file, kept open for the lock's lifetime. Closed (releasing
     /// the flock) on drop.
-    file: Option<File>,
+    file: Option<std::fs::File>,
 }
 
 impl RepoLock {
@@ -57,9 +56,9 @@ impl RepoLock {
     pub fn try_acquire(config_dir: &Path) -> Result<Self, Error> {
         // The config dir normally exists by the time any Store is constructed;
         // create it best-effort so a fresh worker can open the lockfile.
-        let _ = fs::create_dir_all(config_dir);
+        let _ = std::fs::create_dir_all(config_dir);
         let path = config_dir.join(REPO_LOCK_FILE);
-        let file = OpenOptions::new()
+        let file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)

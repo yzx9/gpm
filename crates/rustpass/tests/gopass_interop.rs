@@ -35,7 +35,6 @@ mod common;
 
 mod tests {
     use super::common::{encrypt_to_recipients, expect_fast_forwarded, generate_test_keypair};
-    use std::fs;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
@@ -78,18 +77,18 @@ done
     /// TTY-needing pinentry and bypasses our mock.
     fn install_mock_pinentry(home: &Path) {
         let bin = home.join("bin");
-        fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
         let mock = bin.join("pinentry");
-        fs::write(&mock, MOCK_PINENTRY).unwrap();
-        let mut perm = fs::metadata(&mock).unwrap().permissions();
+        std::fs::write(&mock, MOCK_PINENTRY).unwrap();
+        let mut perm = std::fs::metadata(&mock).unwrap().permissions();
         perm.set_mode(0o755);
-        fs::set_permissions(&mock, perm).unwrap();
+        std::fs::set_permissions(&mock, perm).unwrap();
 
         let gnupg = home.join("gnupg");
-        fs::create_dir_all(&gnupg).unwrap();
-        let mut gperm = fs::metadata(&gnupg).unwrap().permissions();
+        std::fs::create_dir_all(&gnupg).unwrap();
+        let mut gperm = std::fs::metadata(&gnupg).unwrap().permissions();
         gperm.set_mode(0o700);
-        fs::set_permissions(&gnupg, gperm).unwrap();
+        std::fs::set_permissions(&gnupg, gperm).unwrap();
     }
 
     /// Build a `gopass` command fully isolated into `home`: its config and data
@@ -157,7 +156,7 @@ done
         // Rewrite the recipients file to gpm's recipient (gopass's own format:
         // one recipient per line, trailing newline). gopass honors this on every
         // insert and does not normalize it away.
-        fs::write(store_dir.join(".age-recipients"), format!("{recipient}\n")).unwrap();
+        std::fs::write(store_dir.join(".age-recipients"), format!("{recipient}\n")).unwrap();
 
         (home, store_dir)
     }
@@ -419,9 +418,9 @@ done
             let src = gpm_repo.join(format!("{name}.age"));
             let dst = store_dir.join(format!("{name}.age"));
             if let Some(parent) = dst.parent() {
-                fs::create_dir_all(parent).unwrap();
+                std::fs::create_dir_all(parent).unwrap();
             }
-            fs::copy(&src, &dst).unwrap();
+            std::fs::copy(&src, &dst).unwrap();
         }
         commit_worktree_strict(&store_dir);
 
@@ -589,7 +588,8 @@ done
 
         macro_rules! recipients_intact {
             () => {{
-                let recips = fs::read_to_string(env.store_dir.join(".age-recipients")).unwrap();
+                let recips =
+                    std::fs::read_to_string(env.store_dir.join(".age-recipients")).unwrap();
                 assert!(
                     recips.contains(gpm_recipient.as_str()),
                     "gpm recipient dropped from .age-recipients:\n{recips}"
@@ -756,7 +756,7 @@ done
         // gopass wrote its own recipient during init; capture it before any
         // rewrite. The holder of the matching identity (gopass) can decrypt a
         // file encrypted to it, independent of the store's recipients list.
-        let gopass_recipient = fs::read_to_string(store_dir.join(".age-recipients"))
+        let gopass_recipient = std::fs::read_to_string(store_dir.join(".age-recipients"))
             .unwrap()
             .lines()
             .find(|l| !l.trim().is_empty())
@@ -765,7 +765,7 @@ done
             .to_owned();
 
         // List both so either side can decrypt planted files.
-        fs::write(
+        std::fs::write(
             store_dir.join(".age-recipients"),
             format!("{gpm_recipient}\n{gopass_recipient}\n"),
         )
@@ -782,9 +782,9 @@ done
     fn plant_legacy_entry(store: &Path, name: &str, plaintext: &[u8], recipients: &[&str]) {
         let file = store.join(format!("{name}.age"));
         if let Some(parent) = file.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&file, encrypt_to_recipients(plaintext, recipients)).unwrap();
+        std::fs::write(&file, encrypt_to_recipients(plaintext, recipients)).unwrap();
     }
 
     /// `gopass show <name>`: decrypt through gopass's real parse cascade
@@ -928,7 +928,7 @@ done
         let work = tempfile::tempdir().unwrap();
         for (i, &(fname, bytes)) in cases.iter().enumerate() {
             let path = work.path().join(fname);
-            fs::write(&path, bytes).unwrap();
+            std::fs::write(&path, bytes).unwrap();
             gopass_fscopy(home.path(), &path, &format!("att/{i}"));
         }
         commit_worktree(&store_dir);

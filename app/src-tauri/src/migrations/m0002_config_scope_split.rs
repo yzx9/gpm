@@ -162,10 +162,14 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     // Read the pre-split app.json. The engine only runs us when peek saw a
     // schema < 2 (so the file exists); a full V1 parse failure is rare — fall
     // back to the V1 defaults so the app-shell prefs degrade rather than panic.
-    let v1: AppConfigV1 = state.app_config.read_app_json_as().unwrap_or_else(|e| {
-        log::warn!("0002_config_scope_split: app.json unparseable ({e}); using V1 defaults");
-        AppConfigV1::default()
-    });
+    let v1: AppConfigV1 = state
+        .app_config
+        .read_app_json_as()
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("0002_config_scope_split: app.json unparseable ({e}); using V1 defaults");
+            AppConfigV1::default()
+        });
 
     match state.store.load_repo_config_as::<LegacyRepoConfig>().await {
         Ok(legacy) => {

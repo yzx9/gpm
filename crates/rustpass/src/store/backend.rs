@@ -291,7 +291,6 @@ impl Store {
 mod tests {
     use super::*;
     use crate::crypto::BackendKind;
-    use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
@@ -331,7 +330,7 @@ mod tests {
         let repo_dir2 = tempfile::tempdir().unwrap();
         let external = tempfile::tempdir().unwrap();
         let external_file = external.path().join("victim");
-        fs::write(&external_file, b"age1stolen\n").unwrap();
+        std::fs::write(&external_file, b"age1stolen\n").unwrap();
         symlink(&external_file, repo_dir2.path().join(".age-recipients")).unwrap();
         let store2 = Store::new(repo_dir2.path().to_path_buf(), None);
         store2
@@ -350,7 +349,7 @@ mod tests {
         // Sanity: a regular recipients index still reads (the lstat guard must
         // not reject a normal file).
         let repo_dir3 = tempfile::tempdir().unwrap();
-        fs::write(repo_dir3.path().join(".age-recipients"), b"age1abc\n").unwrap();
+        std::fs::write(repo_dir3.path().join(".age-recipients"), b"age1abc\n").unwrap();
         let store3 = Store::new(repo_dir3.path().to_path_buf(), None);
         store3
             .resolve_and_set(Some("git"), &repo_dir3.path().to_string_lossy())

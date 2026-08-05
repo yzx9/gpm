@@ -14,8 +14,6 @@
 
 mod common;
 
-use std::fs;
-
 use common::*;
 use rustpass::crypto::SecretExt;
 use rustpass::store;
@@ -50,9 +48,9 @@ fn list_deeply_nested_entries() {
 fn list_mixed_extensions() {
     let (_identity, recipient) = generate_test_keypair();
     let dir = create_test_store(vec![("valid.age", b"password")], &recipient);
-    fs::write(dir.path().join("notes.txt"), b"not encrypted").unwrap();
-    fs::write(dir.path().join("data.json"), b"{}").unwrap();
-    fs::write(dir.path().join("backup.gpg"), b"gpg data").unwrap();
+    std::fs::write(dir.path().join("notes.txt"), b"not encrypted").unwrap();
+    std::fs::write(dir.path().join("data.json"), b"{}").unwrap();
+    std::fs::write(dir.path().join("backup.gpg"), b"gpg data").unwrap();
 
     let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);
@@ -111,7 +109,7 @@ fn list_many_entries_sorted() {
         let content = format!("password{i}");
         let file_path = dir.path().join(&name);
         let encrypted = encrypt_to_recipient(content.as_bytes(), &recipient);
-        fs::write(&file_path, encrypted).unwrap();
+        std::fs::write(&file_path, encrypted).unwrap();
     }
 
     let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
@@ -154,7 +152,7 @@ fn list_skips_age_recipients_file() {
     let (_identity, recipient) = generate_test_keypair();
     let dir = create_test_store(vec![("real.age", b"password")], &recipient);
     // Write a .age-recipients file (gopass metadata, not an entry)
-    fs::write(dir.path().join(".age-recipients"), "age1abc123...").unwrap();
+    std::fs::write(dir.path().join(".age-recipients"), "age1abc123...").unwrap();
 
     let entries = store::list_entries(dir.path(), SecretExt::AGE).unwrap();
     assert_eq!(entries.len(), 1);

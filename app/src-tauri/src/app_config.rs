@@ -58,7 +58,6 @@
 //! re-setting up the repo does not reset the user's language, timers, autosync,
 //! or app-lock choice.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -67,6 +66,7 @@ use rustpass::config::save_atomic;
 use rustpass::{Error, ErrorCode, LockMode, Store, clamp_lock_mode, normalize_clear_secs};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tokio::fs;
 
 use crate::AppState;
 use crate::verbose::{arm_verbose_timer, disarm_verbose_timer};
@@ -695,8 +695,8 @@ pub(crate) fn locale_init_script() -> String {
 /// [`LegacyAppConfig`] cleanly (carries only the behavior subset), so callers
 /// dispatching on the file shape should check [`rustpass::seal::is_envelope`]
 /// first to tell a sealed slot apart from a plaintext legacy file.
-fn load_legacy_app_json_at(path: &Path) -> Option<LegacyAppConfig> {
-    let s = fs::read_to_string(path).ok()?;
+async fn load_legacy_app_json_at(path: &Path) -> Option<LegacyAppConfig> {
+    let s = fs::read_to_string(path).await.ok()?;
     serde_json::from_str::<LegacyAppConfig>(&s).ok()
 }
 
@@ -713,7 +713,7 @@ struct SchemaVersionPeek {
 /// without a `Store` (so the migration registry can run before the Store is
 /// built if needed), then [`set_store`](Self::set_store) binds the Store so
 /// sealed behavior writes/reads can flow. Plaintext `pref.json` is read once
-/// synchronously at construction (lifting the legacy `app.json` display fields
+/// at construction via `tokio::fs` (lifting the legacy `app.json` display fields
 /// when `pref.json` is absent); sealed `app.json` is loaded post-unlock via
 /// [`reload_behavior`](Self::reload_behavior). The in-memory caches are
 /// authoritative thereafter; the [`Mutex`] guards are never held across an
@@ -745,7 +745,7 @@ impl AppConfigStore {
     /// `locale`/`theme_mode`/`verbose_until` to defaults; warn so the revert
     /// leaves a trace (the file is plaintext, so the warn carries no secret).
     #[must_use]
-    pub(crate) fn new(config_dir: &Path) -> Self {
+    pub(crate) async fn new(config_dir: &Path) -> Self {
         let pref_path = config_dir.join(PREF_FILE);
         let app_json_path = config_dir.join(APP_CONFIG_FILE);
         // Prefer pref.json (post-split shape); fall back to the legacy lift from
@@ -757,8 +757,8 @@ impl AppConfigStore {
         // post-split and is loaded post-unlock via `reload_behavior`, but the
         // legacy file still carries behavior pre-split). schema_version is
         // preserved (the registry bumps it as migrations run).
-        let (pref, behavior) = if pref_path.exists() {
-            let pref = match fs::read_to_string(&pref_path) {
+        let (pref, behavior) = if fs::try_exists(&pref_path).await.unwrap_or(false) {
+            let pref = match fs::read_to_string(&pref_path).await {
                 Ok(s) => serde_json::from_str::<PrefConfig>(&s).unwrap_or_else(|e| {
                     log::warn!("app-config: corrupt pref.json, using defaults: {e}");
                     PrefConfig::default()
@@ -769,7 +769,7 @@ impl AppConfigStore {
                 }
             };
             (pref, BehaviorConfig::default())
-        } else if let Some(legacy) = load_legacy_app_json_at(&app_json_path) {
+        } else if let Some(legacy) = load_legacy_app_json_at(&app_json_path).await {
             (
                 PrefConfig::from_legacy(&legacy),
                 BehaviorConfig::from_legacy(&legacy),
@@ -827,17 +827,18 @@ impl AppConfigStore {
     /// display prefs from `app.json` and clobbers the user's locale/theme.
     /// `save_atomic` (temp + rename) guarantees the file is either absent or
     /// complete, so existence is a reliable split signal.
-    pub(crate) fn pref_json_exists(&self) -> bool {
-        self.pref_path.exists()
+    pub(crate) async fn pref_json_exists(&self) -> bool {
+        fs::try_exists(&self.pref_path).await.unwrap_or(false)
     }
 
     /// Read `app.json` (the pre-split single-file shape) as raw text and
     /// deserialize into `T`. Plaintext analog of
     /// [`rustpass::Store::load_repo_config_as`] minus the unseal step. Used by
-    /// each migration to read its own source-version snapshot. Sync — the read
-    /// is tiny and [`AppConfigStore::new`] already reads synchronously.
-    pub(crate) fn read_app_json_as<T: serde::de::DeserializeOwned>(&self) -> Result<T, Error> {
-        let s = fs::read_to_string(&self.app_json_path)?;
+    /// each migration to read its own source-version snapshot.
+    pub(crate) async fn read_app_json_as<T: serde::de::DeserializeOwned>(
+        &self,
+    ) -> Result<T, Error> {
+        let s = fs::read_to_string(&self.app_json_path).await?;
         Ok(serde_json::from_str(&s)?)
     }
 
@@ -847,16 +848,16 @@ impl AppConfigStore {
     /// unparseable; the engine treats `None` as "skip all migrations" (a
     /// missing/corrupt state is a fresh install or post-reset, not a schema to
     /// migrate).
-    pub(crate) fn peek_schema_version(&self) -> Option<u32> {
+    pub(crate) async fn peek_schema_version(&self) -> Option<u32> {
         // Post-split (pref.json exists) — schema_version lives there.
-        if self.pref_path.exists()
-            && let Ok(s) = fs::read_to_string(&self.pref_path)
+        if fs::try_exists(&self.pref_path).await.unwrap_or(false)
+            && let Ok(s) = fs::read_to_string(&self.pref_path).await
             && let Ok(p) = serde_json::from_str::<SchemaVersionPeek>(&s)
         {
             return Some(p.schema_version);
         }
         // Pre-split OR pref.json corrupt/missing — fall back to app.json.
-        let s = fs::read_to_string(&self.app_json_path).ok()?;
+        let s = fs::read_to_string(&self.app_json_path).await.ok()?;
         serde_json::from_str::<SchemaVersionPeek>(&s)
             .ok()
             .map(|p| p.schema_version)
@@ -895,8 +896,8 @@ impl AppConfigStore {
         // Pref refresh (defensive — m0005's save_pref + schema bump already
         // swapped the cache; re-reading keeps this robust if a future migration
         // path ever skips that swap). pref.json is always present here.
-        if self.pref_path.exists() {
-            let s = fs::read_to_string(&self.pref_path)?;
+        if fs::try_exists(&self.pref_path).await.unwrap_or(false) {
+            let s = fs::read_to_string(&self.pref_path).await?;
             let pref: PrefConfig = serde_json::from_str(&s)?;
             *self.pref.lock().expect("pref lock poisoned") = pref;
         }
@@ -1022,7 +1023,7 @@ impl AppConfigStore {
     /// Take-once: whether the marker existed, and remove it. Used by the
     /// foreground on cold-start to decide whether to trigger a sync.
     pub(crate) async fn consume_sync_attention_marker(&self) -> bool {
-        tokio::fs::remove_file(self.sync_attention_marker_path())
+        fs::remove_file(self.sync_attention_marker_path())
             .await
             .is_ok()
     }
@@ -1337,15 +1338,15 @@ mod tests {
 
     use super::*;
 
-    fn store_at(dir: &Path) -> AppConfigStore {
-        AppConfigStore::new(dir)
+    async fn store_at(dir: &Path) -> AppConfigStore {
+        AppConfigStore::new(dir).await
     }
 
     /// Bind a desktop-passthrough Store (`master_key = None`) so the sealed
     /// behavior setters/readers can flow. The seal is plaintext-passthrough in
     /// this mode, so behavior round-trips through `app.json` as plaintext JSON.
     async fn store_with_desktop_store(dir: &Path) -> AppConfigStore {
-        let s = AppConfigStore::new(dir);
+        let s = AppConfigStore::new(dir).await;
         s.set_store(Arc::new(Store::new(dir.to_path_buf(), None)));
         s.reload_behavior().await.ok();
         s
@@ -1357,7 +1358,11 @@ mod tests {
         // is None, which the frontend resolves to the Sensitive default.
         let dir = tempdir().expect("tempdir");
         assert!(
-            store_at(dir.path()).get().secure_screen_mode.is_none(),
+            store_at(dir.path())
+                .await
+                .get()
+                .secure_screen_mode
+                .is_none(),
             "missing app.json must fall back to the default, not panic"
         );
     }
@@ -1365,22 +1370,26 @@ mod tests {
     #[tokio::test]
     async fn corrupt_file_defaults_sensitive_mode() {
         let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join(APP_CONFIG_FILE), "{not json").unwrap();
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{not json").unwrap();
         assert!(
-            store_at(dir.path()).get().secure_screen_mode.is_none(),
+            store_at(dir.path())
+                .await
+                .get()
+                .secure_screen_mode
+                .is_none(),
             "corrupt app.json must fall back to the default, not panic"
         );
     }
 
-    #[test]
-    fn default_locale_is_none() {
+    #[tokio::test]
+    async fn default_locale_is_none() {
         assert!(AppConfig::default().locale.is_none());
     }
 
     #[tokio::test]
     async fn locale_roundtrips_through_save() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .save_legacy_app_json(&LegacyAppConfig {
                 locale: Some("zh-CN".to_string()),
@@ -1388,7 +1397,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let reloaded = store_at(dir.path()).get();
+        let reloaded = store_at(dir.path()).await.get();
         assert_eq!(reloaded.locale.as_deref(), Some("zh-CN"));
     }
 
@@ -1397,7 +1406,7 @@ mod tests {
         // skip_serializing_if keeps the field out of the file when it is None,
         // so existing files stay byte-identical and don't carry a null.
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .save_legacy_app_json(&LegacyAppConfig {
                 locale: None,
@@ -1405,46 +1414,46 @@ mod tests {
             })
             .await
             .unwrap();
-        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("locale"),
             "locale key must be absent when None; got: {on_disk}"
         );
     }
 
-    #[test]
-    fn existing_app_json_without_locale_loads() {
+    #[tokio::test]
+    async fn existing_app_json_without_locale_loads() {
         // An app.json written before the locale field existed must still parse,
         // with locale defaulting to None (backward compatibility).
         let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
-        assert!(store_at(dir.path()).get().locale.is_none());
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
+        assert!(store_at(dir.path()).await.get().locale.is_none());
     }
 
-    #[test]
-    fn validate_locale_accepts_supported_and_none() {
+    #[tokio::test]
+    async fn validate_locale_accepts_supported_and_none() {
         assert!(validate_locale(None).is_ok());
         assert!(validate_locale(Some("en")).is_ok());
         assert!(validate_locale(Some("zh-CN")).is_ok());
     }
 
-    #[test]
-    fn validate_locale_rejects_unknown() {
+    #[tokio::test]
+    async fn validate_locale_rejects_unknown() {
         let err = validate_locale(Some("zh-TW")).unwrap_err();
         assert_eq!(err.code, "CONFIG_ERROR");
         assert!(err.message.contains("zh-TW"));
         assert!(validate_locale(Some("fr")).is_err());
     }
 
-    #[test]
-    fn default_theme_mode_is_none() {
+    #[tokio::test]
+    async fn default_theme_mode_is_none() {
         assert!(AppConfig::default().theme_mode.is_none());
     }
 
     #[tokio::test]
     async fn theme_mode_roundtrips_through_save() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .save_legacy_app_json(&LegacyAppConfig {
                 theme_mode: Some("dark".to_string()),
@@ -1452,7 +1461,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let reloaded = store_at(dir.path()).get();
+        let reloaded = store_at(dir.path()).await.get();
         assert_eq!(reloaded.theme_mode.as_deref(), Some("dark"));
     }
 
@@ -1461,7 +1470,7 @@ mod tests {
         // skip_serializing_if keeps theme_mode out of app.json when None, so
         // existing files stay byte-identical and carry no null.
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .save_legacy_app_json(&LegacyAppConfig {
                 theme_mode: None,
@@ -1469,27 +1478,27 @@ mod tests {
             })
             .await
             .unwrap();
-        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("theme_mode"),
             "theme_mode key must be absent when None; got: {on_disk}"
         );
     }
 
-    #[test]
-    fn existing_app_json_without_theme_mode_loads() {
+    #[tokio::test]
+    async fn existing_app_json_without_theme_mode_loads() {
         // An app.json written before theme_mode existed must still parse, with
         // theme_mode defaulting to None (backward compatibility — adding the
         // optional field is non-breaking, like locale).
         let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
-        assert!(store_at(dir.path()).get().theme_mode.is_none());
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
+        assert!(store_at(dir.path()).await.get().theme_mode.is_none());
     }
 
     #[tokio::test]
     async fn set_theme_mode_persists_validates_and_clears() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .set_theme_mode(Some("dark".to_string()))
             .await
@@ -1507,10 +1516,10 @@ mod tests {
         assert!(store.get().theme_mode.is_none());
     }
 
-    #[test]
-    fn app_config_store_new_missing_file_uses_defaults() {
+    #[tokio::test]
+    async fn app_config_store_new_missing_file_uses_defaults() {
         let dir = tempdir().expect("tempdir");
-        let store = AppConfigStore::new(dir.path());
+        let store = AppConfigStore::new(dir.path()).await;
         assert_eq!(
             store.get().schema_version,
             AppConfig::default().schema_version,
@@ -1518,11 +1527,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn app_config_store_new_corrupt_json_uses_defaults() {
+    #[tokio::test]
+    async fn app_config_store_new_corrupt_json_uses_defaults() {
         let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join(APP_CONFIG_FILE), "{not valid json").unwrap();
-        let store = AppConfigStore::new(dir.path());
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{not valid json").unwrap();
+        let store = AppConfigStore::new(dir.path()).await;
         assert_eq!(
             store.get().schema_version,
             AppConfig::default().schema_version,
@@ -1530,17 +1539,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn app_config_store_new_valid_file_loads_value() {
+    #[tokio::test]
+    async fn app_config_store_new_valid_file_loads_value() {
         let dir = tempdir().expect("tempdir");
         // A non-default value round-trips: secure_screen_mode "off" (default is
         // None / Sensitive).
-        fs::write(
+        std::fs::write(
             dir.path().join(APP_CONFIG_FILE),
             serde_json::json!({ "secure_screen_mode": "off" }).to_string(),
         )
         .unwrap();
-        let store = AppConfigStore::new(dir.path());
+        let store = AppConfigStore::new(dir.path()).await;
         assert_eq!(
             store.get().secure_screen_mode,
             Some(SecureScreenMode::Off),
@@ -1551,7 +1560,7 @@ mod tests {
     #[tokio::test]
     async fn verbose_until_roundtrips_through_pref() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         let pinned = now_unix() + 42;
         store
             .save_pref(&PrefConfig {
@@ -1560,7 +1569,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let reloaded = store_at(dir.path()).get_pref();
+        let reloaded = store_at(dir.path()).await.get_pref();
         assert_eq!(reloaded.verbose_until, Some(pinned));
     }
 
@@ -1569,9 +1578,9 @@ mod tests {
         // skip_serializing_if keeps verbose_until out of pref.json while None,
         // so a default config stays byte-identical.
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store.save_pref(&PrefConfig::default()).await.unwrap();
-        let on_disk = fs::read_to_string(dir.path().join(PREF_FILE)).unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(PREF_FILE)).unwrap();
         assert!(
             !on_disk.contains("verbose_until"),
             "verbose_until key must be absent when None; got: {on_disk}"
@@ -1581,7 +1590,7 @@ mod tests {
     #[tokio::test]
     async fn effective_log_filter_reflects_verbose_deadline() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         // No deadline ⇒ Info.
         assert_eq!(store.effective_log_filter(), log::LevelFilter::Info);
         // A fresh verbose window ⇒ Debug.
@@ -1595,7 +1604,7 @@ mod tests {
     #[tokio::test]
     async fn clear_expired_verbose_reverts_a_past_deadline() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         // Stamp a deadline already in the past.
         store
             .save_pref(&PrefConfig {
@@ -1619,7 +1628,7 @@ mod tests {
     #[tokio::test]
     async fn clear_expired_verbose_leaves_a_live_window_alone() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store.set_verbose(true).await.unwrap();
         let live = store.get_pref().verbose_until;
         store.clear_expired_verbose().await.unwrap();
@@ -1630,8 +1639,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn normalize_system_locale_maps_variants() {
+    #[tokio::test]
+    async fn normalize_system_locale_maps_variants() {
         assert_eq!(normalize_system_locale(None), "en");
         assert_eq!(normalize_system_locale(Some("en")), "en");
         assert_eq!(normalize_system_locale(Some("en-US")), "en");
@@ -1646,7 +1655,7 @@ mod tests {
     #[tokio::test]
     async fn resolved_locale_uses_explicit_override() {
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .save_legacy_app_json(&LegacyAppConfig {
                 locale: Some("zh-CN".to_string()),
@@ -1663,7 +1672,7 @@ mod tests {
         // code or empty string. The resolver must not surface it — it degrades
         // to a supported locale rather than handing the raw value to the UI.
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .save_legacy_app_json(&LegacyAppConfig {
                 locale: Some("fr".to_string()),
@@ -1678,18 +1687,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolved_locale_with_none_returns_supported() {
+    #[tokio::test]
+    async fn resolved_locale_with_none_returns_supported() {
         let dir = tempdir().expect("tempdir");
-        let resolved = store_at(dir.path()).resolved_locale();
+        let resolved = store_at(dir.path()).await.resolved_locale();
         assert!(
             is_supported_locale(&resolved),
             "resolved locale must be supported, got {resolved}"
         );
     }
 
-    #[test]
-    fn init_script_locale_returns_supported() {
+    #[tokio::test]
+    async fn init_script_locale_returns_supported() {
         // The init script runs before app.json is readable, so it carries the
         // system-locale resolution — always a supported code.
         let resolved = init_script_locale();
@@ -1699,8 +1708,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn default_secure_screen_mode_is_none() {
+    #[tokio::test]
+    async fn default_secure_screen_mode_is_none() {
         assert!(AppConfig::default().secure_screen_mode.is_none());
     }
 
@@ -1709,8 +1718,8 @@ mod tests {
     /// The frontend resolves `Unknown` to the sensitive default. Tested at the
     /// serde layer directly so the assertion survives the split (which moves
     /// `secure_screen_mode` into the sealed behavior file).
-    #[test]
-    fn secure_screen_mode_unknown_sinks_via_serde_other() {
+    #[tokio::test]
+    async fn secure_screen_mode_unknown_sinks_via_serde_other() {
         let json = r#"{"secure_screen_mode":"some-future-mode"}"#;
         let cfg: AppConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.secure_screen_mode, Some(SecureScreenMode::Unknown));
@@ -1752,7 +1761,7 @@ mod tests {
         // BehaviorConfig shape — also omits the field, but the assertion text
         // would need to know the new shape).
         let dir = tempdir().expect("tempdir");
-        let store = store_at(dir.path());
+        let store = store_at(dir.path()).await;
         store
             .save_legacy_app_json(&LegacyAppConfig {
                 secure_screen_mode: None,
@@ -1760,7 +1769,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("secure_screen_mode"),
             "secure_screen_mode must be absent when None; got: {on_disk}",
@@ -1792,8 +1801,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn serde_missing_key_schema_default_stays_at_one() {
+    #[tokio::test]
+    async fn serde_missing_key_schema_default_stays_at_one() {
         // The serde missing-key default stays at 1: a pre-split app.json that
         // omits the key must still run the registry (otherwise it would skip
         // straight to the target and silently lose the scope split + the
@@ -1802,8 +1811,8 @@ mod tests {
         assert_eq!(default_schema_version(), 1);
     }
 
-    #[test]
-    fn default_config_starts_at_current_schema_target() {
+    #[tokio::test]
+    async fn default_config_starts_at_current_schema_target() {
         // A brand-new install skips the legacy no-op migrations by starting at
         // the registry's target. (Existing files keep their own schema_version;
         // only a missing key falls back to the serde default of 1.)
@@ -1821,8 +1830,8 @@ mod tests {
     /// preserving all display fields + `schema_version`. The deprecated
     /// `secure_screen`/`log_level` fields don't survive into `PrefConfig`
     /// (they live only in the V1–V3 snapshots, consumed by `m0003`/`m0004`).
-    #[test]
-    fn pref_config_from_legacy_preserves_display_fields() {
+    #[tokio::test]
+    async fn pref_config_from_legacy_preserves_display_fields() {
         let app = LegacyAppConfig {
             secure_screen: false,
             secure_screen_mode: Some(SecureScreenMode::Off),
@@ -1841,8 +1850,8 @@ mod tests {
     /// The behavior half of a `LegacyAppConfig` lifts cleanly into a
     /// `BehaviorConfig`, preserving all six behavior fields. Pins the legacy
     /// lift round-trip.
-    #[test]
-    fn behavior_config_from_legacy_preserves_behavior_fields() {
+    #[tokio::test]
+    async fn behavior_config_from_legacy_preserves_behavior_fields() {
         let app = LegacyAppConfig {
             secure_screen_mode: Some(SecureScreenMode::Always),
             lock_mode: LockMode::Idle(300),
@@ -1865,16 +1874,16 @@ mod tests {
     /// defaults ON (not the derived `bool` false), matching what a missing key
     /// would deserialize to. Without this, the legacy lift of a partially-
     /// populated file would silently downgrade screen-capture protection.
-    #[test]
-    fn legacy_app_config_default_secure_screen_is_true() {
+    #[tokio::test]
+    async fn legacy_app_config_default_secure_screen_is_true() {
         assert!(
             LegacyAppConfig::default().secure_screen,
             "LegacyAppConfig::default must agree with the serde default (true)"
         );
     }
 
-    #[test]
-    fn gate_idle_default_is_after_300() {
+    #[tokio::test]
+    async fn gate_idle_default_is_after_300() {
         // The unified default for both the IPC view and the sealed behavior
         // half — new installs get a 5-min idle timeout.
         assert_eq!(
@@ -1887,8 +1896,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn gate_idle_serde_round_trips() {
+    #[tokio::test]
+    async fn gate_idle_serde_round_trips() {
         for mode in [
             GateIdle::Off,
             GateIdle::After(600),
@@ -1915,7 +1924,7 @@ mod tests {
             .save_behavior(&BehaviorConfig::default())
             .await
             .unwrap();
-        let on_disk = fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
+        let on_disk = std::fs::read_to_string(dir.path().join(APP_CONFIG_FILE)).unwrap();
         assert!(
             !on_disk.contains("gate_idle"),
             "gate_idle must be absent at default; got: {on_disk}",
@@ -1936,8 +1945,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn clamp_gate_idle_keeps_off_and_clamps_after() {
+    #[tokio::test]
+    async fn clamp_gate_idle_keeps_off_and_clamps_after() {
         assert_eq!(clamp_gate_idle(GateIdle::Off), GateIdle::Off);
         assert_eq!(
             clamp_gate_idle(GateIdle::After(60)),
@@ -1950,8 +1959,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn behavior_config_from_legacy_defaults_gate_idle() {
+    #[tokio::test]
+    async fn behavior_config_from_legacy_defaults_gate_idle() {
         // gate_idle is a new field — from_legacy does not carry it from a legacy
         // config (which never had it); it defaults, and m0006 later pins existing
         // users to Off.
@@ -1967,14 +1976,14 @@ mod tests {
     async fn pref_json_preferred_over_legacy_app_json_when_present() {
         let dir = tempdir().expect("tempdir");
         // Stale legacy file (would lift different values if used).
-        fs::write(dir.path().join(APP_CONFIG_FILE), r#"{"locale":"en"}"#).unwrap();
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), r#"{"locale":"en"}"#).unwrap();
         // pref.json wins.
-        fs::write(
+        std::fs::write(
             dir.path().join(PREF_FILE),
             r#"{"locale":"zh-CN","schema_version":4}"#,
         )
         .unwrap();
-        let cfg = store_at(dir.path()).get();
+        let cfg = store_at(dir.path()).await.get();
         assert_eq!(
             cfg.locale.as_deref(),
             Some("zh-CN"),

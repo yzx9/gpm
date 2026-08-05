@@ -25,7 +25,6 @@ mod read_commands;
 mod seal_migrate;
 mod setup_flow;
 
-use std::fs;
 use std::io::Write;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
@@ -95,9 +94,9 @@ fn create_bare_repo(entries: &[(&str, &[u8])], recipient_str: &str) -> tempfile:
     for (path, content) in entries {
         let file_path = work_dir.path().join(path);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&file_path, encrypt_to_recipient(content, recipient_str)).unwrap();
+        std::fs::write(&file_path, encrypt_to_recipient(content, recipient_str)).unwrap();
     }
 
     let mut index = repo.index().unwrap();
@@ -170,7 +169,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
 
     // Bind the AppConfigStore to the store (mirrors init_state) so gate-idle and
     // other behavior-config reads/writes flow through the seal in tests.
-    let app_config = crate::app_config::AppConfigStore::new(config_dir.path());
+    let app_config = crate::app_config::AppConfigStore::new(config_dir.path()).await;
     app_config.set_store(Arc::clone(&store));
 
     // Keep bare_dir alive (returned in TestStore) so the store's `origin` remote

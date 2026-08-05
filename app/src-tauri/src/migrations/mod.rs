@@ -71,6 +71,7 @@ pub(crate) async fn run_app_migrations(state: &AppState) {
     let mut current = state
         .app_config
         .peek_schema_version()
+        .await
         .unwrap_or(APP_CONFIG_SCHEMA_VERSION);
     let mut ran = false;
     for &(version, name) in MIGRATIONS {
@@ -82,7 +83,7 @@ pub(crate) async fn run_app_migrations(state: &AppState) {
                 // The migration persisted its target version to disk.
                 current = version;
                 ran = true;
-                debug_assert_eq!(state.app_config.peek_schema_version(), Some(version));
+                debug_assert_eq!(state.app_config.peek_schema_version().await, Some(version));
             }
             Ok(MigrationOutcome::Pending) => return, // app-lock; next unlock retries
             Err(e) => {

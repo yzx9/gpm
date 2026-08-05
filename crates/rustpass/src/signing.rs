@@ -1083,7 +1083,6 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
 
     use pgp::composed::{ArmorOptions, DetachedSignature, KeyType, SecretKeyParamsBuilder};
     use pgp::crypto::hash::HashAlgorithm;
@@ -1271,7 +1270,7 @@ mod tests {
         msg: &str,
     ) -> Oid {
         let workdir = repo.workdir().expect("repo has a workdir");
-        fs::write(workdir.join(path), content).expect("write file");
+        std::fs::write(workdir.join(path), content).expect("write file");
         let mut index = repo.index().expect("index");
         index.add_path(Path::new(path)).expect("add path");
         index.write().expect("write index");

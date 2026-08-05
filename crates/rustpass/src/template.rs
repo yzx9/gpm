@@ -25,9 +25,9 @@
 //! fields). Pipe functions (`{{ .Content | md5sum }}`, …) are not yet supported
 //! and are reported as an error rather than silently mis-rendered.
 
+use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::path::Path;
-use std::{collections::HashMap, fs};
 
 use serde::Serialize;
 
@@ -133,7 +133,7 @@ pub fn lookup_template_in_repo(repo_path: &Path, name: &str) -> Option<String> {
         } else {
             format!("{cur}/{TEMPLATE_FILE}")
         };
-        if let Ok(content) = fs::read_to_string(repo_path.join(rel)) {
+        if let Ok(content) = std::fs::read_to_string(repo_path.join(rel)) {
             return Some(content);
         }
     }
@@ -451,8 +451,8 @@ mod tests {
     fn lookup_walks_up_to_find_template() {
         let dir = tempfile::tempdir().unwrap();
         // websites/.pass-template applies to websites/foo and websites/a/b.
-        fs::create_dir_all(dir.path().join("websites/sub")).unwrap();
-        fs::write(
+        std::fs::create_dir_all(dir.path().join("websites/sub")).unwrap();
+        std::fs::write(
             dir.path().join("websites").join(TEMPLATE_FILE),
             "{{ .Content }}\n\nuser: ",
         )
@@ -461,7 +461,7 @@ mod tests {
         let tpl = lookup_template_in_repo(dir.path(), "websites/foo").unwrap();
         assert!(tpl.contains("user:"));
         // Nearer template wins over a root one.
-        fs::write(dir.path().join(TEMPLATE_FILE), "ROOT").unwrap();
+        std::fs::write(dir.path().join(TEMPLATE_FILE), "ROOT").unwrap();
         let tpl = lookup_template_in_repo(dir.path(), "websites/foo").unwrap();
         assert!(tpl.contains("user:"), "nearer websites/.pass-template wins");
         // Deeper entry still finds the websites template.

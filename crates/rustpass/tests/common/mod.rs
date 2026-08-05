@@ -4,7 +4,6 @@
 
 //! Shared test helpers used across integration test files.
 
-use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
@@ -140,10 +139,10 @@ pub fn create_test_store(entries: Vec<(&str, &[u8])>, recipient_str: &str) -> te
     for (path, content) in entries {
         let file_path = dir.path().join(path);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
         let encrypted = encrypt_to_recipient(content, recipient_str);
-        fs::write(file_path, encrypted).unwrap();
+        std::fs::write(file_path, encrypted).unwrap();
     }
     dir
 }
@@ -186,19 +185,19 @@ pub fn create_test_git_repo_with(
     for (path, content) in &entries {
         let file_path = work_dir.path().join(path);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
         let encrypted = encrypt_to_recipient(content, recipient_str);
-        fs::write(&file_path, encrypted).unwrap();
+        std::fs::write(&file_path, encrypted).unwrap();
     }
 
     // Write plaintext files verbatim (recipients file, templates, …)
     for (path, content) in &plaintext_files {
         let file_path = work_dir.path().join(path);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&file_path, content).unwrap();
+        std::fs::write(&file_path, content).unwrap();
     }
 
     // Stage and commit all entries
@@ -293,10 +292,10 @@ pub fn add_commit_to_bare(
     for (path, content) in &entries {
         let file_path = work_dir.path().join(path);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
         let encrypted = encrypt_to_recipient(content, recipient_str);
-        fs::write(&file_path, encrypted).unwrap();
+        std::fs::write(&file_path, encrypted).unwrap();
     }
 
     let mut index = repo.index().unwrap();
@@ -338,9 +337,9 @@ pub fn local_commit_files(repo_path: &Path, files: &[(&str, &[u8])], message: &s
     for (rel, content) in files {
         let file_path = repo_path.join(rel);
         if let Some(p) = file_path.parent() {
-            fs::create_dir_all(p).unwrap();
+            std::fs::create_dir_all(p).unwrap();
         }
-        fs::write(&file_path, content).unwrap();
+        std::fs::write(&file_path, content).unwrap();
     }
     let mut index = repo.index().expect("index");
     for (rel, _) in files {
@@ -422,9 +421,9 @@ pub fn commit_plain_files_to_bare(
     for (path, content) in &files {
         let file_path = work_dir.path().join(path);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&file_path, content).unwrap();
+        std::fs::write(&file_path, content).unwrap();
     }
     let mut index = repo.index().unwrap();
     index

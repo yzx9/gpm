@@ -100,10 +100,14 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     // schema < 3 (so the file exists); a full V2 parse failure (a wrong-type
     // field that peek still parses) is rare — fall back to the V2 defaults so
     // the chain heals the file to target instead of warn-looping every launch.
-    let v2: AppConfigV2 = state.app_config.read_app_json_as().unwrap_or_else(|e| {
-        log::warn!("0003_secure_screen_mode: app.json unparseable ({e}); using V2 defaults");
-        AppConfigV2::default()
-    });
+    let v2: AppConfigV2 = state
+        .app_config
+        .read_app_json_as()
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("0003_secure_screen_mode: app.json unparseable ({e}); using V2 defaults");
+            AppConfigV2::default()
+        });
     // Only set the mode when it is not already pinned (a partially-migrated
     // file re-running this step keeps any explicit value). false → Off;
     // true/missing → None — None is the Sensitive default, so a default user's

@@ -6,7 +6,6 @@
 //! read side of the store, mirroring [`crate::write`] on the write side.
 
 use std::fmt;
-use std::fs;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -14,6 +13,7 @@ use rustpass::{AttachmentMeta, Entry, Error, ErrorCode, RankedPage};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_file_save::FileSaveExt;
+use tokio::fs;
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -489,7 +489,7 @@ pub(crate) async fn export_attachment_core<R: Runtime>(
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("cache dir unavailable: {e}")))?;
     let temp_path = cache_dir.join(STAGE_FILENAME);
     let _stage = StageGuard::new(&temp_path);
-    tokio::fs::write(&temp_path, attachment.bytes())
+    fs::write(&temp_path, attachment.bytes())
         .await
         .map_err(|e| {
             Error::new(
@@ -504,7 +504,9 @@ pub(crate) async fn export_attachment_core<R: Runtime>(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600)) {
+        if let Err(e) =
+            fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600)).await
+        {
             log::warn!("export-attachment: stage perms 0600 failed: {e}");
         }
     }
@@ -579,13 +581,13 @@ struct StageGuard<'a> {
 }
 impl<'a> StageGuard<'a> {
     fn new(path: &'a Path) -> Self {
-        let _ = fs::remove_file(path); // best-effort wipe of a stranded prior stage
+        let _ = std::fs::remove_file(path); // best-effort wipe of a stranded prior stage
         Self { path }
     }
 }
 impl Drop for StageGuard<'_> {
     fn drop(&mut self) {
-        let _ = fs::remove_file(self.path);
+        let _ = std::fs::remove_file(self.path);
     }
 }
 
@@ -593,11 +595,11 @@ impl Drop for StageGuard<'_> {
 /// mid-export (`StageGuard`'s Drop runs on panic/cancel but not on SIGKILL).
 /// Called once at app startup so a hard-killed export doesn't leave decrypted
 /// bytes sitting in `app_cache_dir` until the next export overwrites them.
-pub(crate) fn sweep_attachment_stage<R: Runtime>(app: &AppHandle<R>) {
+pub(crate) async fn sweep_attachment_stage<R: Runtime>(app: &AppHandle<R>) {
     let Ok(cache_dir) = app.path().app_cache_dir() else {
         return;
     };
-    let _ = fs::remove_file(cache_dir.join(STAGE_FILENAME));
+    let _ = fs::remove_file(cache_dir.join(STAGE_FILENAME)).await;
 }
 
 #[cfg(test)]
@@ -763,7 +765,7 @@ mod tests {
         {
             let _guard = StageGuard::new(&path);
             // Simulate the stage write that happens after construction.
-            fs::write(&path, b"decoded bytes").unwrap();
+            std::fs::write(&path, b"decoded bytes").unwrap();
             assert!(path.exists(), "stage exists while guard is held");
         }
         assert!(!path.exists(), "StageGuard::drop must wipe the staged file");
@@ -775,7 +777,7 @@ mod tests {
         let path = dir.path().join("gpm-attachment.bin");
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = StageGuard::new(&path);
-            fs::write(&path, b"decoded bytes").unwrap();
+            std::fs::write(&path, b"decoded bytes").unwrap();
             panic!("simulated mid-export panic");
         }));
         assert!(result.is_err(), "the panic should propagate");

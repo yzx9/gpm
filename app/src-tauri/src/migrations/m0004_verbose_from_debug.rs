@@ -107,10 +107,14 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     // schema < 4 (so the file exists); a full V3 parse failure (a wrong-type
     // field that peek still parses) is rare — fall back to the V3 defaults so
     // the chain heals the file to target instead of warn-looping every launch.
-    let v3: AppConfigV3 = state.app_config.read_app_json_as().unwrap_or_else(|e| {
-        log::warn!("0004_verbose_from_debug: app.json unparseable ({e}); using V3 defaults");
-        AppConfigV3::default()
-    });
+    let v3: AppConfigV3 = state
+        .app_config
+        .read_app_json_as()
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("0004_verbose_from_debug: app.json unparseable ({e}); using V3 defaults");
+            AppConfigV3::default()
+        });
     // Only a previously pinned "debug" carries into verbose; error/warn/info and
     // unset all collapse to the Info default. Leave `verbose_until` untouched if
     // a partially-migrated file already set one.

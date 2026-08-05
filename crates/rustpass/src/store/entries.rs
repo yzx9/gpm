@@ -516,7 +516,6 @@ fn invalid_name(message: &str) -> Error {
 mod tests {
     use super::*;
     use crate::crypto::SecretExt;
-    use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
@@ -524,8 +523,8 @@ mod tests {
     fn resolve_entry_path_valid_file() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("cloud");
-        fs::create_dir_all(&file_path).unwrap();
-        fs::write(file_path.join("aws.age"), b"encrypted").unwrap();
+        std::fs::create_dir_all(&file_path).unwrap();
+        std::fs::write(file_path.join("aws.age"), b"encrypted").unwrap();
 
         let result = resolve_entry_path(dir.path(), "cloud/aws.age");
         assert!(result.is_ok());
@@ -561,7 +560,7 @@ mod tests {
     fn resolve_entry_path_symlink_escape() {
         let external_dir = tempfile::tempdir().unwrap();
         let external_file = external_dir.path().join("target.txt");
-        fs::write(&external_file, b"external-secret").unwrap();
+        std::fs::write(&external_file, b"external-secret").unwrap();
 
         let repo_dir = tempfile::tempdir().unwrap();
         let link_path = repo_dir.path().join("escape.age");

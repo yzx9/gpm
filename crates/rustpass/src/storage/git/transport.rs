@@ -371,7 +371,6 @@ pub(super) fn classify_git_error(msg: &str) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, mpsc};
@@ -554,7 +553,7 @@ mod tests {
     fn bare_repo_with_file() -> tempfile::TempDir {
         let work = tempfile::tempdir().expect("work dir");
         let repo = Repository::init(work.path()).expect("init work");
-        fs::write(work.path().join("f.age"), b"secret").expect("write file");
+        std::fs::write(work.path().join("f.age"), b"secret").expect("write file");
         let mut index = repo.index().expect("index");
         index.add_path(Path::new("f.age")).expect("add path");
         index.write().expect("index write");

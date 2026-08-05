@@ -708,11 +708,11 @@ mod tests {
     /// Minimal [`AppState`]. `generate_identity_core` only touches
     /// `pending_identity`, so the store / timer / pending-write are inert
     /// placeholders — no git repo or Tauri runtime needed.
-    fn pending_state() -> (AppState, tempfile::TempDir) {
+    async fn pending_state() -> (AppState, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         let state = AppState {
             store: Arc::new(Store::new(dir.path().to_path_buf(), None)),
-            app_config: AppConfigStore::new(dir.path()),
+            app_config: AppConfigStore::new(dir.path()).await,
             app_handle: None,
             lock_timer: IdleTimer::new(),
             pending_identity: Mutex::new(None),
@@ -733,9 +733,9 @@ mod tests {
         (state, dir)
     }
 
-    #[test]
-    fn age_mints_and_stages_the_matching_secret() {
-        let (state, _dir) = pending_state();
+    #[tokio::test]
+    async fn age_mints_and_stages_the_matching_secret() {
+        let (state, _dir) = pending_state().await;
         let recipient =
             generate_identity_core(&state, CreateIdentityKind::Age, None).expect("age mint");
         assert!(recipient.starts_with("age1"), "recipient: {recipient}");
@@ -756,9 +756,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ssh_encryption_flag_tracks_the_passphrase() {
-        let (state, _dir) = pending_state();
+    #[tokio::test]
+    async fn ssh_encryption_flag_tracks_the_passphrase() {
+        let (state, _dir) = pending_state().await;
 
         let recipient =
             generate_identity_core(&state, CreateIdentityKind::Ssh, Some("create-pass"))
@@ -797,9 +797,9 @@ mod tests {
         assert!(!pending.info.encrypted);
     }
 
-    #[test]
-    fn a_second_mint_overwrites_the_prior_staged_identity() {
-        let (state, _dir) = pending_state();
+    #[tokio::test]
+    async fn a_second_mint_overwrites_the_prior_staged_identity() {
+        let (state, _dir) = pending_state().await;
         generate_identity_core(&state, CreateIdentityKind::Age, None).unwrap();
         generate_identity_core(&state, CreateIdentityKind::Ssh, None).unwrap();
         let pending = state

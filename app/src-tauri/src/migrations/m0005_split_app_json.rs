@@ -37,10 +37,11 @@
 //! injected but BEFORE `app_locked` is cleared (so `app_locked` is still
 //! `true` even though the key is now in memory).
 
+use std::io;
 use std::sync::atomic::Ordering;
-use std::{fs, io};
 
 use rustpass::Error;
+use tokio::fs;
 
 use crate::AppState;
 use crate::app_config::{BehaviorConfig, GateIdle, PrefConfig};
@@ -81,7 +82,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
 
     // 2. Read raw app.json bytes from disk.
     let app_json_path = state.app_config.app_json_path();
-    let bytes = match fs::read(app_json_path) {
+    let bytes = match fs::read(app_json_path).await {
         Ok(b) => b,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             // 3. Missing — fresh install / post-reset. Nothing to split; bump
@@ -109,12 +110,12 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
             .map(|()| MigrationOutcome::Done);
     }
 
-    // 5. Plaintext V4: parse via the read_app_json_as path (which goes through
-    //    std::fs::read_to_string — bytes were only needed for is_envelope
-    //    above; re-reading is cheap). V4 has no `deny_unknown_fields`, so a
-    //    main-shipped schema-4 file carrying the deprecated `secure_screen`
-    //    and/or `log_level` keys parses cleanly (the unknown keys are ignored).
-    let v4: AppConfigV4 = match state.app_config.read_app_json_as() {
+    // 5. Plaintext V4: parse via the read_app_json_as path (which re-reads via
+    //    tokio::fs — bytes were only needed for is_envelope above; re-reading is
+    //    cheap). V4 has no `deny_unknown_fields`, so a main-shipped schema-4
+    //    file carrying the deprecated `secure_screen` and/or `log_level` keys
+    //    parses cleanly (the unknown keys are ignored).
+    let v4: AppConfigV4 = match state.app_config.read_app_json_as().await {
         Ok(c) => c,
         Err(e) => {
             // Unparseable as V4: warn + mark done. The file is in an unknown
@@ -135,7 +136,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     // with defaulted display fields + `schema_version: 4`. PRESERVE
     // schema_version (do NOT bump yet) — the schema advances only after the
     // sealed write succeeds, so a Pending resume re-enters cleanly.
-    if !state.app_config.pref_json_exists() {
+    if !state.app_config.pref_json_exists().await {
         state
             .app_config
             .save_pref(&PrefConfig {

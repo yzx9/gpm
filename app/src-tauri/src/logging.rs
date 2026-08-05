@@ -197,7 +197,6 @@ pub(crate) fn write_log(level: String, message: String) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::time::{Duration, SystemTime};
 
     use super::*;
@@ -206,10 +205,11 @@ mod tests {
     /// the past, so the ordering test doesn't depend on filesystem time resolution.
     fn write_with_mtime(dir: &Path, name: &str, contents: &[u8], secs_ago: u64) {
         let path = dir.join(name);
-        fs::write(&path, contents).unwrap();
-        let f = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        std::fs::write(&path, contents).unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         let mt = SystemTime::now() - Duration::from_secs(secs_ago);
-        f.set_times(fs::FileTimes::new().set_modified(mt)).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_modified(mt))
+            .unwrap();
     }
 
     #[tokio::test]
@@ -307,16 +307,16 @@ mod tests {
         let active = dir.path().join("gpm.log");
         let rotated = dir.path().join("gpm_2026-01-01_00-00-00.log");
         let bak = dir.path().join("gpm_2026-01-01_00-00-00.log.bak");
-        fs::write(&active, b"active-data\n").unwrap();
-        fs::write(&rotated, b"rotated\n").unwrap();
-        fs::write(&bak, b"bak\n").unwrap();
+        std::fs::write(&active, b"active-data\n").unwrap();
+        std::fs::write(&rotated, b"rotated\n").unwrap();
+        std::fs::write(&bak, b"bak\n").unwrap();
 
         clear_log_in(dir.path(), "gpm").await.unwrap();
 
         // Active exists, truncated to empty (NOT deleted — the logger's handle
         // stays valid).
         assert!(active.exists(), "active file must remain (handle alive)");
-        assert_eq!(fs::read_to_string(&active).unwrap(), "");
+        assert_eq!(std::fs::read_to_string(&active).unwrap(), "");
         // Rotated + bak removed.
         assert!(!rotated.exists(), "rotated file removed");
         assert!(!bak.exists(), ".bak removed");

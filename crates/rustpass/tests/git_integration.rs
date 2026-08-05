@@ -14,8 +14,6 @@
 
 mod common;
 
-use std::fs;
-
 use common::*;
 use rustpass::crypto;
 use rustpass::secret::Secret;
@@ -61,7 +59,8 @@ async fn clone_removes_existing_dest() {
 
     let dest = tempfile::tempdir().expect("failed to create dest dir");
 
-    fs::write(dest.path().join("stale-file.txt"), b"old data").expect("failed to write stale file");
+    std::fs::write(dest.path().join("stale-file.txt"), b"old data")
+        .expect("failed to write stale file");
     assert!(
         dest.path().join("stale-file.txt").exists(),
         "precondition: stale file must exist before clone"

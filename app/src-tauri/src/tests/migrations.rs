@@ -13,7 +13,6 @@
 //! sealed write is deferred) is exercised against the schema-based
 //! behavior-load discriminator.
 
-use std::fs;
 use std::path::Path;
 use std::sync::atomic::{self, AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -62,7 +61,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
 /// `reload_behavior`. Tests that assert behavior fields after a run must go
 /// through here to verify true on-disk persistence.
 async fn reload_at(dir: &Path, store: &Arc<Store>) -> AppConfig {
-    let ac = AppConfigStore::new(dir);
+    let ac = AppConfigStore::new(dir).await;
     ac.set_store(Arc::clone(store));
     ac.reload_behavior().await.ok();
     ac.get()
@@ -85,16 +84,16 @@ const OLD_REPO_JSON: &str = r#"{
 #[tokio::test]
 async fn migrate_copies_non_default_prefs_and_preserves_app_prefs() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
+    std::fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
     // Pre-existing app.json with non-default app prefs the migration must keep.
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":1,"secure_screen":false,"locale":"zh-CN"}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -124,13 +123,13 @@ async fn migrate_copies_non_default_prefs_and_preserves_app_prefs() {
 #[tokio::test]
 async fn migrate_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
+    std::fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
     // A pre-split app.json (schema 1) so the registry actually runs on the
     // first pass (a brand-new install now starts at the target via Default).
-    fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -152,10 +151,10 @@ async fn migrate_noops_and_marks_done_when_no_repo_json() {
     let dir = tempfile::tempdir().unwrap();
     // A pre-split app.json (schema 1) with no repo.json: m0002 has nothing to
     // copy and marks itself done, then m0003 converts the default bool.
-    fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -173,14 +172,14 @@ async fn migrate_noops_and_marks_done_when_no_repo_json() {
 #[tokio::test]
 async fn m0003_maps_default_true_to_none_and_stays_byte_identical() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":1,"secure_screen":true}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -193,7 +192,7 @@ async fn m0003_maps_default_true_to_none_and_stays_byte_identical() {
     );
     // The post-split pref.json carries no `secure_screen_mode` (the field is on
     // the sealed behavior slot, and the default-sensitive user has it as None).
-    let pref_on_disk = fs::read_to_string(dir.path().join("pref.json")).unwrap();
+    let pref_on_disk = std::fs::read_to_string(dir.path().join("pref.json")).unwrap();
     assert!(
         !pref_on_disk.contains("secure_screen_mode"),
         "default user stays byte-identical; got: {pref_on_disk}",
@@ -208,20 +207,20 @@ async fn m0003_maps_default_true_to_none_and_stays_byte_identical() {
 async fn v2_file_does_not_roll_back_scope_prefs() {
     let dir = tempfile::tempdir().unwrap();
     // A slim repo.json (post-split shape: no behavior prefs).
-    fs::write(
+    std::fs::write(
         dir.path().join("repo.json"),
         r#"{"url":"https://x/repo.git","local_path":"/p"}"#,
     )
     .unwrap();
     // A v2 app.json with non-default scope prefs + secure_screen off.
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":2,"secure_screen":false,"lock_mode":{"idle":300},"autosync":false}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -240,14 +239,14 @@ async fn v2_file_does_not_roll_back_scope_prefs() {
 #[tokio::test]
 async fn m0003_preserves_an_already_pinned_mode() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":2,"secure_screen":true,"secure_screen_mode":"off"}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -270,18 +269,18 @@ async fn m0003_preserves_an_already_pinned_mode() {
 #[tokio::test]
 async fn m0002_save_failure_in_copy_branch_leaves_schema_and_retries() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
-    fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
+    std::fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     // `write_app_json_raw` (via `save_atomic`) writes `app.tmp` then renames it
     // over `app.json`, so a directory at the tmp path makes the write fail on
     // every platform (no chmod). m0002 must propagate that Err instead of
     // marking itself done.
-    fs::create_dir(dir.path().join("app.tmp")).unwrap();
+    std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,
@@ -291,7 +290,7 @@ async fn m0002_save_failure_in_copy_branch_leaves_schema_and_retries() {
 
     // Clear the block and retry — the engine re-enters m0002 (schema still < 2)
     // and completes both steps to the target.
-    fs::remove_dir(dir.path().join("app.tmp")).unwrap();
+    std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
     let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
@@ -306,13 +305,13 @@ async fn m0002_save_failure_in_copy_branch_leaves_schema_and_retries() {
 async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
     let dir = tempfile::tempdir().unwrap();
     // No repo.json → m0002's "nothing to copy" branch.
-    fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
-    fs::create_dir(dir.path().join("app.tmp")).unwrap();
+    std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,
@@ -320,7 +319,7 @@ async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
         "noop-branch save failure must not mark the migration done"
     );
 
-    fs::remove_dir(dir.path().join("app.tmp")).unwrap();
+    std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,
@@ -335,14 +334,14 @@ async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
 #[tokio::test]
 async fn m0004_carries_pinned_debug_into_verbose() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":3,"log_level":"debug"}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -363,14 +362,14 @@ async fn m0004_carries_pinned_debug_into_verbose() {
 async fn m0004_collapses_non_debug_levels_to_info_default() {
     for level in ["warn", "info", "error"] {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(
+        std::fs::write(
             dir.path().join("app.json"),
             format!(r#"{{"schema_version":3,"log_level":"{level}"}}"#),
         )
         .unwrap();
         let state = build_state(
             Arc::new(Store::new(dir.path().to_path_buf(), None)),
-            AppConfigStore::new(dir.path()),
+            AppConfigStore::new(dir.path()).await,
         );
 
         run_app_migrations(&state).await;
@@ -391,14 +390,14 @@ async fn m0004_collapses_non_debug_levels_to_info_default() {
 async fn m0004_preserves_an_already_set_verbose_until() {
     let dir = tempfile::tempdir().unwrap();
     let pinned = now_unix() + 42; // an arbitrary pre-existing deadline
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         format!(r#"{{"schema_version":3,"log_level":"debug","verbose_until":{pinned}}}"#),
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -421,20 +420,20 @@ async fn m0004_preserves_an_already_set_verbose_until() {
 #[tokio::test]
 async fn m0005_pending_under_app_lock_leaves_app_json_plaintext() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":4,"lock_mode":{"idle":120},"autosync":false}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)), // keyless cold start
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
     state.app_lock_enabled.store(true, atomic::Ordering::SeqCst);
 
     run_app_migrations(&state).await;
 
-    let on_disk = fs::read(dir.path().join("app.json")).unwrap();
+    let on_disk = std::fs::read(dir.path().join("app.json")).unwrap();
     assert!(
         !rustpass::seal::is_envelope(&on_disk),
         "app-lock cold start must NOT seal app.json (the key is withheld)"
@@ -462,20 +461,20 @@ async fn m0005_pending_under_app_lock_leaves_app_json_plaintext() {
 #[tokio::test]
 async fn m0005_completes_when_master_key_injected() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":4,"lock_mode":{"idle":120},"autosync":false,"secure_screen_mode":"always"}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)), // keyless cold start
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
     state.app_lock_enabled.store(true, atomic::Ordering::SeqCst);
 
     // First run: app-lock cold start, master key withheld → m0005 defers.
     run_app_migrations(&state).await;
-    let after_first = fs::read(dir.path().join("app.json")).unwrap();
+    let after_first = std::fs::read(dir.path().join("app.json")).unwrap();
     assert!(
         !rustpass::seal::is_envelope(&after_first),
         "deferred on first run"
@@ -491,7 +490,7 @@ async fn m0005_completes_when_master_key_injected() {
     run_app_migrations(&state).await;
 
     // Completed: app.json is now a sealed envelope, schema advanced to target.
-    let after_second = fs::read(dir.path().join("app.json")).unwrap();
+    let after_second = std::fs::read(dir.path().join("app.json")).unwrap();
     assert!(
         rustpass::seal::is_envelope(&after_second),
         "completed once the master key is present"
@@ -508,10 +507,10 @@ async fn m0005_completes_when_master_key_injected() {
 #[tokio::test]
 async fn m0007_no_op_on_desktop_advances_schema() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
+    std::fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
     // app_handle None + app_lock_enabled false ⇒ desktop no-op: bump to target.
     run_app_migrations(&state).await;
@@ -530,10 +529,10 @@ async fn m0007_no_op_on_desktop_advances_schema() {
 #[tokio::test]
 async fn m0007_pends_under_app_lock_without_vault_key() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
+    std::fs::write(dir.path().join("pref.json"), r#"{"schema_version":6}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)), // keyless: vault_seal unkeyed
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
     state.app_lock_enabled.store(true, atomic::Ordering::SeqCst);
 
@@ -572,12 +571,12 @@ async fn m0005_preserves_display_prefs_on_desktop_half_migrated_recovery() {
     // (Carries `secure_screen` from main's schema-4 shape — V4 must tolerate
     // it; serde ignores unknown keys, the deprecated field doesn't reach
     // PrefConfig.)
-    fs::write(
+    std::fs::write(
         dir.path().join("pref.json"),
         r#"{"schema_version":4,"secure_screen":true,"locale":"zh-CN","theme_mode":"dark"}"#,
     )
     .unwrap();
-    let state = build_state(store, AppConfigStore::new(dir.path()));
+    let state = build_state(store, AppConfigStore::new(dir.path()).await);
     // `new()` loaded pref.json's real display prefs (not the app.json defaults).
     assert_eq!(state.app_config.get_pref().locale.as_deref(), Some("zh-CN"));
 
@@ -604,7 +603,7 @@ async fn missing_app_json_is_a_noop() {
     // No repo.json and no app.json — a true fresh install.
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -626,10 +625,10 @@ async fn missing_app_json_is_a_noop() {
 #[tokio::test]
 async fn corrupt_app_json_is_a_noop() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("app.json"), "{not json").unwrap();
+    std::fs::write(dir.path().join("app.json"), "{not json").unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -649,11 +648,11 @@ async fn corrupt_app_json_is_a_noop() {
 #[tokio::test]
 async fn m0002_seeds_security_caches_from_snapshot() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
-    fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
+    std::fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":1}"#).unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -680,14 +679,14 @@ async fn m0002_seeds_security_caches_from_snapshot() {
 #[tokio::test]
 async fn post_migration_cache_reflects_migrated_values() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":3,"log_level":"debug"}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -718,14 +717,14 @@ async fn corrupt_v1_file_keeps_sensitive_screen_default() {
     let dir = tempfile::tempdir().unwrap();
     // schema_version parses (peek ⇒ 1) but locale:123 is the wrong type, so the
     // full V1 read fails and m0002 falls back to AppConfigV1::default().
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":1,"locale":123}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -753,14 +752,14 @@ async fn corrupt_v2_file_heals_to_target_via_fallback() {
     let dir = tempfile::tempdir().unwrap();
     // schema_version parses (peek ⇒ 2) but lock_mode is the wrong type, so the
     // full V2 read in m0003 fails and m0003 falls back to AppConfigV2::default().
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":2,"lock_mode":{"idle":"not-a-number"}}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -790,7 +789,7 @@ async fn v4_reads_main_shiped_schema_4_with_deprecated_keys() {
     let dir = tempfile::tempdir().unwrap();
     // Schema-4 file carrying both deprecated keys (main's m0003 left
     // secure_screen in place; main's m0004 leaves log_level when not "debug").
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{
             "schema_version":4,
@@ -806,7 +805,7 @@ async fn v4_reads_main_shiped_schema_4_with_deprecated_keys() {
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     run_app_migrations(&state).await;
@@ -824,7 +823,7 @@ async fn v4_reads_main_shiped_schema_4_with_deprecated_keys() {
         "the persisted mode survives; the deprecated bool is dropped at V4"
     );
     // The pref.json written by m0005 must NOT carry the deprecated keys.
-    let pref_on_disk = fs::read_to_string(dir.path().join("pref.json")).unwrap();
+    let pref_on_disk = std::fs::read_to_string(dir.path().join("pref.json")).unwrap();
     assert!(
         !pref_on_disk.contains("secure_screen") && !pref_on_disk.contains("log_level"),
         "PrefConfig carries neither deprecated key; got: {pref_on_disk}",
@@ -846,19 +845,19 @@ async fn reload_behavior_loads_half_migrated_plaintext_app_json() {
     let dir = tempfile::tempdir().unwrap();
     // Half-migrated state: pref.json already split off (schema preserved at 4),
     // app.json still the plaintext single-file V4 (sealed write deferred).
-    fs::write(
+    std::fs::write(
         dir.path().join("pref.json"),
         r#"{"schema_version":4,"locale":"zh-CN"}"#,
     )
     .unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join("app.json"),
         r#"{"schema_version":4,"lock_mode":{"idle":120},"autosync":false}"#,
     )
     .unwrap();
     let state = build_state(
         Arc::new(Store::new(dir.path().to_path_buf(), None)),
-        AppConfigStore::new(dir.path()),
+        AppConfigStore::new(dir.path()).await,
     );
 
     // new() saw pref.json exist ⇒ behavior cache starts at default (not lifted

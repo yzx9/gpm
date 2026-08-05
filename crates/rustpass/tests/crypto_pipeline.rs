@@ -19,8 +19,6 @@
 
 mod common;
 
-use std::fs;
-
 use rustpass::crypto::{AgeBackend, CryptoBackend};
 use rustpass::storage::{GitStorage, RepoFiles};
 
@@ -44,7 +42,7 @@ async fn encrypt_ensures_our_recipient_when_absent_from_index() {
     );
 
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join(TEST_RECIPIENTS_FILE), index).unwrap();
+    std::fs::write(dir.path().join(TEST_RECIPIENTS_FILE), index).unwrap();
 
     let backend = AgeBackend;
     let view = RepoFiles::new(&GitStorage, dir.path());
@@ -81,7 +79,7 @@ async fn list_recipients_round_trips_and_treats_missing_as_empty() {
     // Present index → parsed. The round-trip back through encrypt/decrypt above
     // already exercises the parsed-recipients path; here we just confirm count.
     let (_id, recipient) = generate_test_keypair();
-    fs::write(
+    std::fs::write(
         dir.path().join(TEST_RECIPIENTS_FILE),
         format!("{recipient}\n"),
     )
@@ -100,7 +98,7 @@ async fn list_recipients_round_trips_and_treats_missing_as_empty() {
 #[tokio::test]
 async fn list_recipients_rejects_non_utf8_index() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(
+    std::fs::write(
         dir.path().join(TEST_RECIPIENTS_FILE),
         b"age1abc\n\xff\xfe\n",
     )

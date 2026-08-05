@@ -55,7 +55,7 @@ pub(crate) async fn run_headless_sync(
 ) -> BackgroundSyncResult {
     // pref.json is plaintext — readable without the master key, so the cadence
     // gate works pre-unlock too.
-    let app_cfg = AppConfigStore::new(&config_dir);
+    let app_cfg = AppConfigStore::new(&config_dir).await;
     if app_cfg.background_sync().is_off() {
         return BackgroundSyncResult::Skipped { reason: "disabled" };
     }
@@ -219,7 +219,6 @@ mod jni {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
 
     use crate::app_config::BackgroundSyncCadence;
     use base64::Engine;
@@ -242,7 +241,7 @@ mod tests {
     async fn skips_with_no_key_when_enabled() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         // Enable background sync (cadence non-Off) so the cadence gate passes.
-        let app_cfg = AppConfigStore::new(dir.path());
+        let app_cfg = AppConfigStore::new(dir.path()).await;
         app_cfg
             .set_background_sync(BackgroundSyncCadence::Hours1)
             .await
@@ -265,14 +264,14 @@ mod tests {
     #[tokio::test]
     async fn headless_sync_leaves_plaintext_identity_untouched() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let app_cfg = AppConfigStore::new(dir.path());
+        let app_cfg = AppConfigStore::new(dir.path()).await;
         app_cfg
             .set_background_sync(BackgroundSyncCadence::Hours1)
             .await
             .expect("set cadence");
         let master = rustpass::seal::generate_master_key().unwrap();
         let master_b64 = crate::B64.encode(master);
-        fs::write(dir.path().join("identity"), b"plaintext-identity").unwrap();
+        std::fs::write(dir.path().join("identity"), b"plaintext-identity").unwrap();
 
         let res = run_headless_sync(dir.path().to_path_buf(), master_b64).await;
 
@@ -286,7 +285,7 @@ mod tests {
             "pull-only worker should skip cleanly, not error on vault-tier files"
         );
         assert_eq!(
-            fs::read(dir.path().join("identity")).unwrap(),
+            std::fs::read(dir.path().join("identity")).unwrap(),
             b"plaintext-identity",
             "headless worker must not touch vault-tier identity"
         );

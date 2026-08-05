@@ -254,7 +254,7 @@ fn init_state(app: &tauri::App<tauri::Wry>) -> AppState {
     );
     // App-shell (non-repo) preferences — primarily the screen-capture master
     // toggle. Borrows `config_dir` before it is moved into `Store` below.
-    let app_config = app_config::AppConfigStore::new(&config_dir);
+    let app_config = tauri::async_runtime::block_on(app_config::AppConfigStore::new(&config_dir));
     // Apply the persisted log level NOW (right after app.json loads and the log
     // plugin has initialized). The plugin is capped at Debug (see `run()`), so
     // this `set_max_level` is the runtime gate — a live `verbose_until` ⇒ Debug,
@@ -459,7 +459,7 @@ pub fn run() {
             app.manage(state);
             // Best-effort: clear any attachment stage stranded by a hard-killed
             // prior export (StageGuard's Drop runs on panic/cancel, not SIGKILL).
-            read::sweep_attachment_stage(app.handle());
+            tauri::async_runtime::block_on(read::sweep_attachment_stage(app.handle()));
             #[cfg(target_os = "android")]
             {
                 let handle = app.handle().clone();
