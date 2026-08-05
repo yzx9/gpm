@@ -1,7 +1,8 @@
 <!--
-Feature-level threat model for the GPG/OpenPGP crypto backend. Forward-looking — the
-backend is implemented and seam-tested but NOT yet wired into the Store (prd.md §6).
-Complements docs/SECURITY.md. Living.
+Feature-level threat model for the GPG/OpenPGP crypto backend. The backend is
+implemented, seam-tested, and wired through the Store for read and write; remaining work
+is the setup sub-flow + keyring-management UI (prd.md §6). Complements docs/SECURITY.md.
+Living.
 -->
 
 # 004 — GPG encryption: threat model

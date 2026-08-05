@@ -1,7 +1,7 @@
 # GPG/OpenPGP crypto backend (rpgp)
 
 **Priority:** P1
-**Status:** Draft
+**Status:** Accepted
 **Phase:** Next
 
 ## What
