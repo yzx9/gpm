@@ -21,7 +21,8 @@ import { useI18n } from "vue-i18n";
  * confirm dialog.
  *
  * The backend `export_diagnostics` is safe to run while the app is locked: it
- * omits repo_config.json/behavior.json and redacts credentials (see
+ * omits repo_config.json while locked (and the behavior prefs from
+ * app_config.json) and redacts credentials (see
  * diagnostics_export.rs). The SAF save picker is a native OS surface that
  * always paints above the WebView, and dismissing it surfaces as a `CANCELLED`
  * error treated here as a silent cancel.

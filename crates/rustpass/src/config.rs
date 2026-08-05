@@ -81,13 +81,13 @@ pub async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
 
 /// Configuration and identity persistence for a password store.
 ///
-/// This is the **sealed-files tier** of gpm's three persistence tiers (RFC
-/// 0038): (1) Git — the age-encrypted repository of secrets; (2) sealed files —
-/// `repo.json`, `identity`, and the sealed `app.json` behavior slot, owned
-/// here; (3) plaintext files — `pref.json` (owned by the app shell,
-/// `src-tauri`). The secrets themselves live in tier 1 (the on-disk clone this
-/// config points at); tiers 2 and 3 are local metadata that never leave the
-/// device.
+/// This is the **sealed-files tier** of gpm's two persistence tiers: (1) Git —
+/// the age-encrypted repository of secrets; (2) sealed files — `repo.json`,
+/// `identity`, and the sealed merged `app.json` (all app preferences), owned
+/// here. The secrets themselves live in tier 1 (the on-disk clone this config
+/// points at); tier 2 is local metadata that never leaves the device. (R074
+/// collapsed the former plaintext `pref.json` tier into the sealed `app.json`,
+/// so the config tier holds zero plaintext.)
 ///
 /// Manages storage of the age identity and repository-scoped configuration in
 /// an app-private directory. On Android, this is app-private storage; on
@@ -439,13 +439,13 @@ impl Config {
         Ok(())
     }
 
-    /// Path of the sealed app-behavior config slot — the post-split home of the
-    /// behavior prefs (`lock_mode`, clear timers, `autosync`,
-    /// `biometric_app_lock`, `secure_screen_mode`). Same file name as the legacy
-    /// plaintext `app.json`; the slot is distinguished by AAD (`"app_behavior"`),
-    /// not by path. The app shell's `m0004` migration repurposes this file from
-    /// plaintext-legacy to sealed-behavior. Deliberately NOT cleared by
-    /// `clear_all` — behavior prefs survive `reset_config`.
+    /// Path of the sealed app-config slot — `app.json`. Pre-R074 this held only
+    /// the behavior prefs (sealed under AAD `"app_behavior"`); R074's `m0008`
+    /// collapses the plaintext `pref.json` into this same file as a single sealed
+    /// merged config (AAD `"app_config"`). The slot is distinguished from the
+    /// legacy behavior-only shape by AAD, not by path. Same file name as the
+    /// legacy plaintext `app.json`. Deliberately NOT cleared by `clear_all` —
+    /// app prefs survive `reset_config`.
     fn app_behavior_path(&self) -> PathBuf {
         self.config_dir.join("app.json")
     }
@@ -454,6 +454,12 @@ impl Config {
     /// app-behavior slot. Passthrough-plaintext on desktop (key `None`), matching
     /// the other sealed slots. The app shell serializes its `BehaviorConfig` and
     /// passes the bytes here; rustpass stays independent of that type.
+    ///
+    /// **History:** pre-R074 this was the only app-config slot; R074's `m0008`
+    /// collapses the plaintext `pref.json` + this sealed behavior slot into a
+    /// single sealed merged config written by [`save_app_config`](Self::save_app_config).
+    /// The historical migrations (`m0005`/`m0006`) still write the behavior-only
+    /// slot via this method for schema-<8 upgraders, so it stays.
     ///
     /// # Errors
     ///
@@ -468,6 +474,16 @@ impl Config {
 
     /// Read + unseal the app-behavior slot. Returns [`ErrorCode::NoIdentity`] if
     /// the slot is absent (fresh install, or pre-split before `m0004` runs).
+    ///
+    /// Single AAD (`"app_behavior"`) — unlike [`Self::load_app_config`], there is
+    /// no dual-AAD fallback here. During the R074 transition a caller that still
+    /// reaches for this (the headless worker's old-world `reload_behavior` while
+    /// `pref.json` exists) can hit `SealTampered` if `m0008` has already re-sealed
+    /// `app.json` under `"app_config"` but not yet deleted `pref.json` (a crash
+    /// window that persists until the next foreground launch finishes `m0008`).
+    /// Callers soft-fail on `SealTampered`; the only observable effect is a
+    /// read-only background pull under default `autosync` — accepted for the
+    /// transition (low impact, narrow window).
     ///
     /// # Errors
     ///
@@ -484,6 +500,59 @@ impl Config {
         }
         let raw = fs::read(&path).await?;
         self.master_seal.unseal("app_behavior", &raw)
+    }
+
+    /// Seal `bytes` (a serialized **merged** app config — display + behavior) under
+    /// the master key into the app-config slot, the R074 post-collapse single
+    /// sealed home of all app prefs. Same on-disk path as the legacy behavior slot
+    /// ([`app_behavior_path`](Self::app_behavior_path)); the slot is distinguished
+    /// by AAD (`"app_config"` vs `"app_behavior"`), so a merged write does not
+    /// collide with a behavior-only read. Passthrough-plaintext on desktop.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory cannot be created, the AEAD seal
+    /// fails (`SealKeyUnavailable` if the key was wiped mid-session), or the file
+    /// cannot be written.
+    pub async fn save_app_config(&self, bytes: &[u8]) -> Result<(), Error> {
+        fs::create_dir_all(&self.config_dir).await?;
+        let sealed = self.master_seal.seal("app_config", bytes)?;
+        save_atomic(&self.app_behavior_path(), &sealed).await
+    }
+
+    /// Read + unseal the merged app-config slot. Returns [`ErrorCode::NoIdentity`]
+    /// if the slot is absent (fresh install).
+    ///
+    /// **Dual-AAD read (R074):** the merged config is sealed under `"app_config"`,
+    /// but a file last written before the collapse — or mid-`m0008`, before the
+    /// re-seal lands — still carries the legacy `"app_behavior"` tag. Try the new
+    /// tag first; on a tag mismatch (`SealTampered`) fall back to the legacy tag,
+    /// so the transition reads either shape. (On desktop/passthrough there is no
+    /// real AEAD, so the first read always succeeds.) A genuinely tampered/corrupt
+    /// file fails under both tags and surfaces the final `SealTampered`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or the AEAD unseal fails.
+    pub async fn load_app_config(&self) -> Result<Vec<u8>, Error> {
+        let path = self.app_behavior_path();
+        if !path.exists() {
+            return Err(Error::new(ErrorCode::NoIdentity, "No app config stored"));
+        }
+        let raw = fs::read(&path).await?;
+        match self.master_seal.unseal("app_config", &raw) {
+            // A key-availability failure is not tag-related — surface it as-is so
+            // the caller (e.g. a pre-unlock read) sees `SealKeyUnavailable`, not a
+            // misleading fallback `SealTampered`.
+            Ok(b) => Ok(b),
+            Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => Err(e),
+            // Wrong AAD (legacy `app_behavior` tag) ⇒ retry under the legacy tag.
+            // (Any other error — e.g. a transient `StoreError`/poisoned lock — also
+            // lands here and surfaces as the SECOND unseal's error code; callers
+            // already treat a non-`NO_IDENTITY`/non-`SEAL_KEY_UNAVAILABLE` failure
+            // as `Corrupt`/halt, so no error class is masked.)
+            Err(_) => self.master_seal.unseal("app_behavior", &raw),
+        }
     }
 
     /// Save repository configuration (URL + local path).
@@ -1927,6 +1996,78 @@ mod tests {
         let other_cfg = Config::new(dir.path().to_path_buf(), Some(other_key));
         let err = other_cfg.load_app_identity_pass().await.unwrap_err();
         assert_eq!(err.code, "SEAL_TAMPERED");
+    }
+
+    /// R074 merged-config slot: `save_app_config` / `load_app_config` round-trip
+    /// under a real key (the merged `AppConfig` is sealed under AAD `"app_config"`).
+    #[tokio::test]
+    async fn app_config_slot_round_trips_under_master_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        let payload = br#"{"locale":"zh-CN","autosync":false,"schema_version":8}"#;
+        cfg.save_app_config(payload).await.unwrap();
+        // Sealed ⇒ the on-disk bytes are NOT the plaintext.
+        let on_disk = std::fs::read(cfg.app_behavior_path()).unwrap();
+        assert!(crate::seal::is_envelope(&on_disk));
+        assert_ne!(&on_disk[..], &payload[..]);
+        // Round-trips back to the exact bytes.
+        assert_eq!(cfg.load_app_config().await.unwrap(), payload);
+    }
+
+    /// Dual-AAD read (R074 D10): a file sealed under the legacy `"app_behavior"`
+    /// tag (the pre-collapse behavior-only slot) is still readable via
+    /// `load_app_config`, which falls back to the legacy tag. This is the
+    /// transition read `m0008` + the worker rely on before the re-seal lands.
+    #[tokio::test]
+    async fn load_app_config_falls_back_to_legacy_app_behavior_tag() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        // Write the OLD behavior-only slot (AAD app_behavior), as m0005/m0006 do.
+        let behavior = br#"{"lock_mode":{"idle":120},"autosync":false}"#;
+        cfg.save_app_behavior(behavior).await.unwrap();
+        // load_app_config must still read it (dual-AAD fallback).
+        assert_eq!(cfg.load_app_config().await.unwrap(), behavior);
+    }
+
+    /// A genuinely tampered merged-config file fails under BOTH AAD tags and
+    /// surfaces `SealTampered` (never a silent success from the fallback).
+    #[tokio::test]
+    async fn app_config_slot_tampered_surfaces_seal_tampered() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        cfg.save_app_config(b"merged").await.unwrap();
+        let mut tampered = std::fs::read(cfg.app_behavior_path()).unwrap();
+        if let Some(b) = tampered.last_mut() {
+            *b ^= 0xff;
+        }
+        std::fs::write(cfg.app_behavior_path(), &tampered).unwrap();
+        let err = cfg.load_app_config().await.unwrap_err();
+        assert_eq!(err.code, "SEAL_TAMPERED");
+    }
+
+    /// An absent merged-config slot reads as `NoIdentity` (fresh install), not an
+    /// error — matching `load_app_behavior`'s absent semantics.
+    #[tokio::test]
+    async fn load_app_config_no_identity_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), None);
+        assert_eq!(cfg.load_app_config().await.unwrap_err().code, "NO_IDENTITY");
+    }
+
+    /// Desktop passthrough (no key): both write paths are plaintext identity, and
+    /// `load_app_config` reads them back verbatim (no real AEAD ⇒ no tag check).
+    #[tokio::test]
+    async fn load_app_config_passthrough_on_desktop() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), None);
+        cfg.save_app_config(b"merged-plaintext").await.unwrap();
+        assert_eq!(cfg.load_app_config().await.unwrap(), b"merged-plaintext");
+        // The legacy-tagged write is also readable (passthrough ignores AAD).
+        cfg.save_app_behavior(b"behavior-plaintext").await.unwrap();
+        assert_eq!(cfg.load_app_config().await.unwrap(), b"behavior-plaintext");
     }
 
     #[tokio::test]

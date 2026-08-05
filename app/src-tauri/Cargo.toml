@@ -36,7 +36,7 @@ rustpass = { path = "../../crates/rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 zeroize = { workspace = true }
-tokio = { workspace = true, features = ["rt", "fs"] }
+tokio = { workspace = true, features = ["rt", "fs", "sync"] }
 base64 = { workspace = true }
 sys-locale = "0.3"
 log = "0.4"

@@ -24,6 +24,7 @@
 use rustpass::{Error, ErrorCode};
 
 use crate::AppState;
+use crate::app_config::PeekOutcome;
 
 pub(crate) mod m0002_config_scope_split;
 pub(crate) mod m0003_secure_screen_mode;
@@ -31,6 +32,7 @@ pub(crate) mod m0004_verbose_from_debug;
 pub(crate) mod m0005_split_app_json;
 pub(crate) mod m0006_gate_idle_timeout;
 pub(crate) mod m0007_vault_key;
+pub(crate) mod m0008_collapse_pref_into_sealed;
 
 /// Outcome of a single migration step.
 ///
@@ -52,6 +54,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (5, "0005_split_app_json"),
     (6, "0006_gate_idle_timeout"),
     (7, "0007_vault_key"),
+    (8, "0008_collapse_pref_into_sealed"),
 ];
 
 /// The `app.json`/`pref.json` schema version once every registered migration has
@@ -63,16 +66,26 @@ pub(crate) const APP_CONFIG_SCHEMA_VERSION: u32 =
 /// Run every pending migration in order. See the module docs for the app-lock
 /// resume semantics.
 pub(crate) async fn run_app_migrations(state: &AppState) {
-    // Gate off a raw on-disk peek, NOT the in-memory cache: migrations write raw
-    // (no per-step cache swap), so the cache is stale mid-chain. A missing or
-    // corrupt `pref.json`+`app.json` (fresh install / post-reset) peeks as
-    // `None` and skips all migrations — matching the old "default cache at
-    // target ⇒ skip".
-    let mut current = state
-        .app_config
-        .peek_schema_version()
-        .await
-        .unwrap_or(APP_CONFIG_SCHEMA_VERSION);
+    // Gate off a raw on-disk peek (3-state PeekOutcome), NOT the in-memory cache:
+    // migrations write raw (no per-step cache swap), so the cache is stale
+    // mid-chain. R074 moved `schema_version` into the sealed merged `app.json`,
+    // so the peek unseals to read it (the auth-free key is loaded at `.setup()`,
+    // so a present file always unseals — no "deferred" state).
+    let mut current = match state.app_config.peek_schema_version().await {
+        PeekOutcome::Version(v) => v,
+        // Fresh install / post-reset (no config file) ⇒ skip the whole chain.
+        PeekOutcome::Absent => APP_CONFIG_SCHEMA_VERSION,
+        // `app.json` present but unreadable (real tamper / lost key). Halt + log
+        // so the user routes to re-setup — NEVER silently treat as Absent, which
+        // would wipe their prefs by skipping to defaults.
+        PeekOutcome::Corrupt => {
+            log::warn!(
+                "app-config: sealed app.json present but unreadable (tamper/lost key); \
+                 halting migrations — re-setup may be required"
+            );
+            return;
+        }
+    };
     let mut ran = false;
     for &(version, name) in MIGRATIONS {
         if current >= version {
@@ -83,7 +96,10 @@ pub(crate) async fn run_app_migrations(state: &AppState) {
                 // The migration persisted its target version to disk.
                 current = version;
                 ran = true;
-                debug_assert_eq!(state.app_config.peek_schema_version().await, Some(version));
+                debug_assert_eq!(
+                    state.app_config.peek_schema_version().await,
+                    PeekOutcome::Version(version)
+                );
             }
             Ok(MigrationOutcome::Pending) => return, // app-lock; next unlock retries
             Err(e) => {
@@ -112,6 +128,7 @@ async fn apply_migration(state: &AppState, version: u32) -> Result<MigrationOutc
         5 => m0005_split_app_json::apply(state, version).await,
         6 => m0006_gate_idle_timeout::apply(state, version).await,
         7 => m0007_vault_key::apply(state, version).await,
+        8 => m0008_collapse_pref_into_sealed::apply(state, version).await,
         // Unreachable in practice — `version` comes from iterating `MIGRATIONS`,
         // whose every entry has a match arm above. Return an `Err` (not a panic)
         // so a future mismatch (a registry row without a dispatch arm) surfaces

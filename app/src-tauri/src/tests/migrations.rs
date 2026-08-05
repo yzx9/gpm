@@ -21,7 +21,8 @@ use rustpass::{LockMode, Store};
 
 use crate::AppState;
 use crate::app_config::{
-    AppConfig, AppConfigStore, SecureScreenMode, VERBOSE_WINDOW_SECS, now_unix,
+    AppConfig, AppConfigStore, BackgroundSyncCadence, PeekOutcome, SecureScreenMode,
+    VERBOSE_WINDOW_SECS, now_unix,
 };
 use crate::migrations::{APP_CONFIG_SCHEMA_VERSION, run_app_migrations};
 
@@ -190,12 +191,13 @@ async fn m0003_maps_default_true_to_none_and_stays_byte_identical() {
         reloaded.secure_screen_mode.is_none(),
         "true ⇒ None (Sensitive)"
     );
-    // The post-split pref.json carries no `secure_screen_mode` (the field is on
-    // the sealed behavior slot, and the default-sensitive user has it as None).
-    let pref_on_disk = std::fs::read_to_string(dir.path().join("pref.json")).unwrap();
+    // R074: pref.json is collapsed into the sealed merged app.json (desktop:
+    // plaintext AppConfig). The default-sensitive user has secure_screen_mode =
+    // None, so the merged file omits the key (byte-identical on default).
+    let app_on_disk = std::fs::read_to_string(dir.path().join("app.json")).unwrap();
     assert!(
-        !pref_on_disk.contains("secure_screen_mode"),
-        "default user stays byte-identical; got: {pref_on_disk}",
+        !app_on_disk.contains("secure_screen_mode"),
+        "default user stays byte-identical; got: {app_on_disk}",
     );
 }
 
@@ -620,10 +622,11 @@ async fn missing_app_json_is_a_noop() {
     );
 }
 
-/// A corrupt `app.json` peeks as `None` (unparseable) and likewise skips all
-/// migrations without panicking — the app boots on defaults, matching `new()`.
+/// A corrupt `app.json` peeks as `Corrupt` (R074: present-but-unparseable ⇒
+/// never silently `Absent`) and halts the chain — the app boots on defaults,
+/// matching `new()`, without panicking or wiping prefs by skipping to target.
 #[tokio::test]
-async fn corrupt_app_json_is_a_noop() {
+async fn corrupt_app_json_halts_on_corrupt() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("app.json"), "{not json").unwrap();
     let state = build_state(
@@ -633,8 +636,8 @@ async fn corrupt_app_json_is_a_noop() {
 
     run_app_migrations(&state).await;
 
-    // The corrupt file is left in place (migrations don't rewrite it); the next
-    // settings save overwrites it. The cache holds the default.
+    // The corrupt file is left in place (the chain halted, not rewrote it); the
+    // next settings save overwrites it. The cache holds the default.
     assert_eq!(
         state.app_config.get().schema_version,
         APP_CONFIG_SCHEMA_VERSION,
@@ -822,11 +825,14 @@ async fn v4_reads_main_shiped_schema_4_with_deprecated_keys() {
         Some(SecureScreenMode::Off),
         "the persisted mode survives; the deprecated bool is dropped at V4"
     );
-    // The pref.json written by m0005 must NOT carry the deprecated keys.
-    let pref_on_disk = std::fs::read_to_string(dir.path().join("pref.json")).unwrap();
+    // R074: pref.json is collapsed into the sealed merged app.json (desktop:
+    // plaintext AppConfig). The deprecated `secure_screen` bool + `log_level`
+    // must NOT survive into it (matched with the trailing `":` so the modern
+    // `secure_screen_mode` field — which DOES survive — is not a false positive).
+    let app_on_disk = std::fs::read_to_string(dir.path().join("app.json")).unwrap();
     assert!(
-        !pref_on_disk.contains("secure_screen") && !pref_on_disk.contains("log_level"),
-        "PrefConfig carries neither deprecated key; got: {pref_on_disk}",
+        !app_on_disk.contains("\"secure_screen\":") && !app_on_disk.contains("log_level"),
+        "merged app config drops the deprecated secure_screen bool + log_level; got: {app_on_disk}",
     );
 }
 
@@ -882,5 +888,314 @@ async fn reload_behavior_loads_half_migrated_plaintext_app_json() {
     assert!(
         !behavior.autosync,
         "reload_behavior must lift autosync off the plaintext V4 app.json"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// R074 — m0008 collapse + the 3-state PeekOutcome gate
+// ---------------------------------------------------------------------------
+
+/// Seed a schema-7 two-file state (plaintext `pref.json` display + the sealed
+/// behavior slot) so `m0008` is the only migration that runs. Desktop passthrough
+/// ⇒ the behavior slot is plaintext `BehaviorConfig` JSON.
+async fn seed_schema_7(dir: &Path, store: &Arc<Store>, pref_json: &str, behavior_json: &str) {
+    std::fs::write(dir.join("pref.json"), pref_json).unwrap();
+    store
+        .save_app_behavior(behavior_json.as_bytes())
+        .await
+        .unwrap();
+}
+
+/// m0008 (desktop): pref.json(7) + the sealed behavior slot collapse into a
+/// single sealed merged `app.json`(8); `pref.json` is deleted; every value
+/// (display + behavior + cadence) survives.
+#[tokio::test]
+async fn m0008_collapses_pref_and_behavior_into_sealed_app_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    seed_schema_7(
+        dir.path(),
+        &store,
+        r#"{"schema_version":7,"locale":"zh-CN","theme_mode":"dark","background_sync":"1h"}"#,
+        r#"{"lock_mode":{"idle":120},"autosync":false,"gate_idle":"off"}"#,
+    )
+    .await;
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    // pref.json is gone — the load-bearing "zero plaintext" assertion.
+    assert!(
+        !dir.path().join("pref.json").exists(),
+        "m0008 must delete pref.json"
+    );
+    // The merged app.json carries schema 8 + every value from both halves.
+    let reloaded = reload_at(dir.path(), &state.store).await;
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    assert_eq!(reloaded.locale.as_deref(), Some("zh-CN"));
+    assert_eq!(reloaded.theme_mode.as_deref(), Some("dark"));
+    assert_eq!(reloaded.background_sync, BackgroundSyncCadence::Hours1);
+    assert_eq!(reloaded.lock_mode, LockMode::Idle(120));
+    assert!(!reloaded.autosync);
+}
+
+/// m0008 half-migrated recovery: a prior run wrote the merged `app.json`(8) but
+/// crashed before deleting `pref.json`(7). Re-run detects the already-merged
+/// file (typed dispatch), deletes the stale `pref.json`, and does NOT re-seal —
+/// the merged file's values win, not the stale pref.json's.
+#[tokio::test]
+async fn m0008_half_migrated_recovery_deletes_stale_pref_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    // The merged app.json@8 a prior m0008 run wrote.
+    store
+        .save_app_config(
+            r#"{"schema_version":8,"locale":"zh-CN","lock_mode":{"idle":120}}"#.as_bytes(),
+        )
+        .await
+        .unwrap();
+    // Stale pref.json@7 left by the crash (carries a DIFFERENT locale to prove
+    // it is not re-merged over the authoritative merged file).
+    std::fs::write(
+        dir.path().join("pref.json"),
+        r#"{"schema_version":7,"locale":"stale"}"#,
+    )
+    .unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    assert!(
+        !dir.path().join("pref.json").exists(),
+        "the stale pref.json is deleted on recovery"
+    );
+    let reloaded = reload_at(dir.path(), &state.store).await;
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    assert_eq!(
+        reloaded.locale.as_deref(),
+        Some("zh-CN"),
+        "the merged file is authoritative, not the stale pref.json"
+    );
+}
+
+/// m0008 with no behavior slot (`NO_IDENTITY`): `pref.json` + default behavior
+/// collapse into the merged file; `pref.json` is deleted.
+#[tokio::test]
+async fn m0008_merges_pref_with_default_behavior_when_no_slot() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    std::fs::write(
+        dir.path().join("pref.json"),
+        r#"{"schema_version":7,"locale":"en"}"#,
+    )
+    .unwrap();
+    // No app.json behavior slot.
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    assert!(!dir.path().join("pref.json").exists());
+    let reloaded = reload_at(dir.path(), &state.store).await;
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    assert_eq!(reloaded.locale.as_deref(), Some("en"));
+    // Behavior defaulted (no slot to merge from).
+    assert_eq!(reloaded.lock_mode, LockMode::default());
+    assert!(
+        reloaded.autosync,
+        "autosync defaults true with no behavior slot"
+    );
+}
+
+/// `PeekOutcome::Absent`: no config files at all ⇒ `Absent` ⇒ the chain skips.
+#[tokio::test]
+async fn peek_absent_when_no_config_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let ac = AppConfigStore::new(dir.path()).await;
+    ac.set_store(Arc::new(Store::new(dir.path().to_path_buf(), None)));
+    assert_eq!(ac.peek_schema_version().await, PeekOutcome::Absent);
+}
+
+/// `PeekOutcome::Version` (old world): `pref.json` present ⇒ plaintext read.
+#[tokio::test]
+async fn peek_version_from_pref_json() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pref.json"), r#"{"schema_version":7}"#).unwrap();
+    let ac = AppConfigStore::new(dir.path()).await;
+    ac.set_store(Arc::new(Store::new(dir.path().to_path_buf(), None)));
+    assert_eq!(ac.peek_schema_version().await, PeekOutcome::Version(7));
+}
+
+/// `PeekOutcome::Version` (new world): the sealed merged `app.json` ⇒ `Version(8)`.
+#[tokio::test]
+async fn peek_version_from_sealed_merged_app_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    store
+        .save_app_config(r#"{"schema_version":8}"#.as_bytes())
+        .await
+        .unwrap();
+    let ac = AppConfigStore::new(dir.path()).await;
+    ac.set_store(store);
+    assert_eq!(ac.peek_schema_version().await, PeekOutcome::Version(8));
+}
+
+/// `PeekOutcome::Corrupt`: `app.json` present but unparseable ⇒ `Corrupt` (never
+/// silently `Absent`). The chain halts + logs rather than wiping prefs.
+#[tokio::test]
+async fn peek_corrupt_when_app_json_unparseable() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("app.json"), "{not json").unwrap();
+    let ac = AppConfigStore::new(dir.path()).await;
+    ac.set_store(Arc::new(Store::new(dir.path().to_path_buf(), None)));
+    assert_eq!(ac.peek_schema_version().await, PeekOutcome::Corrupt);
+}
+
+/// m0008 under a REAL master key (not desktop passthrough): the sealed behavior
+/// slot + `pref.json` collapse into a sealed merged envelope, readable back under
+/// the same key. The other m0008 tests use `Store(None)` passthrough; this pins
+/// the keyed-seal integration through the migration (the seal layer itself is
+/// unit-tested in rustpass).
+#[tokio::test]
+async fn m0008_collapses_under_real_master_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = rustpass::seal::generate_master_key().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), Some(key)));
+    seed_schema_7(
+        dir.path(),
+        &store,
+        r#"{"schema_version":7,"locale":"zh-CN","background_sync":"6h"}"#,
+        r#"{"lock_mode":{"idle":300},"autosync":false}"#,
+    )
+    .await;
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    assert!(!dir.path().join("pref.json").exists(), "pref.json deleted");
+    // The merged app.json is a real seal envelope now (sealed under the key).
+    let on_disk = std::fs::read(dir.path().join("app.json")).unwrap();
+    assert!(
+        rustpass::seal::is_envelope(&on_disk),
+        "merged app.json is a sealed envelope under the real key"
+    );
+    // Readable back under the SAME key, with every value preserved.
+    let reloaded = reload_at(dir.path(), &state.store).await;
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    assert_eq!(reloaded.locale.as_deref(), Some("zh-CN"));
+    assert_eq!(reloaded.background_sync, BackgroundSyncCadence::Hours6);
+    assert_eq!(reloaded.lock_mode, LockMode::Idle(300));
+    assert!(!reloaded.autosync);
+}
+
+/// m0008 propagates a sealed-write failure as `Err` (the `?` contract): a dir at
+/// `app.tmp` blocks `save_atomic`'s temp write, schema stays below target, and a
+/// retry after clearing the block completes. Mirrors m0002's save-failure tests.
+#[tokio::test]
+async fn m0008_write_failure_leaves_schema_and_retries() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    seed_schema_7(
+        dir.path(),
+        &store,
+        r#"{"schema_version":7,"locale":"en"}"#,
+        r#"{"lock_mode":{"idle":120}}"#,
+    )
+    .await;
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    // Block save_atomic's temp write (`app.tmp` is a dir ⇒ fs::write fails on
+    // every platform). m0008 must propagate that Err instead of marking done.
+    std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
+    run_app_migrations(&state).await;
+    assert_eq!(
+        reload_at(dir.path(), &state.store).await.schema_version,
+        7,
+        "a failed merged write must not advance the schema"
+    );
+    assert!(
+        dir.path().join("pref.json").exists(),
+        "pref.json survives a failed merged write"
+    );
+
+    // Clear the block + retry — m0008 completes to target.
+    std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
+    run_app_migrations(&state).await;
+    assert_eq!(
+        reload_at(dir.path(), &state.store).await.schema_version,
+        APP_CONFIG_SCHEMA_VERSION,
+    );
+    assert!(!dir.path().join("pref.json").exists());
+}
+
+/// m0008 propagates `Err` (not delete+Done) when `app.json` unseals OK but
+/// parses as neither `AppConfig@8` nor `BehaviorConfig` — AEAD-valid garbage
+/// (a sealing-code bug or an incompatible downgrade). `pref.json` survives for
+/// recovery and the app stays in the old-world layout rather than forcing
+/// re-setup (the merged `app.json` was never written, so a `Done` would peek
+/// `Corrupt` next launch and wipe the display prefs). Desktop passthrough:
+/// "unseals OK" = the file reads; invalid JSON fails both parses.
+#[tokio::test]
+async fn m0008_unparseable_app_json_propagates_err_and_keeps_pref() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    seed_schema_7(
+        dir.path(),
+        &store,
+        r#"{"schema_version":7,"locale":"zh-CN"}"#,
+        r#"{"lock_mode":{"idle":120}}"#,
+    )
+    .await;
+    // Overwrite app.json with AEAD-valid-but-unparseable content (desktop
+    // passthrough ⇒ invalid JSON fails both the AppConfig and BehaviorConfig
+    // parses).
+    std::fs::write(dir.path().join("app.json"), "{not json").unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+    // m0008 surfaced Err ⇒ schema did not advance, pref.json survives.
+    assert_eq!(
+        reload_at(dir.path(), &state.store).await.schema_version,
+        7,
+        "an unparseable app.json must not advance the schema"
+    );
+    assert!(
+        dir.path().join("pref.json").exists(),
+        "pref.json survives an unparseable app.json (no silent wipe)"
+    );
+}
+
+/// m0008 propagates a tampered sealed behavior slot as `Err` (D5): the engine
+/// retries, schema stays below target. Never silent-defaults behavior prefs.
+#[tokio::test]
+async fn m0008_corrupt_sealed_propagates_err() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = rustpass::seal::generate_master_key().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), Some(key)));
+    seed_schema_7(
+        dir.path(),
+        &store,
+        r#"{"schema_version":7,"locale":"en"}"#,
+        r#"{"lock_mode":{"idle":120}}"#,
+    )
+    .await;
+    // Tamper the sealed behavior slot (flip a byte in the AEAD tag/ciphertext).
+    let mut sealed = std::fs::read(dir.path().join("app.json")).unwrap();
+    if let Some(b) = sealed.last_mut() {
+        *b ^= 0xff;
+    }
+    std::fs::write(dir.path().join("app.json"), &sealed).unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    // m0008 returned Err on the tampered slot ⇒ schema stayed at 7, no crash.
+    assert_eq!(
+        state.app_config.get_pref().schema_version,
+        7,
+        "a tampered behavior slot must not advance the schema (Err propagates)"
+    );
+    assert!(
+        dir.path().join("pref.json").exists(),
+        "pref.json survives a tampered-slot read"
     );
 }

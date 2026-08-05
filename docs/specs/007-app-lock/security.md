@@ -14,20 +14,25 @@ these at rest, and (with App Lock on) in memory.
 ## At-rest encryption (Android)
 
 Both `identity` and `repo.json` are encrypted at rest (hardware-backed AES-GCM in the
-Android Keystore), but R064 split the at-rest key into two: `repo.json` (and the
-`app.json` behavior slot) sit under an **auth-free** master key — permanently
-retrievable without a prompt — while `identity` (and its passphrase slot) sit under a
-**vault key** that follows the App Lock toggle. An attacker who can _read_ the app's
-private storage — a stolen backup, a forensic dump, a non-root malicious app with
-storage access — gets ciphertext, not the git credentials, trust set, or identity.
-The same authenticated encryption gives these files **integrity**: a modified
+Android Keystore), but R064 split the at-rest key into two: `repo.json` and the merged
+`app.json` (all app preferences — display + behavior) sit under an **auth-free** master
+key — permanently retrievable without a prompt — while `identity` (and its passphrase
+slot) sit under a **vault key** that follows the App Lock toggle. An attacker who can
+_read_ the app's private storage — a stolen backup, a forensic dump, a non-root malicious
+app with storage access — gets ciphertext, not the git credentials, trust set, or
+identity. The same authenticated encryption gives these files **integrity**: a modified
 `repo.json` (flipping the verification mode, injecting an attacker signing key) or a
 swapped `identity` fails the auth tag and is rejected, not silently accepted.
 
-The auth-free master key lives in app memory for the session — no more sensitive than the
-git credentials already held in memory while cloning/syncing, and consistent with the
-non-goal of not defending against a compromised OS or the app's own process (which could
-ask the Keystore to unseal it anyway). The vault key is loaded only after the app-unlock
+The auth-free master key is loaded at app startup, **always — including while App Lock is
+engaged** (R074): it seals the merged `app.json`, which must be readable at first paint so
+the pinned language/theme bake into the WebView before the window is created. This is safe
+because the auth-free key is **not what App Lock protects** — App Lock gates the **vault
+key** (the identity). The auth-free key is the git-credential tier (already loaded by the
+headless background worker while the app is locked), and a process/memory attacker is an
+explicit non-goal, so loading it at startup vs `app_unlock` is security-irrelevant. It
+lives in app memory for the session — no more sensitive than the git credentials already
+held in memory while cloning/syncing. The vault key is loaded only after the app-unlock
 biometric and wiped on re-lock (see below). If a Keystore key is lost (app data cleared,
 Keystore wiped, factory reset) the encrypted files become unreadable and re-setup is
 required; there is no escrow, since an escrow key on disk would defeat the purpose.

@@ -37,36 +37,33 @@ pub(crate) enum BackgroundSyncResult {
 /// Tauri runtime, no `AppHandle`. The JNI shim constructs this from a config
 /// dir + a base64 master key the Kotlin Worker retrieved from the Keystore.
 ///
-/// Gates (defense-in-depth, since the Worker also gates): cadence ≠ `Off`
-/// (`pref.json`), `is_repo_ready`, and `AutoSync`-on (background sync is linked
-/// to `AutoSync`). Runs under App Lock too (R064): the worker reads only the
-/// auth-free master key — never the biometric-gated vault key — so `repo.json`
-/// (git credential) is readable while the identity stays gated. Then a pull-only
-/// `run_best_effort_sync` (the shared private-slot +
-/// 30s deadline helper). On a divergence or an authenticity-blocked
-/// fast-forward, atomically creates a passive attention marker file (NOT a
-/// `pref.json` field, so the write can't race a foreground pref write) for the
-/// next foreground to consume. The full `SyncOutcome` carries secret entry
+/// Gates (defense-in-depth, since the Worker also gates): the auth-free master
+/// key present, cadence ≠ `Off`, `is_repo_ready`, and `AutoSync`-on (background
+/// sync is linked to `AutoSync`). Runs under App Lock too (R064): the worker
+/// reads only the auth-free master key — never the biometric-gated vault key —
+/// so `repo.json` (git credential) is readable while the identity stays gated.
+/// R074: cadence + `AutoSync` now live in the sealed merged `app.json`, so the
+/// key is decoded + the config loaded BEFORE the gates (no plaintext `pref.json`
+/// to read first anymore). Then a pull-only `run_best_effort_sync` (the shared
+/// private-slot + 30s deadline helper). On a divergence or an authenticity-
+/// blocked fast-forward, atomically creates a passive attention marker file for
+/// the next foreground to consume. The full `SyncOutcome` carries secret entry
 /// names and is not persisted.
 #[allow(dead_code)] // called by the Android-only JNI shim + the host gate tests.
 pub(crate) async fn run_headless_sync(
     config_dir: PathBuf,
     master_key_b64: String,
 ) -> BackgroundSyncResult {
-    // pref.json is plaintext — readable without the master key, so the cadence
-    // gate works pre-unlock too.
-    let app_cfg = AppConfigStore::new(&config_dir).await;
-    if app_cfg.background_sync().is_off() {
-        return BackgroundSyncResult::Skipped { reason: "disabled" };
-    }
-
-    // The master key arrives base64-encoded (the existing Rust↔Keystore IPC
-    // shape). Missing ⇒ the store isn't set up yet (R064: the auth-free master
-    // is permanent, so its absence is never "App Lock on") — skip, don't error.
+    // R074: the auth-free key must be decoded FIRST — cadence + autosync now
+    // live in the sealed merged app.json, which is unreadable without it. The
+    // key arrives base64-encoded (the Rust↔Keystore IPC shape). Missing ⇒ the
+    // store isn't set up yet (R064: the auth-free master is permanent, so its
+    // absence is never "App Lock on") — skip, don't error.
     let Some(master_key) = crate::decode_master_key(&master_key_b64) else {
         return BackgroundSyncResult::Skipped { reason: "no_key" };
     };
 
+    let app_cfg = AppConfigStore::new(&config_dir).await;
     let store = Arc::new(Store::new(config_dir, Some(master_key)));
     // R064: the worker is pull-only — it reads `repo.json`/`app.json` under the
     // auth-free master but never the identity. Drop the vault_seal bridge so no
@@ -74,6 +71,17 @@ pub(crate) async fn run_headless_sync(
     // vault-tier files are under the distinct vault key the worker lacks).
     store.set_vault_key(None);
     app_cfg.set_store(Arc::clone(&store));
+    // Load the sealed merged config so the gates below read the persisted
+    // cadence + autosync (not cold-start defaults).
+    if let Err(e) = app_cfg.reload().await {
+        return BackgroundSyncResult::Error {
+            message: e.to_string(),
+        };
+    }
+    // Cadence gate.
+    if app_cfg.background_sync().is_off() {
+        return BackgroundSyncResult::Skipped { reason: "disabled" };
+    }
     if let Err(e) = store.migrate_repo_seal().await {
         return BackgroundSyncResult::Error {
             message: e.to_string(),
@@ -89,13 +97,7 @@ pub(crate) async fn run_headless_sync(
             reason: "not_ready",
         };
     }
-    // AutoSync gate. Reading the persisted flag unseals app.json via the
-    // master key (already injected above).
-    if let Err(e) = app_cfg.reload_behavior().await {
-        return BackgroundSyncResult::Error {
-            message: e.to_string(),
-        };
-    }
+    // AutoSync gate (autosync loaded above from the merged config).
     if !app_cfg.get_behavior().autosync {
         return BackgroundSyncResult::Skipped {
             reason: "autosync_off",
@@ -220,17 +222,36 @@ mod jni {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
+    use rustpass::Store;
+
     use crate::app_config::BackgroundSyncCadence;
     use base64::Engine;
 
     use super::*;
 
+    /// Seed `dir` with a sealed merged app config carrying `cadence`, via a
+    /// desktop-passthrough Store. R074: cadence lives in the sealed merged
+    /// `app.json`, so a worker must load it with the auth-free key.
+    async fn seed_cadence(dir: &std::path::Path, cadence: BackgroundSyncCadence) {
+        let app_cfg = AppConfigStore::new(dir).await;
+        app_cfg.set_store(Arc::new(Store::new(dir.to_path_buf(), None)));
+        app_cfg
+            .set_background_sync(cadence)
+            .await
+            .expect("set cadence");
+    }
+
     #[tokio::test]
     async fn skips_when_disabled() {
-        // Default cadence is Off ⇒ the cadence gate fires before the key or
-        // repo is touched. No Store / Keystore needed.
+        // R074: cadence is read from the sealed merged app.json AFTER the key is
+        // decoded + the config loaded. A real key + the default (Off) cadence ⇒
+        // the cadence gate fires (no app.json yet ⇒ reload defaults to Off).
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let res = run_headless_sync(dir.path().to_path_buf(), String::new()).await;
+        let master = rustpass::seal::generate_master_key().unwrap();
+        let master_b64 = crate::B64.encode(master);
+        let res = run_headless_sync(dir.path().to_path_buf(), master_b64).await;
         assert!(matches!(
             res,
             BackgroundSyncResult::Skipped { reason: "disabled" }
@@ -238,16 +259,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_with_no_key_when_enabled() {
+    async fn skips_with_no_key() {
+        // R074: the auth-free key is decoded FIRST (cadence is sealed). A bad key
+        // ⇒ no_key before the cadence gate, regardless of the persisted cadence.
         let dir = tempfile::TempDir::new().expect("tempdir");
-        // Enable background sync (cadence non-Off) so the cadence gate passes.
-        let app_cfg = AppConfigStore::new(dir.path()).await;
-        app_cfg
-            .set_background_sync(BackgroundSyncCadence::Hours1)
-            .await
-            .expect("set cadence");
-        // A non-32-byte "key" fails to decode ⇒ no_key skip (AppLock / not set
-        // up). Still no Store or Keystore needed.
         let res = run_headless_sync(dir.path().to_path_buf(), String::from("not-a-key")).await;
         assert!(matches!(
             res,
@@ -255,20 +270,16 @@ mod tests {
         ));
     }
 
-    /// Pins the R064 chunk-7 wiring: `run_headless_sync` must call
-    /// `migrate_repo_seal` (not `migrate_seal`) so the pull-only worker never
-    /// touches vault-tier files. With a plaintext identity + the wiped
-    /// `vault_seal`, a revert to `migrate_seal` would `SealKeyUnavailable` on the
-    /// plaintext identity ⇒ `Error`; repo-only migrate skips it cleanly and the
-    /// worker skips `not_ready` (no repo.json).
+    /// R074: with a real key + a non-Off cadence in the sealed merged config, the
+    /// worker proceeds past the cadence + autosync gates to `not_ready` (no
+    /// repo.json) — pinning that the key-first order loads the sealed cadence
+    /// correctly. Also pins the R064 chunk-7 wiring: the pull-only worker never
+    /// touches vault-tier files (a plaintext identity is left untouched; a revert
+    /// to `migrate_seal` would `SealKeyUnavailable` on it ⇒ `Error`).
     #[tokio::test]
-    async fn headless_sync_leaves_plaintext_identity_untouched() {
+    async fn headless_sync_proceeds_past_cadence_and_leaves_identity_untouched() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let app_cfg = AppConfigStore::new(dir.path()).await;
-        app_cfg
-            .set_background_sync(BackgroundSyncCadence::Hours1)
-            .await
-            .expect("set cadence");
+        seed_cadence(dir.path(), BackgroundSyncCadence::Hours1).await;
         let master = rustpass::seal::generate_master_key().unwrap();
         let master_b64 = crate::B64.encode(master);
         std::fs::write(dir.path().join("identity"), b"plaintext-identity").unwrap();
@@ -282,7 +293,7 @@ mod tests {
                     reason: "not_ready"
                 }
             ),
-            "pull-only worker should skip cleanly, not error on vault-tier files"
+            "with key + cadence, the worker proceeds to not_ready (no repo.json)"
         );
         assert_eq!(
             std::fs::read(dir.path().join("identity")).unwrap(),

@@ -18,9 +18,13 @@
 //! and the file-save plugin streams that file to the destination the user picks.
 //!
 //! Graceful degrade: the export is not unlock-gated. When the app is locked, the
-//! redacted repo config and the behavior settings are omitted (they are sealed
-//! at rest) and the manifest says why; the log, prefs, and device info always
-//! ship, so the bundle works even when the bug is an unlock/startup failure.
+//! redacted repo config is omitted (it carries git credentials) and the single
+//! `app_config.json` entry carries only the display prefs — the behavior prefs
+//! are omitted — and the manifest says why; the log, device info, and display
+//! prefs always ship, so the bundle works even when the bug is an unlock/startup
+//! failure. (R074: there is one sealed merged `app.json`, readable under lock
+//! via the auth-free key — the behavior omission is a privacy choice, not a
+//! seal-forced one.)
 
 use std::sync::atomic::Ordering;
 use std::time;
@@ -84,7 +88,8 @@ fn build_manifest(app_locked: bool, repo_status: &str, entry_names: &[&str]) -> 
          {list}\n\
          Repository config: {repo_status}\n\n\
          Secrets (access tokens, SSH keys, passphrases) are replaced with [REDACTED].\n\
-         When the app is locked, repo_config.json and behavior.json are omitted.\n",
+         When the app is locked, repo_config.json is omitted and app_config.json\n\
+         carries only the display prefs (behavior prefs are omitted).\n",
         ver = env!("CARGO_PKG_VERSION"),
         locked = app_locked,
     )
@@ -125,9 +130,20 @@ pub(crate) async fn export_diagnostics(
         Err(_) => Vec::new(),
     };
 
-    // Plaintext display prefs (always real, non-secret).
-    let pref_json = serde_json::to_string_pretty(&state.app_config.get_pref())
-        .unwrap_or_else(|_| "{}".to_string());
+    // App config — a single `app_config.json` entry (R074 collapsed pref.json +
+    // the sealed behavior slot into one sealed merged app.json). When unlocked,
+    // ship the full merged config; when locked, ship a DISPLAY-ONLY projection
+    // (locale/theme/verbose/cadence) — the behavior prefs (lock_mode, autosync,
+    // …) are omitted while locked, matching the prior "behavior omitted when
+    // locked" posture. (The merged file is readable under lock via the auth-free
+    // key — decision D — so the omission is a privacy choice, not a seal-forced
+    // one. None of these fields are secrets.)
+    let app_config_json = if app_locked {
+        serde_json::to_string_pretty(&state.app_config.get_pref())
+            .unwrap_or_else(|_| "{}".to_string())
+    } else {
+        serde_json::to_string_pretty(&state.app_config.get()).unwrap_or_else(|_| "{}".to_string())
+    };
 
     // Device info (Android build fields + UA + display; OS/arch/version
     // fallback). Best-effort.
@@ -136,12 +152,9 @@ pub(crate) async fn export_diagnostics(
         Err(_) => "{}".to_string(),
     };
 
-    // Redacted repo config + behavior: only when unlocked. The behavior cache is
-    // NOT cleared on a background-wipe, so while locked it holds stale-by-design
-    // values (last-loaded real settings after an unlock-then-lock, or defaults on
-    // a cold start) — either way unfit to ship as "current", so omit it when
-    // locked. (The Logs screen is only reachable unlocked, so this branch is
-    // defense for a non-UI caller, not the normal path.)
+    // Redacted repo config: only when unlocked (it carries git credentials,
+    // reduced to [REDACTED] presence via `redacted()`). (The Logs screen is only
+    // reachable unlocked, so this branch is defense for a non-UI caller.)
     let (repo_json, repo_status) = if app_locked {
         (String::new(), "omitted: app locked".to_string())
     } else {
@@ -163,18 +176,17 @@ pub(crate) async fn export_diagnostics(
             Err(e) => (String::new(), format!("omitted: {e}")),
         }
     };
-    let behavior_json = if app_locked {
-        String::new()
-    } else {
-        serde_json::to_string_pretty(&state.app_config.get_behavior()).unwrap_or_default()
-    };
 
     // ── 2. Assemble the manifest + entries, then zip ─────────────────────────
 
-    let mut names: Vec<&str> = vec!["MANIFEST.txt", "gpm.log", "pref.json", "device_info.json"];
+    let mut names: Vec<&str> = vec![
+        "MANIFEST.txt",
+        "gpm.log",
+        "app_config.json",
+        "device_info.json",
+    ];
     if !app_locked {
         names.push("repo_config.json");
-        names.push("behavior.json");
     }
     let manifest = build_manifest(app_locked, &repo_status, &names);
 
@@ -188,8 +200,8 @@ pub(crate) async fn export_diagnostics(
             bytes: log_bytes,
         },
         BundleEntry {
-            name: "pref.json",
-            bytes: pref_json.into_bytes(),
+            name: "app_config.json",
+            bytes: app_config_json.into_bytes(),
         },
         BundleEntry {
             name: "device_info.json",
@@ -200,10 +212,6 @@ pub(crate) async fn export_diagnostics(
         entries.push(BundleEntry {
             name: "repo_config.json",
             bytes: repo_json.into_bytes(),
-        });
-        entries.push(BundleEntry {
-            name: "behavior.json",
-            bytes: behavior_json.into_bytes(),
         });
     }
 
@@ -348,12 +356,17 @@ mod tests {
 
     #[test]
     fn manifest_notes_omitted_when_locked() {
-        let names = ["MANIFEST.txt", "gpm.log", "pref.json", "device_info.json"];
+        let names = [
+            "MANIFEST.txt",
+            "gpm.log",
+            "app_config.json",
+            "device_info.json",
+        ];
         let m = build_manifest(true, "omitted: app locked", &names);
         assert!(m.contains("App locked at export: true"), "{m}");
         assert!(m.contains("Repository config: omitted: app locked"), "{m}");
-        // No repo/behavior entries in the Contents list when locked. The privacy
-        // note names the files, so check the list-bullet form, not the bare name.
+        // No repo_config entry in the Contents list when locked. The privacy note
+        // names the file, so check the list-bullet form, not the bare name.
         assert!(!m.contains("- repo_config.json"), "{m}");
     }
 
@@ -362,10 +375,9 @@ mod tests {
         let names = [
             "MANIFEST.txt",
             "gpm.log",
-            "pref.json",
+            "app_config.json",
             "device_info.json",
             "repo_config.json",
-            "behavior.json",
         ];
         let m = build_manifest(false, "included", &names);
         assert!(m.contains("App locked at export: false"), "{m}");

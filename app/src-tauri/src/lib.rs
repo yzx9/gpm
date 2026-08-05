@@ -4,7 +4,7 @@
 
 //! GPM — age-only gopass password manager client built with Tauri v2.
 
-use std::sync::atomic::{self, AtomicBool, AtomicU8, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
@@ -183,38 +183,56 @@ async fn provision_master<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[
 
 /// Resolve the seal master key + app-lock state at startup.
 ///
-/// When a biometric-gated master key exists (the app-launch gate is on), the
-/// key is deliberately NOT loaded here — it is injected after the app-unlock
-/// biometric prompt — so `repo.json` stays unreadable until the user
-/// authenticates. Otherwise the auth-free master key loads silently (the
-/// pre-app-lock path). Returns `(master_key, app_lock_enabled)`.
+/// **R074 (decision D):** the auth-free master key is loaded **always**,
+/// including under App Lock — it seals the merged app config (`repo.json` +
+/// `app.json`), which must be readable at `.setup()` so the pinned locale/theme
+/// bake into the first-paint init scripts. This is safe because the auth-free
+/// key is **not** what App Lock protects: App Lock gates the **vault key** (the
+/// identity, retrieved via biometric at `app_unlock`). The auth-free key is the
+/// git-credential tier — already loaded by the headless worker while locked
+/// under R064 — and a process/memory attacker is an explicit non-goal. So
+/// loading it at `.setup()` vs `app_unlock` is security-irrelevant.
+///
+/// `app_lock_enabled` is still probed (`keystore::has_app_lock_enabled`) so the frontend
+/// knows whether to show the app-lock overlay; only the vault key stays deferred
+/// to `app_unlock`. Returns `(master_key, app_lock_enabled)`.
 async fn startup_master_key<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> (Option<[u8; 32]>, bool) {
-    if keystore::has_app_lock_enabled(ks).await {
-        (None, true)
-    } else {
-        // Auth-free path: retrieve the sealed master, provisioning on first run.
-        // retrieve_master_or_none is safe on the upgrader path (no generate-on-absent);
-        // provision_master is the explicit first-run generate+store (None on desktop).
-        let key = match retrieve_master_or_none(ks).await {
-            Some(k) => Some(k),
-            None => provision_master(ks).await,
-        };
-        (key, false)
-    }
+    let app_lock_enabled = keystore::has_app_lock_enabled(ks).await;
+    // Always retrieve the auth-free master (D). retrieve_master_or_none is safe on
+    // the upgrader path (no generate-on-absent); provision_master is the explicit
+    // first-run generate+store.
+    let key = match retrieve_master_or_none(ks).await {
+        Some(k) => Some(k),
+        None => {
+            // Provision ONLY when app-lock is off. A pre-m0007 upgrader under app
+            // lock has its master in the legacy biometric alias (relocated to the
+            // auth-free alias by m0007 at app_unlock), so the auth-free alias is
+            // legitimately absent here — never mint over it. Such an upgrader is at
+            // schema < 8, so pref.json still exists and the first-paint read is
+            // unaffected; the next cold start (post-m0007) finds the auth-free key.
+            if app_lock_enabled {
+                None
+            } else {
+                provision_master(ks).await
+            }
+        }
+    };
+    (key, app_lock_enabled)
 }
 
 // ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
 
-/// Build the initial [`AppState`] during Tauri setup: load (or defer, when
-/// app-lock is on) the seal master key, run the one-time plaintext→envelope
-/// migration, and assemble the state. Extracted from [`run`] so the entry
-/// point stays a thin builder.
+/// Build the initial [`AppState`] during Tauri setup: run the one-time
+/// plaintext→envelope + config migrations and assemble the state. Extracted
+/// from [`run`] so the entry point stays a thin builder.
 ///
-/// `config_dir` and `app_config` are resolved in `run`'s setup closure (not
-/// here) so the pinned `theme_mode` can be read from `pref.json` and baked
-/// into the main window's init script before the window is created.
+/// R074 (decision D): `store` (with the auth-free master key already loaded) and
+/// `app_config` (already bound to the store + reloaded from the sealed config)
+/// are built in `run`'s setup closure, so the pinned locale/theme bake into the
+/// window's init script before it is created, and the migration engine sees a
+/// keyed store from the start.
 ///
 /// # Panics
 ///
@@ -222,60 +240,26 @@ async fn startup_master_key<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> (Optio
 /// the setup closure, before this is called).
 fn init_state(
     app: &tauri::App<tauri::Wry>,
-    config_dir: std::path::PathBuf,
+    store: Arc<Store>,
     app_config: app_config::AppConfigStore,
+    app_lock_enabled: bool,
 ) -> AppState {
-    // Cold-start banner: version first (the thing bug reports most need to
-    // pin), then build profile + target so a trace distinguishes dev vs
-    // release and android vs desktop at a glance. Emitted BEFORE the keystore
-    // await below so a hang there still leaves a breadcrumb.
-    log::info!(
-        "gpm {} starting ({} {}/{})",
-        env!("CARGO_PKG_VERSION"),
-        if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        },
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-    );
-    // At-rest master key + app-lock state. When the biometric-gated master key
-    // exists (app-lock on), the key is NOT loaded here — it is injected after
-    // the app-unlock biometric prompt — so `repo.json` stays unreadable until
-    // the user authenticates on launch/resume. Otherwise the auth-free master
-    // key loads silently (the pre-app-lock path).
-    let (master_key, app_lock_enabled) =
-        tauri::async_runtime::block_on(startup_master_key(app.secure_keystore()));
-    // Basic-state summary — config dir (where the rotated log + sealed config
-    // live) and whether the app-launch biometric gate is armed. Logged here,
-    // before `config_dir` moves into `Store`, so a trace lands the paths once.
-    log::info!(
-        "startup: config_dir={}, app_lock={}",
-        config_dir.display(),
-        app_lock_enabled,
-    );
-    // `app_config` is passed in: the setup closure builds it once so the pinned
-    // `theme_mode` can be read for the window's init script before creation.
-    // Apply the persisted log level NOW (right after app.json loads and the log
-    // plugin has initialized). The plugin is capped at Debug (see `run()`), so
-    // this `set_max_level` is the runtime gate — a live `verbose_until` ⇒ Debug,
-    // else Info. Applied twice on purpose: here (the common Info case, early so
-    // startup stays quiet) and again after `run_app_migrations` below, so an
-    // upgrading `m0004` debug user gets Debug continuity on the first launch.
+    // Apply the persisted log level NOW (the sealed config is already loaded by
+    // the setup closure's reload). The plugin is capped at Debug (see `run()`),
+    // so this `set_max_level` is the runtime gate — a live `verbose_until` ⇒
+    // Debug, else Info. Applied twice on purpose: here (the common Info case,
+    // early so startup stays quiet) and again after `run_app_migrations` below,
+    // so an upgrading `m0004` debug user gets Debug continuity on the first launch.
     log::set_max_level(app_config.effective_log_filter());
-    let store = Arc::new(Store::new(config_dir, master_key));
-    // Two-phase binding: the AppConfigStore setters/readers for the sealed
-    // behavior slot need the Store ref, but the Store can't be constructed
-    // until the config_dir is known. Bind it now (before the AppState move) so
-    // `run_app_migrations` and the post-migration reload below can flow through
-    // the Seal (sealed on Android, plaintext-passthrough on desktop).
+    // Bind the Store (idempotent — the setup closure already bound it; safe to
+    // repeat so `run_app_migrations` and the post-migration reload flow through
+    // the Seal regardless of call order).
     app_config.set_store(Arc::clone(&store));
     // One-time migration of any pre-existing plaintext files into the seal
     // envelope (no-op on desktop / already-wrapped). Each file is wrapped
     // atomically with a roundtrip check, so a failure leaves plaintext intact —
-    // logged, non-fatal. With app-lock on the master key is absent here, so
-    // this is a no-op over the existing envelopes.
+    // logged, non-fatal. R074/D: the auth-free master key is always loaded, so
+    // this runs even under app-lock (it touches only master_seal files).
     if let Err(e) = tauri::async_runtime::block_on(store.migrate_seal()) {
         log::warn!("seal migration failed: {e}");
     }
@@ -337,17 +321,16 @@ fn init_state(
     // Arm the mid-session revert timer if a verbose window is still live (a
     // relaunch inside the window keeps capturing at Debug, then auto-reverts).
     verbose::arm_verbose_timer(&app_state, app.handle());
-    // Reload the sealed behavior cache + reseed the Store's injected `autosync`
-    // so a cold start (where the behavior cache started at defaults) sees the
-    // persisted values. Skipped under app-lock (the load soft-fails to defaults;
-    // the app_unlock path runs its own reload + reseed after biometric injects
-    // the key). Best-effort.
-    if !app_state.app_lock_enabled.load(atomic::Ordering::SeqCst) {
-        tauri::async_runtime::block_on(app_state.app_config.reload_behavior()).ok();
-        app_state
-            .store
-            .set_autosync(app_state.app_config.get_behavior().autosync);
-    }
+    // Reload the sealed config + reseed the Store's injected `autosync`
+    // so a cold start sees the persisted values. R074/D: the auth-free master key
+    // is always loaded (even under app-lock), so the sealed merged config is
+    // readable here unconditionally — no app-lock guard. (The setup closure's
+    // reload already populated the caches; this is a defensive re-seed covering
+    // the no-migration cold start + post-migration refresh.)
+    tauri::async_runtime::block_on(app_state.app_config.reload_behavior()).ok();
+    app_state
+        .store
+        .set_autosync(app_state.app_config.get_behavior().autosync);
     app_state
 }
 
@@ -455,31 +438,61 @@ pub fn run() {
         // verbose notices (boot-still-active, deadline-reverted).
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            // Resolve the config dir + read pref.json synchronously so the pinned
-            // `theme_mode` can be baked into the main window's init script before
-            // the window is created (eliminates the cold-start theme flash on a
-            // pinned Light/Dark). Both are then handed to `init_state` so
-            // pref.json is read exactly once. Done BEFORE `init_state`'s heavy
-            // work (keystore IPC, seal migration, migrations) so the WebView can
-            // paint a correctly-themed frame 0 while that work runs.
+            // Cold-start banner FIRST: version (the thing bug reports most need
+            // to pin), then build profile + target. Emitted before the keystore
+            // await below so a hang there still leaves a breadcrumb.
+            log::info!(
+                "gpm {} starting ({} {}/{})",
+                env!("CARGO_PKG_VERSION"),
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                },
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+            );
             let config_dir = app
                 .path()
                 .app_config_dir()
                 .expect("Cannot determine app config directory");
+            // R074 (decision D): load the auth-free master key + build the Store
+            // HERE, before reading the app config, so the sealed merged config is
+            // readable at first paint. The auth-free key is NOT what App Lock
+            // protects (it gates the vault key / identity); loading it here — even
+            // under App Lock — is safe: it is the git-credential tier, already
+            // worker-loaded while locked, and a process attacker is a non-goal.
+            let (master_key, app_lock_enabled) =
+                tauri::async_runtime::block_on(startup_master_key(app.secure_keystore()));
+            // Basic-state summary — config dir (where the rotated log + sealed
+            // config live) and whether the app-launch biometric gate is armed.
+            log::info!(
+                "startup: config_dir={}, app_lock={}",
+                config_dir.display(),
+                app_lock_enabled,
+            );
+            let store = Arc::new(Store::new(config_dir.clone(), master_key));
             let app_config =
                 tauri::async_runtime::block_on(app_config::AppConfigStore::new(&config_dir));
+            app_config.set_store(Arc::clone(&store));
+            // Load the sealed config into the caches so the init scripts below
+            // bake the PINNED locale/theme (new world: the merged sealed app.json;
+            // old world: pref.json + the behavior slot), not cold-start defaults.
+            // This is what preserves the first-paint fix (e3c7df6/cfadbb5) without
+            // any post-unlock re-apply: the config is readable at .setup().
+            if let Err(e) = tauri::async_runtime::block_on(app_config.reload()) {
+                log::warn!("app-config: startup reload failed: {e}");
+            }
             let theme_script =
                 app_config::theme_init_script(app_config.get_pref().theme_mode.as_deref());
             let locale_script = app_config::locale_init_script(&app_config.resolved_locale());
             // `create: false` in tauri.conf.json keeps Tauri from auto-creating
             // the main window; build it here with the per-window init scripts.
             // Both the locale (pinned-or-system, from `resolved_locale`) and the
-            // theme script are registered per-window — they can only be composed
-            // once `pref.json` is read (unreadable at Tauri `Builder` time on
-            // Android). Any future `WebviewWindowBuilder` must chain both, since
-            // the per-window approach no longer auto-covers new windows the way a
-            // global init script did. The "main" label must match the
-            // capabilities scope in capabilities/{default,mobile}.json.
+            // theme script are registered per-window — composed from the sealed
+            // config just above (unreadable at Tauri `Builder` time on Android).
+            // Any future `WebviewWindowBuilder` must chain both. The "main" label
+            // must match the capabilities scope in capabilities/{default,mobile}.json.
             let main_window = app
                 .config()
                 .app
@@ -491,7 +504,7 @@ pub fn run() {
                 .initialization_script(theme_script)
                 .initialization_script(locale_script)
                 .build()?;
-            let state = init_state(app, config_dir, app_config);
+            let state = init_state(app, store, app_config, app_lock_enabled);
             // Apply the persisted background-sync cadence on launch
             // (enqueue/cancel the WorkManager periodic work).
             #[cfg(target_os = "android")]

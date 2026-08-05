@@ -99,6 +99,29 @@ impl Store {
     pub async fn load_app_behavior(&self) -> Result<Vec<u8>, Error> {
         self.config.load_app_behavior().await
     }
+
+    /// Seal a serialized **merged** app config (display + behavior) into the
+    /// app-config slot — the R074 post-collapse single sealed home of all app
+    /// prefs. See [`Config::save_app_config`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the AEAD seal or the write fails.
+    pub async fn save_app_config(&self, bytes: &[u8]) -> Result<(), Error> {
+        self.config.save_app_config(bytes).await
+    }
+
+    /// Read + unseal the merged app-config slot (dual-AAD: falls back to the
+    /// legacy `"app_behavior"` tag during the R074 transition). See
+    /// [`Config::load_app_config`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::NoIdentity`] if the slot is absent, or an error if
+    /// the AEAD unseal fails.
+    pub async fn load_app_config(&self) -> Result<Vec<u8>, Error> {
+        self.config.load_app_config().await
+    }
 }
 
 /// Normalize a view/clipboard auto-clear override: `None` stays (default),

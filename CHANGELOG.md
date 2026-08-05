@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- On Android, **all** of your app settings — display language, theme, auto-lock timers, autosync, screen-capture mode, and the rest — are now **encrypted at rest**, with no settings file left in plaintext. (A few non-secret display preferences used to be stored unencrypted so they could be read before the app unlocked; the at-rest key is now available at startup, so that workaround is gone.) Nothing about how the app behaves changes — your settings carry over as-is. Desktop is unchanged: it has no device key store, so its settings stay in plaintext there as before.
 - Diagnostic log lines that come from the app interface — the lines you see in **Settings → Logs** and in an exported bug-report bundle — no longer repeat where they're from. Each used to say "frontend" twice over; the lines are now shorter and easier to read.
 - In **Settings**, the **Logs** entry moves up to sit right after **Repository**, grouped with the other reference pages — **Security**, **Permissions & data**, and **About** — just below the actual settings (General, Lock & identity, Repository). Those four pages explain or document the app rather than holding a setting, so they now read as one group instead of Logs sitting alone at the bottom.
 

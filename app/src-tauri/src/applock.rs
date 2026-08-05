@@ -509,12 +509,11 @@ pub(crate) async fn app_unlock(
     log::set_max_level(state.app_config.effective_log_filter());
     // Re-arm the mid-session revert timer if a verbose window is still live.
     arm_verbose_timer(state.inner(), &app);
-    // Reload the sealed behavior cache + reseed the Store's injected `autosync`
-    // now that the master key is in memory. At cold start under app-lock the
-    // behavior cache was at defaults (the load soft-failed); a Pending m0005
-    // just populated it, but a no-op m0005 (already migrated) leaves it empty
-    // unless we reload here. Runs before `app_locked` is cleared so the frontend
-    // sees real values after the unlock emit.
+    // Reload the sealed config + reseed the Store's injected `autosync`. R074/D:
+    // the auth-free key is loaded at `.setup()`, so the merged config is already
+    // in the caches — this is a defensive post-migration refresh (a just-run
+    // m0008 collapsed pref.json into the sealed merged app.json). Runs before
+    // `app_locked` is cleared so the frontend sees real values after the emit.
     state.app_config.reload_behavior().await.ok();
     state
         .store

@@ -4,6 +4,12 @@
 
 //! Migration `0005_split_app_json`.
 //!
+//! **Historical note (R074):** `m0008_collapse_pref_into_sealed` is the inverse
+//! of this migration — it merges `pref.json` + the sealed behavior slot back into
+//! a single sealed `app.json` and deletes `pref.json`. This migration stays in
+//! the permanent registry so schema-<8 upgraders still pass through the split on
+//! their way to the collapsed schema-8 shape.
+//!
 //! Splits the single plaintext `app.json` (the schema-4 single-file shape that
 //! `m0002`/`m0003`/`m0004_verbose_from_debug` last wrote — read as
 //! [`AppConfigV4`]) into the post-split pair:
