@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.17.0] - 2026-08-05
+
 ### Added
 
 - You can now **browse a secret's past versions** and view or copy an old value. Open any secret and tap **Revisions** to see every change recorded for it, newest first, each with its signature status. Tap a version to reveal it — an old value is always marked as a past version (date and commit) so it can't be mistaken for the current one, and it auto-clears like any revealed password. A version encrypted for an identity you no longer have shows as "can't decrypt" instead of failing, and one that deleted the secret is called out. This is the recovery and audit counterpart to gopass's `history` / `show --revision`.
@@ -437,7 +439,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.17.0...HEAD
+[v0.17.0]: https://github.com/yzx9/gpm/compare/v0.16.1...v0.17.0
 [v0.16.1]: https://github.com/yzx9/gpm/compare/v0.16.0...v0.16.1
 [v0.16.0]: https://github.com/yzx9/gpm/compare/v0.15.1...v0.16.0
 [v0.15.1]: https://github.com/yzx9/gpm/compare/v0.15.0...v0.15.1
