@@ -2,26 +2,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Android Keystore storage for the gpm at-rest **master key**, in two policies:
+// Generic Android Keystore storage for a caller-supplied secret string, under a
+// caller-chosen policy: auth-free (no prompt, survives biometric changes) OR
+// biometric-gated (a BiometricPrompt per use). The alias, prefs name,
+// key-generation policy, and prompt text are ALL caller-supplied — this plugin
+// carries no app-specific identifiers or brand strings.
 //
-// 1. Auth-free (the default): sealed with a hardware-backed AES/GCM key that is
-//    NOT user-authentication-required and NOT invalidated by biometric
-//    enrollment — no BiometricPrompt, survives fingerprint changes. Used when
-//    the app-launch biometric gate is OFF.
-// 2. Biometric-gated (opt-in app-lock): the same master key blob, re-sealed
-//    behind a key that IS user-authentication-required (STRONG biometric per
-//    use) but still NOT invalidated by biometric enrollment. Adding a
-//    fingerprint does NOT brick the store; only removing ALL biometrics does
-//    (documented re-setup). The master key cannot self-heal the way a passphrase
-//    can, so we deliberately diverge from KeystorePlugin (biometric-keystore),
-//    which uses setInvalidatedByBiometricEnrollment(true) for the passphrase.
+// The crypto pattern (AndroidKeyStore AES/GCM key, optionally bound to a
+// BiometricPrompt CryptoObject with prompts on BOTH encrypt and decrypt) mirrors
+// KeystorePlugin.kt in biometric-keystore; the two are homomorphic so they can
+// be merged mechanically later.
 //
-// The master key is a random 32-byte secret; the plugin seals it (iv +
-// ciphertext in SharedPreferences) and hands the plaintext back to Rust (Base64
-// over IPC). The non-extractable Keystore key never leaves the secure element.
-//
-// The biometric CryptoObject + BiometricPrompt pattern (prompt on BOTH encrypt
-// and decrypt) mirrors KeystorePlugin.kt in biometric-keystore.
+// Secrets are handled as ByteArray within the crypto flow and zeroed after use.
 
 package xyz.yzx9.gpm.securekeystore
 
@@ -44,6 +36,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.nio.charset.Charset
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -51,86 +44,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 private const val ANDROID_KEYSTORE = "AndroidKeyStore"
-
-// Auth-free master key.
-private const val KEY_ALIAS = "gpm_master_key"
-private const val PREFS_NAME = "gpm_secure_keystore"
-
-// Biometric-gated master key (app-lock). Separate alias + prefs so the two
-// policies never collide and a migration is just move-between-stores.
-private const val BIOMETRIC_KEY_ALIAS = "gpm_master_key_biometric"
-private const val BIOMETRIC_PREFS_NAME = "gpm_secure_keystoreBiometric"
-
 private const val PREF_CT = "ct"
 private const val PREF_IV = "iv"
 
+private val UTF_8: Charset = Charsets.UTF_8
+
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
-
-// Vault key (R064): the biometric-gated key that seals `identity` + `app_id_pass`
-// when App Lock is ON. Distinct alias + prefs from the legacy app-lock key so the
-// at-rest master key (`gpm_master_key`) can stay auth-free + permanent while the
-// identity moves under the gate. Same KeyGen spec as the legacy biometric key.
-private const val VAULT_KEY_ALIAS = "gpm_vault_key"
-private const val VAULT_PREFS_NAME = "gpm_secure_keystoreVault"
-
-/**
- * Which biometric-gated key a biometric command targets. R064 splits the old
- * single `gpm_master_key_biometric` ([LEGACY] — held the master under App Lock
- * pre-R064) from the new `gpm_vault_key` ([VAULT] — holds the distinct vault
- * key). m0007 relocates LEGACY → the auth-free master + mints VAULT, then
- * deletes LEGACY.
- *
- * `internal` so the JVM unit test can exercise [fromString]; the alias/prefsName
- * are compile-time constants, so it is a plain JVM unit test.
- */
-internal enum class BiometricSlot(val alias: String, val prefsName: String) {
-    LEGACY(BIOMETRIC_KEY_ALIAS, BIOMETRIC_PREFS_NAME),
-    VAULT(VAULT_KEY_ALIAS, VAULT_PREFS_NAME);
-
-    companion object {
-        /**
-         * Parse the slot string sent by the Rust handle. Unspecified (`null`) ⇒
-         * [LEGACY], preserving the pre-split bridge: until the app shell threads
-         * an explicit slot, the biometric commands keep targeting the legacy
-         * `gpm_master_key_biometric` alias exactly as before R064.
-         */
-        fun fromString(s: String?): BiometricSlot = when (s) {
-            "vault" -> VAULT
-            else -> LEGACY
-        }
-    }
-}
-
-/**
- * R064 dual-alias "app-lock is on" decision (pure, host-testable): `true` iff
- * EITHER biometric slot holds a sealed key that still inits cleanly. Pre-m0007
- * upgraders hold the legacy alias (vault absent); post-m0007 hold the vault
- * (legacy deleted); mutually exclusive in steady state. Extracted from
- * [SecureKeystorePlugin.hasStoredBiometric] so the OR-disjunction is pinned by
- * a plain JVM unit test (no Activity / Keystore needed).
- */
-internal fun hasUsableBiometricInAnySlot(
-    legacyPresent: Boolean,
-    legacyUsable: Boolean,
-    vaultPresent: Boolean,
-    vaultUsable: Boolean,
-): Boolean = (legacyPresent && legacyUsable) || (vaultPresent && vaultUsable)
-
-/** Generic BiometricPrompt fallbacks (NOT a duplicate of
- *  native.json/en): the app name (title) + a neutral word (negative) keep the
- *  prompt coherent if the frontend omits the localized text. Duplicated from
- *  KeystorePlugin.kt because the plugins are separate Gradle modules. */
-data class ResolvedPromptText(val title: String, val subtitle: String?, val negative: String)
-
-/** Resolve localized prompt text against the generic fallbacks. Pure (no Android
- *  types) — plain JVM unit test. */
-fun resolvePromptText(title: String?, subtitle: String?, negative: String?): ResolvedPromptText =
-    ResolvedPromptText(
-        title = title?.takeUnless { it.isBlank() } ?: "gpm",
-        subtitle = subtitle?.takeUnless { it.isBlank() },
-        negative = negative?.takeUnless { it.isBlank() } ?: "Cancel",
-    )
 
 /** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. Pure: the
  *  `ERROR_*` constants are compile-time-inlined `static final int`, so the
@@ -188,40 +108,49 @@ internal fun decodeBlob(ivB64: String?, ctB64: String?): Pair<ByteArray, ByteArr
     return Pair(Base64.decode(ivB64, Base64.NO_WRAP), Base64.decode(ctB64, Base64.NO_WRAP))
 }
 
-/** Argument for `store` / `storeBiometric`: the Base64 32-byte master key. The
- *  title/subtitle/negative fields carry localized prompt text; only
- *  `storeBiometric` uses them (the auth-free `store` does not prompt). The
- *  `slot` field (R064) selects the biometric target for `storeBiometric`
- *  ("vault" | "legacy"; defaults to legacy via [BiometricSlot.fromString]). */
+/** Caller-supplied key-generation policy (mirrors the Rust `KeyPolicy`). The
+ *  plugin applies it verbatim to [KeyGenParameterSpec]; it never invents values. */
+@InvokeArg
+class KeyPolicyArgs {
+    var authRequired: Boolean = false
+    var authBiometricStrong: Boolean = false
+    var invalidatedByEnrollment: Boolean = false
+    var authValiditySeconds: Long = 0
+}
+
+/** `store` args: the secret + alias/prefs + policy + prompt text. */
 @InvokeArg
 class StoreArgs {
-    lateinit var key: String
+    lateinit var value: String
+    lateinit var alias: String
+    lateinit var prefs: String
+    var policy: KeyPolicyArgs? = null
     var title: String? = null
     var subtitle: String? = null
     var negative: String? = null
-    var slot: String? = null
 }
 
-/** `retrieveBiometric` carries no secret — the localized prompt text + the R064
- *  biometric `slot` ("vault" | "legacy"; defaults to legacy). */
+/** `retrieve` args: alias/prefs + policy + prompt text (carries no secret). */
 @InvokeArg
-class RetrieveBiometricArgs {
+class RetrieveArgs {
+    lateinit var alias: String
+    lateinit var prefs: String
+    var policy: KeyPolicyArgs? = null
     var title: String? = null
     var subtitle: String? = null
     var negative: String? = null
-    var slot: String? = null
 }
 
-/** `deleteBiometric` carries only the R064 biometric `slot` ("vault" | "legacy";
- *  defaults to legacy). */
+/** `aliasState` / `delete` args: which alias + prefs to probe/clear. */
 @InvokeArg
-class DeleteBiometricArgs {
-    var slot: String? = null
+class AliasArgs {
+    lateinit var alias: String
+    lateinit var prefs: String
 }
 
 /**
- * Stores the gpm at-rest master key in the Android Keystore under two policies:
- * an auth-free key (default) and a biometric-gated key (opt-in app-lock).
+ * Generic Android Keystore storage. All identifiers (alias, prefs) and policy
+ * come from the caller; this class carries no app-specific state.
  *
  * The auth-free path is API 23+ (minSdk 24). The biometric-gated path is API
  * 30+ (Android 11): its key uses
@@ -231,15 +160,79 @@ class DeleteBiometricArgs {
 @TauriPlugin
 class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
-    // ── Shared helpers ───────────────────────────────────────────────────
+    // ── Lifecycle-free helpers ───────────────────────────────────────────
 
     /** The host activity as a [FragmentActivity], required by [BiometricPrompt]. */
     private fun fragmentActivity(): FragmentActivity? = activity as? FragmentActivity
 
-    /** The STRONG biometric authenticators bitmask — must match the key's
-     *  `AUTH_BIOMETRIC_STRONG` or `retrieveBiometric` fails at prompt time. */
+    private fun prefs(name: String): SharedPreferences =
+        activity.getSharedPreferences(name, Context.MODE_PRIVATE)
+
+    /** The STRONG biometric authenticators bitmask. */
     private val strongAuthenticator: Int
         get() = BiometricManager.Authenticators.BIOMETRIC_STRONG
+
+    // ── Key + cipher management ──────────────────────────────────────────
+
+    /**
+     * Generate a fresh key at [alias] per [policy], replacing any prior entry.
+     *
+     * A fresh key on every `store` sidesteps the "alias exists but key is
+     * invalidated" trap. **Conditional policy application**: auth params and
+     * `setInvalidatedByBiometricEnrollment` are applied ONLY when
+     * `policy.authRequired` — an auth-free keygen calls neither, so its spec is
+     * byte-identical to a plain keygen (no enrollment flag is set, which keeps
+     * the "no migration" invariant honest: `unset` stays `unset`).
+     */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun generateKey(alias: String, policy: KeyPolicyArgs) {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (keyStore.containsAlias(alias)) {
+            keyStore.deleteEntry(alias)
+        }
+        val keyGenerator =
+            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+        val builder = KeyGenParameterSpec.Builder(
+            alias,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+        if (policy.authRequired) {
+            builder.setUserAuthenticationRequired(true)
+            val authType = if (policy.authBiometricStrong) KeyProperties.AUTH_BIOMETRIC_STRONG else 0
+            // API 30+: validity (0 = per-use) + authenticator set.
+            builder.setUserAuthenticationParameters(
+                policy.authValiditySeconds.toInt().coerceAtLeast(0),
+                authType,
+            )
+            // Meaningful only for a user-auth-bound key; an auth-free keygen
+            // never calls this, so the spec stays a plain keygen.
+            builder.setInvalidatedByBiometricEnrollment(policy.invalidatedByEnrollment)
+        }
+        keyGenerator.init(builder.build())
+        keyGenerator.generateKey()
+    }
+
+    private fun loadKey(alias: String): SecretKey {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        return (keyStore.getEntry(alias, null) as KeyStore.SecretKeyEntry).secretKey
+    }
+
+    /** A [Cipher] initialised for encryption with a fresh IV. */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun encryptionCipher(alias: String): Cipher {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, loadKey(alias))
+        return cipher
+    }
+
+    /** A [Cipher] initialised for decryption with the stored IV. */
+    private fun decryptionCipher(alias: String, iv: ByteArray): Cipher {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, loadKey(alias), GCMParameterSpec(GCM_TAG_BITS, iv))
+        return cipher
+    }
 
     private fun storeCipherData(prefs: SharedPreferences, iv: ByteArray, ciphertext: ByteArray) {
         val (ivB64, ctB64) = encodeBlob(iv, ciphertext)
@@ -249,224 +242,30 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         }.apply()
     }
 
-    /** The stored (iv, ciphertext) pair for `prefs`, or null if nothing is sealed. */
+    /** The stored (iv, ciphertext) pair for [prefs], or null if nothing is sealed. */
     private fun readCipherData(prefs: SharedPreferences): Pair<ByteArray, ByteArray>? =
         decodeBlob(prefs.getString(PREF_IV, null), prefs.getString(PREF_CT, null))
 
-    // ── Auth-free master key ─────────────────────────────────────────────
+    // ── PromptInfo (caller-supplied text; no brand fallback) ─────────────
 
-    private fun prefs(): SharedPreferences =
-        activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    /**
-     * Generate a fresh auth-free AES/GCM key, replacing any prior entry. A fresh
-     * key on every `store` sidesteps a stale-alias trap; `store` is called once
-     * (when the master key is first generated), so the churn is harmless.
-     */
-    private fun generateKey() {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        if (keyStore.containsAlias(KEY_ALIAS)) {
-            keyStore.deleteEntry(KEY_ALIAS)
-        }
-        val keyGenerator =
-            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-        val spec = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            // Auth-free: no setUserAuthenticationRequired, no auth params, and
-            // NOT invalidated by biometric enrollment — so the at-rest store
-            // never bricks on a fingerprint change.
-            .build()
-        keyGenerator.init(spec)
-        keyGenerator.generateKey()
-    }
-
-    private fun loadKey(): SecretKey {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        return (keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
-    }
-
-    /** A [Cipher] initialised for encryption with a fresh IV. */
-    private fun encryptionCipher(): Cipher {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, loadKey())
-        return cipher
-    }
-
-    /** A [Cipher] initialised for decryption with the stored IV. */
-    private fun decryptionCipher(iv: ByteArray): Cipher {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, loadKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
-        return cipher
-    }
-
-    // ── Biometric-gated keys (legacy app-lock master + R064 vault) ───────
-
-    private fun biometricPrefs(slot: BiometricSlot): SharedPreferences =
-        activity.getSharedPreferences(slot.prefsName, Context.MODE_PRIVATE)
-
-    /**
-     * Generate a fresh biometric-gated AES/GCM key for [slot], replacing any
-     * prior entry.
-     *
-     * A fresh key on every `storeBiometric` sidesteps the "alias exists but key
-     * is invalidated" trap (a dead key keeps its alias), so re-enabling after a
-     * biometric change just works. API 30+: per-use STRONG biometric auth.
-     *
-     * Deliberately `setInvalidatedByBiometricEnrollment(false)`: the key cannot
-     * self-heal (unlike a passphrase), so adding a fingerprint must NOT brick
-     * the whole store. The residual risk — removing ALL biometrics invalidates
-     * the key — is the documented re-setup case for the opt-in gate.
-     */
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun generateBiometricKey(slot: BiometricSlot) {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        if (keyStore.containsAlias(slot.alias)) {
-            keyStore.deleteEntry(slot.alias)
-        }
-        val keyGenerator =
-            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-        val spec = KeyGenParameterSpec.Builder(
-            slot.alias,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setUserAuthenticationRequired(true)
-            // API 30+: every use requires a CryptoObject-bound STRONG biometric.
-            .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-            // Survive fingerprint enrollment (do NOT brick the store on a new
-            // finger). Removing all biometrics invalidates or renders the key
-            // unusable (KeyStore-behavior-dependent) → documented re-setup.
-            .setInvalidatedByBiometricEnrollment(false)
-            .build()
-        keyGenerator.init(spec)
-        keyGenerator.generateKey()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun loadBiometricKey(slot: BiometricSlot): SecretKey {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        return (keyStore.getEntry(slot.alias, null) as KeyStore.SecretKeyEntry).secretKey
-    }
-
-    /** A [Cipher] initialised for [slot]'s biometric-key encryption with a fresh IV. */
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun biometricEncryptionCipher(slot: BiometricSlot): Cipher {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, loadBiometricKey(slot))
-        return cipher
-    }
-
-    /** A [Cipher] initialised for [slot]'s biometric-key decryption with the stored IV. */
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun biometricDecryptionCipher(slot: BiometricSlot, iv: ByteArray): Cipher {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, loadBiometricKey(slot), GCMParameterSpec(GCM_TAG_BITS, iv))
-        return cipher
-    }
-
-    // ── Biometric prompt plumbing (mirrors KeystorePlugin.kt) ────────────
-
+    /** Build [BiometricPrompt.PromptInfo] from caller-supplied text. The plugin
+     *  bakes NO fallback string — `title`/`negative` must be supplied by the
+     *  caller when the policy is auth-required (a missing title rejects rather
+     *  than silently substituting a brand). */
     private fun promptInfo(title: String?, subtitle: String?, negative: String?): BiometricPrompt.PromptInfo {
-        val r = resolvePromptText(title, subtitle, negative)
         val builder = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(r.title)
-            .setNegativeButtonText(r.negative)
+            .setTitle(title ?: error("auth-required policy needs a prompt title"))
+            .setNegativeButtonText(negative ?: error("auth-required policy needs a negative label"))
             .setAllowedAuthenticators(strongAuthenticator)
-        if (r.subtitle != null) builder.setSubtitle(r.subtitle)
+        if (subtitle != null) builder.setSubtitle(subtitle)
         return builder.build()
     }
 
-    // ── @Command surface: auth-free master key ───────────────────────────
+    // ── @Command surface ─────────────────────────────────────────────────
 
-    /** `true` — the Android Keystore is always present on Android. */
-    @Command
-    fun isAvailable(invoke: Invoke) {
-        val ret = JSObject()
-        ret.put("available", true)
-        invoke.resolve(ret)
-    }
-
-    /**
-     * Retrieve the sealed master key. Resolves `{ stored: false }` if nothing
-     * is sealed, or `{ stored: true, key: <base64> }` otherwise. Non-prompting.
-     */
-    @Command
-    fun retrieve(invoke: Invoke) {
-        val (iv, ciphertext) = readCipherData(prefs()) ?: run {
-            val ret = JSObject()
-            ret.put("stored", false)
-            invoke.resolve(ret)
-            return
-        }
-
-        val plain = try {
-            decryptionCipher(iv).doFinal(ciphertext)
-        } catch (e: Exception) {
-            invoke.reject(safeName(e), "SECURE_KEYSTORE_FAILED")
-            return
-        }
-
-        val ret = JSObject()
-        ret.put("stored", true)
-        ret.put("key", Base64.encodeToString(plain, Base64.NO_WRAP))
-        invoke.resolve(ret)
-        plain.fill(0)
-    }
-
-    /** Seal the supplied Base64 master key into the auth-free Keystore. */
-    @Command
-    fun store(invoke: Invoke) {
-        val keyB64 = invoke.parseArgs(StoreArgs::class.java).key
-        val plain = try {
-            Base64.decode(keyB64, Base64.NO_WRAP)
-        } catch (e: Exception) {
-            invoke.reject(safeName(e), "SECURE_KEYSTORE_FAILED")
-            return
-        }
-
-        try {
-            generateKey()
-            val cipher = encryptionCipher()
-            val ciphertext = cipher.doFinal(plain)
-            storeCipherData(prefs(), cipher.iv, ciphertext)
-        } catch (e: Exception) {
-            invoke.reject(safeName(e), "SECURE_KEYSTORE_FAILED")
-            return
-        } finally {
-            plain.fill(0)
-        }
-        // No-arg resolve() sends the literal "null", which the Rust handle
-        // deserializes into `()`. `resolve(JSObject())` would send "{}", which
-        // fails that `()` deserialize (invalid type: map, expected unit).
-        invoke.resolve()
-    }
-
-    /** Delete the auth-free Keystore key and ciphertext (best-effort). */
-    @Command
-    fun delete(invoke: Invoke) {
-        try {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-            if (keyStore.containsAlias(KEY_ALIAS)) {
-                keyStore.deleteEntry(KEY_ALIAS)
-            }
-        } catch (_: Exception) {
-            // Best-effort: still clear prefs so the app can always reset.
-        }
-        prefs().edit().clear().apply()
-        invoke.resolve()
-    }
-
-    // ── @Command surface: biometric-gated master key (app-lock) ──────────
-
-    /** Availability state for the biometric-gated master key — one of
-     *  "available", "no_enrollment", "weak_enrolled", "unavailable". Non-
-     *  prompting. Pre-API-30 → "unavailable" (the STRONG keystore key requires
-     *  R). See [mapBiometricState] for the mapping. */
+    /** Availability state for biometric-gated storage — one of "available",
+     *  "no_enrollment", "weak_enrolled", "unavailable". Non-prompting.
+     *  Pre-API-30 → "unavailable" (the STRONG keystore key requires R). */
     @Command
     fun isBiometricAvailable(invoke: Invoke) {
         val state = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
@@ -483,84 +282,80 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(ret)
     }
 
-    /** `true` iff a sealed biometric key exists in EITHER slot AND still inits
-     *  cleanly. Non-prompting. A key invalidated by all-biometrics-removed →
-     *  false, so a cold launch skips a doomed prompt.
-     *
-     *  R064: checks BOTH the vault (`gpm_vault_key`) and the legacy
-     *  (`gpm_master_key_biometric`) slots, so the "app-lock is on" signal stays
-     *  correct across the m0007 transition — pre-m0007 upgraders hold the
-     *  legacy alias (vault absent), post-m0007 hold the vault (legacy deleted). */
+    /**
+     * Probe one alias's liveness: `{ present, usable }`. Non-prompting.
+     * `present` = ciphertext exists; `usable` = the key still initializes
+     * (pre-API-30 or a dead key → false). This is the primitive the Rust side
+     * composes (`present && usable`).
+     */
     @Command
-    fun hasStoredBiometric(invoke: Invoke) {
-        // Explicit API guard BEFORE any reference to the R-only probe, so the
-        // method is robust to reordering (the `@RequiresApi(R)` body must never
-        // be reached on API <30, or it would verify-error at first touch).
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            val ret = JSObject()
-            ret.put("stored", false)
-            invoke.resolve(ret)
-            return
-        }
-        val stored = hasUsableBiometricInAnySlot(
-            legacyPresent = readCipherData(biometricPrefs(BiometricSlot.LEGACY)) != null,
-            legacyUsable = biometricKeyUsable(BiometricSlot.LEGACY),
-            vaultPresent = readCipherData(biometricPrefs(BiometricSlot.VAULT)) != null,
-            vaultUsable = biometricKeyUsable(BiometricSlot.VAULT),
-        )
+    fun aliasState(invoke: Invoke) {
+        val args = invoke.parseArgs(AliasArgs::class.java)
+        val p = prefs(args.prefs)
+        val present = readCipherData(p) != null
+        // The R-only cipher probe must never be touched on API <30.
+        val usable = present &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            cipherUsable(args.alias)
         val ret = JSObject()
-        ret.put("stored", stored)
+        ret.put("present", present)
+        ret.put("usable", usable)
         invoke.resolve(ret)
     }
 
-    /** Whether [slot]'s biometric key still inits — i.e. is usable. Non-prompting:
+    /** Whether [alias]'s sealed key still inits — i.e. is usable. Non-prompting:
      *  init on an authentication-bound key does NOT require auth; only the
-     *  prompt does. Any init failure ⇒ not usable ⇒ fall back / re-setup.
-     *
-     *  Keep this body free of API-30-only symbols beyond the cipher init: the
-     *  SDK guard in [hasStoredBiometric] gatekeeps, and `@RequiresApi(R)` is
-     *  lint-only, not runtime-enforced. */
+     *  prompt does. Any init failure ⇒ not usable ⇒ fall back / re-setup. */
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun biometricKeyUsable(slot: BiometricSlot): Boolean = try {
-        biometricEncryptionCipher(slot)
+    private fun cipherUsable(alias: String): Boolean = try {
+        encryptionCipher(alias)
         true
     } catch (e: Exception) {
-        Log.w("gpm_secure_keystore", "hasStoredBiometric probe failed (${slot.alias}): ${safeName(e)}")
+        Log.w("gpm_secure_keystore", "aliasState probe failed ($alias): ${safeName(e)}")
         false
     }
 
     /**
-     * Seal the supplied Base64 master key behind biometric auth. Shows a
-     * CryptoObject ENCRYPT prompt (a `setUserAuthenticationRequired` key needs
-     * auth for encrypt too) and resolves ONLY from a terminal callback.
+     * Seal the supplied value at `alias` behind biometric auth (when the policy
+     * is auth-required). Shows a CryptoObject ENCRYPT prompt and resolves ONLY
+     * from a terminal biometric callback. Auth-free policy seals directly.
      */
     @RequiresApi(Build.VERSION_CODES.R)
     @Command
-    fun storeBiometric(invoke: Invoke) {
+    fun store(invoke: Invoke) {
+        val args = invoke.parseArgs(StoreArgs::class.java)
+        val policy = args.policy ?: KeyPolicyArgs()
+        val plainBytes = args.value.toByteArray(UTF_8)
+
+        val cipher = try {
+            generateKey(args.alias, policy)
+            encryptionCipher(args.alias)
+        } catch (e: Exception) {
+            plainBytes.fill(0)
+            invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+            return
+        }
+
+        if (!policy.authRequired) {
+            // Auth-free keygen: seal directly, no prompt.
+            try {
+                val ciphertext = cipher.doFinal(plainBytes)
+                storeCipherData(prefs(args.prefs), cipher.iv, ciphertext)
+                ciphertext.fill(0)
+                invoke.resolve()
+            } catch (e: Exception) {
+                invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+            } finally {
+                plainBytes.fill(0)
+            }
+            return
+        }
+
         val fa = fragmentActivity() ?: run {
+            plainBytes.fill(0)
             invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
             return
         }
-
-        val args = invoke.parseArgs(StoreArgs::class.java)
-        val keyB64 = args.key
-        val slot = BiometricSlot.fromString(args.slot)
-        val plain = try {
-            Base64.decode(keyB64, Base64.NO_WRAP)
-        } catch (e: Exception) {
-            invoke.reject(safeName(e), "BIOMETRIC_FAILED")
-            return
-        }
-
-        val cipher = try {
-            generateBiometricKey(slot)
-            biometricEncryptionCipher(slot)
-        } catch (e: Exception) {
-            plain.fill(0)
-            invoke.reject(safeName(e), "BIOMETRIC_FAILED")
-            return
-        }
-
         val prompt = BiometricPrompt(
             fa,
             ContextCompat.getMainExecutor(activity),
@@ -569,22 +364,19 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
                     try {
                         val authCipher = result.cryptoObject?.cipher
                             ?: error("cipher missing after auth")
-                        val ciphertext = authCipher.doFinal(plain)
-                        storeCipherData(biometricPrefs(slot), authCipher.iv, ciphertext)
+                        val ciphertext = authCipher.doFinal(plainBytes)
+                        storeCipherData(prefs(args.prefs), authCipher.iv, ciphertext)
                         ciphertext.fill(0)
                         invoke.resolve()
                     } catch (e: Exception) {
                         invoke.reject(safeName(e), "BIOMETRIC_FAILED")
                     } finally {
-                        plain.fill(0)
+                        plainBytes.fill(0)
                     }
                 }
 
                 override fun onAuthenticationError(code: Int, errString: CharSequence) {
-                    // Terminal (cancel / lockout / hw-unavailable) — the most
-                    // common exit when enabling app lock. Zero the master-key
-                    // bytes: the success path's `finally` doesn't run here.
-                    plain.fill(0)
+                    plainBytes.fill(0)
                     invoke.reject(errString.toString(), mapErrorCode(code))
                 }
 
@@ -600,18 +392,33 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * Retrieve the sealed master key behind biometric auth. Shows a CryptoObject
-     * DECRYPT prompt and resolves ONLY from a terminal callback with
-     * `{ stored: true, key: <base64> }`. A permanently-invalidated key
-     * (all biometrics removed) maps to `BIOMETRIC_KEY_INVALIDATED`.
+     * Retrieve the sealed value at `alias`. Auth-free policy decrypts directly
+     * (no prompt); auth-required policy shows a CryptoObject DECRYPT prompt and
+     * resolves ONLY from a terminal callback. Rejects with `BIOMETRIC_NOT_SET`
+     * when nothing is sealed (before any prompt).
      */
     @Command
-    fun retrieveBiometric(invoke: Invoke) {
-        // API guard FIRST: the R-only cipher helpers must never be touched on
-        // API <30. (Robust to reordering; the app layer also gates on
-        // isBiometricAvailable, but this is the in-plugin backstop.)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            invoke.reject("biometric requires API 30+", "BIOMETRIC_UNAVAILABLE")
+    fun retrieve(invoke: Invoke) {
+        val args = invoke.parseArgs(RetrieveArgs::class.java)
+        val policy = args.policy ?: KeyPolicyArgs()
+
+        val (iv, ciphertext) = readCipherData(prefs(args.prefs)) ?: run {
+            invoke.reject("nothing stored", "BIOMETRIC_NOT_SET")
+            return
+        }
+
+        if (!policy.authRequired) {
+            // Auth-free keygen: decrypt directly, no prompt.
+            try {
+                val cipher = decryptionCipher(args.alias, iv)
+                val plain = cipher.doFinal(ciphertext)
+                val ret = JSObject()
+                ret.put("value", String(plain, UTF_8))
+                invoke.resolve(ret)
+                plain.fill(0)
+            } catch (e: Exception) {
+                invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+            }
             return
         }
 
@@ -619,16 +426,8 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
             return
         }
-        val args = invoke.parseArgs(RetrieveBiometricArgs::class.java)
-        val slot = BiometricSlot.fromString(args.slot)
-
-        val (iv, ciphertext) = readCipherData(biometricPrefs(slot)) ?: run {
-            invoke.reject("nothing stored", "BIOMETRIC_NOT_SET")
-            return
-        }
-
         val cipher = try {
-            biometricDecryptionCipher(slot, iv)
+            decryptionCipher(args.alias, iv)
         } catch (e: Exception) {
             // Includes KeyPermanentlyInvalidatedException when all biometrics
             // were removed since the key was generated → re-setup required.
@@ -646,8 +445,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
                             ?: error("cipher missing after auth")
                         val plain = authCipher.doFinal(ciphertext)
                         val ret = JSObject()
-                        ret.put("stored", true)
-                        ret.put("key", Base64.encodeToString(plain, Base64.NO_WRAP))
+                        ret.put("value", String(plain, UTF_8))
                         invoke.resolve(ret)
                         plain.fill(0)
                     } catch (e: Exception) {
@@ -669,22 +467,19 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         )
     }
 
-    /** Delete the biometric Keystore key + ciphertext for [slot] (best-effort).
-     *
-     *  R064: `slot` selects vault (`gpm_vault_key`) vs legacy
-     *  (`gpm_master_key_biometric`); defaults to legacy. */
+    /** Delete the Keystore key at `alias` and the stored ciphertext (best-effort). */
     @Command
-    fun deleteBiometric(invoke: Invoke) {
-        val slot = BiometricSlot.fromString(invoke.parseArgs(DeleteBiometricArgs::class.java).slot)
+    fun delete(invoke: Invoke) {
+        val args = invoke.parseArgs(AliasArgs::class.java)
         try {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-            if (keyStore.containsAlias(slot.alias)) {
-                keyStore.deleteEntry(slot.alias)
+            if (keyStore.containsAlias(args.alias)) {
+                keyStore.deleteEntry(args.alias)
             }
         } catch (_: Exception) {
             // Best-effort: still clear prefs so the app can always reset.
         }
-        biometricPrefs(slot).edit().clear().apply()
+        prefs(args.prefs).edit().clear().apply()
         invoke.resolve()
     }
 }

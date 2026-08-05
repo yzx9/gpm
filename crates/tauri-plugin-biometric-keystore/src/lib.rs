@@ -179,7 +179,7 @@ pub fn resolve_prompt_text(
             .as_deref()
             .map(non_blank)
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| fallback)
+            .unwrap_or(fallback)
             .to_owned()
     };
     ResolvedPromptText {
@@ -452,6 +452,10 @@ impl<R: Runtime> Keystore<R> {
     }
 
     /// Inert: nothing is ever stored.
+    ///
+    /// # Errors
+    ///
+    /// Inert stub: always returns `Ok`; never errors.
     #[expect(clippy::unused_async)]
     pub async fn alias_state(
         &self,

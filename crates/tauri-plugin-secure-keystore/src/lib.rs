@@ -2,34 +2,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tauri plugin that stores the gpm at-rest **master key** in the Android
-//! Keystore — sealed with a hardware-backed, **auth-free** AES/GCM key — and
-//! hands it back to Rust so `rustpass` can AEAD-encrypt local private files
-//! (`repo.json`, `identity`).
+//! Tauri plugin that seals a caller-supplied **secret string** into the Android
+//! Keystore (hardware-backed AES/GCM) under a caller-chosen policy — either
+//! **auth-free** (no prompt, survives biometric changes) or **biometric-gated**
+//! (a `BiometricPrompt` per use) — and retrieves it on demand. The plugin is
+//! generic: the Keystore alias, prefs name, key-generation policy, and prompt
+//! text are all supplied by the caller — it carries no app-specific identifiers
+//! or brand strings.
 //!
-//! This is the auth-free sibling of `tauri-plugin-biometric-keystore` (which
-//! seals the identity *passphrase* behind a biometric-gated key). Same Keystore
-//! AES/GCM mechanism, different key policy:
-//! - `biometric-keystore`: `setUserAuthenticationRequired(true)`, per-use
-//!   biometric prompt, invalidated on fingerprint-enrollment change.
-//! - `secure-keystore` (here): `setUserAuthenticationRequired(false)`, no
-//!   prompt, **survives** fingerprint changes — so the at-rest store never
-//!   bricks on a fingerprint change.
+//! The secret flows Kotlin → Rust and never reaches the `WebView`. On
+//! non-Android targets the plugin is registered but inert (operations report
+//! `unavailable` / empty).
 //!
-//! The master key is a random 32-byte secret; the plugin seals it (iv +
-//! ciphertext in `SharedPreferences`) and returns the **plaintext** bytes
-//! (Base64 over IPC) to Rust, exactly as `biometric-keystore` returns the
-//! passphrase. The non-extractable Keystore key never leaves the secure
-//! element; the master key it wraps is no more sensitive than the PAT `rustpass`
-//! already holds in memory.
-//!
-//! This is a **backend-only** plugin: the app layer calls
-//! [`SecureKeystoreExt::secure_keystore`] to obtain the handle and retrieve /
-//! store the master key — it never reaches the `WebView`.
-//!
-//! On non-Android targets the plugin is registered but inert:
-//! `is_available` reads `false`, `retrieve` returns `None`, so the app falls
-//! back to plaintext at-rest storage (documented asymmetry).
+//! **Homomorphic with `tauri-plugin-biometric-keystore`**: same handle method
+//! names/signatures (`store`/`retrieve`/`delete`/`alias_state`/`has_stored`)
+//! and same `KeyPolicy`/`BiometricState`/`PromptText` shapes, so the two crates
+//! can be mechanically merged later (one keeps the shared pure functions; the
+//! other is dropped). The one intentional divergence: this crate exposes
+//! biometric availability as `is_biometric_available`, where
+//! `biometric-keystore` exposes it as `is_available` — the merge picks one name.
 
 #[cfg(not(target_os = "android"))]
 use std::marker::PhantomData;
@@ -45,41 +36,19 @@ use tauri::{Manager, Runtime};
 const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.securekeystore";
 
 // ---------------------------------------------------------------------------
-// Availability state (quad-state: STRONG + WEAK canAuthenticate mapping)
-// ---------------------------------------------------------------------------
-
-/// Biometric availability state reported by the Kotlin plugin. Mirrors the
-/// strings emitted by `mapBiometricState` (SecureKeystorePlugin.kt) and is
-/// byte-identical to `tauri_plugin_biometric_keystore::BiometricState` — the two
-/// plugins are separate crates so the type is duplicated; the cross-layer string
-/// contract is pinned by tests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BiometricState {
-    /// API 30+ with a STRONG (Class 3) biometric enrolled.
-    Available,
-    /// STRONG absent, nothing enrolled.
-    NoEnrollment,
-    /// STRONG absent but a weak (Class 2) print is enrolled.
-    WeakEnrolled,
-    /// No usable hardware / hw unavailable / security update required / unsupported /
-    /// pre-API-30 — nothing the user can fix from settings.
-    Unavailable,
-}
-
-// ---------------------------------------------------------------------------
 // Error type (unified across mobile/desktop)
 // ---------------------------------------------------------------------------
 
 /// Error returned by secure-keystore operations.
 ///
-/// Carries the Kotlin `SECURE_KEYSTORE_*` codes through to the app layer.
-/// Serializes to `{ code, message }` and **never** contains secret content —
-/// messages are derived only from exception class names or system strings.
+/// Carries the Kotlin `BIOMETRIC_*` / `SECURE_KEYSTORE_*` codes through to the
+/// app layer. Serializes to `{ code, message }` and **never** contains secret
+/// content — messages are derived only from exception class names or system
+/// strings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecureKeystoreError {
     /// Machine-readable code, e.g. `SECURE_KEYSTORE_UNAVAILABLE`,
-    /// `SECURE_KEYSTORE_NOT_SET`, `SECURE_KEYSTORE_FAILED`.
+    /// `BIOMETRIC_NOT_SET`, `BIOMETRIC_KEY_INVALIDATED`, `BIOMETRIC_FAILED`.
     pub code: String,
     /// Safe (no-secret) human-readable message.
     pub message: String,
@@ -117,14 +86,66 @@ fn map_invoke_err(err: PluginInvokeError) -> SecureKeystoreError {
 }
 
 // ---------------------------------------------------------------------------
-// Prompt text
+// Availability state (quad-state: STRONG + WEAK canAuthenticate mapping)
 // ---------------------------------------------------------------------------
 
-/// Localized `BiometricPrompt` text supplied by the frontend, so the native
-/// layer never localizes. Deserialized from the `{ title, subtitle, negative }`
-/// shape the `WebView` sends and forwarded to Kotlin, which falls back to a
-/// generic safety string when a field is absent. Defined here (not the app
-/// crate) so the app command's IPC param type IS the plugin's type.
+/// Biometric availability state reported by the Kotlin plugin. Mirrors the
+/// strings emitted by `mapBiometricState` (SecureKeystorePlugin.kt) and is
+/// byte-identical to `tauri_plugin_biometric_keystore::BiometricState` — the two
+/// plugins are separate crates so the type is duplicated; the cross-layer string
+/// contract is pinned by tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BiometricState {
+    /// API 30+ with a STRONG (Class 3) biometric enrolled.
+    Available,
+    /// STRONG absent, nothing enrolled.
+    NoEnrollment,
+    /// STRONG absent but a weak (Class 2) print is enrolled.
+    WeakEnrolled,
+    /// No usable hardware / hw unavailable / security update required / unsupported /
+    /// pre-API-30 — nothing the user can fix from settings.
+    Unavailable,
+}
+
+// ---------------------------------------------------------------------------
+// Key-generation policy (caller-supplied; the plugin applies it verbatim)
+// ---------------------------------------------------------------------------
+
+/// Android Keystore key-generation policy, applied to `KeyGenParameterSpec`.
+///
+/// Round-tripped to Kotlin as **flattened** camelCase payload fields (Tauri's
+/// `@InvokeArg` is flat-field shaped). Construct via const instances — there is
+/// **no `Default` and no `serde(default)`**: a bool default drifting here
+/// would silently change key behavior (auth-free vs gated, enrollment
+/// invalidation), so the caller always supplies the full policy explicitly.
+/// The plugin never invents policy values. Byte-identical to
+/// `tauri_plugin_biometric_keystore::KeyPolicy` (the merge collapses the two).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyPolicy {
+    /// `setUserAuthenticationRequired(true)` — every use needs biometric auth.
+    pub auth_required: bool,
+    /// When `auth_required`, bind to `AUTH_BIOMETRIC_STRONG` (Class 3); else
+    /// ignored (auth-free keys carry no authenticator set).
+    pub auth_biometric_strong: bool,
+    /// When `auth_required`, `setInvalidatedByBiometricEnrollment(this)`;
+    /// **unset** when `auth_required` is false (the flag is meaningless without
+    /// user-auth binding — leaving it unset keeps the auth-free keygen
+    /// byte-identical to a plain keygen, so no migration is implied).
+    pub invalidated_by_enrollment: bool,
+    /// When `auth_required`, the `setUserAuthenticationParameters` validity in
+    /// seconds (0 = per-use auth). Ignored when `auth_required` is false.
+    pub auth_validity_seconds: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Prompt text (caller resolves against its own brand fallbacks)
+// ---------------------------------------------------------------------------
+
+/// Localized `BiometricPrompt` text as supplied by the app (it owns
+/// localization; the plugin never localizes and never bakes a brand string).
+/// Fields are optional; resolve with [`resolve_prompt_text`] before passing to
+/// `store`/`retrieve`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PromptText {
     /// Prompt title.
@@ -135,43 +156,76 @@ pub struct PromptText {
     pub negative: Option<String>,
 }
 
-/// Which biometric-gated Keystore alias a biometric command targets (R064
-/// master/vault key split). Serialized to the Kotlin command as `"vault"` /
-/// `"legacy"`.
-///
-/// - [`BiometricSlot::Vault`] — `gpm_vault_key`: seals `identity` +
-///   `app_id_pass` when App Lock is ON (the distinct biometric vault key).
-/// - [`BiometricSlot::Legacy`] — `gpm_master_key_biometric`: held the master
-///   under App Lock pre-R064; m0007 relocates it to the auth-free master and
-///   deletes this alias.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BiometricSlot {
-    /// `gpm_vault_key` — the distinct biometric vault key sealing `identity` +
-    /// `app_id_pass` under App Lock (R064).
-    Vault,
-    /// `gpm_master_key_biometric` — the pre-R064 master-key alias, relocated to
-    /// the auth-free store and deleted by m0007.
-    Legacy,
+/// [`PromptText`] with caller-supplied fallbacks applied — `title`/`negative`
+/// are guaranteed non-empty. Passed to `store`/`retrieve`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedPromptText {
+    /// Resolved prompt title (non-empty).
+    pub title: String,
+    /// Resolved prompt subtitle (`None` when blank/unset).
+    pub subtitle: Option<String>,
+    /// Resolved negative-button label (non-empty).
+    pub negative: String,
 }
 
-impl BiometricSlot {
-    /// The string the Kotlin `BiometricSlot.fromString` parses.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Vault => "vault",
-            Self::Legacy => "legacy",
-        }
+/// Resolve [`PromptText`] against caller-supplied fallbacks. Pure (no platform
+/// types). The plugin never bakes a brand string; the app supplies the fallback
+/// values (e.g. its own app name). A blank field falls back; a blank subtitle
+/// becomes `None`.
+#[must_use]
+pub fn resolve_prompt_text(
+    prompt: &PromptText,
+    fallback_title: &str,
+    fallback_negative: &str,
+) -> ResolvedPromptText {
+    fn non_blank(s: &str) -> &str {
+        s.trim_start().trim_end()
+    }
+    let pick = |field: &Option<String>, fallback: &str| -> String {
+        field
+            .as_deref()
+            .map(non_blank)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(fallback)
+            .to_owned()
+    };
+    ResolvedPromptText {
+        title: pick(&prompt.title, fallback_title),
+        subtitle: prompt
+            .subtitle
+            .as_deref()
+            .map(non_blank)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned),
+        negative: pick(&prompt.negative, fallback_negative),
     }
 }
 
 // ---------------------------------------------------------------------------
-// Handle (cfg-gated: real on Android, stub elsewhere)
+// Alias liveness (the platform probe; composition happens in Rust)
+// ---------------------------------------------------------------------------
+
+/// Liveness of one Keystore alias: whether ciphertext exists (`present`) and
+/// whether its key still initializes cleanly (`usable`). `present && usable` is
+/// "a stored, working key"; `present && !usable` is a dead key (e.g. all
+/// biometrics removed) the caller should treat as absent.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub struct AliasState {
+    /// Whether ciphertext is present in prefs for this alias.
+    pub present: bool,
+    /// Whether the alias's key still initializes (a non-prompting cipher-init
+    /// probe; pre-API-30 or a dead key → `false`).
+    pub usable: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Keystore handle (cfg-gated: real on Android, stub elsewhere)
 // ---------------------------------------------------------------------------
 
 /// Handle to the secure keystore. On Android it wraps the mobile plugin handle;
 /// on other targets it is an inert stub whose operations report unavailable.
 #[cfg(target_os = "android")]
+#[derive(Debug)]
 pub struct SecureKeystore<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 /// Handle to the secure keystore — inert stub on non-Android targets.
@@ -185,71 +239,6 @@ pub struct SecureKeystore<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> SecureKeystore<R> {
-    /// Whether the secure keystore is usable on this device. Fast / non-prompting.
-    ///
-    /// # Errors
-    ///
-    /// Only if the mobile-plugin invoke itself fails.
-    pub async fn is_available(&self) -> Result<bool, SecureKeystoreError> {
-        #[derive(Deserialize)]
-        struct Resp {
-            available: bool,
-        }
-        self.0
-            .run_mobile_plugin_async::<Resp>("isAvailable", ())
-            .await
-            .map(|r| r.available)
-            .map_err(map_invoke_err)
-    }
-
-    /// Retrieve the sealed master key (Base64), or `None` if nothing is sealed.
-    /// Non-prompting (the key is auth-free).
-    ///
-    /// # Errors
-    ///
-    /// [`SecureKeystoreError`] only if the mobile-plugin invoke itself fails.
-    pub async fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
-        #[derive(Deserialize)]
-        struct Resp {
-            stored: bool,
-            key: Option<String>,
-        }
-        let r = self
-            .0
-            .run_mobile_plugin_async::<Resp>("retrieve", ())
-            .await
-            .map_err(map_invoke_err)?;
-        Ok(if r.stored { r.key } else { None })
-    }
-
-    /// Seal the supplied master key (Base64) into the Keystore.
-    ///
-    /// # Errors
-    ///
-    /// [`SecureKeystoreError`] only if the mobile-plugin invoke itself fails.
-    pub async fn store(&self, key_b64: &str) -> Result<(), SecureKeystoreError> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            key: &'a str,
-        }
-        self.0
-            .run_mobile_plugin_async::<()>("store", Payload { key: key_b64 })
-            .await
-            .map_err(map_invoke_err)
-    }
-
-    /// Delete the Keystore key and the stored ciphertext (best-effort).
-    ///
-    /// # Errors
-    ///
-    /// [`SecureKeystoreError`] only if the mobile-plugin invoke itself fails.
-    pub async fn delete(&self) -> Result<(), SecureKeystoreError> {
-        self.0
-            .run_mobile_plugin_async::<()>("delete", ())
-            .await
-            .map_err(map_invoke_err)
-    }
-
     /// Quad-state biometric availability ([`BiometricState`]). Fast / non-
     /// prompting. Pre-API-30 → `Unavailable`. The app-lock toggle is offered only
     /// on `Available`; callers derive `== Available` where they need a bool.
@@ -269,177 +258,175 @@ impl<R: Runtime> SecureKeystore<R> {
             .map_err(map_invoke_err)
     }
 
-    /// Whether a biometric-gated master key exists AND its key still inits
-    /// cleanly (non-prompting liveness probe). This is the authoritative
-    /// "app-lock is enabled" signal at startup — readable before `repo.json`,
-    /// since the master key's location (auth-free vs biometric-gated) is itself
-    /// the toggle state. `false` if biometrics were removed and the key is dead.
+    /// Probe one alias's liveness (single IPC): whether ciphertext exists AND
+    /// its key still initializes. Non-prompting. The platform-side cipher-init
+    /// probe cannot move to Rust, so this is the primitive; callers compose
+    /// (`present && usable`, slot OR-disjunction, etc.) in Rust.
     ///
     /// # Errors
     ///
     /// Only if the mobile-plugin invoke itself fails.
-    pub async fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
-        #[derive(Deserialize)]
-        struct Resp {
-            stored: bool,
+    pub async fn alias_state(
+        &self,
+        alias: &str,
+        prefs: &str,
+    ) -> Result<AliasState, SecureKeystoreError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Payload<'a> {
+            alias: &'a str,
+            prefs: &'a str,
         }
         self.0
-            .run_mobile_plugin_async::<Resp>("hasStoredBiometric", ())
+            .run_mobile_plugin_async::<AliasState>("aliasState", Payload { alias, prefs })
             .await
-            .map(|r| r.stored)
             .map_err(map_invoke_err)
     }
 
-    /// Seal the supplied master key (Base64) behind a biometric-gated key.
-    /// **Shows a BiometricPrompt** (CryptoObject ENCRYPT). Used when enabling the
-    /// app-lock to migrate the master key from the auth-free store. `prompt`
-    /// supplies the localized prompt text.
+    /// Whether a stored, working key exists for `alias` (non-prompting). Composed
+    /// from [`alias_state`](Self::alias_state): ciphertext present AND key usable.
+    ///
+    /// # Errors
+    ///
+    /// Only if the mobile-plugin invoke itself fails.
+    pub async fn has_stored(&self, alias: &str, prefs: &str) -> Result<bool, SecureKeystoreError> {
+        let s = self.alias_state(alias, prefs).await?;
+        Ok(s.present && s.usable)
+    }
+
+    /// Delete the stored ciphertext and the Keystore key for `alias`
+    /// (best-effort).
+    ///
+    /// # Errors
+    ///
+    /// [`SecureKeystoreError`] only if the mobile-plugin invoke itself fails.
+    pub async fn delete(&self, alias: &str, prefs: &str) -> Result<(), SecureKeystoreError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Payload<'a> {
+            alias: &'a str,
+            prefs: &'a str,
+        }
+        self.0
+            .run_mobile_plugin_async::<()>("delete", Payload { alias, prefs })
+            .await
+            .map_err(map_invoke_err)
+    }
+
+    /// Seal `value` into the Keystore at `alias`. **Shows a biometric prompt**
+    /// (CryptoObject ENCRYPT) when `policy.auth_required` — the key needs user
+    /// auth for encrypt too. The `Invoke` stays open across the prompt and is
+    /// resolved only from a terminal biometric callback. Auth-free policy seals
+    /// directly with no prompt. `prompt` supplies already-resolved prompt text
+    /// (see [`resolve_prompt_text`]).
     ///
     /// # Errors
     ///
     /// [`SecureKeystoreError`] carrying a `BIOMETRIC_*` / `SECURE_KEYSTORE_*`
-    /// code if the prompt is dismissed, the key is dead, or the invoke fails.
-    pub async fn store_biometric(
+    /// code (e.g. `BIOMETRIC_CANCELLED`, `BIOMETRIC_KEY_INVALIDATED`,
+    /// `BIOMETRIC_FAILED`) if the prompt is dismissed, the key is dead, or the
+    /// invoke fails.
+    pub async fn store(
         &self,
-        key_b64: &str,
-        slot: BiometricSlot,
-        prompt: Option<&PromptText>,
+        value: &str,
+        alias: &str,
+        prefs: &str,
+        policy: KeyPolicy,
+        prompt: Option<&ResolvedPromptText>,
     ) -> Result<(), SecureKeystoreError> {
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct Payload<'a> {
-            key: &'a str,
-            slot: &'a str,
+            value: &'a str,
+            alias: &'a str,
+            prefs: &'a str,
+            auth_required: bool,
+            auth_biometric_strong: bool,
+            invalidated_by_enrollment: bool,
+            auth_validity_seconds: u32,
             title: Option<&'a str>,
             subtitle: Option<&'a str>,
             negative: Option<&'a str>,
         }
         self.0
             .run_mobile_plugin_async::<()>(
-                "storeBiometric",
+                "store",
                 Payload {
-                    key: key_b64,
-                    slot: slot.as_str(),
-                    title: prompt.and_then(|p| p.title.as_deref()),
-                    subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
-                    negative: prompt.and_then(|p| p.negative.as_deref()),
+                    value,
+                    alias,
+                    prefs,
+                    auth_required: policy.auth_required,
+                    auth_biometric_strong: policy.auth_biometric_strong,
+                    invalidated_by_enrollment: policy.invalidated_by_enrollment,
+                    auth_validity_seconds: policy.auth_validity_seconds,
+                    title: prompt.map(|p| p.title.as_str()),
+                    subtitle: prompt.map(|p| p.subtitle.as_deref()).flatten(),
+                    negative: prompt.map(|p| p.negative.as_str()),
                 },
             )
             .await
             .map_err(map_invoke_err)
     }
 
-    /// Retrieve the biometric-gated master key (Base64), or `None` if nothing is
-    /// sealed. **Shows a BiometricPrompt** (CryptoObject DECRYPT). The key is
-    /// returned here (Rust side only). Rejects with `BIOMETRIC_KEY_INVALIDATED`
-    /// if the key died (all biometrics removed). `prompt` supplies the localized
+    /// Retrieve the sealed value at `alias`. **Shows a biometric prompt**
+    /// (CryptoObject DECRYPT) when `policy.auth_required`; an auth-free policy
+    /// decrypts directly. The value is returned here (Rust side only) and wrapped
+    /// in `Zeroizing<String>` by the caller. `prompt` supplies already-resolved
     /// prompt text.
     ///
     /// # Errors
     ///
     /// [`SecureKeystoreError`] carrying a `BIOMETRIC_*` / `SECURE_KEYSTORE_*`
-    /// code (e.g. `BIOMETRIC_KEY_INVALIDATED` on key death) on dismissal or
-    /// invoke failure.
-    pub async fn retrieve_biometric(
+    /// code: `BIOMETRIC_NOT_SET` when nothing is sealed (no prompt), and
+    /// `BIOMETRIC_KEY_INVALIDATED` / `BIOMETRIC_CANCELLED` / `BIOMETRIC_FAILED`
+    /// on dismissal, key death, or invoke failure.
+    pub async fn retrieve(
         &self,
-        slot: BiometricSlot,
-        prompt: Option<&PromptText>,
-    ) -> Result<Option<String>, SecureKeystoreError> {
+        alias: &str,
+        prefs: &str,
+        policy: KeyPolicy,
+        prompt: Option<&ResolvedPromptText>,
+    ) -> Result<String, SecureKeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
-            stored: bool,
-            key: Option<String>,
+            value: String,
         }
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct Payload<'a> {
-            slot: &'a str,
+            alias: &'a str,
+            prefs: &'a str,
+            auth_required: bool,
+            auth_biometric_strong: bool,
+            invalidated_by_enrollment: bool,
+            auth_validity_seconds: u32,
             title: Option<&'a str>,
             subtitle: Option<&'a str>,
             negative: Option<&'a str>,
         }
-        let r = self
-            .0
-            .run_mobile_plugin_async::<Resp>(
-                "retrieveBiometric",
-                Payload {
-                    slot: slot.as_str(),
-                    title: prompt.and_then(|p| p.title.as_deref()),
-                    subtitle: prompt.and_then(|p| p.subtitle.as_deref()),
-                    negative: prompt.and_then(|p| p.negative.as_deref()),
-                },
-            )
-            .await
-            .map_err(map_invoke_err)?;
-        Ok(if r.stored { r.key } else { None })
-    }
-
-    /// Delete the biometric-gated Keystore key and ciphertext for `slot`
-    /// (best-effort). Used when disabling the app-lock (after the master key is
-    /// migrated back to the auth-free store) and by m0007 (to drop the legacy
-    /// alias after relocating its master to the auth-free store).
-    ///
-    /// # Errors
-    ///
-    /// [`SecureKeystoreError`] only if the mobile-plugin invoke itself fails.
-    pub async fn delete_biometric(&self, slot: BiometricSlot) -> Result<(), SecureKeystoreError> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            slot: &'a str,
-        }
         self.0
-            .run_mobile_plugin_async::<()>(
-                "deleteBiometric",
+            .run_mobile_plugin_async::<Resp>(
+                "retrieve",
                 Payload {
-                    slot: slot.as_str(),
+                    alias,
+                    prefs,
+                    auth_required: policy.auth_required,
+                    auth_biometric_strong: policy.auth_biometric_strong,
+                    invalidated_by_enrollment: policy.invalidated_by_enrollment,
+                    auth_validity_seconds: policy.auth_validity_seconds,
+                    title: prompt.map(|p| p.title.as_str()),
+                    subtitle: prompt.map(|p| p.subtitle.as_deref()).flatten(),
+                    negative: prompt.map(|p| p.negative.as_str()),
                 },
             )
             .await
+            .map(|r| r.value)
             .map_err(map_invoke_err)
     }
 }
 
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> SecureKeystore<R> {
-    /// Inert: the secure keystore is never available on non-Android targets.
-    ///
-    /// # Errors
-    ///
-    /// Inert stub: always returns `Ok(false)`; never errors.
-    #[expect(clippy::unused_async)]
-    pub async fn is_available(&self) -> Result<bool, SecureKeystoreError> {
-        Ok(false)
-    }
-
-    /// Inert: nothing is ever stored.
-    ///
-    /// # Errors
-    ///
-    /// Inert stub: always returns `Ok(None)`; never errors.
-    #[expect(clippy::unused_async)]
-    pub async fn retrieve(&self) -> Result<Option<String>, SecureKeystoreError> {
-        Ok(None)
-    }
-
-    /// Inert: never succeeds — the secure keystore is unavailable.
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`SecureKeystoreError::unavailable`] — the secure keystore
-    /// is unsupported off-Android.
-    #[expect(clippy::unused_async)]
-    pub async fn store(&self, _key_b64: &str) -> Result<(), SecureKeystoreError> {
-        Err(SecureKeystoreError::unavailable())
-    }
-
-    /// Inert: nothing to delete.
-    ///
-    /// # Errors
-    ///
-    /// Inert stub: always returns `Ok`; never errors.
-    #[expect(clippy::unused_async)]
-    pub async fn delete(&self) -> Result<(), SecureKeystoreError> {
-        Ok(())
-    }
-
     /// Inert: biometric is never available on non-Android targets.
     ///
     /// # Errors
@@ -450,44 +437,35 @@ impl<R: Runtime> SecureKeystore<R> {
         Ok(BiometricState::Unavailable)
     }
 
-    /// Inert: no biometric-gated key is ever stored.
+    /// Inert: nothing is ever stored.
     ///
     /// # Errors
     ///
-    /// Inert stub: always returns `Ok(false)`; never errors.
+    /// Inert stub: always returns `Ok`; never errors.
     #[expect(clippy::unused_async)]
-    pub async fn has_stored_biometric(&self) -> Result<bool, SecureKeystoreError> {
-        Ok(false)
-    }
-
-    /// Inert: never succeeds — biometric is unavailable.
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`SecureKeystoreError::unavailable`] — biometric is
-    /// unsupported off-Android.
-    #[expect(clippy::unused_async)]
-    pub async fn store_biometric(
+    pub async fn alias_state(
         &self,
-        _key_b64: &str,
-        _slot: BiometricSlot,
-        _prompt: Option<&PromptText>,
-    ) -> Result<(), SecureKeystoreError> {
-        Err(SecureKeystoreError::unavailable())
+        _alias: &str,
+        _prefs: &str,
+    ) -> Result<AliasState, SecureKeystoreError> {
+        Ok(AliasState {
+            present: false,
+            usable: false,
+        })
     }
 
     /// Inert: nothing is ever stored.
     ///
     /// # Errors
     ///
-    /// Inert stub: always returns `Ok(None)`; never errors.
+    /// Inert stub: always returns `Ok(false)`; never errors.
     #[expect(clippy::unused_async)]
-    pub async fn retrieve_biometric(
+    pub async fn has_stored(
         &self,
-        _slot: BiometricSlot,
-        _prompt: Option<&PromptText>,
-    ) -> Result<Option<String>, SecureKeystoreError> {
-        Ok(None)
+        _alias: &str,
+        _prefs: &str,
+    ) -> Result<bool, SecureKeystoreError> {
+        Ok(false)
     }
 
     /// Inert: nothing to delete.
@@ -496,8 +474,41 @@ impl<R: Runtime> SecureKeystore<R> {
     ///
     /// Inert stub: always returns `Ok`; never errors.
     #[expect(clippy::unused_async)]
-    pub async fn delete_biometric(&self, _slot: BiometricSlot) -> Result<(), SecureKeystoreError> {
+    pub async fn delete(&self, _alias: &str, _prefs: &str) -> Result<(), SecureKeystoreError> {
         Ok(())
+    }
+
+    /// Inert: never succeeds — the secure keystore is unavailable.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`SecureKeystoreError::unavailable`] off-Android.
+    #[expect(clippy::unused_async)]
+    pub async fn store(
+        &self,
+        _value: &str,
+        _alias: &str,
+        _prefs: &str,
+        _policy: KeyPolicy,
+        _prompt: Option<&ResolvedPromptText>,
+    ) -> Result<(), SecureKeystoreError> {
+        Err(SecureKeystoreError::unavailable())
+    }
+
+    /// Inert: never succeeds — the secure keystore is unavailable.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`SecureKeystoreError::unavailable`] off-Android.
+    #[expect(clippy::unused_async)]
+    pub async fn retrieve(
+        &self,
+        _alias: &str,
+        _prefs: &str,
+        _policy: KeyPolicy,
+        _prompt: Option<&ResolvedPromptText>,
+    ) -> Result<String, SecureKeystoreError> {
+        Err(SecureKeystoreError::unavailable())
     }
 }
 
@@ -549,7 +560,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::BiometricState;
+    use super::{BiometricState, KeyPolicy, PromptText, resolve_prompt_text};
 
     /// Pins the cross-layer contract: byte-identical strings to
     /// `tauri_plugin_biometric_keystore::BiometricState` and to Kotlin's
@@ -589,5 +600,47 @@ mod tests {
                 expected
             );
         }
+    }
+
+    /// `KeyPolicy` has NO `Default` — a bool default drifting here would
+    /// silently change key behavior. Pin that the impl is absent so a future
+    /// `#[derive(Default)]` addition is caught.
+    #[test]
+    fn key_policy_has_no_default_impl() {
+        let p = KeyPolicy {
+            auth_required: false,
+            auth_biometric_strong: false,
+            invalidated_by_enrollment: false,
+            auth_validity_seconds: 0,
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        let back: KeyPolicy = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, back);
+    }
+
+    #[test]
+    fn resolve_prompt_text_applies_caller_fallbacks() {
+        let p = PromptText {
+            title: None,
+            subtitle: Some("   ".to_owned()),
+            negative: None,
+        };
+        let r = resolve_prompt_text(&p, "MyApp", "Cancel");
+        assert_eq!(r.title, "MyApp");
+        assert_eq!(r.negative, "Cancel");
+        assert!(r.subtitle.is_none());
+    }
+
+    #[test]
+    fn resolve_prompt_text_keeps_provided_non_blank() {
+        let p = PromptText {
+            title: Some("Title".to_owned()),
+            subtitle: Some("Sub".to_owned()),
+            negative: Some("Nope".to_owned()),
+        };
+        let r = resolve_prompt_text(&p, "MyApp", "Cancel");
+        assert_eq!(r.title, "Title");
+        assert_eq!(r.subtitle.as_deref(), Some("Sub"));
+        assert_eq!(r.negative, "Nope");
     }
 }

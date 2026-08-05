@@ -154,10 +154,7 @@ pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
 /// master that would orphan every existing envelope. First-run provisioning is
 /// [`provision_master`]'s job, called explicitly by [`startup_master_key`].
 async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[u8; 32]> {
-    if !ks.is_available().await.unwrap_or(false) {
-        return None;
-    }
-    let b64 = ks.retrieve().await.unwrap_or(None)?;
+    let b64 = keystore::retrieve_master(ks).await.unwrap_or(None)?;
     decode_master_key(&b64)
 }
 
@@ -167,19 +164,20 @@ async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> O
 /// cannot be sealed is discarded rather than used unpersisted, so it can never orphan
 /// later envelopes behind a key the next run won't have.
 async fn provision_master<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[u8; 32]> {
-    if !ks.is_available().await.unwrap_or(false) {
-        return None;
-    }
     // Never overwrite an existing entry: a present entry (even a malformed one)
     // may have envelopes sealed under it, so minting a fresh key would orphan
     // them. Degrade to passthrough instead — this restores the pre-split self-heal
     // (a garbled decode used to return None without touching the entry).
-    if ks.retrieve().await.unwrap_or(None).is_some() {
+    if keystore::retrieve_master(ks)
+        .await
+        .unwrap_or(None)
+        .is_some()
+    {
         return None;
     }
     let key = rustpass::seal::generate_master_key().ok()?;
     // Seal before adopting — an unpersisted key would orphan future envelopes.
-    ks.store(&B64.encode(key)).await.ok()?;
+    keystore::store_master(ks, &B64.encode(key)).await.ok()?;
     Some(key)
 }
 
@@ -191,7 +189,7 @@ async fn provision_master<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[
 /// authenticates. Otherwise the auth-free master key loads silently (the
 /// pre-app-lock path). Returns `(master_key, app_lock_enabled)`.
 async fn startup_master_key<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> (Option<[u8; 32]>, bool) {
-    if ks.has_stored_biometric().await.unwrap_or(false) {
+    if keystore::has_app_lock_enabled(ks).await {
         (None, true)
     } else {
         // Auth-free path: retrieve the sealed master, provisioning on first run.

@@ -40,10 +40,11 @@ use std::sync::atomic::Ordering;
 
 use base64::Engine;
 use rustpass::Error;
-use tauri_plugin_secure_keystore::{BiometricSlot, SecureKeystoreExt};
+use tauri_plugin_secure_keystore::SecureKeystoreExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
+use crate::keystore::BiometricSlot;
 use crate::migrations::MigrationOutcome;
 
 /// Advance an App-Lock-ON upgrader to the master/vault split, bumping
@@ -88,9 +89,8 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
         // this is a one-shot migration). A cancel/reject ⇒ Pending so the next
         // app_unlock retries; nothing is stranded (master auth-free, identity
         // still under the master and readable via the bridge).
-        if let Err(e) = ks
-            .store_biometric(&vault_b64, BiometricSlot::Vault, None)
-            .await
+        if let Err(e) =
+            crate::keystore::store_slot(ks, &vault_b64, BiometricSlot::Vault, None).await
         {
             log::warn!("0007_vault_key: vault ENCRYPT deferred: {e:?}");
             return Ok(MigrationOutcome::Pending);
@@ -110,7 +110,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     //    deleting it with no vault would lock the user out until a cold restart.
     //    Best-effort: a delete failure leaves a dead alias, not a brick.
     if state.store.has_identity()
-        && let Err(e) = ks.delete_biometric(BiometricSlot::Legacy).await
+        && let Err(e) = crate::keystore::delete_slot(ks, BiometricSlot::Legacy).await
     {
         log::warn!("0007_vault_key: legacy alias delete failed: {e:?}");
     }

@@ -373,22 +373,41 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * Retrieve the sealed value at `alias` behind biometric auth. Shows a
-     * CryptoObject DECRYPT prompt and resolves ONLY from a terminal callback.
+     * Retrieve the sealed value at `alias`. Auth-free policy decrypts directly
+     * (no prompt); auth-required policy shows a CryptoObject DECRYPT prompt and
+     * resolves ONLY from a terminal callback. Rejects with `BIOMETRIC_NOT_SET`
+     * when nothing is sealed (before any prompt). Identical to
+     * secure-keystore's `retrieve` so the two plugins merge mechanically.
      */
     @Command
     fun retrieve(invoke: Invoke) {
-        val fa = fragmentActivity() ?: run {
-            invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
-            return
-        }
         val args = invoke.parseArgs(RetrieveArgs::class.java)
+        val policy = args.policy ?: KeyPolicyArgs()
 
         val (iv, ciphertext) = readCipherData(prefs(args.prefs)) ?: run {
             invoke.reject("nothing stored", "BIOMETRIC_NOT_SET")
             return
         }
 
+        if (!policy.authRequired) {
+            // Auth-free keygen: decrypt directly, no prompt.
+            try {
+                val cipher = decryptionCipher(args.alias, iv)
+                val plain = cipher.doFinal(ciphertext)
+                val ret = JSObject()
+                ret.put("value", String(plain, UTF_8))
+                invoke.resolve(ret)
+                plain.fill(0)
+            } catch (e: Exception) {
+                invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+            }
+            return
+        }
+
+        val fa = fragmentActivity() ?: run {
+            invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
+            return
+        }
         val cipher = try {
             decryptionCipher(args.alias, iv)
         } catch (e: Exception) {

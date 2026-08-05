@@ -23,34 +23,15 @@ import org.robolectric.annotation.Config
  * `decodeBlob` preserves the original `readCipherData` semantics exactly: null
  * iff an input is null (nothing sealed); a present-but-empty string decodes to
  * an empty `ByteArray` (NOT null) — characterization, not a behavior change.
+ *
+ * NOTE: `resolvePromptText` (brand fallbacks), `BiometricSlot.fromString`, and
+ * `hasUsableBiometricInAnySlot` (the app-lock OR) moved out of the plugin to the
+ * app layer (the plugin now carries no brand string, no slot enum, no app-lock
+ * logic) — their tests moved with them. The plugin's pure helpers below stay.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class SecureKeystorePluginTest {
-
-    @Test
-    fun resolvePromptText_appliesGenericFallbacks() {
-        val r = resolvePromptText(null, "  ", null)
-        assertEquals("gpm", r.title)
-        assertEquals(null, r.subtitle)
-        assertEquals("Cancel", r.negative)
-    }
-
-    @Test
-    fun resolvePromptText_keepsProvidedText() {
-        val r = resolvePromptText("Title", "Sub", "Neg")
-        assertEquals("Title", r.title)
-        assertEquals("Sub", r.subtitle)
-        assertEquals("Neg", r.negative)
-    }
-
-    @Test
-    fun resolvePromptText_dropsBlankSubtitleOnly() {
-        val r = resolvePromptText("", "", "")
-        assertEquals("gpm", r.title)
-        assertEquals(null, r.subtitle)
-        assertEquals("Cancel", r.negative)
-    }
 
     @Test
     fun mapErrorCode_cancellations() {
@@ -76,9 +57,11 @@ class SecureKeystorePluginTest {
 
     @Test
     fun mapErrorCode_unknownCodesCollapseToFailed() {
+        // Framework codes not handled above collapse to the default bucket.
         assertEquals("BIOMETRIC_FAILED", mapErrorCode(BiometricPrompt.ERROR_UNABLE_TO_PROCESS))
         assertEquals("BIOMETRIC_FAILED", mapErrorCode(BiometricPrompt.ERROR_NO_SPACE))
         assertEquals("BIOMETRIC_FAILED", mapErrorCode(BiometricPrompt.ERROR_TIMEOUT))
+        // An entirely unknown code also collapses.
         assertEquals("BIOMETRIC_FAILED", mapErrorCode(99999))
     }
 
@@ -89,6 +72,7 @@ class SecureKeystorePluginTest {
 
     @Test
     fun safeName_fallsBackWhenSimpleNameEmpty() {
+        // An anonymous throwable subclass has an empty simple name.
         val anon = object : Throwable() {}
         assertEquals("error", safeName(anon))
     }
@@ -136,6 +120,7 @@ class SecureKeystorePluginTest {
 
     @Test
     fun mapBiometricState_noneEnrolledWithWeakPrint_returns_weakEnrolled() {
+        // A weak (Class 2) print is enrolled but no STRONG one; gpm needs Class 3.
         assertEquals(
             "weak_enrolled",
             mapBiometricState(
@@ -176,58 +161,5 @@ class SecureKeystorePluginTest {
                 BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
             ),
         )
-    }
-
-    // BiometricSlot.fromString (R064) — the slot string the Rust handle sends
-    // maps to the right alias/prefs; unspecified ⇒ LEGACY (the pre-split bridge:
-    // until the app shell threads an explicit slot, the biometric commands keep
-    // targeting the legacy gpm_master_key_biometric alias exactly as before).
-    @Test
-    fun biometricSlot_fromString_vault() {
-        val slot = BiometricSlot.fromString("vault")
-        assertEquals(BiometricSlot.VAULT, slot)
-        assertEquals("gpm_vault_key", slot.alias)
-        assertEquals("gpm_secure_keystoreVault", slot.prefsName)
-    }
-
-    @Test
-    fun biometricSlot_fromString_legacy() {
-        val slot = BiometricSlot.fromString("legacy")
-        assertEquals(BiometricSlot.LEGACY, slot)
-        assertEquals("gpm_master_key_biometric", slot.alias)
-        assertEquals("gpm_secure_keystoreBiometric", slot.prefsName)
-    }
-
-    @Test
-    fun biometricSlot_fromString_unspecifiedDefaultsToLegacy() {
-        assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString(null))
-        assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString(""))
-        assertEquals(BiometricSlot.LEGACY, BiometricSlot.fromString("garbage"))
-    }
-
-    // hasUsableBiometricInAnySlot (R064) — the dual-alias "app-lock is on" OR.
-    // Args: (legacyPresent, legacyUsable, vaultPresent, vaultUsable). Pins that
-    // EITHER slot with a usable key ⇒ true, and a present-but-dead key
-    // (usable=false, all-biometrics-removed) ⇒ false so a cold launch skips a
-    // doomed prompt. Covers the m0007 transition: legacy-only (pre-m0007),
-    // vault-only (post-m0007), and neither.
-    @Test
-    fun hasUsableBiometricInAnySlot_true_when_only_legacy_present_and_usable() {
-        assertEquals(true, hasUsableBiometricInAnySlot(true, true, false, false))
-    }
-
-    @Test
-    fun hasUsableBiometricInAnySlot_true_when_only_vault_present_and_usable() {
-        assertEquals(true, hasUsableBiometricInAnySlot(false, false, true, true))
-    }
-
-    @Test
-    fun hasUsableBiometricInAnySlot_false_when_neither_slot_present() {
-        assertEquals(false, hasUsableBiometricInAnySlot(false, false, false, false))
-    }
-
-    @Test
-    fun hasUsableBiometricInAnySlot_false_when_present_but_unusable() {
-        assertEquals(false, hasUsableBiometricInAnySlot(true, false, true, false))
     }
 }
