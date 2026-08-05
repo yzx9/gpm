@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - gpm's license broadened from **Apache-2.0** to **MIT OR Apache-2.0** — you can now use, modify, and distribute gpm under either license, at your option. This matches the convention used across the Rust ecosystem. Existing use under Apache-2.0 is unaffected; the new MIT option is purely additional.
+- gpm's look now leans into its **seal** identity: the background is a calm warm paper (light) or ink (dark) instead of cool gray, primary actions and focus use a muted celadon green, and a cinnabar-red brand accent appears only where identity and trust matter — a verified commit signature now reads as a cinnabar seal rather than a generic green check. The home screen and first-run setup also carry the app mark.
 
 ## [v0.17.2] - 2026-08-07
 

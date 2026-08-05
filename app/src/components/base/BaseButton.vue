@@ -26,8 +26,17 @@ const props = withDefaults(
      * Ignored for `action` variants (fixed compact size). */
     size?: "md" | "sm" | "xs";
     /** Foreground color for the `link` variant only (other variants define their
-     * own foreground). `default` inherits the surrounding text color. */
-    tone?: "default" | "muted" | "accent" | "danger" | "success" | "warn";
+     * own foreground). `default` inherits the surrounding text color. `seal` is
+     * the cinnabar brand tone (docs/design.md §5.1) — use sparingly for
+     * identity/authenticity moments, not routine affordances. */
+    tone?:
+      | "default"
+      | "muted"
+      | "accent"
+      | "seal"
+      | "danger"
+      | "success"
+      | "warn";
     /** Shows a leading spinner (white on `primary`, dark elsewhere) and disables. */
     loading?: boolean;
     /** Stretch to 100% width. */
@@ -222,6 +231,9 @@ const toneClass = computed(() =>
 }
 .tone-accent {
   color: var(--color-accent);
+}
+.tone-seal {
+  color: var(--color-seal);
 }
 .tone-danger {
   color: var(--color-danger);

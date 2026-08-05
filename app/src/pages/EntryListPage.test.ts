@@ -271,7 +271,7 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(authCall).toBe(2);
-      expect(wrapper.find("button.tone-success").exists()).toBe(true);
+      expect(wrapper.find("button.tone-seal").exists()).toBe(true);
     });
 
     it("reloads on unlock even if the cold-start fetch is still in flight (biometric race)", async () => {

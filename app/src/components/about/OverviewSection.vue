@@ -106,8 +106,10 @@ const builtWith = ["Rust", "Tauri", "Vue 3", "age", "libgit2"] as const;
     background: var(--color-hover);
   }
 }
+/* A cinnabar seal of approval on each design goal (docs/design.md §5.1:
+ * seal-like status marks), rather than generic success-green. */
 .goal-check {
-  color: var(--color-success, var(--color-accent));
+  color: var(--color-seal);
   margin-top: 0.1rem;
 }
 .tech-chip {

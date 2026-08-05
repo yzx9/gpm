@@ -19,7 +19,10 @@ import { useI18n } from "vue-i18n";
 const { t } = useI18n();
 const { signatureLabel } = useCommitSignature();
 
-type Tone = "success" | "warning" | "danger";
+// `seal` (cinnabar) is the brand tone for a verified signature — a verified
+// commit is literally a seal of authenticity/integrity (docs/design.md §3, §5.1),
+// distinct from semantic success-green and from danger-red.
+type Tone = "seal" | "warning" | "danger";
 
 const props = withDefaults(
   defineProps<{
@@ -48,16 +51,15 @@ const ICON: Record<CommitSigStatus["kind"], LucideIcon> = {
   unknown: CircleQuestionMark,
 };
 
-/** Map a status to the semantic tone that colours both the icon and the banner.
- * This is the single source of truth that used to be spread across the removed
- * `statusClass`/`statusBgClass` helpers (verified→green, bad_signature→red,
- * everything else→amber). Every kind is listed explicitly (no `default`) so a
- * future `CommitSigStatus` variant forces a compile error here, matching the
- * exhaustive `ICON` map and the `signatureLabel` switch in `useCommitSignature`. */
+/** Map a status to the tone that colours both the icon and the banner. Single
+ * source of truth (verified→cinnabar seal, bad_signature→red, everything
+ * else→amber). Every kind is listed explicitly (no `default`) so a future
+ * `CommitSigStatus` variant forces a compile error here, matching the exhaustive
+ * `ICON` map and the `signatureLabel` switch in `useCommitSignature`. */
 function tone(status: CommitSigStatus): Tone {
   switch (status.kind) {
     case "verified":
-      return "success";
+      return "seal";
     case "bad_signature":
       return "danger";
     case "unsigned":
@@ -71,12 +73,12 @@ function tone(status: CommitSigStatus): Tone {
 
 // Literal class strings so Tailwind's scanner generates the utilities.
 const GLYPH_TONE: Record<Tone, string> = {
-  success: "text-success",
+  seal: "text-seal",
   warning: "text-warning",
   danger: "text-danger",
 };
 const BANNER_TONE: Record<Tone, string> = {
-  success: "bg-success-soft text-success",
+  seal: "bg-seal-soft text-seal",
   warning: "bg-warning-soft text-warning",
   danger: "bg-danger-soft text-danger",
 };

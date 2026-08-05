@@ -27,19 +27,39 @@
   --text-xl: 1.25rem;
   --text-display: 1.75rem;
 
-  /* Colors — light mode defaults (dark overrides below) */
-  --color-page: #f8f9fa;
-  --color-surface: #ffffff;
-  --color-input: #fafafa;
-  --color-hover: #f0f0f5;
-  --color-default: #1a1a2e;
-  --color-muted: #6b6b6b;
-  --color-subtle: #aaaaaa;
-  --color-edge: #dddddd;
-  --color-accent: #3a5ce5;
-  --color-accent-deep: #2f5ae0;
+  /* Colors — light mode defaults (dark overrides below).
+     Three independent layers per docs/design.md §5:
+       • neutrals — warm-paper canvas + ink-green text (§5.3), the calm field.
+       • celadon  — the interaction color: primary actions, focus, selected
+                    controls, nav (§5.2). Exposed as the `--color-accent` family
+                    so every existing accent consumer becomes celadon without a
+                    per-file rename.
+       • cinnabar — the brand / seal color, scarce and meaningful (§5.1), via the
+                    new `--color-seal` family. Kept separate from semantic danger
+                    red so brand and error read as distinct values (§5.1, §18).
+     Semantic danger/success/info/warning stay independent of brand (§5). */
+  /* Neutrals — warm paper (§5.3) */
+  --color-page: #f5f3ee; /* canvas */
+  --color-surface: #fcfbf8; /* raised / surface-primary */
+  --color-input: #f6f3ec; /* recessed form field */
+  --color-hover: #ece9e1; /* hover / active overlay */
+  --color-default: #1b201d; /* text-primary */
+  --color-muted: #5b645f; /* text-secondary */
+  --color-subtle: #7b837e; /* text-tertiary */
+  --color-edge: #d8ddd8; /* border-default */
+  /* Celadon — interaction / activation (§5.2), aliased onto the accent role */
+  --color-accent: #4d6b61; /* celadon-600 */
+  --color-accent-deep: #3f5f57; /* celadon-700, pressed/hover */
+  --color-accent-soft: #dce8e3; /* celadon container */
   --color-on-accent: #ffffff;
-  --color-accent-ring: oklch(54.28% 0.2275 264.05 / 0.2);
+  /* Tracks --color-accent in either theme, so the focus ring adapts to dark too. */
+  --color-accent-ring: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  /* Cinnabar — brand / seal (§5.1) */
+  --color-seal: #8f3f36; /* seal-600 */
+  --color-seal-deep: #74312b; /* seal-700 */
+  --color-seal-soft: #f3e4e0; /* seal container */
+  --color-on-seal: #ffffff;
+  /* Semantic — independent of brand (§5) */
   --color-danger: #c33;
   --color-danger-deep: #a82828;
   --color-danger-soft: #fee;
@@ -73,17 +93,26 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --color-page: #0d1117;
-    --color-surface: #161b22;
-    --color-input: #1a1a2e;
-    --color-hover: #2f2f50;
-    --color-default: #e6edf3;
-    --color-muted: #9ba4ae;
-    --color-subtle: #6e7681;
-    --color-edge: #444;
-    --color-accent: #7c95ff;
-    --color-accent-deep: #5b7bf5;
-    --color-on-accent: #0d1117;
+    /* Neutrals — ink-green (§5.3) */
+    --color-page: #111613; /* canvas */
+    --color-surface: #181e1a; /* surface-primary */
+    --color-input: #1e2622; /* recessed */
+    --color-hover: #262e29; /* hover / active overlay */
+    --color-default: #eef2ed; /* text-primary */
+    --color-muted: #afbab3; /* text-secondary */
+    --color-subtle: #849088; /* text-tertiary */
+    --color-edge: #344039; /* border-default */
+    /* Celadon — lifted for dark (§5.2). The ring auto-adapts via color-mix. */
+    --color-accent: #88ada1; /* celadon-dark-600 */
+    --color-accent-deep: #71968b; /* celadon-dark-700 */
+    --color-accent-soft: #253d36; /* celadon-dark container */
+    --color-on-accent: #111613;
+    /* Cinnabar — lifted for dark (§5.1) */
+    --color-seal: #cf796d; /* seal-dark-600 */
+    --color-seal-deep: #b96559; /* seal-dark-700 */
+    --color-seal-soft: #4c2925; /* seal-dark container */
+    --color-on-seal: #111613;
+    /* Semantic — independent of brand */
     --color-danger: #ff6b6b;
     --color-danger-deep: #e85555;
     --color-danger-soft: #3a1a1a;

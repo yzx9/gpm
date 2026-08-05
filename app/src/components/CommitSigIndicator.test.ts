@@ -21,10 +21,10 @@ const UNSUPPORTED: CommitSigStatus = {
 const UNKNOWN: CommitSigStatus = { kind: "unknown" };
 
 describe("CommitSigIndicator — glyph variant (default)", () => {
-  it("renders an icon with the success tone for verified", () => {
+  it("renders an icon with the seal tone for verified", () => {
     const w = mount(CommitSigIndicator, { props: { status: VERIFIED } });
     expect(w.find("svg").exists()).toBe(true);
-    expect(w.classes()).toContain("text-success");
+    expect(w.classes()).toContain("text-seal");
   });
 
   it("renders an icon with the danger tone for bad_signature", () => {
@@ -38,7 +38,7 @@ describe("CommitSigIndicator — glyph variant (default)", () => {
       const w = mount(CommitSigIndicator, { props: { status } });
       expect(w.find("svg").exists()).toBe(true);
       expect(w.classes()).toContain("text-warning");
-      expect(w.classes()).not.toContain("text-success");
+      expect(w.classes()).not.toContain("text-seal");
       expect(w.classes()).not.toContain("text-danger");
     }
   });
@@ -61,12 +61,12 @@ describe("CommitSigIndicator — glyph variant (default)", () => {
 });
 
 describe("CommitSigIndicator — banner variant", () => {
-  it("renders label + fingerprint on the success background for verified", () => {
+  it("renders label + fingerprint on the seal background for verified", () => {
     const w = mount(CommitSigIndicator, {
       props: { status: VERIFIED, variant: "banner" },
     });
-    expect(w.classes()).toContain("bg-success-soft");
-    expect(w.classes()).toContain("text-success");
+    expect(w.classes()).toContain("bg-seal-soft");
+    expect(w.classes()).toContain("text-seal");
     expect(w.text()).toContain("Verified");
     expect(w.text()).toContain("AB:CD");
   });
