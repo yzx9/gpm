@@ -33,6 +33,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import BrandMark from "@/components/BrandMark.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
@@ -52,7 +53,6 @@ import {
   CircleCheck,
   CircleDashed,
   Lock,
-  LockKeyhole,
   Plus,
   RefreshCw,
   Search,
@@ -133,10 +133,11 @@ const resolving = ref(false);
 const divergeError = ref("");
 
 /** The indicator badge for the current authenticity state. `tone` drives the
- * lamp color via BaseButton's link variant (success / warn / muted). */
+ * lamp color via BaseButton's link variant (seal / warn / muted). A verified
+ * head shows as a cinnabar seal — the brand mark for authenticity (§5.1). */
 const badge = computed<{
   icon: LucideIcon;
-  tone: "muted" | "success" | "warn";
+  tone: "muted" | "seal" | "warn";
   title: string;
 }>(() => {
   const s = authState.value;
@@ -147,7 +148,7 @@ const badge = computed<{
     case "verified":
       return {
         icon: CircleCheck,
-        tone: "success",
+        tone: "seal",
         title: t("entries.badgeTrustedHead"),
       };
     case "unknown":
@@ -584,7 +585,7 @@ defineExpose({ syncRepo });
       <template #nav>
         <div class="flex items-center gap-1">
           <h1 class="text-xl flex items-center gap-1">
-            <BaseIcon :icon="LockKeyhole" :size="24" /> gpm
+            <BrandMark :size="24" /> gpm
           </h1>
           <BaseButton
             variant="link"
@@ -718,7 +719,7 @@ defineExpose({ syncRepo });
         <BaseIcon
           :icon="Lock"
           :size="40"
-          class="block mb-2 mx-auto text-muted"
+          class="block mb-2 mx-auto text-seal"
         />
         <p>{{ t("entries.empty") }}</p>
         <p class="text-xs text-muted mt-1">

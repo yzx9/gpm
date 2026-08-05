@@ -6,7 +6,19 @@
     <link rel="icon" type="image/png" sizes="64x64" href="/icon-64.png" />
     <link rel="icon" type="image/png" sizes="128x128" href="/icon-128.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#4a6cf7" />
+    <!-- Chrome (status bar / recents) matches the warm-paper / ink canvas in
+         either mode (docs/design.md §5.3) — neutral chrome so the cinnabar and
+         celadon inside the content carry the brand, not the frame. -->
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: light)"
+      content="#f5f3ee"
+    />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: dark)"
+      content="#111613"
+    />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"

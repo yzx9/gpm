@@ -749,7 +749,7 @@ onMounted(async () => {
         <!-- Encrypted: change passphrase -->
         <template v-else>
           <p class="text-xs text-muted mb-2 flex items-center gap-1">
-            <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
+            <BaseIcon :icon="CircleCheck" :size="14" class="text-seal" />
             {{ t("settings.passphrase.encryptedHint") }}
           </p>
           <BaseButton variant="action" @click="openPassphraseModal('change')">
@@ -828,7 +828,7 @@ onMounted(async () => {
 
         <template v-else>
           <p class="text-xs text-muted mb-2 flex items-center gap-1">
-            <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
+            <BaseIcon :icon="CircleCheck" :size="14" class="text-seal" />
             {{ t("settings.appLock.enabledHint") }}
           </p>
           <BaseButton

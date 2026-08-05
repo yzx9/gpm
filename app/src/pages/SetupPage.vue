@@ -3,11 +3,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
-import BaseIcon from "@/components/base/BaseIcon.vue";
+import BrandMark from "@/components/BrandMark.vue";
 import CloneFlow from "@/components/setup/CloneFlow.vue";
 import CreateFlow from "@/components/setup/CreateFlow.vue";
 import { useSecureClaim } from "@/composables";
-import { LockKeyhole } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -47,7 +46,7 @@ function onDone() {
       <h1
         class="text-center text-display mb-1 flex items-center justify-center gap-2"
       >
-        <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
+        <BrandMark :size="28" /> gpm
       </h1>
       <p class="text-center text-muted text-sm mb-6">
         {{ t("setup.tagline") }}
