@@ -455,8 +455,6 @@ pub fn run() {
         // adds no new permission prompt. Used by the frontend for the unsolicited
         // verbose notices (boot-still-active, deadline-reverted).
         .plugin(tauri_plugin_notification::init())
-        // Best-effort display language baked in pre-paint; `resolved_locale` IPC reconciles a pinned preference after mount (see `app_config`).
-        .append_invoke_initialization_script(app_config::locale_init_script())
         .setup(|app| {
             // Resolve the config dir + read pref.json synchronously so the pinned
             // `theme_mode` can be baked into the main window's init script before
@@ -473,11 +471,16 @@ pub fn run() {
                 tauri::async_runtime::block_on(app_config::AppConfigStore::new(&config_dir));
             let theme_script =
                 app_config::theme_init_script(app_config.get_pref().theme_mode.as_deref());
+            let locale_script = app_config::locale_init_script(&app_config.resolved_locale());
             // `create: false` in tauri.conf.json keeps Tauri from auto-creating
-            // the main window; build it here with the per-window theme init
-            // script. The global locale init script still applies (Tauri
-            // prepends global init scripts to every webview). The "main" label
-            // must match the capabilities scope in capabilities/{default,mobile}.json.
+            // the main window; build it here with the per-window init scripts.
+            // Both the locale (pinned-or-system, from `resolved_locale`) and the
+            // theme script are registered per-window — they can only be composed
+            // once `pref.json` is read (unreadable at Tauri `Builder` time on
+            // Android). Any future `WebviewWindowBuilder` must chain both, since
+            // the per-window approach no longer auto-covers new windows the way a
+            // global init script did. The "main" label must match the
+            // capabilities scope in capabilities/{default,mobile}.json.
             let main_window = app
                 .config()
                 .app
@@ -487,6 +490,7 @@ pub fn run() {
                 .expect("main window config missing (tauri.conf.json)");
             WebviewWindowBuilder::from_config(app.handle(), main_window)?
                 .initialization_script(theme_script)
+                .initialization_script(locale_script)
                 .build()?;
             let state = init_state(app, config_dir, app_config);
             // Apply the persisted background-sync cadence on launch

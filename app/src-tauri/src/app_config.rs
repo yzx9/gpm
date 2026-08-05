@@ -660,34 +660,48 @@ fn normalize_system_locale(raw: Option<&str>) -> String {
     }
 }
 
-/// The locale to bake into the `WebView` initialization script.
+/// Serialize `value` to a JSON literal, escaped for an HTML `<script>` context.
 ///
-/// This runs at Tauri `Builder` time, before the `App` exists — so on Android
-/// the config directory (and thus `pref.json`/`app.json`) is not yet readable
-/// (it is only resolvable through the running app's mobile-plugin IPC). The
-/// system locale is readable this early, though (`sys_locale` reads it via
-/// libc, no app required, on every platform), so the inject carries the "track
-/// system" resolution. This is exactly correct for users who haven't pinned a
-/// language (the default, and the first-launch case), and the boot
-/// `resolved_locale` IPC corrects it within one frame for users who have.
-pub(crate) fn init_script_locale() -> String {
-    normalize_system_locale(sys_locale::get_locale().as_deref())
+/// `</` is escaped to `<\/` so a planted value can't close the injected
+/// `<script>` tag early on Android `WebViews` without `addDocumentStartJavaScript`
+/// (`serde_json` doesn't escape `/`; `<\/` is JSON-valid, JS-equivalent, and
+/// HTML-safe). Shared by the locale and theme init scripts.
+fn init_script_json<T: Serialize + ?Sized>(value: &T) -> String {
+    serde_json::to_string(value)
+        .expect("init-script values serialize to a JSON literal")
+        .replace("</", "<\\/")
 }
 
-/// The full JavaScript snippet that bakes the boot locale into the `WebView` as
-/// `window.__GPM_LOCALE__` before the page's own scripts run. Registered on the
-/// Tauri `Builder` (`append_invoke_initialization_script`) so it applies to
-/// every webview on every platform, riding the same channel that sets up
-/// `__TAURI_INTERNALS__`.
-pub(crate) fn locale_init_script() -> String {
-    let locale = init_script_locale();
-    let locale_json = serde_json::to_string(&locale)
-        .expect("locale always serializes to a JS string literal")
-        // Escape `</` so a planted locale can't break out of the HTML <script>
-        // Tauri injects on Android WebViews without addDocumentStartJavaScript
-        // (serde_json doesn't escape `/`; `<\/` is JSON-valid, JS-equivalent).
-        .replace("</", "<\\/");
-    format!("window.__GPM_LOCALE__ = {locale_json};")
+/// Wrap `body` in an immediately-invoked function expression so the script's
+/// locals (e.g. `var d`) stay scoped and don't leak into the page's global
+/// scope. Shared by the locale and theme init scripts.
+fn with_iife(body: &str) -> String {
+    format!("(function(){{{body}}})();")
+}
+
+/// The JavaScript snippet that bakes the resolved locale into the `WebView`
+/// **before first paint**, as both `window.__GPM_LOCALE__` and `<html lang>`.
+///
+/// Composed in `.setup()` from [`AppConfigStore::resolved_locale`] — the pinned
+/// locale when one is set, otherwise the normalized system locale — and
+/// registered per-window (on the `WebviewWindowBuilder`), because it can only be
+/// composed once `pref.json` has been read (unreadable at Tauri `Builder` time
+/// on Android). The frontend reads `__GPM_LOCALE__` synchronously at module
+/// load, so the right value here means the mount frame renders the pinned
+/// language with no one-frame system-locale flash.
+///
+/// Setting `<html lang>` too closes the parallel a11y gap: `index.html` hardcodes
+/// `lang="en"`, so until the frontend sets it a screen reader on a pinned non-en
+/// device reads English pronunciation. The init script runs pre-HTML-parse
+/// (document start), where `document.documentElement` already exists; the
+/// `if (d)` guard keeps the `lang` set a harmless no-op if it ever does not. The
+/// value is always a supported code from `resolved_locale`, so no sanitization is
+/// needed beyond the shared [`init_script_json`] escape.
+pub(crate) fn locale_init_script(locale: &str) -> String {
+    let json = init_script_json(locale);
+    with_iife(&format!(
+        "window.__GPM_LOCALE__ = {json};var d=document.documentElement;if(d){{d.lang={json};}}"
+    ))
 }
 
 /// The JavaScript snippet that bakes the pinned color-scheme preference into
@@ -695,12 +709,10 @@ pub(crate) fn locale_init_script() -> String {
 /// one-frame flash a pinned Light/Dark would otherwise show (the CSS
 /// `color-scheme` and app-color variables both key off `[data-theme]`).
 ///
-/// Unlike [`locale_init_script`], this is registered per-window (on the
-/// `WebviewWindowBuilder` inside `.setup()`), not globally on the Builder —
-/// because it can only be composed once `pref.json` has been read, which needs
-/// the running app's config dir (unreadable at Tauri `Builder` time on
-/// Android). The global locale script still applies to the same window (Tauri
-/// prepends global init scripts ahead of per-window ones).
+/// Registered per-window (on the `WebviewWindowBuilder` inside `.setup()`),
+/// alongside [`locale_init_script`], because both can only be composed once
+/// `pref.json` has been read — which needs the running app's config dir
+/// (unreadable at Tauri `Builder` time on Android).
 ///
 /// `None` (track system) clears any stale `data-theme` — defensive, since the
 /// attribute starts absent on a fresh document. `Some("light")`/`Some("dark")`
@@ -712,15 +724,10 @@ pub(crate) fn locale_init_script() -> String {
 /// the JS — a garbage value (a corrupt `pref.json`) degrades to system instead
 /// of poisoning frame 0, mirroring `normalize_theme_mode`.
 pub(crate) fn theme_init_script(theme_mode: Option<&str>) -> String {
-    let mode_json = serde_json::to_string(&theme_mode)
-        .expect("theme_mode serializes to a JS value (string or null)")
-        // Escape `</` so a planted theme_mode can't break out of the HTML
-        // <script> Tauri injects on Android WebViews without
-        // addDocumentStartJavaScript (serde_json doesn't escape `/`).
-        .replace("</", "<\\/");
-    format!(
-        "(function(){{var m={mode_json},d=document.documentElement;if(d){{if(m==='light'||m==='dark'){{d.setAttribute('data-theme',m);}}else{{d.removeAttribute('data-theme');}}}}}})();"
-    )
+    let mode_json = init_script_json(&theme_mode);
+    with_iife(&format!(
+        "var m={mode_json},d=document.documentElement;if(d){{if(m==='light'||m==='dark'){{d.setAttribute('data-theme',m);}}else{{d.removeAttribute('data-theme');}}}}"
+    ))
 }
 
 /// Read `app.json` (the pre-split single-file shape) from `config_dir` and
@@ -1327,9 +1334,11 @@ pub(crate) async fn set_theme_mode(
     state.app_config.set_theme_mode(mode).await
 }
 
-/// The authoritative locale the app should render in. The frontend uses this at
-/// boot to reconcile against the best-effort value baked into the `WebView` init
-/// script (which can only carry the system locale, not a pinned preference).
+/// The authoritative locale the app should render in. The frontend reconciles
+/// against the value the `.setup()` init script already baked in pre-paint
+/// (which carries the resolved — pinned-or-system — locale); this is the
+/// post-mount safety net for the rare case where `pref.json` was unreadable at
+/// setup.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn resolved_locale(state: State<'_, AppState>) -> String {
@@ -1733,15 +1742,37 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn init_script_locale_returns_supported() {
-        // The init script runs before app.json is readable, so it carries the
-        // system-locale resolution — always a supported code.
-        let resolved = init_script_locale();
-        assert!(
-            is_supported_locale(&resolved),
-            "init script locale must be supported, got {resolved}"
+    #[test]
+    fn locale_init_script_emits_canonical_locale_assignment() {
+        // The resolved locale bakes both window.__GPM_LOCALE__ AND <html lang>
+        // into the pre-paint init script so resolveBootLocale() reads the pinned
+        // (or system-fallback) locale at module load and a screen reader gets
+        // the right pronunciation from frame 0. Exact-match locks the format!
+        // shape (a stray/missing brace, quote, or `;` fails).
+        assert_eq!(
+            locale_init_script("zh-CN"),
+            r#"(function(){window.__GPM_LOCALE__ = "zh-CN";var d=document.documentElement;if(d){d.lang="zh-CN";}})();"#
         );
+        assert_eq!(
+            locale_init_script("en"),
+            r#"(function(){window.__GPM_LOCALE__ = "en";var d=document.documentElement;if(d){d.lang="en";}})();"#
+        );
+    }
+
+    #[test]
+    fn locale_init_script_escapes_html_script_close_tag() {
+        // A `</script>` in a planted locale must not break out of the HTML
+        // <script> Tauri injects on older Android WebViews. resolved_locale only
+        // ever returns en/zh-CN, so this is purely defensive — mirroring the
+        // theme guard (prior learning: tauri-init-script-script-breakout). The
+        // escape lives in the shared init_script_json.
+        let payload = "</script><script>alert(1)</script>";
+        let s = locale_init_script(payload);
+        assert!(
+            !s.contains("</script"),
+            "raw </script must not survive, got: {s}"
+        );
+        assert!(s.contains("<\\/script"), "must escape </ as <\\/, got: {s}");
     }
 
     #[test]

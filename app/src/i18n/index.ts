@@ -12,17 +12,15 @@ import { createI18n } from "vue-i18n";
  * Two paths feed the active locale, so the app renders in the right language
  * on the first frame wherever possible and is eventually correct everywhere:
  *
- *  1. Best-effort inject — the backend bakes the system-locale resolution into
- *     `window.__GPM_LOCALE__` before the page's scripts run (Tauri init script).
- *     This gives a zero-flash first frame for the common case (user tracking the
- *     system language), because the backend's own resolution also starts from
- *     the system locale.
+ *  1. Pre-paint inject — the backend bakes the resolved locale (pinned when one
+ *     is set, otherwise the system locale) into `window.__GPM_LOCALE__` **and**
+ *     `<html lang>` before the page's scripts run (a Tauri init script composed
+ *     in `.setup()`, where `pref.json` is readable). This gives a zero-flash
+ *     first frame for both the track-system case and a pinned preference.
  *  2. Authoritative reconcile — after mount, the frontend asks the backend for
  *     the resolved locale (`resolved_locale` IPC) and corrects if it differs.
- *     This is the only path that can honor a pinned preference, since the init
- *     script can only carry the system locale (app.json isn't readable at Tauri
- *     Builder time on Android). On a pinned-preference device the first frame
- *     is the system-locale guess and the reconcile switches within one frame.
+ *     In the normal case the inject already matched, so this is an idempotent
+ *     safety net for the rare case where `pref.json` was unreadable at setup.
  *
  * The injected value is always the literal `"en"` or `"zh-CN"` (the backend
  * normalizes before injecting), so reading it needs no sanitization — only the
@@ -75,7 +73,8 @@ interface GpmLocaleGlobals {
  * NOT consult `navigator.language` here — on Android WebView that reflects the
  * app locale, which on no-GMS OEM builds is frequently English even when the
  * system is Chinese, so it is a less faithful guess than the plain default. The
- * boot IPC reconcile corrects any mismatch within a frame regardless.
+ * inject normally already carries the resolved (pinned-or-system) locale; the
+ * post-mount `resolved_locale` reconcile is just a safety net.
  */
 export function resolveBootLocale(): SupportedLocale {
   const injected = (globalThis as GpmLocaleGlobals).__GPM_LOCALE__;

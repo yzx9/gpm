@@ -214,8 +214,9 @@ installRouteGuards(router);
 // Bootstrap. Wrapped async so the boot locale's `common` bundle can load before
 // the first paint when the boot locale isn't the default (whose `common` is
 // already inlined in `createI18n`) — that keeps nav/button strings in the right
-// language on the first frame for, e.g., a Chinese-system user. After mount the
-// backend reconcile corrects a pinned preference within one frame.
+// language on the first frame. The pre-paint init script already bakes in the
+// resolved (pinned-or-system) locale, so the post-mount reconcile below is a
+// safety net, not the primary path.
 void (async () => {
   const app = createApp(App);
   app.use(router);
@@ -239,10 +240,11 @@ void (async () => {
   app.provide(BACK_HANDLER_KEY, backHandlerRegistry);
 
   const boot = currentLocale();
-  // Mirror the boot locale to <html lang> for accessibility and :lang() CSS.
-  // `setLocale` does this on every switch, but the boot locale is never switched
-  // to (the reconcile is a no-op when it already matches), so set it once here
-  // or the first frame renders without a lang attribute.
+  // Mirror the boot locale to <html lang> for accessibility. The pre-paint init
+  // script already sets this (so screen readers are correct from frame 0); this
+  // is the JS-side authoritative set, idempotent with the inject. `setLocale`
+  // mirrors it on every later switch, but the boot locale is never switched to,
+  // so set it once here too.
   document.documentElement.lang = boot;
   if (boot !== DEFAULT_LOCALE) {
     // loadBundle already swallows a missing bundle; the `.catch` makes the
@@ -257,6 +259,10 @@ void (async () => {
   // native BiometricPrompt. Like `common`, a failed load never blocks mount.
   await loadBundle(boot, "native").catch(() => {});
   app.mount("#app");
+  // Safety net: the Rust setup closure already baked the resolved locale into
+  // the WebView's pre-paint init script (see locale_init_script in
+  // app_config.rs), so frame 0 renders the right language. This reconcile
+  // corrects the rare case where pref.json was unreadable at setup.
   void reconcileLocaleFromBackend();
   // Safety net: the Rust setup closure already baked the pinned theme into the
   // WebView's pre-paint init script (see theme_init_script in app_config.rs), so
