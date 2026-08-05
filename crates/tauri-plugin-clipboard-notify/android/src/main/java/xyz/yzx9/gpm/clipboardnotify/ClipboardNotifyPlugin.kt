@@ -221,8 +221,11 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         val notif =
             NotificationCompat.Builder(activity, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_clipboard_notify)
-                .setContentTitle(args.title?.takeUnless { it.isBlank() } ?: "gpm")
-                .setContentText(args.body?.takeUnless { it.isBlank() } ?: "Tap to clear")
+                // Rust resolves these against caller-supplied fallbacks before the
+                // IPC, so they are already non-blank here; the plugin bakes NO brand
+                // string of its own.
+                .setContentTitle(args.title)
+                .setContentText(args.body)
                 .setOngoing(true)
                 .setAutoCancel(false)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
@@ -266,21 +269,22 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
 
     /**
      * Create the notification channel if absent. The localized name/description
-     * are baked in at creation time: Android ignores
-     * name changes on an existing channel, so a locale switch does NOT recreate
-     * it (that would reset the user's per-channel settings) — the channel name
-     * reflects the locale active at first creation. Generic fallbacks (NOT a
-     * duplicate of native.json/en) when the frontend omits them.
+     * are baked in at creation time: Android ignores name changes on an existing
+     * channel, so a locale switch does NOT recreate it (that would reset the
+     * user's per-channel settings) — the channel name reflects the locale active
+     * at first creation. The caller (Rust) supplies already-resolved, non-blank
+     * values; this plugin bakes NO brand string (a missing name falls back to the
+     * non-brand channel id, not an app name).
      */
     private fun ensureChannel(channelName: String?, channelDescription: String?) {
         if (SDK_INT >= Build.VERSION_CODES.O) {
             val channel =
                 NotificationChannel(
                     CHANNEL_ID,
-                    channelName?.takeUnless { it.isBlank() } ?: "gpm",
+                    channelName ?: CHANNEL_ID,
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = channelDescription?.takeUnless { it.isBlank() } ?: "gpm"
+                    description = channelDescription
                 }
             NotificationManagerCompat.from(activity).createNotificationChannel(channel)
         }

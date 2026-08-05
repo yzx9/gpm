@@ -21,6 +21,15 @@ use crate::AppState;
 use crate::identity::{arm_clipboard_clear, disarm_clipboard_clear};
 use crate::read::clipboard_clear_plan;
 
+// gpm brand fallbacks for the clipboard-clear notification. The plugin carries
+// no brand string — it surfaces only caller-resolved text, so these live here
+// (the app layer) and are applied via `resolve_notification_text` before the
+// plugin sees them. Mirrors the keystore brand-fallback pattern.
+const NOTIF_FALLBACK_TITLE: &str = "gpm";
+const NOTIF_FALLBACK_BODY: &str = "Tap to clear";
+const NOTIF_FALLBACK_CHANNEL_NAME: &str = "gpm";
+const NOTIF_FALLBACK_CHANNEL_DESCRIPTION: &str = "gpm";
+
 /// Write `text` to the system clipboard, then arm the cancellable auto-clear
 /// for the configured `clipboard_clear_secs` and post the sticky notification.
 /// Returns the resolved auto-clear seconds (0 when the user set *Never*); the
@@ -46,8 +55,18 @@ pub(crate) async fn write_and_schedule_clear<R: Runtime>(
     let (spawn_clear, cleared_after_secs) = clipboard_clear_plan(clear_secs);
     if spawn_clear {
         arm_clipboard_clear(state, app, clear_secs);
+        // Resolve the frontend-supplied notification text against gpm's brand
+        // fallbacks here (the plugin applies no fallback of its own).
+        let resolved = tauri_plugin_clipboard_notify::resolve_notification_text(
+            notify_text,
+            clear_secs,
+            NOTIF_FALLBACK_TITLE,
+            NOTIF_FALLBACK_BODY,
+            NOTIF_FALLBACK_CHANNEL_NAME,
+            NOTIF_FALLBACK_CHANNEL_DESCRIPTION,
+        );
         app.clipboard_notify()
-            .post_notification(clear_secs, notify_text)
+            .post_notification(clear_secs, &resolved)
             .await;
     } else {
         // Never: abort any in-flight clear from a prior shorter setting.

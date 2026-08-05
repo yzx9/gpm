@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Tauri plugin that posts a sticky Android notification while a secret is on
-//! the clipboard, so the user can tap to clear it early without gpm
-//! foregrounding.
+//! the clipboard, so the user can tap to clear it early without bringing the
+//! host app to the foreground.
 //!
 //! **Backend-only** from the capability standpoint: the frontend never calls
 //! `plugin:clipboard-notify|*` directly. App commands in `src-tauri/src/`
@@ -26,12 +26,11 @@ use std::marker::PhantomData;
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime};
 
-// `Deserialize` is used unconditionally (the [`NotifyText`] IPC type deserializes
-// on every target); `Serialize` + `PluginHandle` are Android-only (Payloads +
-// the mobile handle).
-use serde::Deserialize;
-#[cfg(target_os = "android")]
-use serde::Serialize;
+// `Deserialize`/`Serialize` are used unconditionally (the [`NotifyText`] IPC
+// type deserializes on every target; `ResolvedNotificationText` serializes on
+// every target so its construction is unit-testable); `PluginHandle` is
+// Android-only (the mobile handle).
+use serde::{Deserialize, Serialize};
 #[cfg(target_os = "android")]
 use tauri::plugin::PluginHandle;
 
@@ -75,6 +74,76 @@ impl NotifyText {
         self.body_template
             .as_ref()
             .map(|t| t.replace("{secs}", &secs.to_string()))
+    }
+}
+
+/// [`NotifyText`] with caller-supplied fallbacks applied — every field is
+/// non-empty, and the body's `{secs}` hole is substituted. Passed to
+/// [`ClipboardNotify::post_notification`]. The plugin never bakes a brand string;
+/// the app supplies the fallback values (e.g. its own app name).
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedNotificationText {
+    /// Notification title (non-empty).
+    pub title: String,
+    /// Notification body with `{secs}` substituted (non-empty).
+    pub body: String,
+    /// Notification channel display name (non-empty).
+    #[serde(rename = "channelName")]
+    pub channel_name: String,
+    /// Notification channel description (non-empty).
+    #[serde(rename = "channelDescription")]
+    pub channel_description: String,
+}
+
+/// Resolve [`NotifyText`] against caller-supplied fallbacks. Pure (no platform
+/// code). A blank provided field falls back; the body template's `{secs}` hole is
+/// substituted against `secs` in BOTH the provided template and the fallback.
+/// `text = None` resolves every field to its fallback (the frontend omitted the
+/// localized text). The plugin carries no brand string — the app supplies the
+/// fallbacks.
+#[must_use]
+pub fn resolve_notification_text(
+    text: Option<&NotifyText>,
+    secs: u64,
+    fallback_title: &str,
+    fallback_body: &str,
+    fallback_channel_name: &str,
+    fallback_channel_description: &str,
+) -> ResolvedNotificationText {
+    fn non_blank(s: &str) -> &str {
+        s.trim_start().trim_end()
+    }
+    /// Pick a non-blank provided field, else the fallback.
+    fn pick(provided: Option<&str>, fallback: &str) -> String {
+        provided
+            .map(non_blank)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(fallback)
+            .to_owned()
+    }
+    /// Like [`pick`], but also substitute `{secs}` (the body template).
+    fn pick_secs(provided: Option<&str>, fallback: &str, secs: u64) -> String {
+        let chosen = provided
+            .map(non_blank)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(fallback);
+        chosen.replace("{secs}", &secs.to_string())
+    }
+    ResolvedNotificationText {
+        title: pick(text.and_then(|t| t.title.as_deref()), fallback_title),
+        body: pick_secs(
+            text.and_then(|t| t.body_template.as_deref()),
+            fallback_body,
+            secs,
+        ),
+        channel_name: pick(
+            text.and_then(|t| t.channel_name.as_deref()),
+            fallback_channel_name,
+        ),
+        channel_description: pick(
+            text.and_then(|t| t.channel_description.as_deref()),
+            fallback_channel_description,
+        ),
     }
 }
 
@@ -153,20 +222,20 @@ impl<R: Runtime> ClipboardNotify<R> {
     }
 
     /// Post (or update, by fixed ID) the sticky clipboard-clear notification
-    /// armed to fire `secs` as the displayed auto-clear window. `text` supplies
-    /// the localized title/body/channel; the body template's `{secs}`
-    /// hole is resolved here against `secs`. Best-effort: errors are swallowed
-    /// (a missing notification never fails a copy).
-    pub async fn post_notification(&self, secs: u64, text: Option<&NotifyText>) {
+    /// armed to fire `secs` as the displayed auto-clear window. `text` is the
+    /// already-resolved notification text (see [`resolve_notification_text`]) —
+    /// the plugin applies no fallback of its own. Best-effort: errors are
+    /// swallowed (a missing notification never fails a copy).
+    pub async fn post_notification(&self, secs: u64, text: &ResolvedNotificationText) {
         #[derive(Serialize)]
         struct Payload {
             secs: u64,
-            title: Option<String>,
-            body: Option<String>,
+            title: String,
+            body: String,
             #[serde(rename = "channelName")]
-            channel_name: Option<String>,
+            channel_name: String,
             #[serde(rename = "channelDescription")]
-            channel_description: Option<String>,
+            channel_description: String,
         }
         let _ = self
             .0
@@ -174,10 +243,10 @@ impl<R: Runtime> ClipboardNotify<R> {
                 "postClipboardNotification",
                 Payload {
                     secs,
-                    title: text.and_then(|x| x.title.clone()),
-                    body: text.and_then(|x| x.resolve_body(secs)),
-                    channel_name: text.and_then(|x| x.channel_name.clone()),
-                    channel_description: text.and_then(|x| x.channel_description.clone()),
+                    title: text.title.clone(),
+                    body: text.body.clone(),
+                    channel_name: text.channel_name.clone(),
+                    channel_description: text.channel_description.clone(),
                 },
             )
             .await;
@@ -229,7 +298,7 @@ impl<R: Runtime> ClipboardNotify<R> {
     }
     /// Inert no-op.
     #[expect(clippy::unused_async)]
-    pub async fn post_notification(&self, _secs: u64, _text: Option<&NotifyText>) {}
+    pub async fn post_notification(&self, _secs: u64, _text: &ResolvedNotificationText) {}
     /// Inert no-op.
     #[expect(clippy::unused_async)]
     pub async fn dismiss(&self) {}
@@ -289,7 +358,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::NotifyText;
+    use super::{NotifyText, resolve_notification_text};
 
     fn text(body_template: &str) -> NotifyText {
         NotifyText {
@@ -330,5 +399,39 @@ mod tests {
             text("{secs} 秒后自动清除").resolve_body(60).as_deref(),
             Some("60 秒后自动清除"),
         );
+    }
+
+    #[test]
+    fn resolve_notification_text_none_uses_all_fallbacks() {
+        // No NotifyText at all → every field is its caller fallback. The body
+        // fallback's {secs} (if any) is substituted; a plain fallback passes thru.
+        let r = resolve_notification_text(None, 45, "MyApp", "Tap to clear", "MyApp", "MyApp desc");
+        assert_eq!(r.title, "MyApp");
+        assert_eq!(r.body, "Tap to clear");
+        assert_eq!(r.channel_name, "MyApp");
+        assert_eq!(r.channel_description, "MyApp desc");
+    }
+
+    #[test]
+    fn resolve_notification_text_keeps_provided_and_substitutes_secs() {
+        let t = NotifyText {
+            title: Some("Custom".to_owned()),
+            body_template: Some("Clears in {secs}s".to_owned()),
+            channel_name: Some("  ".to_owned()), // blank → fallback
+            channel_description: None,
+        };
+        let r =
+            resolve_notification_text(Some(&t), 30, "MyApp", "Tap to clear", "MyApp", "MyApp desc");
+        assert_eq!(r.title, "Custom");
+        assert_eq!(r.body, "Clears in 30s");
+        assert_eq!(r.channel_name, "MyApp"); // blank fell back
+        assert_eq!(r.channel_description, "MyApp desc");
+    }
+
+    #[test]
+    fn resolve_notification_text_substitutes_secs_in_fallback_body() {
+        // A fallback body template carries {secs} too.
+        let r = resolve_notification_text(None, 12, "App", "Auto-clears in {secs}s", "App", "App");
+        assert_eq!(r.body, "Auto-clears in 12s");
     }
 }
