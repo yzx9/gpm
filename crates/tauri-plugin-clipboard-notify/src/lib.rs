@@ -110,13 +110,10 @@ pub fn resolve_notification_text(
     fallback_channel_name: &str,
     fallback_channel_description: &str,
 ) -> ResolvedNotificationText {
-    fn non_blank(s: &str) -> &str {
-        s.trim_start().trim_end()
-    }
     /// Pick a non-blank provided field, else the fallback.
     fn pick(provided: Option<&str>, fallback: &str) -> String {
         provided
-            .map(non_blank)
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or(fallback)
             .to_owned()
@@ -124,7 +121,7 @@ pub fn resolve_notification_text(
     /// Like [`pick`], but also substitute `{secs}` (the body template).
     fn pick_secs(provided: Option<&str>, fallback: &str, secs: u64) -> String {
         let chosen = provided
-            .map(non_blank)
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or(fallback);
         chosen.replace("{secs}", &secs.to_string())

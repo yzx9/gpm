@@ -6,6 +6,8 @@ package xyz.yzx9.gpm.biometrickeystore
 
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -140,5 +142,43 @@ class KeystorePluginTest {
             android.provider.Settings.ACTION_SECURITY_SETTINGS,
             securitySettingsIntent().action,
         )
+    }
+
+    // ── IPC contract: Rust Payload ↔ Kotlin @InvokeArg ───────────────────
+    //
+    // Tauri parses `@InvokeArg` via Jackson `ObjectMapper.readValue(json, cls)`
+    // with `FAIL_ON_UNKNOWN_PROPERTIES` *disabled* (tauri-api PluginManager.kt).
+    // These pin the flattened-policy contract: the Rust `Payload` emits
+    // camelCase top-level fields (authRequired, …) — NOT a nested `policy`
+    // object — so the Kotlin Args MUST read them flat. A nested
+    // `policy: KeyPolicyArgs?` would never bind (no `policy` key in the JSON)
+    // and silently default to auth-free, defeating the biometric gate (the P0
+    // this suite now guards against).
+
+    private val tauriLikeMapper = ObjectMapper()
+        .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+
+    @Test
+    fun storeArgs_bindsFlattenedPolicyFromRustPayload() {
+        // The exact JSON the Rust `Payload` serializes for PASSPHRASE_POLICY.
+        val json = """{"value":"secret","alias":"gpm_passphrase","prefs":"gpm_keystore","authRequired":true,"authBiometricStrong":true,"invalidatedByEnrollment":true,"authValiditySeconds":0,"title":"gpm","subtitle":null,"negative":"Cancel"}"""
+        val args = tauriLikeMapper.readValue(json, StoreArgs::class.java)
+        assertEquals("secret", args.value)
+        assertEquals("gpm_passphrase", args.alias)
+        assertEquals(true, args.authRequired)
+        assertEquals(true, args.authBiometricStrong)
+        assertEquals(true, args.invalidatedByEnrollment)
+        assertEquals(0L, args.authValiditySeconds)
+        assertEquals("gpm", args.title)
+    }
+
+    @Test
+    fun storeArgs_aNestedPolicyObjectDoesNotBind() {
+        // Characterizes the trap: a payload that nests the policy under a
+        // `policy` key leaves the flat fields at their auth-free defaults. This
+        // is exactly the regression this test exists to prevent on either side.
+        val nested = """{"value":"x","alias":"a","prefs":"p","policy":{"authRequired":true}}"""
+        val args = tauriLikeMapper.readValue(nested, StoreArgs::class.java)
+        assertEquals(false, args.authRequired)
     }
 }

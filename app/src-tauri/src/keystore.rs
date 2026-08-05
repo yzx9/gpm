@@ -388,6 +388,9 @@ mod tests {
         alias_states: std::sync::Mutex<Vec<(String, String)>>,
         retrieve_ret: std::sync::Mutex<Result<String, SecureKeystoreError>>,
         alias_state_ret: std::sync::Mutex<AliasState>,
+        /// Per-alias overrides; when absent for a probed alias, falls back to
+        /// `alias_state_ret`. Lets a test distinguish vault vs legacy probes.
+        alias_state_overrides: std::sync::Mutex<std::collections::HashMap<String, AliasState>>,
     }
 
     impl MockKeystore {
@@ -402,6 +405,7 @@ mod tests {
                     present: false,
                     usable: false,
                 }),
+                alias_state_overrides: std::sync::Mutex::new(std::collections::HashMap::new()),
             }
         }
         fn with_retrieve(self, r: Result<String, SecureKeystoreError>) -> Self {
@@ -410,6 +414,15 @@ mod tests {
         }
         fn with_alias_state(self, s: AliasState) -> Self {
             *self.alias_state_ret.lock().unwrap() = s;
+            self
+        }
+        /// Override the `alias_state` return for one alias only (e.g. vault vs
+        /// legacy), so the m0007 pre/post-transition shapes are testable.
+        fn with_alias_state_for(self, alias: &str, s: AliasState) -> Self {
+            self.alias_state_overrides
+                .lock()
+                .unwrap()
+                .insert(alias.to_string(), s);
             self
         }
     }
@@ -424,7 +437,14 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((alias.to_string(), prefs.to_string()));
-            Ok(*self.alias_state_ret.lock().unwrap())
+            let s = self
+                .alias_state_overrides
+                .lock()
+                .unwrap()
+                .get(alias)
+                .copied()
+                .unwrap_or_else(|| *self.alias_state_ret.lock().unwrap());
+            Ok(s)
         }
         async fn delete(&self, alias: &str, prefs: &str) -> Result<(), SecureKeystoreError> {
             self.deletes
@@ -523,20 +543,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_slot_passes_slot_alias_and_vault_policy() {
-        let mock = MockKeystore::new();
-        store_slot(&mock, "v", BiometricSlot::Vault, None)
-            .await
-            .unwrap();
-        assert_eq!(
-            *mock.stores.lock().unwrap(),
-            vec![(
-                "v".to_string(),
-                BiometricSlot::Vault.alias().to_string(),
-                BiometricSlot::Vault.prefs().to_string(),
-                VAULT_POLICY
-            )]
-        );
+    async fn store_slot_passes_each_slots_alias_and_vault_policy() {
+        for slot in [BiometricSlot::Vault, BiometricSlot::Legacy] {
+            let mock = MockKeystore::new();
+            store_slot(&mock, "v", slot, None).await.unwrap();
+            assert_eq!(
+                *mock.stores.lock().unwrap(),
+                vec![(
+                    "v".to_string(),
+                    slot.alias().to_string(),
+                    slot.prefs().to_string(),
+                    VAULT_POLICY
+                )],
+                "{slot:?} alias/prefs/policy"
+            );
+        }
     }
 
     #[tokio::test]
@@ -598,5 +619,106 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn has_app_lock_enabled_false_when_present_but_unusable() {
+        // A present-but-DEAD key (present:true, usable:false — the
+        // all-biometrics-removed re-setup case) must NOT arm the gate. Guards
+        // against `present && usable` regressing to just `present`.
+        let mock = MockKeystore::new().with_alias_state(AliasState {
+            present: true,
+            usable: false,
+        });
+        assert!(!has_app_lock_enabled(&mock).await);
+        // Both slots probed (vault dead ⇒ fall through to legacy).
+        assert_eq!(mock.alias_states.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn has_app_lock_enabled_true_when_only_legacy_usable() {
+        // Pre-m0007 upgrader: vault absent, legacy holds the usable key ⇒ true.
+        // Requires per-alias returns (vault ≠ legacy).
+        let mock = MockKeystore::new()
+            .with_alias_state_for(
+                BiometricSlot::Vault.alias(),
+                AliasState {
+                    present: false,
+                    usable: false,
+                },
+            )
+            .with_alias_state_for(
+                BiometricSlot::Legacy.alias(),
+                AliasState {
+                    present: true,
+                    usable: true,
+                },
+            );
+        assert!(has_app_lock_enabled(&mock).await);
+        // Vault probed first (absent), then legacy (usable) — both fire in order.
+        assert_eq!(
+            *mock.alias_states.lock().unwrap(),
+            vec![
+                (
+                    BiometricSlot::Vault.alias().to_string(),
+                    BiometricSlot::Vault.prefs().to_string()
+                ),
+                (
+                    BiometricSlot::Legacy.alias().to_string(),
+                    BiometricSlot::Legacy.prefs().to_string()
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn retrieve_slot_maps_not_set_to_none() {
+        // A missing slot returns None with no prompt — the docstring promise.
+        for slot in [BiometricSlot::Vault, BiometricSlot::Legacy] {
+            let mock = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
+                code: "BIOMETRIC_NOT_SET".to_string(),
+                message: String::new(),
+            }));
+            assert!(
+                retrieve_slot(&mock, slot, None).await.unwrap().is_none(),
+                "{slot:?}: NOT_SET should map to None"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn retrieve_master_maps_unavailable_to_none() {
+        // The desktop / no-Keystore branch (fires on every desktop launch).
+        let mock = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
+            code: "SECURE_KEYSTORE_UNAVAILABLE".to_string(),
+            message: String::new(),
+        }));
+        assert!(retrieve_master(&mock).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn retrieve_propagates_non_not_set_errors() {
+        // A real failure (key invalidated / cancelled / failed) must NOT collapse
+        // to Ok(None) — it must propagate so the caller can react.
+        for code in [
+            "BIOMETRIC_KEY_INVALIDATED",
+            "BIOMETRIC_CANCELLED",
+            "BIOMETRIC_FAILED",
+        ] {
+            let mock = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
+                code: code.to_string(),
+                message: String::new(),
+            }));
+            let err = retrieve_master(&mock).await.unwrap_err();
+            assert_eq!(err.code, code, "{code}: should propagate, not map to None");
+            let mock2 = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
+                code: code.to_string(),
+                message: String::new(),
+            }));
+            let err2 = retrieve_slot(&mock2, BiometricSlot::Vault, None)
+                .await
+                .unwrap_err();
+            assert_eq!(err2.code, code, "{code}: retrieve_slot should propagate");
+        }
     }
 }

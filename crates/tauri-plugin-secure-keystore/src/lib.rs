@@ -178,13 +178,10 @@ pub fn resolve_prompt_text(
     fallback_title: &str,
     fallback_negative: &str,
 ) -> ResolvedPromptText {
-    fn non_blank(s: &str) -> &str {
-        s.trim_start().trim_end()
-    }
     let pick = |field: &Option<String>, fallback: &str| -> String {
         field
             .as_deref()
-            .map(non_blank)
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or(fallback)
             .to_owned()
@@ -194,7 +191,7 @@ pub fn resolve_prompt_text(
         subtitle: prompt
             .subtitle
             .as_deref()
-            .map(non_blank)
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(ToOwned::to_owned),
         negative: pick(&prompt.negative, fallback_negative),
@@ -602,14 +599,16 @@ mod tests {
         }
     }
 
-    /// `KeyPolicy` has NO `Default` — a bool default drifting here would
-    /// silently change key behavior. Pin that the impl is absent so a future
-    /// `#[derive(Default)]` addition is caught.
+    /// `KeyPolicy` round-trips losslessly through serde (flattened camelCase) —
+    /// the contract the IPC payload relies on. Uses a non-default value
+    /// (`auth_required: true`) so a dropped/mis-serialized field changes the
+    /// result. (The "no `Default`/no `serde(default)`" intent is a code
+    /// convention on the type itself, not machine-enforced by this test.)
     #[test]
-    fn key_policy_has_no_default_impl() {
+    fn key_policy_round_trips_through_serde() {
         let p = KeyPolicy {
-            auth_required: false,
-            auth_biometric_strong: false,
+            auth_required: true,
+            auth_biometric_strong: true,
             invalidated_by_enrollment: false,
             auth_validity_seconds: 0,
         };

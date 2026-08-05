@@ -92,34 +92,36 @@ internal fun mapBiometricState(strongCode: Int, weakCode: Int): String = when {
  *  surface. Robolectric-tested (Intent construction needs the Android runtime). */
 internal fun securitySettingsIntent(): Intent = Intent(Settings.ACTION_SECURITY_SETTINGS)
 
-/** Caller-supplied key-generation policy (mirrors the Rust `KeyPolicy`). The
- *  plugin applies it verbatim to [KeyGenParameterSpec]; it never invents values. */
-@InvokeArg
-class KeyPolicyArgs {
-    var authRequired: Boolean = false
-    var authBiometricStrong: Boolean = false
-    var invalidatedByEnrollment: Boolean = false
-    var authValiditySeconds: Long = 0
-}
-
-/** `store` args: the secret + alias/prefs + policy + prompt text. */
+/** `store` args: the secret + alias/prefs + **flattened** key policy + prompt
+ *  text. The policy fields are FLAT top-level fields — NOT a nested `policy`
+ *  object — to match the Rust `Payload` exactly. Tauri's `@InvokeArg` is parsed
+ *  by Jackson field-by-field; a nested `policy: KeyPolicyArgs?` would never bind
+ *  (the Rust payload has no `policy` key) and silently default to auth-free,
+ *  defeating the biometric gate. Pinned by the round-trip JVM test. */
 @InvokeArg
 class StoreArgs {
     lateinit var value: String
     lateinit var alias: String
     lateinit var prefs: String
-    var policy: KeyPolicyArgs? = null
+    var authRequired: Boolean = false
+    var authBiometricStrong: Boolean = false
+    var invalidatedByEnrollment: Boolean = false
+    var authValiditySeconds: Long = 0
     var title: String? = null
     var subtitle: String? = null
     var negative: String? = null
 }
 
-/** `retrieve` args: alias/prefs + policy + prompt text (carries no secret). */
+/** `retrieve` args: alias/prefs + **flattened** key policy + prompt text (no
+ *  secret). See [StoreArgs] for why the policy is flat. */
 @InvokeArg
 class RetrieveArgs {
     lateinit var alias: String
     lateinit var prefs: String
-    var policy: KeyPolicyArgs? = null
+    var authRequired: Boolean = false
+    var authBiometricStrong: Boolean = false
+    var invalidatedByEnrollment: Boolean = false
+    var authValiditySeconds: Long = 0
     var title: String? = null
     var subtitle: String? = null
     var negative: String? = null
@@ -168,7 +170,13 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
      * the "no migration" invariant honest: `unset` stays `unset`).
      */
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun generateKey(alias: String, policy: KeyPolicyArgs) {
+    private fun generateKey(
+        alias: String,
+        authRequired: Boolean,
+        authBiometricStrong: Boolean,
+        invalidatedByEnrollment: Boolean,
+        authValiditySeconds: Long,
+    ) {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         if (keyStore.containsAlias(alias)) {
             keyStore.deleteEntry(alias)
@@ -181,17 +189,17 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-        if (policy.authRequired) {
+        if (authRequired) {
             builder.setUserAuthenticationRequired(true)
-            val authType = if (policy.authBiometricStrong) KeyProperties.AUTH_BIOMETRIC_STRONG else 0
+            val authType = if (authBiometricStrong) KeyProperties.AUTH_BIOMETRIC_STRONG else 0
             // API 30+: validity (0 = per-use) + authenticator set.
             builder.setUserAuthenticationParameters(
-                policy.authValiditySeconds.toInt().coerceAtLeast(0),
+                authValiditySeconds.toInt().coerceAtLeast(0),
                 authType,
             )
             // Meaningful only for a user-auth-bound key; an auth-free keygen
             // never calls this, so the spec stays a plain keygen.
-            builder.setInvalidatedByBiometricEnrollment(policy.invalidatedByEnrollment)
+            builder.setInvalidatedByBiometricEnrollment(invalidatedByEnrollment)
         }
         keyGenerator.init(builder.build())
         keyGenerator.generateKey()
@@ -306,11 +314,16 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun store(invoke: Invoke) {
         val args = invoke.parseArgs(StoreArgs::class.java)
-        val policy = args.policy ?: KeyPolicyArgs()
         val plainBytes = args.value.toByteArray(UTF_8)
 
         val cipher = try {
-            generateKey(args.alias, policy)
+            generateKey(
+                args.alias,
+                args.authRequired,
+                args.authBiometricStrong,
+                args.invalidatedByEnrollment,
+                args.authValiditySeconds,
+            )
             encryptionCipher(args.alias)
         } catch (e: Exception) {
             plainBytes.fill(0)
@@ -318,7 +331,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
 
-        if (!policy.authRequired) {
+        if (!args.authRequired) {
             // Auth-free keygen: seal directly, no prompt.
             try {
                 val ciphertext = cipher.doFinal(plainBytes)
@@ -382,14 +395,13 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun retrieve(invoke: Invoke) {
         val args = invoke.parseArgs(RetrieveArgs::class.java)
-        val policy = args.policy ?: KeyPolicyArgs()
 
         val (iv, ciphertext) = readCipherData(prefs(args.prefs)) ?: run {
             invoke.reject("nothing stored", "BIOMETRIC_NOT_SET")
             return
         }
 
-        if (!policy.authRequired) {
+        if (!args.authRequired) {
             // Auth-free keygen: decrypt directly, no prompt.
             try {
                 val cipher = decryptionCipher(args.alias, iv)

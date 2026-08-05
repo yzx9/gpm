@@ -45,4 +45,8 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("junit:junit:4.13.2")
+    // Jackson, to test the JSON → @InvokeArg contract (the IPC shape that
+    // silently downgraded biometric keys to auth-free when nested vs flat).
+    // Same version as tauri-api's own jackson-databind. Test-only.
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.15.3")
 }
