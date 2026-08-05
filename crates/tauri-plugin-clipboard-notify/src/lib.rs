@@ -9,10 +9,12 @@
 //! **Backend-only** from the capability standpoint: the frontend never calls
 //! `plugin:clipboard-notify|*` directly. App commands in `src-tauri/src/`
 //! obtain the handle via [`ClipboardNotifyExt`] and proxy. The notification's
-//! tap is a broadcast that clears the clipboard natively and emits the
-//! `clipboard-cleared` event so the Rust side can cancel the armed clear
-//! timer (otherwise the timer would later clobber unrelated clipboard content
-//! the user placed after the tap).
+//! tap is a manifest-declared broadcast that clears the clipboard natively and
+//! sets a manual-clear flag; the Rust armed clear timer **polls** that flag on
+//! wake (via [`ClipboardNotify::consume_manual_clear_flag`]) and self-skips if
+//! the user already cleared — so it cannot later clobber unrelated clipboard
+//! content the user placed after the tap. There is no Kotlin→Rust event; the
+//! flag is polled over the proven `run_mobile_plugin_async` direction.
 //!
 //! On non-Android targets the plugin is registered but inert: every operation
 //! is a no-op (`post`/`dismiss` return `Ok(())`, `are_enabled` reports `true`
