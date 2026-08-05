@@ -25,29 +25,9 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class KeystorePluginTest {
 
-    @Test
-    fun resolvePromptText_appliesGenericFallbacks() {
-        val r = resolvePromptText(null, "  ", null)
-        assertEquals("gpm", r.title)
-        assertEquals(null, r.subtitle)
-        assertEquals("Cancel", r.negative)
-    }
-
-    @Test
-    fun resolvePromptText_keepsProvidedText() {
-        val r = resolvePromptText("Title", "Sub", "Neg")
-        assertEquals("Title", r.title)
-        assertEquals("Sub", r.subtitle)
-        assertEquals("Neg", r.negative)
-    }
-
-    @Test
-    fun resolvePromptText_dropsBlankSubtitleOnly() {
-        val r = resolvePromptText("", "", "")
-        assertEquals("gpm", r.title)
-        assertEquals(null, r.subtitle)
-        assertEquals("Cancel", r.negative)
-    }
+    // NOTE: `resolvePromptText` (with brand fallbacks) moved out of the plugin
+    // to the app layer (the plugin now carries no brand string) — its tests
+    // moved with it. The plugin's pure helpers below stay here.
 
     @Test
     fun mapErrorCode_cancellations() {

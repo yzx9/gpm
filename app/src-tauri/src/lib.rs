@@ -27,6 +27,7 @@ mod generator;
 mod git;
 mod identity;
 mod jni_sync;
+mod keystore;
 mod logging;
 mod migrations;
 mod page;

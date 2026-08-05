@@ -290,7 +290,14 @@ pub(crate) async fn set_passphrase(
         .await
         .inspect_err(|e| log::warn!("identity: set-passphrase failed: {e}"))?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
-    if let Err(e) = app.keystore().delete().await {
+    if let Err(e) = app
+        .keystore()
+        .delete(
+            crate::keystore::PASSPHRASE_ALIAS,
+            crate::keystore::PASSPHRASE_PREFS,
+        )
+        .await
+    {
         log::warn!("identity: stale biometric slot delete failed: {e:?}");
     }
     // Setting a passphrase locks the store (forces re-auth with the new
@@ -315,7 +322,14 @@ pub(crate) async fn change_passphrase(
         .await
         .inspect_err(|e| log::warn!("identity: change-passphrase failed: {e}"))?;
     // The sealed biometric passphrase (if any) is now stale — invalidate it.
-    if let Err(e) = app.keystore().delete().await {
+    if let Err(e) = app
+        .keystore()
+        .delete(
+            crate::keystore::PASSPHRASE_ALIAS,
+            crate::keystore::PASSPHRASE_PREFS,
+        )
+        .await
+    {
         log::warn!("identity: stale biometric slot delete failed: {e:?}");
     }
     // Changing the passphrase locks the store; emit the real state.

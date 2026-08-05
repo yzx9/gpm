@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::identity::unlock_and_arm;
+use crate::keystore::{PASSPHRASE_ALIAS, PASSPHRASE_POLICY, PASSPHRASE_PREFS, resolve_prompt};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -89,7 +90,10 @@ pub(crate) async fn open_security_settings(app: AppHandle) -> Result<bool, Biome
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn is_biometric_unlock_enabled(app: AppHandle) -> Result<bool, BiometricError> {
-    Ok(app.keystore().has_stored().await?)
+    Ok(app
+        .keystore()
+        .has_stored(PASSPHRASE_ALIAS, PASSPHRASE_PREFS)
+        .await?)
 }
 
 /// Defense-in-depth backstop for the Settings UI gate: refuse biometric
@@ -127,8 +131,15 @@ pub(crate) async fn enable_biometric_unlock(
     // Reject a wrong passphrase before sealing it (age or SSH).
     state.store.validate_passphrase(&passphrase).await?;
     // The Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
+    let resolved = resolve_prompt(prompt_text.as_ref());
     app.keystore()
-        .store(&passphrase, prompt_text.as_ref())
+        .store(
+            &passphrase,
+            PASSPHRASE_ALIAS,
+            PASSPHRASE_PREFS,
+            PASSPHRASE_POLICY,
+            Some(&resolved),
+        )
         .await?;
     Ok(())
 }
@@ -146,12 +157,26 @@ pub(crate) async fn biometric_unlock(
 ) -> Result<(), BiometricError> {
     log::info!("biometric: unlock");
     // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used.
-    let passphrase = Zeroizing::new(app.keystore().retrieve(prompt_text.as_ref()).await?);
+    let resolved = resolve_prompt(prompt_text.as_ref());
+    let passphrase = Zeroizing::new(
+        app.keystore()
+            .retrieve(
+                PASSPHRASE_ALIAS,
+                PASSPHRASE_PREFS,
+                PASSPHRASE_POLICY,
+                Some(&resolved),
+            )
+            .await?,
+    );
 
     if let Err(e) = unlock_and_arm(&state, &app, &passphrase).await {
         if e.code == "WRONG_PASSPHRASE" {
             // Stale sealed passphrase — clear it so the page reveals the form.
-            if let Err(cleanup) = app.keystore().delete().await {
+            if let Err(cleanup) = app
+                .keystore()
+                .delete(PASSPHRASE_ALIAS, PASSPHRASE_PREFS)
+                .await
+            {
                 log::warn!("biometric: stale slot cleanup failed: {cleanup:?}");
             }
         }
@@ -165,11 +190,14 @@ pub(crate) async fn biometric_unlock(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn disable_biometric_unlock(app: AppHandle) -> Result<(), BiometricError> {
     log::info!("biometric: disable");
-    app.keystore().delete().await.map_err(|e| {
-        let be: BiometricError = e.into();
-        log::warn!("biometric: disable failed: {be}");
-        be
-    })?;
+    app.keystore()
+        .delete(PASSPHRASE_ALIAS, PASSPHRASE_PREFS)
+        .await
+        .map_err(|e| {
+            let be: BiometricError = e.into();
+            log::warn!("biometric: disable failed: {be}");
+            be
+        })?;
     Ok(())
 }
 
