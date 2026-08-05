@@ -5,23 +5,46 @@
 #
 # Bump version across project files for a new release.
 #
-# Usage: scripts/bump-version.sh <new-version>
+# Usage: scripts/bump-version.sh [-f|--force] <new-version>
 # Example: scripts/bump-version.sh 1.0.0
+#   -f, --force  skip the A.B.C format and same-version guards (release.sh,
+#                which has already confirmed with the user, passes this)
 
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $(basename "$0") <new-version>" >&2
+FORCE=0
+NEW_VERSION=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--force)
+      FORCE=1
+      ;;
+    -*)
+      echo "error: unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "$NEW_VERSION" ]]; then
+        echo "error: unexpected argument: $1" >&2
+        exit 1
+      fi
+      NEW_VERSION="$1"
+      ;;
+  esac
+  shift
+done
+
+if [[ -z "$NEW_VERSION" ]]; then
+  echo "Usage: $(basename "$0") [-f|--force] <new-version>" >&2
   echo "  e.g. $(basename "$0") 1.0.0" >&2
   exit 1
 fi
 
-NEW_VERSION="$1"
 DATE=$(date +%Y-%m-%d)
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: version must be semver (0.0.0), got: $NEW_VERSION" >&2
+if [[ "$FORCE" -eq 0 ]] && ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "error: version must be semver (0.0.0), got: $NEW_VERSION (use -f to override)" >&2
   exit 1
 fi
 
@@ -31,8 +54,8 @@ if [[ -z "$CURRENT_VERSION" ]]; then
   exit 1
 fi
 
-if [[ "$CURRENT_VERSION" == "$NEW_VERSION" ]]; then
-  echo "error: already at $NEW_VERSION" >&2
+if [[ "$FORCE" -eq 0 ]] && [[ "$CURRENT_VERSION" == "$NEW_VERSION" ]]; then
+  echo "error: already at $NEW_VERSION (use -f to override)" >&2
   exit 1
 fi
 

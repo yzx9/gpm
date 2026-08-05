@@ -124,12 +124,9 @@ android-install-release: android-release
   echo "Installing for ABI: $${ARCH:-unknown}"; \
   adb install "app/src-tauri/gen/android/app/build/outputs/apk/$$APK"
 
-# Bump version, commit, and tag for release
+# Bump version, commit, and tag for release (validates first; offers to push)
 release new_version: gen-icons
-  ./scripts/bump-version.sh {{new_version}}
-  git add Cargo.toml Cargo.lock app/package.json app/src-tauri/tauri.conf.json CHANGELOG.md
-  git commit -m "build: release v{{new_version}}"
-  git tag "v{{new_version}}" -m "build: release v{{new_version}}"
+  ./scripts/release.sh {{new_version}}
 
 # Regenerate app icons + web favicons if source is newer
 [private]
