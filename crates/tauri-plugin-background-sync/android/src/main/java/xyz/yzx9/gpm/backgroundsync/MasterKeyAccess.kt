@@ -17,12 +17,16 @@ import javax.crypto.spec.GCMParameterSpec
  * background-safe, no biometric prompt (the auth-free key has no
  * `setUserAuthenticationRequired`).
  *
- * SELF-CONTAINED DUPLICATE of `tauri-plugin-secure-keystore`'s auth-free
- * retrieve path. **Keep in sync with `SecureKeystorePlugin.kt`** (alias /
- * provider / cipher / prefs names). The D3 plan called for a shared util module
- * across the two plugins, but the cross-plugin Gradle dependency is unproven
- * under Tauri's composite-build setup; promote to a shared module once that
- * wiring is verified (and `SecureKeystorePlugin` is refactored to call it too).
+ * SELF-CONTAINED DUPLICATE of the auth-free retrieve path now parameterized in
+ * `tauri-plugin-secure-keystore`. The canonical alias/prefs names live in
+ * `app/src-tauri/src/keystore.rs` (`MASTER_ALIAS` / `MASTER_PREFS`) — **keep
+ * `KEY_ALIAS` / `PREFS_NAME` below in sync with those on rename** (alias /
+ * provider / cipher / prefs names must all match). The D8 plan called for a
+ * shared util module across the two plugins, but the cross-plugin Gradle
+ * dependency is unproven under Tauri's composite-build setup; promote to a
+ * shared module once that wiring is verified (and `SecureKeystorePlugin` is
+ * refactored to call it too). The dedup is benign meanwhile — a stable
+ * read-only decrypt path.
  */
 object MasterKeyAccess {
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"

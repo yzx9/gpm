@@ -70,6 +70,14 @@ pub(crate) fn resolve_prompt(prompt: Option<&PromptText>) -> ResolvedPromptText 
 //   master and mints the vault) — `BiometricSlot` below.
 // The plugin carries none of these identifiers; they live here and are passed
 // as plain alias/prefs/policy parameters.
+//
+// KNOWN DUPLICATE: `MasterKeyAccess.kt` in `tauri-plugin-background-sync`
+// re-implements the auth-free master-key retrieve (the headless WorkManager
+// worker has no `AppHandle`, so it cannot call the plugin's `@Command`). Its
+// hardcoded `KEY_ALIAS`/`PREFS_NAME` must stay in sync with `MASTER_ALIAS`/
+// `MASTER_PREFS` on rename. Promoting it to a shared Kotlin module is deferred
+// — the cross-plugin Gradle dependency is unproven under Tauri's composite
+// build, and the dedup is benign (a stable read-only decrypt path).
 
 /// Keystore alias for the auth-free at-rest master key.
 pub(crate) const MASTER_ALIAS: &str = "gpm_master_key";
