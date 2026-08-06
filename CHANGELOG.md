@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Diagnostic log lines that come from the app interface — the lines you see in **Settings → Logs** and in an exported bug-report bundle — no longer repeat where they're from. Each used to say "frontend" twice over; the lines are now shorter and easier to read.
+- In **Settings**, the **Logs** entry moves up to sit right after **Repository**, grouped with the other reference pages — **Security**, **Permissions & data**, and **About** — just below the actual settings (General, Lock & identity, Repository). Those four pages explain or document the app rather than holding a setting, so they now read as one group instead of Logs sitting alone at the bottom.
 
 ## [v0.17.0] - 2026-08-05
 

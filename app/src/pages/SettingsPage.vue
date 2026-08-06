@@ -79,6 +79,24 @@ const version = pkg.version;
         <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
       </div>
 
+      <!-- Diagnostics log viewer — leads the docs group (Logs/Security/
+           Permissions/About) that follows the settings categories. The app
+           logs at the fixed Info default, so there is no per-row level
+           summary. Independent of repo/identity state, so always shown. -->
+      <div
+        class="hub-row"
+        tabindex="0"
+        role="button"
+        :aria-label="t('settings.hub.logs')"
+        @click="router.push({ name: 'log' })"
+        @keydown.enter="router.push({ name: 'log' })"
+        @keydown.space.prevent="router.push({ name: 'log' })"
+      >
+        <BaseIcon :icon="ScrollText" :size="20" class="text-muted" />
+        <span class="hub-title">{{ t("settings.hub.logs") }}</span>
+        <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
+      </div>
+
       <!-- Security: plain-language explainer of how gpm protects secrets.
            Carries no secret content, so (like About) it sits below the four
            category pages. -->
@@ -129,23 +147,6 @@ const version = pkg.version;
         <BaseIcon :icon="Info" :size="20" class="text-muted" />
         <span class="hub-title">{{ t("settings.hub.about") }}</span>
         <span class="hub-value">{{ version }}</span>
-        <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
-      </div>
-
-      <!-- Diagnostics log viewer. Sits below the categories like About; the
-           app logs at the fixed Info default, so there is no per-row level
-           summary. Independent of repo/identity state, so always shown. -->
-      <div
-        class="hub-row"
-        tabindex="0"
-        role="button"
-        :aria-label="t('settings.hub.logs')"
-        @click="router.push({ name: 'log' })"
-        @keydown.enter="router.push({ name: 'log' })"
-        @keydown.space.prevent="router.push({ name: 'log' })"
-      >
-        <BaseIcon :icon="ScrollText" :size="20" class="text-muted" />
-        <span class="hub-title">{{ t("settings.hub.logs") }}</span>
         <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
       </div>
     </BaseCard>

@@ -83,21 +83,22 @@ describe("SettingsPage (hub)", () => {
     await wrapper.findAll(".hub-row")[2]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsRepository" });
 
-    // The 4th row is Security (plain-language explainer; no secret content).
+    // The 4th row is the diagnostics log viewer — leads the docs group
+    // (Logs/Security/Permissions/About) below the settings categories.
     await wrapper.findAll(".hub-row")[3]!.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({ name: "log" });
+
+    // The 5th row is Security (plain-language explainer; no secret content).
+    await wrapper.findAll(".hub-row")[4]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "security" });
 
-    // The 5th row is Permissions & data.
-    await wrapper.findAll(".hub-row")[4]!.trigger("click");
+    // The 6th row is Permissions & data.
+    await wrapper.findAll(".hub-row")[5]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsPermissions" });
 
-    // The 6th row is About (overview/licenses; no secret content).
-    await wrapper.findAll(".hub-row")[5]!.trigger("click");
-    expect(mockPush).toHaveBeenCalledWith({ name: "about" });
-
-    // The 7th row is the diagnostics log viewer.
+    // The 7th row is About (overview/licenses; no secret content).
     await wrapper.findAll(".hub-row")[6]!.trigger("click");
-    expect(mockPush).toHaveBeenCalledWith({ name: "log" });
+    expect(mockPush).toHaveBeenCalledWith({ name: "about" });
   });
 
   it("navigates back to entries when Back is clicked", async () => {
