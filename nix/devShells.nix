@@ -56,6 +56,19 @@ let
     # repo root = parent of nix/; keeps the module parameter-free beyond pkgs/system/inputs.
     src = ./..;
     hooks = {
+      # prettier resolves its plugins from repo node_modules. So install once
+      # before any formatter runs when node_modules is absent.
+      ensure-node-deps = {
+        enable = true;
+        name = "ensure-node-deps";
+        description = "pnpm install if node_modules is missing (prettier plugins live there)";
+        entry = "${lib.getExe pkgs.bash} -c '[ -d node_modules ] || ${lib.getExe pkgs.pnpm} install'";
+        pass_filenames = false;
+        always_run = true;
+        language = "system";
+        stages = [ "pre-commit" ];
+      };
+
       nixfmt.enable = true;
 
       prettier.enable = true;
