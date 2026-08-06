@@ -65,11 +65,11 @@ describe("AppLockOverlay", () => {
     expect(invoke).toHaveBeenCalledWith("export_diagnostics");
   });
 
-  it("BIOMETRIC_UNAVAILABLE shows the dedicated (non-dead-end) notice", async () => {
+  it("KEYSTORE_UNAVAILABLE shows the dedicated (non-dead-end) notice", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd === "app_unlock") {
         return Promise.reject({
-          code: "BIOMETRIC_UNAVAILABLE",
+          code: "KEYSTORE_UNAVAILABLE",
           message: "no sensor",
         });
       }

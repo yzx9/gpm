@@ -22,7 +22,7 @@ sanitized error, never a crash leaking secret context.
 ## S2K passphrase unlock
 
 The GPG secret key is protected by its S2K passphrase; unlock reuses the existing
-biometric-keystore + AutoLock machinery (`007/security.md`) — the passphrase is entered
+keystore + AutoLock machinery (`007/security.md`) — the passphrase is entered
 once, gated by biometrics, and cached per the same AutoLock lifecycle as the age
 identity. Brute-force resistance is S2K's responsibility (gpg's standard).
 

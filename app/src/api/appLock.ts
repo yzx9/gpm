@@ -34,8 +34,8 @@ export interface AppLockState {
   reason?: AppLockReason | null;
 }
 
-/** Error from the app-launch gate commands (`APP_LOCK_FAILED`, `BIOMETRIC_*`,
- * `SECURE_KEYSTORE_*`, or a `rustpass` code). Same shape as BiometricError. */
+/** Error from the app-launch gate commands (`APP_LOCK_FAILED`, `KEYSTORE_*`,
+ * or a `rustpass` code). Same shape as BiometricError. */
 export interface AppLockError {
   code: string;
   message: string;

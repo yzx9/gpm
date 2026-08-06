@@ -87,8 +87,8 @@ loss by retrying the whole sequence.
 The upstream Rust YubiKey crate is bound to PC/SC, which Android does not provide,
 and no fork swaps the transport; there is also no usable Rust USB/CCID host stack
 for Android. So the transport and the PIV framing are reused from Yubico's Kotlin
-SDK, bridged to Rust over the same plugin IPC the biometric and secure-keystore
-plugins already use — the identical trust boundary, with the key never reachable
+SDK, bridged to Rust over the same plugin IPC the keystore
+plugin already uses — the identical trust boundary, with the key never reachable
 from the WebView. Conversely, upstream age-plugin-yubikey's stanza logic is
 separable from both its PC/SC transport and its stdio plugin protocol: only a
 single key-agreement primitive depends on the hardware, and the rest (stanza parse,
@@ -127,7 +127,7 @@ This mirrors the injection philosophy the at-rest master key already uses — it
 crosses a boundary as injected bytes, and the engine never knows whether those bytes
 came from a hardware keystore or a desktop passthrough. The hardware identity's
 per-op unwrap is the analogous injected capability. It lives in a new native plugin
-crate of the same shape as the biometric/secure-keystore plugins: the Kotlin side
+crate of the same shape as the keystore plugins: the Kotlin side
 owns the USB/NFC transport and the PIV session, the Rust side owns the age-stanza
 logic and drives the unwrap, and the derived file key crosses Kotlin→Rust as bytes,
 zeroized, never reaching the WebView.
@@ -197,8 +197,8 @@ prerequisites, and the honest Android "not available" error 0030 added becomes t
 real implementation here. Relates to `0036-gpg-crypto-backend` and the crypto-backend
 abstraction it exercises: both record that the identity/backend abstraction will be
 reshaped when a second identity model arrives, and the hardware-identity seam lands
-in that same reshape, not as a one-off. Relates to the biometric/secure-keystore
-plugins as the architectural precedent for the in-process native-plugin plus
+in that same reshape, not as a one-off. Relates to the keystore
+plugin as the architectural precedent for the in-process native-plugin plus
 injected-secret pattern this design reuses.
 
 ## Implementation reference
@@ -250,7 +250,7 @@ the transport and the PIV operation, so gpm reuses rather than rebuilds:
   gpm need not assemble PIV APDUs by hand — it calls key agreement and feeds the
   shared secret into the vendored stanza logic.
 
-This rides the same Rust↔Kotlin plugin bridge the biometric/secure-keystore plugins
+This rides the same Rust↔Kotlin plugin bridge the keystore plugins
 already use; the shared secret (an age file-key input, like the existing plugin path)
 crosses Kotlin→Rust as bytes and is zeroized, never reaching the WebView.
 

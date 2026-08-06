@@ -9,17 +9,17 @@ import type { BiometricPromptText } from "@/i18n/native";
 /** Biometric error codes from the Kotlin plugin / Rust app layer. */
 export type BiometricErrorCode =
   /** Biometric storage unusable (desktop, Android <11, no biometric enrolled). */
-  | "BIOMETRIC_UNAVAILABLE"
+  | "KEYSTORE_UNAVAILABLE"
   /** User cancelled / chose the negative ("Use passphrase") button. */
-  | "BIOMETRIC_CANCELLED"
+  | "KEYSTORE_CANCELLED"
   /** Keystore key invalidated (new fingerprint enrolled). */
-  | "BIOMETRIC_KEY_INVALIDATED"
+  | "KEYSTORE_KEY_INVALIDATED"
   /** Too many failed attempts; temporarily locked out. */
-  | "BIOMETRIC_LOCKOUT"
+  | "KEYSTORE_LOCKOUT"
   /** Nothing sealed (retrieve called with no stored passphrase). */
-  | "BIOMETRIC_NOT_SET"
+  | "KEYSTORE_NOT_SET"
   /** Catch-all biometric failure. */
-  | "BIOMETRIC_FAILED"
+  | "KEYSTORE_FAILED"
   /** Stored passphrase is stale (age path self-heals). */
   | "WRONG_PASSPHRASE";
 
@@ -45,7 +45,7 @@ export type BiometricState =
 /**
  * Thin wrappers over the biometric app commands in `src-tauri/src/lib.rs`.
  *
- * The frontend never talks to `plugin:biometric-keystore|*` directly — all secret-
+ * The frontend never talks to `plugin:keystore|*` directly — all secret-
  * returning operations stay backend-side so passphrases never reach the
  * WebView. `isBiometricAvailable` swallows errors and returns `"unavailable"`,
  * and `isBiometricUnlockEnabled` returns `false`, on desktop / below API 30 /
@@ -91,7 +91,7 @@ export async function isBiometricUnlockEnabled(): Promise<boolean> {
  * Enable biometric unlock: validates `passphrase` (rejecting a wrong one),
  * then seals it behind a biometric prompt (CryptoObject ENCRYPT). Rejects with
  * a {@link BiometricError} on failure (e.g. `WRONG_PASSPHRASE`,
- * `BIOMETRIC_CANCELLED`).
+ * `KEYSTORE_CANCELLED`).
  */
 export async function enableBiometricUnlock(
   passphrase: string,

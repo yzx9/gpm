@@ -1,4 +1,0 @@
-"$schema" = "schemas/schema.json"
-[default]
-description = "Biometric-gated Android Keystore storage for the identity passphrase. Backend-only; no frontend capability is granted."
-permissions = []

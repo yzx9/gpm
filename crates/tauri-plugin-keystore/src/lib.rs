@@ -2,21 +2,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Backend-only Tauri plugin that seals a caller-supplied **secret string**
-//! into the Android Keystore (hardware-backed AES/GCM) behind a biometric
-//! `BiometricPrompt`, and retrieves it on demand. The plugin is generic: the
-//! Keystore alias, prefs name, key-generation policy, and prompt text are all
-//! supplied by the caller — it carries no app-specific identifiers or brand
-//! strings.
+//! Tauri plugin that seals a caller-supplied **secret string** into the Android
+//! Keystore (hardware-backed AES/GCM) under a caller-chosen policy — either
+//! **auth-free** (no prompt, survives biometric changes) or **biometric-gated**
+//! (a `BiometricPrompt` per use) — and retrieves it on demand. The plugin is
+//! generic: the Keystore alias, prefs name, key-generation policy, and prompt
+//! text are all supplied by the caller — it carries no app-specific identifiers
+//! or brand strings.
 //!
 //! The secret flows Kotlin → Rust and never reaches the `WebView`. On
 //! non-Android targets the plugin is registered but inert (operations report
 //! `unavailable` / empty).
-//!
-//! **Homomorphic with `tauri-plugin-secure-keystore`**: same handle method
-//! names/signatures and same `KeyPolicy`/`BiometricState`/`PromptText` shapes,
-//! so the two crates can be mechanically merged later (one keeps the shared
-//! pure functions; the other is dropped).
 
 #[cfg(not(target_os = "android"))]
 use std::marker::PhantomData;
@@ -29,7 +25,7 @@ use tauri::{Manager, Runtime};
 
 /// Android package hosting the `KeystorePlugin` Kotlin class.
 #[cfg(target_os = "android")]
-const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.biometrickeystore";
+const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.keystore";
 
 // ---------------------------------------------------------------------------
 // Error type (unified across mobile/desktop)
@@ -37,42 +33,42 @@ const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.biometrickeystore";
 
 /// Error returned by keystore operations.
 ///
-/// Carries the Kotlin `BIOMETRIC_*` codes through to the app layer. Serializes
+/// Carries the Kotlin `KEYSTORE_*` codes through to the app layer. Serializes
 /// to `{ code, message }` and **never** contains secret content — messages are
 /// derived only from exception class names or system-provided strings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeystoreError {
-    /// Machine-readable code, e.g. `BIOMETRIC_UNAVAILABLE`,
-    /// `BIOMETRIC_CANCELLED`, `BIOMETRIC_KEY_INVALIDATED`, `BIOMETRIC_FAILED`.
+    /// Machine-readable code, e.g. `KEYSTORE_UNAVAILABLE`,
+    /// `KEYSTORE_NOT_SET`, `KEYSTORE_KEY_INVALIDATED`, `KEYSTORE_FAILED`.
     pub code: String,
     /// Safe (no-secret) human-readable message.
     pub message: String,
 }
 
 impl KeystoreError {
-    /// "Biometric not available on this platform/device" sentinel.
+    /// "Keystore not available on this platform/device" sentinel.
     #[must_use]
     pub fn unavailable() -> Self {
         Self {
-            code: "BIOMETRIC_UNAVAILABLE".to_string(),
-            message: "Biometric unlock is not available on this device".to_string(),
+            code: "KEYSTORE_UNAVAILABLE".to_string(),
+            message: "Keystore is not available on this device".to_string(),
         }
     }
 }
 
 /// Map a Tauri mobile-plugin invoke error into a [`KeystoreError`],
-/// preserving the Kotlin-supplied `BIOMETRIC_*` code when present.
+/// preserving the Kotlin-supplied `KEYSTORE_*` code when present.
 #[cfg(target_os = "android")]
 fn map_invoke_err(err: PluginInvokeError) -> KeystoreError {
     match err {
         PluginInvokeError::InvokeRejected(resp) => KeystoreError {
-            code: resp.code.unwrap_or_else(|| "BIOMETRIC_FAILED".to_string()),
+            code: resp.code.unwrap_or_else(|| "KEYSTORE_FAILED".to_string()),
             message: resp
                 .message
-                .unwrap_or_else(|| "Biometric operation failed".to_string()),
+                .unwrap_or_else(|| "Keystore operation failed".to_string()),
         },
         other => KeystoreError {
-            code: "BIOMETRIC_FAILED".to_string(),
+            code: "KEYSTORE_FAILED".to_string(),
             message: other.to_string(),
         },
     }
@@ -229,27 +225,28 @@ pub struct Keystore<R: Runtime>(PhantomData<fn() -> R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> Keystore<R> {
-    /// Whether biometric-gated storage is usable on this device, as a quad-state
-    /// ([`BiometricState`]). Fast / non-prompting. Pre-API-30 → `Unavailable`.
+    /// Quad-state biometric availability ([`BiometricState`]). Fast / non-
+    /// prompting. Pre-API-30 → `Unavailable`. The app-lock toggle is offered only
+    /// on `Available`; callers derive `== Available` where they need a bool.
     ///
     /// # Errors
     ///
     /// Only if the mobile-plugin invoke itself fails.
-    pub async fn is_available(&self) -> Result<BiometricState, KeystoreError> {
+    pub async fn is_biometric_available(&self) -> Result<BiometricState, KeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             state: BiometricState,
         }
         self.0
-            .run_mobile_plugin_async::<Resp>("isAvailable", ())
+            .run_mobile_plugin_async::<Resp>("isBiometricAvailable", ())
             .await
             .map(|r| r.state)
             .map_err(map_invoke_err)
     }
 
     /// Open the system Security settings (the biometric-enrollment surface) — the
-    /// recovery target when [`is_available`](Self::is_available) reports
-    /// `NoEnrollment`. Returns whether a handler activity was found (`false` on
+    /// recovery target when [`is_biometric_available`](Self::is_biometric_available)
+    /// reports `NoEnrollment`. Returns whether a handler activity was found (`false` on
     /// the rare OEM ROM lacking the target) so the caller can toast instead of
     /// failing silently.
     pub async fn open_security_settings(&self) -> bool {
@@ -324,13 +321,14 @@ impl<R: Runtime> Keystore<R> {
     /// Seal `value` into the Keystore at `alias`. **Shows a biometric prompt**
     /// (CryptoObject ENCRYPT) when `policy.auth_required` — the key needs user
     /// auth for encrypt too. The `Invoke` stays open across the prompt and is
-    /// resolved only from a terminal biometric callback. `prompt` supplies
-    /// already-resolved prompt text (see [`resolve_prompt_text`]).
+    /// resolved only from a terminal biometric callback. Auth-free policy seals
+    /// directly with no prompt. `prompt` supplies already-resolved prompt text
+    /// (see [`resolve_prompt_text`]).
     ///
     /// # Errors
     ///
-    /// [`KeystoreError`] carrying a `BIOMETRIC_*` code (e.g. `BIOMETRIC_CANCELLED`,
-    /// `BIOMETRIC_KEY_INVALIDATED`, `BIOMETRIC_FAILED`) if the prompt is dismissed,
+    /// [`KeystoreError`] carrying a `KEYSTORE_*` code (e.g. `KEYSTORE_CANCELLED`,
+    /// `KEYSTORE_KEY_INVALIDATED`, `KEYSTORE_FAILED`) if the prompt is dismissed,
     /// the key is dead, or the invoke fails.
     pub async fn store(
         &self,
@@ -381,8 +379,8 @@ impl<R: Runtime> Keystore<R> {
     ///
     /// # Errors
     ///
-    /// [`KeystoreError`] carrying a `BIOMETRIC_*` code (e.g. `BIOMETRIC_CANCELLED`,
-    /// `BIOMETRIC_KEY_INVALIDATED`, `BIOMETRIC_NOT_SET`, `BIOMETRIC_FAILED`) on
+    /// [`KeystoreError`] carrying a `KEYSTORE_*` code (e.g. `KEYSTORE_CANCELLED`,
+    /// `KEYSTORE_KEY_INVALIDATED`, `KEYSTORE_NOT_SET`, `KEYSTORE_FAILED`) on
     /// dismissal, key death, nothing-stored, or invoke failure.
     pub async fn retrieve(
         &self,
@@ -437,7 +435,7 @@ impl<R: Runtime> Keystore<R> {
     ///
     /// Inert stub: always returns `Ok`; never errors.
     #[expect(clippy::unused_async)]
-    pub async fn is_available(&self) -> Result<BiometricState, KeystoreError> {
+    pub async fn is_biometric_available(&self) -> Result<BiometricState, KeystoreError> {
         Ok(BiometricState::Unavailable)
     }
 
@@ -485,12 +483,11 @@ impl<R: Runtime> Keystore<R> {
         Ok(())
     }
 
-    /// Inert: never succeeds — biometric is unavailable.
+    /// Inert: never succeeds — the keystore is unavailable.
     ///
     /// # Errors
     ///
-    /// Always returns [`KeystoreError::unavailable`] — biometric is unsupported
-    /// off-Android.
+    /// Always returns [`KeystoreError::unavailable`] off-Android.
     #[expect(clippy::unused_async)]
     pub async fn store(
         &self,
@@ -503,12 +500,11 @@ impl<R: Runtime> Keystore<R> {
         Err(KeystoreError::unavailable())
     }
 
-    /// Inert: never succeeds — biometric is unavailable.
+    /// Inert: never succeeds — the keystore is unavailable.
     ///
     /// # Errors
     ///
-    /// Always returns [`KeystoreError::unavailable`] — biometric is unsupported
-    /// off-Android.
+    /// Always returns [`KeystoreError::unavailable`] off-Android.
     #[expect(clippy::unused_async)]
     pub async fn retrieve(
         &self,
@@ -546,11 +542,11 @@ impl<R: Runtime, T: Manager<R>> KeystoreExt<R> for T {
 /// Initializes the keystore plugin.
 ///
 /// On Android, registers the Kotlin `KeystorePlugin` class and manages the
-/// handle. On desktop, manages an inert stub so `KeystoreExt::keystore` is
+/// handle. On desktop, manages an inert stub so [`KeystoreExt::keystore`] is
 /// always callable (operations report unavailable).
 #[must_use]
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    Builder::new("biometric-keystore")
+    Builder::new("keystore")
         .setup(|app, #[allow(unused_variables)] api| {
             #[cfg(target_os = "android")]
             {

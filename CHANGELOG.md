@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Copy password** — and copying a TOTP code, a generated password, or an old revision's value — no longer fails with an error. The clipboard-clear notification's text was reaching the native layer in a form it couldn't read, so every copy broke at the last step; copying and the auto-clear notification now work as intended.
+- On Android, tapping the **biometric** row on the **Permissions & data** page (offered when no fingerprint is set up) now opens the system Security settings so you can enroll one — it previously did nothing.
 
 ## [v0.17.0] - 2026-08-05
 

@@ -40,7 +40,7 @@ use std::sync::atomic::Ordering;
 
 use base64::Engine;
 use rustpass::Error;
-use tauri_plugin_secure_keystore::SecureKeystoreExt;
+use tauri_plugin_keystore::KeystoreExt;
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -76,7 +76,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
         bump_schema_to(state, version).await?;
         return Ok(MigrationOutcome::Done);
     }
-    let ks = app.secure_keystore();
+    let ks = app.keystore();
     // 4. Mint the vault key ONLY while the identity is still under the master
     //    (not yet re-keyed). Crash-safety: if a prior run already re-keyed the
     //    identity to a vault key but crashed before the schema bump, the mint is

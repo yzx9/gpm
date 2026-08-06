@@ -6,21 +6,21 @@
 // caller-chosen policy: auth-free (no prompt, survives biometric changes) OR
 // biometric-gated (a BiometricPrompt per use). The alias, prefs name,
 // key-generation policy, and prompt text are ALL caller-supplied — this plugin
-// carries no app-specific identifiers or brand strings.
-//
-// The crypto pattern (AndroidKeyStore AES/GCM key, optionally bound to a
-// BiometricPrompt CryptoObject with prompts on BOTH encrypt and decrypt) mirrors
-// KeystorePlugin.kt in biometric-keystore; the two are homomorphic so they can
-// be merged mechanically later.
+// carries no app-specific identifiers or brand strings. The crypto pattern
+// (AndroidKeyStore AES/GCM key, optionally bound to a BiometricPrompt
+// CryptoObject with prompts on BOTH encrypt and decrypt) is adapted from
+// impiece/tauri-plugin-keystore (Apache-2.0).
 //
 // Secrets are handled as ByteArray within the crypto flow and zeroed after use.
 
-package xyz.yzx9.gpm.securekeystore
+package xyz.yzx9.gpm.keystore
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -52,24 +52,24 @@ private val UTF_8: Charset = Charsets.UTF_8
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
 
-/** Map a [BiometricPrompt] error code to a stable `BIOMETRIC_*` code. Pure: the
+/** Map a [BiometricPrompt] error code to a stable `KEYSTORE_*` code. Pure: the
  *  `ERROR_*` constants are compile-time-inlined `static final int`, so the
  *  extracted function carries no runtime dependency on `androidx.biometric`. */
 internal fun mapErrorCode(code: Int): String = when (code) {
     BiometricPrompt.ERROR_USER_CANCELED,
     BiometricPrompt.ERROR_NEGATIVE_BUTTON,
     BiometricPrompt.ERROR_CANCELED,
-    -> "BIOMETRIC_CANCELLED"
+    -> "KEYSTORE_CANCELLED"
     BiometricPrompt.ERROR_HW_NOT_PRESENT,
     BiometricPrompt.ERROR_HW_UNAVAILABLE,
     BiometricPrompt.ERROR_NO_BIOMETRICS,
     BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
     BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
-    -> "BIOMETRIC_UNAVAILABLE"
+    -> "KEYSTORE_UNAVAILABLE"
     BiometricPrompt.ERROR_LOCKOUT,
     BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
-    -> "BIOMETRIC_LOCKOUT"
-    else -> "BIOMETRIC_FAILED"
+    -> "KEYSTORE_LOCKOUT"
+    else -> "KEYSTORE_FAILED"
 }
 
 /** Class name only — never leak crypto internals or secret data. */
@@ -79,8 +79,6 @@ internal fun safeName(e: Throwable): String = e.javaClass.simpleName.ifEmpty { "
  *  availability-state string (consumed by Rust as `BiometricState`). Pure: the
  *  `BIOMETRIC_*` constants are compile-time-inlined `static final int`, so this
  *  is a plain JVM unit test — exhaustive over every return.
- *  Duplicated from KeystorePlugin.kt (biometric-keystore) because the plugins are
- *  separate Gradle modules; the cross-layer string contract is pinned by tests.
  *
  *  - `SUCCESS` → "available"
  *  - `NONE_ENROLLED` + a weak print enrolled → "weak_enrolled"
@@ -106,6 +104,22 @@ internal fun encodeBlob(iv: ByteArray, ciphertext: ByteArray): Pair<String, Stri
 internal fun decodeBlob(ivB64: String?, ctB64: String?): Pair<ByteArray, ByteArray>? {
     if (ivB64 == null || ctB64 == null) return null
     return Pair(Base64.decode(ivB64, Base64.NO_WRAP), Base64.decode(ctB64, Base64.NO_WRAP))
+}
+
+/** System Security-settings intent — the fingerprint/biometric enrollment
+ *  surface. Robolectric-tested (Intent construction needs the Android runtime). */
+internal fun securitySettingsIntent(): Intent = Intent(Settings.ACTION_SECURITY_SETTINGS)
+
+/** Run the Security-settings deep-link and report whether a handler activity
+ *  was found (`false` on the rare OEM ROM lacking the target). Extracted from
+ *  the `@Command` as a pure wrapper over a `launch` lambda so the false-branch
+ *  is unit-testable without the Tauri `Invoke`/Plugin lifecycle or a shadow
+ *  Activity. */
+internal fun resolveSecuritySettingsDeepLink(launch: () -> Unit): Boolean = try {
+    launch()
+    true
+} catch (_: Exception) {
+    false
 }
 
 /** `store` args: the secret + alias/prefs + **flattened** key policy + prompt
@@ -160,7 +174,7 @@ class AliasArgs {
  * encrypt/decrypt requires a CryptoObject-bound STRONG biometric prompt.
  */
 @TauriPlugin
-class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
+class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
     // ── Lifecycle-free helpers ───────────────────────────────────────────
 
@@ -292,6 +306,22 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
+     * Deep-link to the system Security settings (the biometric-enrollment
+     * surface) — the recovery target when [isBiometricAvailable] reports
+     * "no_enrollment" / "weak_enrolled". Resolves `{ opened: bool }`: `false` on
+     * the rare OEM ROM lacking a handler activity, so the caller toasts rather
+     * than failing silently.
+     */
+    @Command
+    fun openSecuritySettings(invoke: Invoke) {
+        val ret = JSObject()
+        ret.put("opened", resolveSecuritySettingsDeepLink {
+            activity.startActivity(securitySettingsIntent())
+        })
+        invoke.resolve(ret)
+    }
+
+    /**
      * Probe one alias's liveness: `{ present, usable }`. Non-prompting.
      * `present` = ciphertext exists; `usable` = the key still initializes
      * (pre-API-30 or a dead key → false). This is the primitive the Rust side
@@ -320,7 +350,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         encryptionCipher(alias)
         true
     } catch (e: Exception) {
-        Log.w("gpm_secure_keystore", "aliasState probe failed ($alias): ${safeName(e)}")
+        Log.w("gpm_keystore", "aliasState probe failed ($alias): ${safeName(e)}")
         false
     }
 
@@ -346,7 +376,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             encryptionCipher(args.alias)
         } catch (e: Exception) {
             plainBytes.fill(0)
-            invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+            invoke.reject(safeName(e), "KEYSTORE_FAILED")
             return
         }
 
@@ -358,7 +388,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
                 ciphertext.fill(0)
                 invoke.resolve()
             } catch (e: Exception) {
-                invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+                invoke.reject(safeName(e), "KEYSTORE_FAILED")
             } finally {
                 plainBytes.fill(0)
             }
@@ -367,7 +397,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
         val fa = fragmentActivity() ?: run {
             plainBytes.fill(0)
-            invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
+            invoke.reject("not FragmentActivity", "KEYSTORE_UNAVAILABLE")
             return
         }
         val prompt = BiometricPrompt(
@@ -383,7 +413,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
                         ciphertext.fill(0)
                         invoke.resolve()
                     } catch (e: Exception) {
-                        invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+                        invoke.reject(safeName(e), "KEYSTORE_FAILED")
                     } finally {
                         plainBytes.fill(0)
                     }
@@ -399,16 +429,24 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             },
         )
 
-        prompt.authenticate(
-            promptInfo(args.title, args.subtitle, args.negative),
-            BiometricPrompt.CryptoObject(cipher),
-        )
+        try {
+            prompt.authenticate(
+                promptInfo(args.title, args.subtitle, args.negative),
+                BiometricPrompt.CryptoObject(cipher),
+            )
+        } catch (e: Exception) {
+            // `promptInfo` throws on a missing title/negative (a caller bypassing
+            // resolve_prompt_text with authRequired=true); `authenticate` could
+            // throw synchronously too. Zeroize the to-be-sealed secret either way.
+            plainBytes.fill(0)
+            invoke.reject(safeName(e), "KEYSTORE_FAILED")
+        }
     }
 
     /**
      * Retrieve the sealed value at `alias`. Auth-free policy decrypts directly
      * (no prompt); auth-required policy shows a CryptoObject DECRYPT prompt and
-     * resolves ONLY from a terminal callback. Rejects with `BIOMETRIC_NOT_SET`
+     * resolves ONLY from a terminal callback. Rejects with `KEYSTORE_NOT_SET`
      * when nothing is sealed (before any prompt).
      */
     @Command
@@ -416,7 +454,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(RetrieveArgs::class.java)
 
         val (iv, ciphertext) = readCipherData(prefs(args.prefs)) ?: run {
-            invoke.reject("nothing stored", "BIOMETRIC_NOT_SET")
+            invoke.reject("nothing stored", "KEYSTORE_NOT_SET")
             return
         }
 
@@ -425,18 +463,21 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
             try {
                 val cipher = decryptionCipher(args.alias, iv)
                 val plain = cipher.doFinal(ciphertext)
-                val ret = JSObject()
-                ret.put("value", String(plain, UTF_8))
-                invoke.resolve(ret)
-                plain.fill(0)
+                try {
+                    val ret = JSObject()
+                    ret.put("value", String(plain, UTF_8))
+                    invoke.resolve(ret)
+                } finally {
+                    plain.fill(0)
+                }
             } catch (e: Exception) {
-                invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+                invoke.reject(safeName(e), "KEYSTORE_FAILED")
             }
             return
         }
 
         val fa = fragmentActivity() ?: run {
-            invoke.reject("not FragmentActivity", "BIOMETRIC_UNAVAILABLE")
+            invoke.reject("not FragmentActivity", "KEYSTORE_UNAVAILABLE")
             return
         }
         val cipher = try {
@@ -444,7 +485,7 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
         } catch (e: Exception) {
             // Includes KeyPermanentlyInvalidatedException when all biometrics
             // were removed since the key was generated → re-setup required.
-            invoke.reject(safeName(e), "BIOMETRIC_KEY_INVALIDATED")
+            invoke.reject(safeName(e), "KEYSTORE_KEY_INVALIDATED")
             return
         }
 
@@ -457,12 +498,15 @@ class SecureKeystorePlugin(private val activity: Activity) : Plugin(activity) {
                         val authCipher = result.cryptoObject?.cipher
                             ?: error("cipher missing after auth")
                         val plain = authCipher.doFinal(ciphertext)
-                        val ret = JSObject()
-                        ret.put("value", String(plain, UTF_8))
-                        invoke.resolve(ret)
-                        plain.fill(0)
+                        try {
+                            val ret = JSObject()
+                            ret.put("value", String(plain, UTF_8))
+                            invoke.resolve(ret)
+                        } finally {
+                            plain.fill(0)
+                        }
                     } catch (e: Exception) {
-                        invoke.reject(safeName(e), "BIOMETRIC_FAILED")
+                        invoke.reject(safeName(e), "KEYSTORE_FAILED")
                     }
                 }
 

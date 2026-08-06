@@ -60,7 +60,7 @@ differs. The agreed design:
   same clear error on the decrypt path when it is not (R036).
 
 - **Sealing and re-lock reuse the existing machinery.** The S2K passphrase is
-  sealed through the biometric-keystore plugin and re-fetched on re-unlock under
+  sealed through the keystore plugin and re-fetched on re-unlock under
   biometrics; the unlocked key is AEAD-sealed at rest with the existing master
   key, the same protection the age identity gets; and the same Immediate / Idle /
   Never auto-lock lifecycle that governs the age identity governs the GPG

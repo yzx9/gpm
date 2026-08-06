@@ -334,7 +334,7 @@ async function onPassphraseSubmit() {
   } catch (e) {
     if (mode === "enable-biometric") {
       const err = e as BiometricError;
-      if (err.code === "BIOMETRIC_CANCELLED") {
+      if (err.code === "KEYSTORE_CANCELLED") {
         // User cancelled the biometric prompt — keep the modal open for retry.
       } else if (err.code === "WRONG_PASSPHRASE") {
         error.value = t("settings.passphrase.wrongPassphrase");
@@ -383,7 +383,7 @@ async function onEnableAppLock() {
     toast.success(t("settings.appLock.enabledToast"));
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
-    if (err.code === "BIOMETRIC_CANCELLED") {
+    if (err.code === "KEYSTORE_CANCELLED") {
       // User cancelled the migration prompt — no error toast.
     } else {
       error.value = err.message || t("settings.appLock.enableFailed");
@@ -412,7 +412,7 @@ async function onDisableAppLock() {
     toast.success(t("settings.appLock.disabledToast"));
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
-    if (err.code === "BIOMETRIC_CANCELLED") {
+    if (err.code === "KEYSTORE_CANCELLED") {
       // User cancelled — stays enabled.
     } else {
       error.value = err.message || t("settings.appLock.disableFailed");

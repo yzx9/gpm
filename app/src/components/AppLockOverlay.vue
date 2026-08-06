@@ -52,10 +52,10 @@ async function tryUnlock() {
   } catch (e) {
     const err = asAppLockError(e) as AppLockError;
     switch (err.code) {
-      case "BIOMETRIC_CANCELLED":
+      case "KEYSTORE_CANCELLED":
         // User dismissed the prompt — keep the overlay, offer a retry.
         break;
-      case "BIOMETRIC_KEY_INVALIDATED":
+      case "KEYSTORE_KEY_INVALIDATED":
         // The seal master key is sealed by the biometric-gated Keystore key,
         // which Android destroyed when all enrolled biometrics were removed. The
         // master key is random (not passphrase-derived), so the store is
@@ -65,7 +65,7 @@ async function tryUnlock() {
         // data" overwrites them on next setup — both work.)
         notice.value = t("common.appLock.keyInvalidatedNotice");
         break;
-      case "BIOMETRIC_UNAVAILABLE":
+      case "KEYSTORE_UNAVAILABLE":
         // Sensor temporarily unusable (hw busy/unavailable). Distinct from
         // KEY_INVALIDATED (biometrics removed = unrecoverable): this is usually
         // transient, so point at retry rather than the dead-end generic message.

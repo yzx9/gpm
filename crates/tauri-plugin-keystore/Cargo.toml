@@ -1,10 +1,10 @@
 [package]
-name = "tauri-plugin-secure-keystore"
+name = "tauri-plugin-keystore"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-links = "tauri-plugin-secure-keystore"
+links = "tauri-plugin-keystore"
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }
@@ -12,6 +12,7 @@ tauri-plugin = { version = "2", features = ["build"] }
 [dependencies]
 tauri = "2"
 serde = { workspace = true }
+log = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

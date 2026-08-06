@@ -33,9 +33,9 @@ use rustpass::ssh;
 use rustpass::{Error, ErrorCode, LockMode, Store};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
-use tauri_plugin_biometric_keystore::KeystoreExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
+use tauri_plugin_keystore::KeystoreExt;
 use tokio::task::JoinHandle;
 
 use crate::AppState;

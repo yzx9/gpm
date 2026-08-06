@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use base64::Engine;
 use rustpass::Store;
 use tauri::{Manager, WebviewWindowBuilder};
-use tauri_plugin_secure_keystore::{SecureKeystore, SecureKeystoreExt};
+use tauri_plugin_keystore::{Keystore, KeystoreExt};
 use tokio::task::JoinHandle;
 
 use crate::app_config::BackgroundSyncCadence;
@@ -125,7 +125,7 @@ pub(crate) struct AppState {
     /// here from `RepoConfig`. Persists at `app.json`; survives `reset_config`.
     pub(crate) app_config: app_config::AppConfigStore,
     /// The Tauri app handle, so a migration that needs the Android Keystore
-    /// (m0007 vault-key relocate) can reach `secure_keystore()` without a
+    /// (m0007 vault-key relocate) can reach `keystore()` without a
     /// signature change to the whole migration engine. `Some` in the live app
     /// (`init_state`), `None` on desktop and in tests (the keystore is inert /
     /// absent there, so keystore-touching migrations no-op).
@@ -153,7 +153,7 @@ pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
 /// on the upgrader path (the auth-free alias is absent pre-m0007) without minting a new
 /// master that would orphan every existing envelope. First-run provisioning is
 /// [`provision_master`]'s job, called explicitly by [`startup_master_key`].
-async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[u8; 32]> {
+async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
     let b64 = keystore::retrieve_master(ks).await.unwrap_or(None)?;
     decode_master_key(&b64)
 }
@@ -163,7 +163,7 @@ async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> O
 /// Returns `None` on desktop (no Keystore) or if generation/sealing fails. A key that
 /// cannot be sealed is discarded rather than used unpersisted, so it can never orphan
 /// later envelopes behind a key the next run won't have.
-async fn provision_master<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[u8; 32]> {
+async fn provision_master<R: tauri::Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
     // Never overwrite an existing entry: a present entry (even a malformed one)
     // may have envelopes sealed under it, so minting a fresh key would orphan
     // them. Degrade to passthrough instead — this restores the pre-split self-heal
@@ -196,7 +196,7 @@ async fn provision_master<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> Option<[
 /// `app_lock_enabled` is still probed (`keystore::has_app_lock_enabled`) so the frontend
 /// knows whether to show the app-lock overlay; only the vault key stays deferred
 /// to `app_unlock`. Returns `(master_key, app_lock_enabled)`.
-async fn startup_master_key<R: tauri::Runtime>(ks: &SecureKeystore<R>) -> (Option<[u8; 32]>, bool) {
+async fn startup_master_key<R: tauri::Runtime>(ks: &Keystore<R>) -> (Option<[u8; 32]>, bool) {
     let app_lock_enabled = keystore::has_app_lock_enabled(ks).await;
     // Always retrieve the auth-free master (D). retrieve_master_or_none is safe on
     // the upgrader path (no generate-on-absent); provision_master is the explicit
@@ -423,8 +423,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_safe_area::init())
-        .plugin(tauri_plugin_biometric_keystore::init())
-        .plugin(tauri_plugin_secure_keystore::init())
+        .plugin(tauri_plugin_keystore::init())
         .plugin(tauri_plugin_file_picker::init())
         .plugin(tauri_plugin_device_info::init())
         .plugin(tauri_plugin_file_save::init())
@@ -463,7 +462,7 @@ pub fn run() {
             // under App Lock — is safe: it is the git-credential tier, already
             // worker-loaded while locked, and a process attacker is a non-goal.
             let (master_key, app_lock_enabled) =
-                tauri::async_runtime::block_on(startup_master_key(app.secure_keystore()));
+                tauri::async_runtime::block_on(startup_master_key(app.keystore()));
             // Basic-state summary — config dir (where the rotated log + sealed
             // config live) and whether the app-launch biometric gate is armed.
             log::info!(

@@ -117,7 +117,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({
-        code: "BIOMETRIC_CANCELLED",
+        code: "KEYSTORE_CANCELLED",
         message: "cancel",
       }); // biometric_unlock (auto-prompt)
     const wrapper = mountUnlock();
@@ -138,7 +138,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({
-        code: "BIOMETRIC_KEY_INVALIDATED",
+        code: "KEYSTORE_KEY_INVALIDATED",
         message: "invalidated",
       }) // biometric_unlock
       .mockResolvedValueOnce(undefined); // disable_biometric_unlock (self-heal)
@@ -204,7 +204,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
-      .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
+      .mockRejectedValueOnce({ code: "KEYSTORE_CANCELLED", message: "x" }) // auto-prompt
       .mockResolvedValueOnce(undefined); // manual button -> biometric_unlock
     const wrapper = mountUnlock();
     await flushPromises();
@@ -223,7 +223,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
-      .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
+      .mockRejectedValueOnce({ code: "KEYSTORE_CANCELLED", message: "x" }) // auto-prompt
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mountUnlock();
     await flushPromises();
@@ -252,7 +252,7 @@ describe("UnlockModal", () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
-      .mockRejectedValueOnce({ code: "BIOMETRIC_CANCELLED", message: "x" }) // auto-prompt
+      .mockRejectedValueOnce({ code: "KEYSTORE_CANCELLED", message: "x" }) // auto-prompt
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config
     const wrapper = mountUnlock();
     await flushPromises();
@@ -284,7 +284,7 @@ describe("UnlockModal", () => {
       .mockResolvedValueOnce("available") // is_biometric_available
       .mockResolvedValueOnce(true) // is_biometric_unlock_enabled
       .mockRejectedValueOnce({
-        code: "BIOMETRIC_LOCKOUT",
+        code: "KEYSTORE_LOCKOUT",
         message: "Too many attempts, try later",
       }) // auto-prompt (transient)
       .mockResolvedValueOnce({ lock_mode: "immediate" }); // get_app_config

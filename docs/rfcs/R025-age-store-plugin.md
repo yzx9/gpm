@@ -56,7 +56,7 @@ extraction boundary therefore already exists in practice — there is nothing to
 decision to make.
 
 **A new plugin shape for this repo.** Every local plugin in the repo today is a _native bridge_: a thin Rust
-IPC layer in front of an Android Kotlin/Gradle module (safe-area, biometric-keystore, secure-keystore,
+IPC layer in front of an Android Kotlin/Gradle module (safe-area, keystore,
 file-picker). A pure-Rust _logic_ plugin — no Kotlin, no Gradle module, consumed by other apps' Rust side —
 would be a new pattern here, and a simpler one: it needs no mobile scaffolding at all. Worth calling out
 because it lowers the packaging cost relative to the existing plugins, rather than raising it.

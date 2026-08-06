@@ -3,21 +3,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! gpm-specific Keystore configuration: the alias/prefs names, key policies,
-//! and brand fallbacks that the generic keystore plugins carry **no** knowledge
+//! and brand fallbacks that the generic keystore plugin carries **no** knowledge
 //! of. This is the single source of truth for gpm's Keystore identifiers — the
-//! plugins are called with these as plain parameters, so the plugin crates stay
-//! app-agnostic and publishable. When the two keystore plugins merge, only this
-//! module's handle targets change; the business call-sites (applock / biometric
-//! / m0007) stay put.
+//! plugin is called with these as plain parameters, so it stays app-agnostic and
+//! publishable. The business call-sites (applock / biometric / m0007) read these
+//! aliases/policies and pass them through unchanged.
 
 use tauri::Runtime;
-use tauri_plugin_biometric_keystore::{
-    KeyPolicy, PromptText, ResolvedPromptText, resolve_prompt_text,
+use tauri_plugin_keystore::{
+    AliasState, KeyPolicy, Keystore, KeystoreError, PromptText, ResolvedPromptText,
+    resolve_prompt_text,
 };
-use tauri_plugin_secure_keystore::{AliasState, SecureKeystore, SecureKeystoreError};
 
 // ---------------------------------------------------------------------------
-// Identity passphrase slot (biometric-gated, biometric-keystore plugin)
+// Identity passphrase slot (biometric-gated)
 // ---------------------------------------------------------------------------
 
 /// Keystore alias for the sealed identity passphrase.
@@ -58,11 +57,11 @@ pub(crate) fn resolve_prompt(prompt: Option<&PromptText>) -> ResolvedPromptText 
 }
 
 // ---------------------------------------------------------------------------
-// At-rest master key + biometric vault/legacy slots (secure-keystore plugin)
+// At-rest master key + biometric vault/legacy slots
 // ---------------------------------------------------------------------------
 //
-// R064 split the at-rest seal into two keys, both stored via the
-// (now generic) secure-keystore plugin:
+// R064 split the at-rest seal into two keys, both stored via the keystore
+// plugin:
 // - the **auth-free master key** (permanent; seals `repo.json` + `app.json`;
 //   the headless worker reads it under lock) — `MASTER_*` below.
 // - the **biometric-gated vault key** (opt-in App Lock; seals `identity` +
@@ -87,26 +86,24 @@ pub(crate) const MASTER_PREFS: &str = "gpm_secure_keystore";
 /// Key policy for the auth-free master key: no auth, no enrollment invalidation
 /// — the at-rest store never bricks on a fingerprint change, and the headless
 /// worker can read `repo.json` under lock. Per R064 this key is permanent.
-pub(crate) const MASTER_FREE_POLICY: tauri_plugin_secure_keystore::KeyPolicy =
-    tauri_plugin_secure_keystore::KeyPolicy {
-        auth_required: false,
-        auth_biometric_strong: false,
-        invalidated_by_enrollment: false,
-        auth_validity_seconds: 0,
-    };
+pub(crate) const MASTER_FREE_POLICY: KeyPolicy = KeyPolicy {
+    auth_required: false,
+    auth_biometric_strong: false,
+    invalidated_by_enrollment: false,
+    auth_validity_seconds: 0,
+};
 
 /// Key policy for the biometric-gated slots (vault + legacy): per-use STRONG
 /// biometric auth, but **not** invalidated by enrollment — adding a fingerprint
 /// must not brick the store (the master key cannot self-heal the way a
 /// passphrase can). Removing ALL biometrics still invalidates the key → the
 /// documented re-setup case. Same policy for both slots (R064).
-pub(crate) const VAULT_POLICY: tauri_plugin_secure_keystore::KeyPolicy =
-    tauri_plugin_secure_keystore::KeyPolicy {
-        auth_required: true,
-        auth_biometric_strong: true,
-        invalidated_by_enrollment: false,
-        auth_validity_seconds: 0,
-    };
+pub(crate) const VAULT_POLICY: KeyPolicy = KeyPolicy {
+    auth_required: true,
+    auth_biometric_strong: true,
+    invalidated_by_enrollment: false,
+    auth_validity_seconds: 0,
+};
 
 /// Which biometric-gated Keystore alias an app-lock command targets (R064
 /// master/vault split). Moved here from the plugin crate so the plugin stays
@@ -146,23 +143,21 @@ impl BiometricSlot {
     }
 }
 
-/// `BIOMETRIC_NOT_SET` / `SECURE_KEYSTORE_UNAVAILABLE` both mean "nothing usable
-/// here" for a speculative read (first run, desktop, or a cleared slot).
-fn is_not_set_or_unavailable(e: &SecureKeystoreError) -> bool {
-    e.code == "BIOMETRIC_NOT_SET" || e.code == "SECURE_KEYSTORE_UNAVAILABLE"
+/// `KEYSTORE_NOT_SET` / `KEYSTORE_UNAVAILABLE` both mean "nothing usable here"
+/// for a speculative read (first run, desktop, or a cleared slot).
+fn is_not_set_or_unavailable(e: &KeystoreError) -> bool {
+    e.code == "KEYSTORE_NOT_SET" || e.code == "KEYSTORE_UNAVAILABLE"
 }
 
 /// Resolve an app-lock prompt against gpm's brand fallbacks (the same "gpm" /
 /// "Cancel" the biometric-unlock prompt uses).
-pub(crate) fn resolve_app_lock_prompt(
-    prompt: Option<&tauri_plugin_secure_keystore::PromptText>,
-) -> tauri_plugin_secure_keystore::ResolvedPromptText {
-    let empty = tauri_plugin_secure_keystore::PromptText {
+pub(crate) fn resolve_app_lock_prompt(prompt: Option<&PromptText>) -> ResolvedPromptText {
+    let empty = PromptText {
         title: None,
         subtitle: None,
         negative: None,
     };
-    tauri_plugin_secure_keystore::resolve_prompt_text(
+    resolve_prompt_text(
         prompt.unwrap_or(&empty),
         PROMPT_FALLBACK_TITLE,
         PROMPT_FALLBACK_NEGATIVE,
@@ -174,68 +169,60 @@ pub(crate) fn resolve_app_lock_prompt(
 // ---------------------------------------------------------------------------
 
 /// The keystore backend the gpm app layer talks to. Abstracts the concrete
-/// [`SecureKeystore<R>`] (a Tauri `PluginHandle` wrapper, not directly mockable)
+/// [`Keystore<R>`] (a Tauri `PluginHandle` wrapper, not directly mockable)
 /// so the app-layer helpers below are unit-testable with a recording mock —
 /// pinning that each helper passes the correct alias/prefs/policy (the
 /// regression guard for the caller-parametrized plugin refactor). The real impl
 /// is a thin forward to the plugin's inherent methods.
 pub(crate) trait KvKeystore {
     /// Probe one alias's liveness.
-    async fn alias_state(
-        &self,
-        alias: &str,
-        prefs: &str,
-    ) -> Result<AliasState, SecureKeystoreError>;
+    async fn alias_state(&self, alias: &str, prefs: &str) -> Result<AliasState, KeystoreError>;
     /// Delete an alias's key + ciphertext.
-    async fn delete(&self, alias: &str, prefs: &str) -> Result<(), SecureKeystoreError>;
+    async fn delete(&self, alias: &str, prefs: &str) -> Result<(), KeystoreError>;
     /// Seal `value` at `alias` under `policy`.
     async fn store(
         &self,
         value: &str,
         alias: &str,
         prefs: &str,
-        policy: tauri_plugin_secure_keystore::KeyPolicy,
-        prompt: Option<&tauri_plugin_secure_keystore::ResolvedPromptText>,
-    ) -> Result<(), SecureKeystoreError>;
+        policy: KeyPolicy,
+        prompt: Option<&ResolvedPromptText>,
+    ) -> Result<(), KeystoreError>;
     /// Retrieve the value sealed at `alias`.
     async fn retrieve(
         &self,
         alias: &str,
         prefs: &str,
-        policy: tauri_plugin_secure_keystore::KeyPolicy,
-        prompt: Option<&tauri_plugin_secure_keystore::ResolvedPromptText>,
-    ) -> Result<String, SecureKeystoreError>;
+        policy: KeyPolicy,
+        prompt: Option<&ResolvedPromptText>,
+    ) -> Result<String, KeystoreError>;
 }
 
-impl<R: Runtime> KvKeystore for SecureKeystore<R> {
-    async fn alias_state(
-        &self,
-        alias: &str,
-        prefs: &str,
-    ) -> Result<AliasState, SecureKeystoreError> {
-        SecureKeystore::alias_state(self, alias, prefs).await
+impl<R: Runtime> KvKeystore for Keystore<R> {
+    async fn alias_state(&self, alias: &str, prefs: &str) -> Result<AliasState, KeystoreError> {
+        Keystore::alias_state(self, alias, prefs).await
     }
-    async fn delete(&self, alias: &str, prefs: &str) -> Result<(), SecureKeystoreError> {
-        SecureKeystore::delete(self, alias, prefs).await
+    async fn delete(&self, alias: &str, prefs: &str) -> Result<(), KeystoreError> {
+        Keystore::delete(self, alias, prefs).await
     }
     async fn store(
         &self,
         value: &str,
         alias: &str,
         prefs: &str,
-        policy: tauri_plugin_secure_keystore::KeyPolicy,
-        prompt: Option<&tauri_plugin_secure_keystore::ResolvedPromptText>,
-    ) -> Result<(), SecureKeystoreError> {
-        SecureKeystore::store(self, value, alias, prefs, policy, prompt).await
+        policy: KeyPolicy,
+        prompt: Option<&ResolvedPromptText>,
+    ) -> Result<(), KeystoreError> {
+        Keystore::store(self, value, alias, prefs, policy, prompt).await
     }
     async fn retrieve(
         &self,
         alias: &str,
         prefs: &str,
-        policy: tauri_plugin_secure_keystore::KeyPolicy,
-        prompt: Option<&tauri_plugin_secure_keystore::ResolvedPromptText>,
-    ) -> Result<String, SecureKeystoreError> {
-        SecureKeystore::retrieve(self, alias, prefs, policy, prompt).await
+        policy: KeyPolicy,
+        prompt: Option<&ResolvedPromptText>,
+    ) -> Result<String, KeystoreError> {
+        Keystore::retrieve(self, alias, prefs, policy, prompt).await
     }
 }
 
@@ -243,7 +230,7 @@ impl<R: Runtime> KvKeystore for SecureKeystore<R> {
 /// desktop. Non-prompting.
 pub(crate) async fn retrieve_master<K: KvKeystore>(
     ks: &K,
-) -> Result<Option<String>, SecureKeystoreError> {
+) -> Result<Option<String>, KeystoreError> {
     match ks
         .retrieve(MASTER_ALIAS, MASTER_PREFS, MASTER_FREE_POLICY, None)
         .await
@@ -258,7 +245,7 @@ pub(crate) async fn retrieve_master<K: KvKeystore>(
 pub(crate) async fn store_master<K: KvKeystore>(
     ks: &K,
     key_b64: &str,
-) -> Result<(), SecureKeystoreError> {
+) -> Result<(), KeystoreError> {
     ks.store(
         key_b64,
         MASTER_ALIAS,
@@ -275,8 +262,8 @@ pub(crate) async fn store_master<K: KvKeystore>(
 pub(crate) async fn retrieve_slot<K: KvKeystore>(
     ks: &K,
     slot: BiometricSlot,
-    prompt: Option<&tauri_plugin_secure_keystore::PromptText>,
-) -> Result<Option<String>, SecureKeystoreError> {
+    prompt: Option<&PromptText>,
+) -> Result<Option<String>, KeystoreError> {
     let resolved = resolve_app_lock_prompt(prompt);
     match ks
         .retrieve(slot.alias(), slot.prefs(), VAULT_POLICY, Some(&resolved))
@@ -294,8 +281,8 @@ pub(crate) async fn store_slot<K: KvKeystore>(
     ks: &K,
     value: &str,
     slot: BiometricSlot,
-    prompt: Option<&tauri_plugin_secure_keystore::PromptText>,
-) -> Result<(), SecureKeystoreError> {
+    prompt: Option<&PromptText>,
+) -> Result<(), KeystoreError> {
     let resolved = resolve_app_lock_prompt(prompt);
     ks.store(
         value,
@@ -311,7 +298,7 @@ pub(crate) async fn store_slot<K: KvKeystore>(
 pub(crate) async fn delete_slot<K: KvKeystore>(
     ks: &K,
     slot: BiometricSlot,
-) -> Result<(), SecureKeystoreError> {
+) -> Result<(), KeystoreError> {
     ks.delete(slot.alias(), slot.prefs()).await
 }
 
@@ -322,7 +309,7 @@ pub(crate) async fn delete_slot<K: KvKeystore>(
 /// longer carries the slot OR). Sequential: each probe is a fast cipher-init
 /// check (<5 ms, no prompt), run once at cold start.
 pub(crate) async fn has_app_lock_enabled<K: KvKeystore>(ks: &K) -> bool {
-    let ok = |r: Result<AliasState, SecureKeystoreError>| r.is_ok_and(|s| s.present && s.usable);
+    let ok = |r: Result<AliasState, KeystoreError>| r.is_ok_and(|s| s.present && s.usable);
     // Short-circuit on the common post-m0007 case (vault present) before probing
     // legacy; legacy is only set on the pre-m0007 upgrader path.
     ok(ks
@@ -382,9 +369,8 @@ mod tests {
     // (auth-free vs biometric-gated, enrollment invalidation). Driven through a
     // recording mock so no Android Keystore is needed.
 
-    use tauri_plugin_secure_keystore::KeyPolicy as SecureKeyPolicy;
-    type MockRetrieve = (String, String, SecureKeyPolicy);
-    type MockStore = (String, String, String, SecureKeyPolicy);
+    type MockRetrieve = (String, String, KeyPolicy);
+    type MockStore = (String, String, String, KeyPolicy);
 
     /// Recording [`KvKeystore`] mock: captures every call's alias/prefs/policy and
     /// returns programmable values. `Mutex` (not `tokio::sync`) because no await
@@ -394,7 +380,7 @@ mod tests {
         stores: std::sync::Mutex<Vec<MockStore>>,
         deletes: std::sync::Mutex<Vec<(String, String)>>,
         alias_states: std::sync::Mutex<Vec<(String, String)>>,
-        retrieve_ret: std::sync::Mutex<Result<String, SecureKeystoreError>>,
+        retrieve_ret: std::sync::Mutex<Result<String, KeystoreError>>,
         alias_state_ret: std::sync::Mutex<AliasState>,
         /// Per-alias overrides; when absent for a probed alias, falls back to
         /// `alias_state_ret`. Lets a test distinguish vault vs legacy probes.
@@ -416,7 +402,7 @@ mod tests {
                 alias_state_overrides: std::sync::Mutex::new(std::collections::HashMap::new()),
             }
         }
-        fn with_retrieve(self, r: Result<String, SecureKeystoreError>) -> Self {
+        fn with_retrieve(self, r: Result<String, KeystoreError>) -> Self {
             *self.retrieve_ret.lock().unwrap() = r;
             self
         }
@@ -436,11 +422,7 @@ mod tests {
     }
 
     impl KvKeystore for MockKeystore {
-        async fn alias_state(
-            &self,
-            alias: &str,
-            prefs: &str,
-        ) -> Result<AliasState, SecureKeystoreError> {
+        async fn alias_state(&self, alias: &str, prefs: &str) -> Result<AliasState, KeystoreError> {
             self.alias_states
                 .lock()
                 .unwrap()
@@ -454,7 +436,7 @@ mod tests {
                 .unwrap_or_else(|| *self.alias_state_ret.lock().unwrap());
             Ok(s)
         }
-        async fn delete(&self, alias: &str, prefs: &str) -> Result<(), SecureKeystoreError> {
+        async fn delete(&self, alias: &str, prefs: &str) -> Result<(), KeystoreError> {
             self.deletes
                 .lock()
                 .unwrap()
@@ -466,9 +448,9 @@ mod tests {
             value: &str,
             alias: &str,
             prefs: &str,
-            policy: tauri_plugin_secure_keystore::KeyPolicy,
-            _prompt: Option<&tauri_plugin_secure_keystore::ResolvedPromptText>,
-        ) -> Result<(), SecureKeystoreError> {
+            policy: KeyPolicy,
+            _prompt: Option<&ResolvedPromptText>,
+        ) -> Result<(), KeystoreError> {
             self.stores.lock().unwrap().push((
                 value.to_string(),
                 alias.to_string(),
@@ -481,9 +463,9 @@ mod tests {
             &self,
             alias: &str,
             prefs: &str,
-            policy: tauri_plugin_secure_keystore::KeyPolicy,
-            _prompt: Option<&tauri_plugin_secure_keystore::ResolvedPromptText>,
-        ) -> Result<String, SecureKeystoreError> {
+            policy: KeyPolicy,
+            _prompt: Option<&ResolvedPromptText>,
+        ) -> Result<String, KeystoreError> {
             self.retrieves
                 .lock()
                 .unwrap()
@@ -511,8 +493,8 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_master_maps_not_set_to_none() {
-        let mock = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
-            code: "BIOMETRIC_NOT_SET".to_string(),
+        let mock = MockKeystore::new().with_retrieve(Err(KeystoreError {
+            code: "KEYSTORE_NOT_SET".to_string(),
             message: String::new(),
         }));
         assert!(retrieve_master(&mock).await.unwrap().is_none());
@@ -683,8 +665,8 @@ mod tests {
     async fn retrieve_slot_maps_not_set_to_none() {
         // A missing slot returns None with no prompt — the docstring promise.
         for slot in [BiometricSlot::Vault, BiometricSlot::Legacy] {
-            let mock = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
-                code: "BIOMETRIC_NOT_SET".to_string(),
+            let mock = MockKeystore::new().with_retrieve(Err(KeystoreError {
+                code: "KEYSTORE_NOT_SET".to_string(),
                 message: String::new(),
             }));
             assert!(
@@ -697,8 +679,8 @@ mod tests {
     #[tokio::test]
     async fn retrieve_master_maps_unavailable_to_none() {
         // The desktop / no-Keystore branch (fires on every desktop launch).
-        let mock = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
-            code: "SECURE_KEYSTORE_UNAVAILABLE".to_string(),
+        let mock = MockKeystore::new().with_retrieve(Err(KeystoreError {
+            code: "KEYSTORE_UNAVAILABLE".to_string(),
             message: String::new(),
         }));
         assert!(retrieve_master(&mock).await.unwrap().is_none());
@@ -709,17 +691,17 @@ mod tests {
         // A real failure (key invalidated / cancelled / failed) must NOT collapse
         // to Ok(None) — it must propagate so the caller can react.
         for code in [
-            "BIOMETRIC_KEY_INVALIDATED",
-            "BIOMETRIC_CANCELLED",
-            "BIOMETRIC_FAILED",
+            "KEYSTORE_KEY_INVALIDATED",
+            "KEYSTORE_CANCELLED",
+            "KEYSTORE_FAILED",
         ] {
-            let mock = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
+            let mock = MockKeystore::new().with_retrieve(Err(KeystoreError {
                 code: code.to_string(),
                 message: String::new(),
             }));
             let err = retrieve_master(&mock).await.unwrap_err();
             assert_eq!(err.code, code, "{code}: should propagate, not map to None");
-            let mock2 = MockKeystore::new().with_retrieve(Err(SecureKeystoreError {
+            let mock2 = MockKeystore::new().with_retrieve(Err(KeystoreError {
                 code: code.to_string(),
                 message: String::new(),
             }));

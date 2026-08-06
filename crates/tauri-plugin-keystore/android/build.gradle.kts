@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "xyz.yzx9.gpm.biometrickeystore"
+    namespace = "xyz.yzx9.gpm.keystore"
     compileSdk = 36
 
     defaultConfig {
@@ -39,7 +39,9 @@ android {
 
 dependencies {
     implementation(project(":tauri-android"))
-    // BiometricPrompt + BiometricManager (also brings androidx.core/fragment/appcompat).
+    // BiometricPrompt + BiometricManager for the biometric-gated path; also
+    // brings androidx.core/fragment/appcompat transitively. The auth-free path
+    // needs only the Keystore.
     implementation("androidx.biometric:biometric:1.1.0")
 
     testImplementation("org.robolectric:robolectric:4.14.1")

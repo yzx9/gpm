@@ -101,7 +101,7 @@ own passphrase-protected secret key. Identity setup is in-app keypair generation
 divergence) or secret-key import — fundamentally different from age's "generate
 and paste an identity string," so the setup UI gains a crypto-kind selector with
 a GPG-specific sub-flow. Unlock is the secret-key passphrase, retrievable
-through the existing biometric-keystore plugin the way the age identity
+through the existing keystore plugin the way the age identity
 passphrase is today, with the same Immediate / Idle-timeout / Never auto-lock
 modes and the same wipe-after-use discipline.
 
@@ -111,7 +111,7 @@ content is zeroized and wiped after use, are preserved verbatim — rpgp returns
 plaintext into Rust and we wipe it the same way age output is wiped. What
 changes is the at-rest surface: the in-app keyring (especially the secret key)
 is new durable secret-bearing state and is AEAD-encrypted at rest with the
-master key the secure-keystore plugin already seals — the same protection the
+master key the keystore plugin already seals — the same protection the
 repo configuration and the age identity get today. The recipient public-key half
 of the keyring is not secret. Error-message sanitization carries over unchanged.
 

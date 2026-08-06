@@ -11,12 +11,12 @@ use rustpass::Error;
 use rustpass::error::ErrorCode;
 use serde::Serialize;
 use tauri::{AppHandle, State};
-use tauri_plugin_biometric_keystore::{BiometricState, KeystoreError, KeystoreExt};
+use tauri_plugin_keystore::{BiometricState, KeystoreError, KeystoreExt, PromptText};
 use zeroize::Zeroizing;
 
 use crate::AppState;
-use crate::identity::unlock_and_arm;
-use crate::keystore::{PASSPHRASE_ALIAS, PASSPHRASE_POLICY, PASSPHRASE_PREFS, resolve_prompt};
+use crate::identity;
+use crate::keystore::{self, PASSPHRASE_ALIAS, PASSPHRASE_POLICY, PASSPHRASE_PREFS};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -26,7 +26,7 @@ use crate::keystore::{PASSPHRASE_ALIAS, PASSPHRASE_POLICY, PASSPHRASE_PREFS, res
 ///
 /// Serializes to `{ code, message }` — the same shape as `rustpass::Error` —
 /// so the frontend can destructure both uniformly. Carries the Kotlin
-/// `BIOMETRIC_*` codes (via [`From<KeystoreError>`]) and maps
+/// `KEYSTORE_*` codes (via [`From<KeystoreError>`]) and maps
 /// `rustpass::Error` (via [`From<Error>`]) so a stale stored passphrase's
 /// `WRONG_PASSPHRASE` reaches the frontend. `rustpass::ErrorCode` is not
 /// touched; this type lives entirely in the app layer.
@@ -73,7 +73,7 @@ impl fmt::Display for BiometricError {
 pub(crate) async fn is_biometric_available(
     app: AppHandle,
 ) -> Result<BiometricState, BiometricError> {
-    Ok(app.keystore().is_available().await?)
+    Ok(app.keystore().is_biometric_available().await?)
 }
 
 /// Open the system Security settings (the biometric-enrollment surface) — the
@@ -120,7 +120,7 @@ pub(crate) async fn enable_biometric_unlock(
     state: State<'_, AppState>,
     app: AppHandle,
     passphrase: String,
-    prompt_text: Option<tauri_plugin_biometric_keystore::PromptText>,
+    prompt_text: Option<PromptText>,
 ) -> Result<(), BiometricError> {
     log::info!("biometric: enable");
     // Refuse a plaintext identity before sealing anything: biometric seals a
@@ -131,7 +131,7 @@ pub(crate) async fn enable_biometric_unlock(
     // Reject a wrong passphrase before sealing it (age or SSH).
     state.store.validate_passphrase(&passphrase).await?;
     // The Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
-    let resolved = resolve_prompt(prompt_text.as_ref());
+    let resolved = keystore::resolve_prompt(prompt_text.as_ref());
     app.keystore()
         .store(
             &passphrase,
@@ -153,11 +153,11 @@ pub(crate) async fn enable_biometric_unlock(
 pub(crate) async fn biometric_unlock(
     state: State<'_, AppState>,
     app: AppHandle,
-    prompt_text: Option<tauri_plugin_biometric_keystore::PromptText>,
+    prompt_text: Option<PromptText>,
 ) -> Result<(), BiometricError> {
     log::info!("biometric: unlock");
     // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used.
-    let resolved = resolve_prompt(prompt_text.as_ref());
+    let resolved = keystore::resolve_prompt(prompt_text.as_ref());
     let passphrase = Zeroizing::new(
         app.keystore()
             .retrieve(
@@ -169,16 +169,15 @@ pub(crate) async fn biometric_unlock(
             .await?,
     );
 
-    if let Err(e) = unlock_and_arm(&state, &app, &passphrase).await {
-        if e.code == "WRONG_PASSPHRASE" {
+    if let Err(e) = identity::unlock_and_arm(&state, &app, &passphrase).await {
+        if e.code == "WRONG_PASSPHRASE" &&
             // Stale sealed passphrase — clear it so the page reveals the form.
-            if let Err(cleanup) = app
+            let Err(cleanup) = app
                 .keystore()
                 .delete(PASSPHRASE_ALIAS, PASSPHRASE_PREFS)
                 .await
-            {
-                log::warn!("biometric: stale slot cleanup failed: {cleanup:?}");
-            }
+        {
+            log::warn!("biometric: stale slot cleanup failed: {cleanup:?}");
         }
         return Err(BiometricError::from(e));
     }

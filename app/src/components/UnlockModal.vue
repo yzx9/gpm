@@ -119,11 +119,11 @@ async function tryBiometricUnlock() {
   } catch (e) {
     const err = asBiometricError(e) as BiometricError;
     switch (err.code) {
-      case "BIOMETRIC_CANCELLED":
+      case "KEYSTORE_CANCELLED":
         // User dismissed the prompt — stay in the current mode. The visible
         // ghost switch is the way to the other method; no notice needed.
         break;
-      case "BIOMETRIC_KEY_INVALIDATED":
+      case "KEYSTORE_KEY_INVALIDATED":
         biometricNotice.value = t("common.unlock.biometricResetNotice");
         await disableBiometricUnlock();
         biometricEnabled.value = false;

@@ -18,8 +18,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-safe-area = { path = "../../crates/tauri-plugin-safe-area" }
-tauri-plugin-biometric-keystore = { path = "../../crates/tauri-plugin-biometric-keystore" }
-tauri-plugin-secure-keystore = { path = "../../crates/tauri-plugin-secure-keystore" }
+tauri-plugin-keystore = { path = "../../crates/tauri-plugin-keystore" }
 tauri-plugin-file-picker = { path = "../../crates/tauri-plugin-file-picker" }
 tauri-plugin-screen-secure = { path = "../../crates/tauri-plugin-screen-secure" }
 tauri-plugin-clipboard-notify = { path = "../../crates/tauri-plugin-clipboard-notify" }

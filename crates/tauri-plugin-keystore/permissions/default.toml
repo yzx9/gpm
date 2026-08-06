@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "Android Keystore seal for a caller-supplied secret, under a caller-chosen auth-free or biometric-gated policy. Backend-only; no frontend capability is granted."
+permissions = []

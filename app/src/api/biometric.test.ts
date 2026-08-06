@@ -86,11 +86,11 @@ describe("biometric wrappers", () => {
 
   it("biometricUnlock propagates rejection (e.g. cancel)", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockRejectedValue({
-      code: "BIOMETRIC_CANCELLED",
+      code: "KEYSTORE_CANCELLED",
       message: "cancel",
     });
     await expect(biometricUnlock()).rejects.toEqual({
-      code: "BIOMETRIC_CANCELLED",
+      code: "KEYSTORE_CANCELLED",
       message: "cancel",
     });
   });
