@@ -2270,7 +2270,7 @@ dependencies = [
  "sys-locale",
  "tauri",
  "tauri-build",
- "tauri-plugin-background-sync",
+ "tauri-plugin-background-work",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-clipboard-notify",
  "tauri-plugin-device-info",
@@ -5597,7 +5597,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-background-sync"
+name = "tauri-plugin-background-work"
 version = "0.17.1"
 dependencies = [
  "log",

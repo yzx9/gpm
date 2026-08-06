@@ -46,7 +46,7 @@ A plugin crate exists to be **publishable as a standalone, app-agnostic primitiv
 - `tauri-plugin-screen-secure` — toggles Android `FLAG_SECURE` for per-route screen-capture protection on sensitive screens (frontend calls `set_secure(bool)`; desktop no-op, gated by `screen_secure_available()`)
 - `tauri-plugin-clipboard-notify` — a **generic** sticky-notification + tap-to-clear: posts a sticky Android notification with caller-resolved text while something is on the clipboard; the tap clears natively and sets a manual-clear flag the Rust clear timer polls (no Kotlin→Rust event — the flag is polled over `run_mobile_plugin_async`). Backend-only; inert no-ops on desktop. gpm uses it for the clipboard-clear notification
 - `tauri-plugin-device-info` — surfaces Android hardware/OS build fields, the WebView user-agent, and display metrics to Rust for the diagnostics export (backend-only; desktop gets a minimal OS/arch/version fallback)
-- `tauri-plugin-background-sync` — schedules the periodic Android background git sync via `WorkManager` (network-gated) and cancels it when the cadence is `Off` (backend-only; inert no-ops on desktop, where the foreground sync covers it)
+- `tauri-plugin-background-work` — a **generic**, worker-agnostic periodic-`WorkManager` scheduler: enqueues/cancels a caller-named worker class (FQN resolved via `Class.forName`) under a network constraint (backend-only; inert no-ops on desktop, where the foreground sync covers it).
 
 ## Security Model
 

@@ -1,10 +1,10 @@
 [package]
-name = "tauri-plugin-background-sync"
+name = "tauri-plugin-background-work"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-links = "tauri-plugin-background-sync"
+links = "tauri-plugin-background-work"
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }

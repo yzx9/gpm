@@ -9,7 +9,7 @@
 //! the bottom is `#[cfg(target_os = "android")]`; on other targets this module
 //! still compiles so the core is unit-testable without a device. The JNI symbol
 //! lands in `libgpm_lib.so` (the existing cdylib) and is called by
-//! `xyz.yzx9.gpm.backgroundsync.SyncWorker` over JNI.
+//! `xyz.yzx9.gpm.SyncWorker` over JNI.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -176,7 +176,7 @@ mod jni {
     // The function body itself is safe Rust.
     #[allow(unsafe_code)]
     #[unsafe(no_mangle)]
-    pub extern "system" fn Java_xyz_yzx9_gpm_backgroundsync_SyncWorker_nativeSync<'local>(
+    pub extern "system" fn Java_xyz_yzx9_gpm_SyncWorker_nativeSync<'local>(
         mut unowned_env: EnvUnowned<'local>,
         _class: JClass<'local>,
         config_dir: JString<'local>,

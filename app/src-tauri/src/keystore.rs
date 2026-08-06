@@ -70,13 +70,17 @@ pub(crate) fn resolve_prompt(prompt: Option<&PromptText>) -> ResolvedPromptText 
 // The plugin carries none of these identifiers; they live here and are passed
 // as plain alias/prefs/policy parameters.
 //
-// KNOWN DUPLICATE: `MasterKeyAccess.kt` in `tauri-plugin-background-sync`
-// re-implements the auth-free master-key retrieve (the headless WorkManager
-// worker has no `AppHandle`, so it cannot call the plugin's `@Command`). Its
-// hardcoded `KEY_ALIAS`/`PREFS_NAME` must stay in sync with `MASTER_ALIAS`/
-// `MASTER_PREFS` on rename. Promoting it to a shared Kotlin module is deferred
-// — the cross-plugin Gradle dependency is unproven under Tauri's composite
-// build, and the dedup is benign (a stable read-only decrypt path).
+// R077: the auth-free master-key retrieve the headless WorkManager worker
+// needs (it has no `AppHandle`, so it cannot call the plugin's `@Command`)
+// lives in `HeadlessBootstrap` in the app's own Android source set
+// (`gen/android/app/.../xyz/yzx9/gpm/HeadlessBootstrap.kt`), deduped across the
+// app's consumers (this worker + a future Autofill service). Its hardcoded
+// `KEY_ALIAS`/`PREFS_NAME` must stay in sync with `MASTER_ALIAS`/`MASTER_PREFS`
+// — the Kotlin↔Rust alias-literal duplication is inherent (Kotlin can't read
+// Rust consts), not a stale copy. Since R076 `tauri-plugin-keystore` is the
+// single keystore plugin, so the retrieve is also a parallel of its auth-free
+// path; a shared Kotlin key-access module that dedupes against the plugin too
+// is deferred (D8-primary — the cross-module Gradle wiring is unproven).
 
 /// Keystore alias for the auth-free at-rest master key.
 pub(crate) const MASTER_ALIAS: &str = "gpm_master_key";

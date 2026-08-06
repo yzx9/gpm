@@ -8,6 +8,10 @@ gradlePlugin {
             id = "rust"
             implementationClass = "RustPlugin"
         }
+        create("gpmAppDeps") {
+            id = "gpm.app.deps"
+            implementationClass = "GpmAppDepsPlugin"
+        }
     }
 }
 

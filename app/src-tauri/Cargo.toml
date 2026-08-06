@@ -22,7 +22,7 @@ tauri-plugin-keystore = { path = "../../crates/tauri-plugin-keystore" }
 tauri-plugin-file-picker = { path = "../../crates/tauri-plugin-file-picker" }
 tauri-plugin-screen-secure = { path = "../../crates/tauri-plugin-screen-secure" }
 tauri-plugin-clipboard-notify = { path = "../../crates/tauri-plugin-clipboard-notify" }
-tauri-plugin-background-sync = { path = "../../crates/tauri-plugin-background-sync" }
+tauri-plugin-background-work = { path = "../../crates/tauri-plugin-background-work" }
 tauri-plugin-device-info = { path = "../../crates/tauri-plugin-device-info" }
 tauri-plugin-file-save = { path = "../../crates/tauri-plugin-file-save" }
 tauri-plugin-log = "2"

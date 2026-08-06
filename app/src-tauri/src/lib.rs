@@ -335,6 +335,21 @@ fn init_state(
     app_state
 }
 
+/// The app-owned headless worker FQN the worker-agnostic scheduler
+/// instantiates by name (R077). Lives in the app's Android source set
+/// (`xyz.yzx9.gpm.SyncWorker`), not the plugin.
+#[cfg(target_os = "android")]
+const SYNC_WORKER_CLASS: &str = "xyz.yzx9.gpm.SyncWorker";
+
+/// The WorkManager unique-work name for the periodic background sync. Kept as a
+/// stable literal for update continuity: the post-update
+/// `enqueueUniquePeriodicWork(REPLACE)` matches the previously scheduled work
+/// under this exact name and rewrites its spec, rather than orphaning it. R077
+/// made the plugin worker- and name-agnostic; this is the one app-specific
+/// value the app passes in.
+#[cfg(target_os = "android")]
+const SYNC_WORK_NAME: &str = "gpm_background_sync";
+
 /// Re-apply the periodic background-sync schedule from `cadence`. Called
 /// on app setup (once the cadence is loaded) and whenever the cadence changes
 /// (the `set_background_sync` command). On Android: enqueues/replaces the
@@ -349,18 +364,23 @@ pub(crate) async fn reschedule_background_sync<R: Runtime>(
 ) {
     #[cfg(target_os = "android")]
     {
-        use tauri_plugin_background_sync::BackgroundSyncExt;
-        let sched = app.background_sync_sched();
+        use tauri_plugin_background_work::BackgroundWorkExt;
+        let sched = app.background_work_sched();
         match cadence.hours() {
             Some(hours) => match app.path().app_config_dir() {
                 Ok(config_dir) => {
                     sched
-                        .schedule(hours, config_dir.to_string_lossy().into_owned())
+                        .schedule(
+                            hours,
+                            config_dir.to_string_lossy().into_owned(),
+                            SYNC_WORKER_CLASS.to_string(),
+                            SYNC_WORK_NAME.to_string(),
+                        )
                         .await;
                 }
                 Err(e) => log::warn!("bg-sync: config dir unavailable; not rescheduling: {e}"),
             },
-            None => sched.cancel().await,
+            None => sched.cancel(SYNC_WORK_NAME.to_string()).await,
         }
     }
     #[cfg(not(target_os = "android"))]
@@ -376,8 +396,10 @@ pub(crate) async fn reschedule_background_sync<R: Runtime>(
 pub(crate) async fn cancel_background_sync<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "android")]
     {
-        use tauri_plugin_background_sync::BackgroundSyncExt;
-        app.background_sync_sched().cancel().await;
+        use tauri_plugin_background_work::BackgroundWorkExt;
+        app.background_work_sched()
+            .cancel(SYNC_WORK_NAME.to_string())
+            .await;
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -430,7 +452,7 @@ pub fn run() {
         .plugin(tauri_plugin_file_save::init())
         .plugin(tauri_plugin_screen_secure::init())
         .plugin(tauri_plugin_clipboard_notify::init())
-        .plugin(tauri_plugin_background_sync::init())
+        .plugin(tauri_plugin_background_work::init())
         .plugin(tauri_plugin_opener::init())
         // OS notifications (tauri-plugin-notification). POST_NOTIFICATIONS is
         // already declared via the clipboard-notify manifest merge, so this

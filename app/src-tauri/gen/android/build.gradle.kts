@@ -42,6 +42,11 @@ tasks.register("testPlugins") {
             !p.projectDir.canonicalPath.contains("/.cargo/registry/")
     }
     matched.forEach { p -> dependsOn("${p.path}:testDebugUnitTest") }
+    // :app joins the plugin JVM gate now that it carries Kotlin unit tests
+    // (HeadlessBootstrap, and future Autofill glue). Without this, :app tests
+    // run only on a manual `:app:testUniversalDebugUnitTest`, never in CI.
+    // `universal` is the default flavor; the tests are pure JVM (no ABI code).
+    dependsOn(":app:testUniversalDebugUnitTest")
     doFirst {
         if (matched.isEmpty()) {
             throw GradleException(

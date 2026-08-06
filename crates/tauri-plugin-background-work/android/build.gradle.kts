@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "xyz.yzx9.gpm.backgroundsync"
+    namespace = "xyz.yzx9.gpm.backgroundwork"
     compileSdk = 36
 
     defaultConfig {
@@ -40,11 +40,14 @@ android {
 dependencies {
     implementation(project(":tauri-android"))
 
-    // R061: periodic background sync via WorkManager.
+    // WorkManager: periodic work scheduling.
     implementation("androidx.work:work-runtime-ktx:2.9.0")
-    implementation("androidx.core:core-ktx:1.9.0")
 
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("junit:junit:4.13.2")
+    // Jackson, to test the JSON → @InvokeArg contract (the IPC shape a wrong
+    // workerClassName field-name would silently null). Same version as
+    // tauri-api's own jackson-databind. Test-only.
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.15.3")
 }

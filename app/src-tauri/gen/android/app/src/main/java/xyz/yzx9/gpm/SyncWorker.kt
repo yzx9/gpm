@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package xyz.yzx9.gpm.backgroundsync
+package xyz.yzx9.gpm
 
 import android.app.ActivityManager
 import android.content.Context
@@ -18,6 +18,12 @@ import org.json.JSONObject
  * never retrieves. Loads `libgpm_lib.so` (already packaged by Tauri's
  * `RustPlugin.kt`) and crosses into Rust via [nativeSync].
  *
+ * App-owned (R077): lives in the app's Android source set; the worker-agnostic
+ * `tauri-plugin-background-work` scheduler instantiates it by FQN. The
+ * `config_dir` InputData key ([KEY_CONFIG_DIR]) is the stable contract with
+ * that scheduler — duplicated here rather than imported so the app module
+ * doesn't compile-depend on the plugin.
+ *
  * Default no-arg constructor — WorkManager instantiates workers via reflection,
  * including after process death.
  */
@@ -32,6 +38,7 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
         @JvmStatic
         external fun nativeSync(configDir: String, masterKeyB64: String): String
 
+        private const val KEY_CONFIG_DIR = "config_dir"
         private const val MAX_ATTEMPTS = 3
     }
 
@@ -46,13 +53,13 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
         if (isAppForegrounded()) return Result.success()
 
         val configDir =
-            inputData.getString(BackgroundSyncScheduler.KEY_CONFIG_DIR)
-                ?: return Result.success() // stale work — nothing to do
+            inputData.getString(KEY_CONFIG_DIR)
+                ?: return Result.failure() // missing config_dir — InputData-key drift/corruption; surface, don't silently succeed
 
         // No-key skip: the auth-free master key is absent only when the store
         // isn't set up yet (R064: it's permanent — never migrated away on an App
         // Lock toggle — so its absence is "not set up", never "App Lock on").
-        val keyB64 = MasterKeyAccess.loadAuthFree(applicationContext) ?: return Result.success()
+        val keyB64 = HeadlessBootstrap.loadAuthFreeMasterKey(applicationContext) ?: return Result.success()
 
         val json =
             try {

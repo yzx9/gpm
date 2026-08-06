@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# R077: the app-owned SyncWorker is instantiated by WorkManager via reflection
+# (including after process death), and nativeSync is resolved by JNI symbol
+# name. HeadlessBootstrap is reached through the call graph from
+# SyncWorker.doWork, so it needs no explicit keep.
+-keep class xyz.yzx9.gpm.SyncWorker { *; }

@@ -2,9 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package xyz.yzx9.gpm.backgroundsync
+package xyz.yzx9.gpm
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Base64
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -17,23 +18,20 @@ import javax.crypto.spec.GCMParameterSpec
  * background-safe, no biometric prompt (the auth-free key has no
  * `setUserAuthenticationRequired`).
  *
- * SELF-CONTAINED DUPLICATE of the auth-free retrieve path now parameterized in
- * `tauri-plugin-secure-keystore`. The canonical alias/prefs names live in
- * `app/src-tauri/src/keystore.rs` (`MASTER_ALIAS` / `MASTER_PREFS`) — **keep
- * `KEY_ALIAS` / `PREFS_NAME` below in sync with those on rename** (alias /
- * provider / cipher / prefs names must all match). The D8 plan called for a
- * shared util module across the two plugins, but the cross-plugin Gradle
- * dependency is unproven under Tauri's composite-build setup; promote to a
- * shared module once that wiring is verified (and `SecureKeystorePlugin` is
- * refactored to call it too). The dedup is benign meanwhile — a stable
- * read-only decrypt path.
+ * App-owned headless bootstrap (R077): the OS-started entry points (the
+ * WorkManager `SyncWorker`, a future Autofill service) have no Tauri
+ * `AppHandle`, so they cannot call the keystore plugin's `@Command`. This is
+ * the auth-free retrieve they share. `KEY_ALIAS`/`PREFS_NAME` are the Kotlin
+ * mirrors of the Rust consts `MASTER_ALIAS`/`MASTER_PREFS` in
+ * `app/src-tauri/src/keystore.rs` — keep them in sync on rename (the
+ * duplication is inherent: Kotlin can't read Rust consts).
  */
-object MasterKeyAccess {
+object HeadlessBootstrap {
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
-    private const val KEY_ALIAS = "gpm_master_key"
-    private const val PREFS_NAME = "gpm_secure_keystore"
-    private const val PREF_CT = "ct"
-    private const val PREF_IV = "iv"
+    internal const val KEY_ALIAS = "gpm_master_key"
+    internal const val PREFS_NAME = "gpm_secure_keystore"
+    internal const val PREF_IV = "iv"
+    internal const val PREF_CT = "ct"
     private const val GCM_TAG_BITS = 128
 
     /**
@@ -41,15 +39,26 @@ object MasterKeyAccess {
      * or `null` if the auth-free store is empty/unset. Never prompts.
      *
      * R064: the auth-free `gpm_master_key` is permanent (never deleted on App Lock
-     * toggle), so a background worker retrieves it under App Lock and syncs. The
-     * old "AppLock on ⇒ biometric alias exists ⇒ skip" guard is removed — the
-     * identity now lives under a separate `gpm_vault_key`, not this auth-free key.
+     * toggle), so a background worker retrieves it under App Lock and syncs.
      */
-    fun loadAuthFree(context: Context): String? {
+    fun loadAuthFreeMasterKey(context: Context): String? {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        return loadAuthFreeMasterKey(
+            keyStore,
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
+        )
+    }
+
+    /**
+     * Testable seam: the auth-free retrieve against an explicit [KeyStore] +
+     * [SharedPreferences] pair (the two OS collaborators the public entry
+     * resolves from a [Context]). Split so the null-return branches run under
+     * JVM/Robolectric with an ordinary keystore — the decrypt path itself needs
+     * a real hardware-backed key and is covered by the device smoke.
+     */
+    internal fun loadAuthFreeMasterKey(keyStore: KeyStore, prefs: SharedPreferences): String? {
         if (!keyStore.containsAlias(KEY_ALIAS)) return null
 
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val ivB64 = prefs.getString(PREF_IV, null) ?: return null
         val ctB64 = prefs.getString(PREF_CT, null) ?: return null
 
