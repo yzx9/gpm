@@ -181,6 +181,11 @@ pub(crate) async fn clear_log(app: AppHandle) -> Result<(), Error> {
 /// ACL-gated here) while reaching the exact same logger. `level` is matched
 /// case-insensitively; an unrecognized value degrades to `info`. Records below
 /// the current `max_level` are dropped by the `log` macros as usual.
+///
+/// Records are logged with `target = "frontend"` rather than this module's path
+/// (`gpm_lib::logging`): the module path is identical for every frontend record,
+/// so it carries no signal, whereas `frontend` marks the origin (frontend vs
+/// backend) once — the JS caller's `[gpm:<subsystem>]` tag carries the "where".
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)] // Tauri IPC needs owned args + the Result shape (mirrors git.rs)
 pub(crate) fn write_log(level: String, message: String) -> Result<(), Error> {
@@ -191,7 +196,7 @@ pub(crate) fn write_log(level: String, message: String) -> Result<(), Error> {
         "trace" => log::Level::Trace,
         _ => log::Level::Info, // "info" and anything unrecognized degrade to Info
     };
-    log::log!(level, "frontend: {message}");
+    log::log!(target: "frontend", level, "{message}");
     Ok(())
 }
 

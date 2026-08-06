@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Diagnostic log lines that come from the app interface — the lines you see in **Settings → Logs** and in an exported bug-report bundle — no longer repeat where they're from. Each used to say "frontend" twice over; the lines are now shorter and easier to read.
+
 ## [v0.17.0] - 2026-08-05
 
 ### Added
