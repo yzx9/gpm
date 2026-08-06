@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.17.1] - 2026-08-06
+
 ### Changed
 
 - On Android, **all** of your app settings — display language, theme, auto-lock timers, autosync, screen-capture mode, and the rest — are now **encrypted at rest**, with no settings file left in plaintext. (A few non-secret display preferences used to be stored unencrypted so they could be read before the app unlocked; the at-rest key is now available at startup, so that workaround is gone.) Nothing about how the app behaves changes — your settings carry over as-is. Desktop is unchanged: it has no device key store, so its settings stay in plaintext there as before.
@@ -450,7 +452,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.17.1...HEAD
+[v0.17.1]: https://github.com/yzx9/gpm/compare/v0.17.0...v0.17.1
 [v0.17.0]: https://github.com/yzx9/gpm/compare/v0.16.1...v0.17.0
 [v0.16.1]: https://github.com/yzx9/gpm/compare/v0.16.0...v0.16.1
 [v0.16.0]: https://github.com/yzx9/gpm/compare/v0.15.1...v0.16.0

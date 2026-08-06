@@ -9,7 +9,7 @@
 //! tests). These cover the app-layer glue those tests can't reach: the helper
 //! actually drives `Store::migrate_seal`, the CAS state machine transitions
 //! Pending → Done, and a second call is a no-op. They build a keyed `AppState`
-//! directly (no biometric-keystore mock needed).
+//! directly (no keystore mock needed).
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
