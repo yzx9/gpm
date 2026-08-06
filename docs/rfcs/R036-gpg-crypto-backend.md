@@ -79,7 +79,12 @@ is zeroized on drop, matching gpm's existing wipe discipline.
 
 **What rpgp does not do is scoped out the way age-plugin-yubikey is (RFC 0030):
 recognized but unsupported, with a clear honest error rather than a silent
-failure.** rpgp has no OpenPGP-card / YubiKey hardware-key path, no Brainpool
+failure.** The one case in this set a user can actually hand the app is an
+OpenPGP-card / YubiKey secret key exported as a stub — no usable secret
+material, since it stays on the token — so it gets the explicit handling: reject
+at import where the stub is detectable, and fall back to the same clear error on
+the decrypt path when it is not, so a hardware-token key never surfaces as a
+generic decrypt failure. rpgp has no OpenPGP-card / YubiKey hardware-key path, no Brainpool
 curves, no LibrePGP AEAD variant, no Elgamal, and no web-of-trust semantics —
 its surface is packet formats and crypto primitives (RFC 4880/9580 layers 1–3),
 not key policy (layer 4: key flags, expiry, revocation). None of the missing
