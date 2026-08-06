@@ -9,11 +9,14 @@
 Add an Android autofill service so that, when a login field is focused in any
 app, the OS offers to fill credentials from gpm — dropping the account and
 password straight into the target field without touching the clipboard. The
-service is the OS-facing entry point of a new local plugin (the same shape as
-the existing keystore plugins). This RFC records the decision to scope to the
-Android Autofill Framework and to defer Accessibility-based and
-Credential-Manager-based variants; the functional requirements, the matching
-mechanisms, and the threat model live in `docs/specs/008-android-autofill`.
+service is an app-owned Android component living in the app's own source set
+(`gen/android/app/src/main/java/xyz/yzx9/gpm/`), not a plugin — following the
+pattern R077 establishes for the background-sync worker, where an OS-started
+service reaches initialized state through an app-owned headless bootstrap rather
+than a plugin crate. This RFC records the decision to scope to the Android
+Autofill Framework and to defer Accessibility-based and Credential-Manager-based
+variants; the functional requirements, the matching mechanisms, and the threat
+model live in `docs/specs/008-android-autofill`.
 
 Two things distinguish this from a generic autofill service and shape the rest
 of the RFC. First, matching leans on a plaintext signal gpm already has — the
@@ -34,30 +37,36 @@ yet committing to build it.
 
 ## Context
 
-**Approach.** Register an Autofill Framework service as a new local plugin; the
-plugin's manifest is merged into the app manifest, so no app-manifest edits are
-needed (the clipboard-notify plugin already contributes a manifest component the
-same way). The user enables the service in the system autofill settings — it
-cannot self-enable — after which the OS routes focused-login-field events to it
-system-wide. Detection is push-based: the OS hands the service a snapshot of the
-focused screen's view tree, and the service never scans on its own.
+**Approach.** Register an Autofill Framework service as an app-owned component
+in the app's Android source set; its `<service>` is declared directly in the app
+manifest (`gen/android/app/src/main/AndroidManifest.xml`), so no plugin manifest
+merge is needed. The user enables the service in the system autofill settings —
+it cannot self-enable — after which the OS routes focused-login-field events to
+it system-wide. Detection is push-based: the OS hands the service a snapshot of
+the focused screen's view tree, and the service never scans on its own.
 
 **The load-bearing unknown is process reachability, not matching.** The store,
 the at-rest master key, and the biometric unlock are all initialized when the
 app's main activity starts. An autofill service, though, is invoked out-of-band by
 the OS while the user is in a different app, and on low memory the OS will have
 killed gpm's process entirely; spinning the service up does not start the main
-activity, so none of that state exists when a fill request arrives. There is no
-established path from an OS-started service — or a separate fill surface — to
-that initialized state. This is the single assumption the whole "reuse the
-existing store and unlock" thesis rests on. It is resolved by a minimal prototype
-before any matching or UI is built: prove that a fill returned from a
-service-launched surface actually lands in the target fields after a cold start.
-If it cannot reach initialized state, the design pivots — toward a service-side
-bootstrap that does not depend on the main activity (the deferred identity-agent,
-R042), or a native picker — before the rest is invested in. The field-id plumbing
-the OS provides (the view-tree snapshot handed back to a service-launched surface)
-is, by contrast, a solved platform pattern, not the risk.
+activity, so none of that state exists when a fill request arrives. R077's
+background-sync worker already proves half of this — a cold, OS-started
+WorkManager process reaches an initialized `Store` and reads the auth-free master
+key through an app-owned headless bootstrap (load `libgpm_lib.so`, resolve the
+config dir, retrieve the key, construct the `Store`). The Autofill service
+reuses that same bootstrap, so basic store reachability is no longer the open
+question. What remains open — and is still prototype-gated — is the half the
+worker never exercises: reaching the **biometric identity unlock** (the vault
+key) from a cold service process, since the worker is pull-only and reads only
+the auth-free master key. It is resolved by a minimal prototype before any
+matching or UI is built: prove that a fill returned from a service-launched
+surface actually lands in the target fields after a cold start. If it cannot
+reach the unlocked identity, the design pivots — toward a service-side bootstrap
+that does not depend on the main activity (the deferred identity-agent, R042), or
+a native picker — before the rest is invested in. The field-id plumbing the OS
+provides (the view-tree snapshot handed back to a service-launched surface) is,
+by contrast, a solved platform pattern, not the risk.
 
 **Why the path is the match key.** gpm keeps secret bodies encrypted and unindexed
 by design, so it has no plaintext metadata index to match against the way
@@ -103,24 +112,28 @@ path is the key rather than a built index.
 
 Medium-large, and prototype-gated. The first step is a minimal prototype that
 proves a fill returned from a service-launched surface lands in the target fields
-after a cold start — the go/no-go for the whole feature, and small (a new plugin
-shell and a hard-coded fill, no store, no biometric, no search). Past that gate,
-the MVP — the service, the auth-required suggestion that launches the fill-mode
-search-and-pick, and the fill-back into the target fields — is ~1-2 weeks
-(human), since it leans almost entirely on existing unlock, search, and store
-plumbing and adds one new plugin. The learned association index (encrypted at
-rest), the path/body matching, and the inline phase add ~3-5 days plus a phase.
-The cold-process reachability question dominates the risk; the human cost
-dominates the effort. ~30 min (CC) to scaffold the plugin shell and merged
-manifest.
+after a cold start — the go/no-go for the whole feature, and small (a service
+skeleton in the app source set and a hard-coded fill, no store, no biometric, no
+search). Past that gate, the MVP — the service, the auth-required suggestion that
+launches the fill-mode search-and-pick, and the fill-back into the target fields
+— is ~1-2 weeks (human), since it leans almost entirely on existing unlock,
+search, and store plumbing and the R077 headless bootstrap. The learned
+association index (encrypted at rest), the path/body matching, and the inline
+phase add ~3-5 days plus a phase. The cold-process reachability question
+dominates the risk; the human cost dominates the effort. ~30 min (CC) to scaffold
+the service skeleton in the app source set and the manifest `<service>` entry.
 
 ## Depends on / Supersedes
 
-Re-evaluates the autofill exclusion in A001 (launch scope). Relates to
+Re-evaluates the autofill exclusion in A001 (launch scope). Builds on R077's
+app-owned headless bootstrap: the Autofill service reaches an initialized `Store`
+through the same `gen/android/app/` module the background-sync worker uses, so
+store reachability is inherited rather than re-proven (only the biometric
+identity unlock from a cold service process is still prototype-gated). Relates to
 `0042-identity-agent`: an autofill service is the clearest second consumer of
 unlocked-identity state outside the main activity — the pressure that RFC
-anticipates and defers — and if the prototype shows the service cannot reach
-initialized state any other way, it forces the agent extraction 0042 parks.
-Builds on the local-plugin pattern the keystore plugins already establish and on
-the at-rest AEAD sealing and app-launch biometric gate (their own RFCs shipped
-and were removed).
+anticipates and defers — and if the prototype shows the service cannot reach the
+unlocked identity from a cold process, it forces the agent extraction 0042 parks.
+Builds on the at-rest AEAD sealing and app-launch biometric gate (their own RFCs
+shipped and were removed); the "new local plugin" framing an earlier draft of
+this RFC used is superseded by the R077 app-owned-source-set pattern.
