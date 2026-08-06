@@ -37,6 +37,8 @@ Async Tauri commands, shared app state (`AppState`), and the entry point (`run()
 
 Local Tauri plugin crates. Each follows the standard Tauri mobile-plugin layout: Rust in `src/`, and its Android Kotlin in its own `android/` Gradle library module (own namespace + build) under a `xyz.yzx9.gpm.{plugin}` package. Tauri auto-discovers each `android/` dir and wires it into the app's gradle build on `tauri android *` runs.
 
+A plugin crate exists to be **publishable as a standalone, app-agnostic primitive**; anything tightly coupled to gpm (key aliases, business logic, store internals) belongs in the app, not a plugin. The plugins below carry no gpm identifiers for this reason.
+
 - `tauri-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
 - `tauri-plugin-keystore` — a **generic** Android Keystore seal for a caller-supplied secret string, under a caller-chosen policy (auth-free, or biometric-gated via a per-use `BiometricPrompt`); hardware-backed AES/GCM. `alias`/`prefs`/`policy`/`prompt` are all caller-supplied — the plugin carries no gpm identifiers or brand strings (the app passes them from `keystore.rs`). gpm uses it for the identity passphrase (biometric-gated), the at-rest master key (auth-free), and the App Lock vault key (biometric-gated)
 - `tauri-plugin-file-picker` — opens the Android Storage Access Framework picker and reads the picked file's bytes into Rust (backend-only; desktop falls back to `tauri-plugin-dialog`)
