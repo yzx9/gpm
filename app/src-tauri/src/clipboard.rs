@@ -14,7 +14,7 @@ use rustpass::Error;
 use rustpass::error::ErrorCode;
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
+use tauri_plugin_clipboard_notify::{ClipboardNotifyExt, NotifyText};
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -42,7 +42,7 @@ pub(crate) async fn write_and_schedule_clear<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
     text: String,
-    notify_text: Option<&tauri_plugin_clipboard_notify::NotifyText>,
+    notify_text: Option<&NotifyText>,
 ) -> Result<u32, Error> {
     app.clipboard()
         .write_text(text)
@@ -92,7 +92,7 @@ pub(crate) async fn copy_generated_password(
     state: State<'_, AppState>,
     app: AppHandle,
     text: Zeroizing<String>,
-    notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
+    notify_text: Option<NotifyText>,
 ) -> Result<(), Error> {
     log::info!("copy: generated");
     write_and_schedule_clear(&state, &app, (*text).clone(), notify_text.as_ref())

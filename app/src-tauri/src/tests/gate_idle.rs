@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rustpass::LockMode;
-use tauri::{Listener, Manager};
+use tauri::test::MockRuntime;
+use tauri::{App, Listener, Manager};
 
 use crate::AppState;
 use crate::app_config::GateIdle;
@@ -24,7 +25,7 @@ use crate::tests::{make_unlocked_state, mock_app};
 
 /// Capture the last `app-lock-state` payload (serialized JSON) so a test can
 /// assert the `reason` tag the frontend keys its auto-prompt off of.
-fn last_app_lock_payload(app: &tauri::App<tauri::test::MockRuntime>) -> Arc<Mutex<String>> {
+fn last_app_lock_payload(app: &App<MockRuntime>) -> Arc<Mutex<String>> {
     let payload = Arc::new(Mutex::new(String::new()));
     let payload_clone = payload.clone();
     app.listen("app-lock-state", move |e| {

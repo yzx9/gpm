@@ -12,7 +12,8 @@ use std::time::SystemTime;
 use rustpass::{AttachmentMeta, Entry, Error, ErrorCode, RankedPage};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime, State};
-use tauri_plugin_file_save::FileSaveExt;
+use tauri_plugin_clipboard_notify::NotifyText;
+use tauri_plugin_file_save::{FileSaveError, FileSaveExt};
 use tokio::fs;
 use zeroize::Zeroizing;
 
@@ -209,7 +210,7 @@ pub(crate) async fn copy_password(
     state: State<'_, AppState>,
     app: AppHandle,
     entry_path: String,
-    notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
+    notify_text: Option<NotifyText>,
 ) -> Result<CopyResult, Error> {
     let entry_name = entry_path.trim_end_matches(".age").to_string();
     log::info!("copy: {entry_name}");
@@ -355,7 +356,7 @@ pub(crate) async fn copy_totp(
     state: State<'_, AppState>,
     app: AppHandle,
     entry_path: String,
-    notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
+    notify_text: Option<NotifyText>,
 ) -> Result<TotpCopyResult, Error> {
     let entry_name = entry_path.trim_end_matches(".age").to_string();
     log::info!("copy-totp: {entry_name}");
@@ -562,7 +563,7 @@ fn is_path_sep(c: char) -> bool {
 /// Translate a file-save plugin result into the app error model: `CANCELLED` is
 /// a soft cancel (the user dismissed the picker), everything else is a real
 /// failure.
-fn map_save_result(result: Result<(), tauri_plugin_file_save::FileSaveError>) -> Result<(), Error> {
+fn map_save_result(result: Result<(), FileSaveError>) -> Result<(), Error> {
     match result {
         Ok(()) => Ok(()),
         Err(e) if e.code == "CANCELLED" => Err(Error::new(ErrorCode::Cancelled, "Save cancelled")),
@@ -609,8 +610,9 @@ mod tests {
     //! derives `has_more` from the offset/total (the classic off-by-one). Pure
     //! fns, no Store needed.
 
-    use super::*;
     use rustpass::error::ErrorCode;
+
+    use super::*;
 
     fn entry(name: &str) -> Entry {
         Entry {
@@ -742,7 +744,6 @@ mod tests {
 
     #[test]
     fn map_save_result_categorizes_outcomes() {
-        use tauri_plugin_file_save::FileSaveError;
         assert!(map_save_result(Ok(())).is_ok());
         let cancelled = map_save_result(Err(FileSaveError {
             code: "CANCELLED".into(),

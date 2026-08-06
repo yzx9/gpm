@@ -14,6 +14,7 @@ use std::fmt;
 use rustpass::{AttachmentMeta, CommitSigInfo, Error, ErrorCode, RevisionContent};
 use serde::Serialize;
 use tauri::{AppHandle, Runtime, State};
+use tauri_plugin_clipboard_notify::NotifyText;
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -186,7 +187,7 @@ pub(crate) async fn copy_revision(
     app: AppHandle,
     entry_path: String,
     commit: String,
-    notify_text: Option<tauri_plugin_clipboard_notify::NotifyText>,
+    notify_text: Option<NotifyText>,
 ) -> Result<CopyResult, Error> {
     let entry_name = entry_path.trim_end_matches(".age").to_string();
     log::info!("copy revision: {entry_name}@{commit}");

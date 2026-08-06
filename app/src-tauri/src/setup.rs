@@ -11,7 +11,7 @@ use rustpass::ssh;
 use rustpass::{Error, IdentityInfo, KeyType, Recipient};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
-use tauri_plugin_file_picker::FilePickerExt;
+use tauri_plugin_file_picker::{FilePickerError, FilePickerExt};
 use zeroize::Zeroizing;
 
 use crate::AppState;
@@ -684,7 +684,7 @@ fn key_type_string(key_type: KeyType) -> &'static str {
 
 /// Map a [`tauri_plugin_file_picker::FilePickerError`] into the app's IPC error
 /// type, turning a Kotlin `CANCELLED` into [`ErrorCode::Cancelled`].
-pub(crate) fn map_file_picker_error(e: tauri_plugin_file_picker::FilePickerError) -> Error {
+pub(crate) fn map_file_picker_error(e: FilePickerError) -> Error {
     let code = match e.code.as_str() {
         "CANCELLED" => ErrorCode::Cancelled,
         _ => ErrorCode::InvalidIdentity,

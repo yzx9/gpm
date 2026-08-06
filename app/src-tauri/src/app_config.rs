@@ -59,7 +59,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rustpass::config::save_atomic;
 use rustpass::{Error, ErrorCode, LockMode, Store, clamp_lock_mode, normalize_clear_secs};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio::fs;
 
 use crate::AppState;
@@ -1516,7 +1516,7 @@ pub(crate) fn resolved_locale(state: State<'_, AppState>) -> String {
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn set_verbose(
     state: State<'_, AppState>,
-    app: tauri::AppHandle,
+    app: AppHandle,
     enabled: bool,
     revert_notify: Option<VerboseNotifyText>,
 ) -> Result<AppConfig, Error> {

@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rustpass::LockMode;
-use tauri::{Listener, Manager};
+use tauri::test::MockRuntime;
+use tauri::{App, Listener, Manager};
 
 use crate::AppState;
 use crate::identity;
@@ -105,7 +106,7 @@ async fn stale_timer_self_disarms_after_rearm() {
 // ── no-cache (Immediate) mode: soft wipe ─────────────────────────────────
 
 /// Helper: set the cached lock mode on a managed `AppState`.
-fn set_lock_mode(app: &tauri::App<tauri::test::MockRuntime>, mode: LockMode) {
+fn set_lock_mode(app: &App<MockRuntime>, mode: LockMode) {
     let app_state = app.state::<AppState>();
     *app_state.lock_mode.lock().unwrap() = mode;
 }
@@ -187,7 +188,7 @@ async fn reset_lock_timer_branches_on_mode() {
 
 /// Capture the last `identity-lock-state` payload (as serialized JSON) so a test
 /// can assert the `reason` tag the frontend keys its auto-prompt off of.
-fn last_lock_payload(app: &tauri::App<tauri::test::MockRuntime>) -> Arc<Mutex<String>> {
+fn last_lock_payload(app: &App<MockRuntime>) -> Arc<Mutex<String>> {
     let payload = Arc::new(Mutex::new(String::new()));
     let payload_clone = payload.clone();
     app.listen("identity-lock-state", move |e| {

@@ -35,11 +35,14 @@ use age::secrecy::ExposeSecret;
 use age::x25519::{Identity, Recipient};
 use git2::build::RepoBuilder;
 use git2::{IndexAddOption, Repository, Signature};
-use rustpass::{GitAuth, Store};
+use rustpass::{GitAuth, LockMode, Store};
+use tauri::App;
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
 use crate::AppState;
+use crate::app_config::AppConfigStore;
+use crate::identity::IdleTimer;
 
 /// 1-permit serializer guarding identity-crypto round-trips in this test binary.
 ///
@@ -169,7 +172,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
 
     // Bind the AppConfigStore to the store (mirrors init_state) so gate-idle and
     // other behavior-config reads/writes flow through the seal in tests.
-    let app_config = crate::app_config::AppConfigStore::new(config_dir.path()).await;
+    let app_config = AppConfigStore::new(config_dir.path()).await;
     app_config.set_store(Arc::clone(&store));
 
     // Keep bare_dir alive (returned in TestStore) so the store's `origin` remote
@@ -179,15 +182,15 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         store,
         app_config,
         app_handle: None,
-        lock_timer: crate::identity::IdleTimer::new(),
+        lock_timer: IdleTimer::new(),
         pending_identity: Mutex::new(None),
-        lock_mode: Mutex::new(rustpass::LockMode::default()),
+        lock_mode: Mutex::new(LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
         clipboard_clear_handle: Mutex::new(None),
         clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
         app_lock_enabled: AtomicBool::new(false),
         app_locked: Arc::new(AtomicBool::new(false)),
-        gate_idle_timer: crate::identity::IdleTimer::new(),
+        gate_idle_timer: IdleTimer::new(),
         identity_coupled: AtomicBool::new(false),
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),
@@ -207,7 +210,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
 /// Build a headless [`MockRuntime`] app managing `state`, returning it for the
 /// test to keep alive. Pull `app.state::<AppState>()` and `app.handle()` to
 /// drive commands that take an `AppHandle`.
-pub(super) fn mock_app(state: AppState) -> tauri::App<MockRuntime> {
+pub(super) fn mock_app(state: AppState) -> App<MockRuntime> {
     mock_builder()
         // Register clipboard-notify so the armed clear task's `dismiss()` call
         // resolves against the desktop inert stub instead of panicking on a

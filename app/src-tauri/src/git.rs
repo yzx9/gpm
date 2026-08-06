@@ -12,14 +12,11 @@
 //! [`cancel_git`] command flips the active token to abort an in-flight clone or
 //! pull.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-    mpsc,
-};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 
-use rustpass::{Error, GitProgress, ProgressSender};
-use tauri::{Emitter, Runtime, State};
+use rustpass::{CancelSlot, CancelToken, Error, GitProgress, ProgressSender};
+use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::AppState;
 
@@ -51,7 +48,7 @@ impl From<&GitProgress> for GitProgressEvent {
 /// finishes and drops it, the channel closes and the drain task exits — so
 /// awaiting the join handle flushes the final events before the command returns.
 pub(crate) fn spawn_progress_drain<R: Runtime>(
-    app: tauri::AppHandle<R>,
+    app: AppHandle<R>,
 ) -> (ProgressSender, tauri::async_runtime::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel::<GitProgress>();
     let join = tauri::async_runtime::spawn_blocking(move || {
@@ -63,7 +60,7 @@ pub(crate) fn spawn_progress_drain<R: Runtime>(
 }
 
 /// A fresh, unset cancel token for an upcoming clone/pull.
-pub(crate) fn fresh_cancel_token() -> rustpass::CancelToken {
+pub(crate) fn fresh_cancel_token() -> CancelToken {
     Arc::new(AtomicBool::new(false))
 }
 
@@ -73,7 +70,7 @@ pub(crate) fn fresh_cancel_token() -> rustpass::CancelToken {
 /// Test helper: arm the cancel slot with `token` (the orchestrators arm under
 /// `write_mu` themselves in production).
 #[cfg(test)]
-pub(crate) fn arm_cancel(state: &State<'_, AppState>, token: rustpass::CancelToken) {
+pub(crate) fn arm_cancel(state: &State<'_, AppState>, token: CancelToken) {
     *state
         .active_cancel_slot
         .lock()
@@ -86,10 +83,10 @@ pub(crate) fn arm_cancel(state: &State<'_, AppState>, token: rustpass::CancelTok
 /// `write_mu` themselves (in rustpass) via the same slot, so `cancel_git` always
 /// targets the running op — not one queued behind the lock.
 pub(crate) struct SlotGuard {
-    slot: rustpass::CancelSlot,
+    slot: CancelSlot,
 }
 impl SlotGuard {
-    pub(crate) fn arm(slot: rustpass::CancelSlot, token: rustpass::CancelToken) -> Self {
+    pub(crate) fn arm(slot: CancelSlot, token: CancelToken) -> Self {
         *slot.lock().expect("cancel slot poisoned") = Some(token);
         Self { slot }
     }
@@ -111,12 +108,12 @@ impl Drop for SlotGuard {
 /// arm outside the lock is exactly the stomp a queued op would exploit.
 pub(crate) async fn run_cancellable<R, F, Fut, T>(
     state: &State<'_, AppState>,
-    app: tauri::AppHandle<R>,
+    app: AppHandle<R>,
     op: F,
 ) -> Result<T, Error>
 where
     R: Runtime,
-    F: FnOnce(rustpass::CancelToken, ProgressSender, rustpass::CancelSlot) -> Fut,
+    F: FnOnce(CancelToken, ProgressSender, CancelSlot) -> Fut,
     Fut: Future<Output = Result<T, Error>>,
 {
     let cancel = fresh_cancel_token();

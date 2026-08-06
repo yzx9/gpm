@@ -39,6 +39,7 @@ use tauri_plugin_keystore::KeystoreExt;
 use tokio::task::JoinHandle;
 
 use crate::AppState;
+use crate::app_config::GateIdle;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -625,8 +626,8 @@ pub(crate) fn reset_gate_idle_timer<R: Runtime>(state: &State<'_, AppState>, app
         return;
     }
     match state.app_config.get().gate_idle {
-        crate::app_config::GateIdle::After(secs) => arm_gate_idle(state, app, secs),
-        crate::app_config::GateIdle::Off => disarm_gate_idle(state),
+        GateIdle::After(secs) => arm_gate_idle(state, app, secs),
+        GateIdle::Off => disarm_gate_idle(state),
     }
 }
 

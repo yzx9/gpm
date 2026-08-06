@@ -8,12 +8,13 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
-use rustpass::Store;
-use tauri::{Manager, WebviewWindowBuilder};
+use rustpass::{LockMode, Store};
+use tauri::{App, AppHandle, Manager, Runtime, WebviewWindowBuilder, Wry};
 use tauri_plugin_keystore::{Keystore, KeystoreExt};
 use tokio::task::JoinHandle;
 
-use crate::app_config::BackgroundSyncCadence;
+use crate::app_config::{AppConfigStore, BackgroundSyncCadence};
+use crate::setup::PendingIdentity;
 
 mod app_config;
 mod applock;
@@ -53,12 +54,12 @@ pub(crate) struct AppState {
     /// Identity picked via the file picker, awaiting its passphrase before
     /// `complete_setup_from_file` saves it. Held only in memory (`Zeroizing` on
     /// drop); never persisted.
-    pub(crate) pending_identity: Mutex<Option<setup::PendingIdentity>>,
+    pub(crate) pending_identity: Mutex<Option<PendingIdentity>>,
     /// Cached effective auto-lock mode (refreshed on unlock + the `set_*`
     /// config commands via `identity::refresh_security_cache`) so the read/write
     /// hot paths branch on a cheap mutex read instead of decrypting `repo.json`
     /// per operation.
-    pub(crate) lock_mode: Mutex<rustpass::LockMode>,
+    pub(crate) lock_mode: Mutex<LockMode>,
     /// Cached effective clipboard auto-clear seconds (same refresh contract).
     pub(crate) clipboard_clear_secs: Mutex<u64>,
     /// Clipboard auto-clear timer handle — cancel-and-respawn pattern, same
@@ -123,13 +124,13 @@ pub(crate) struct AppState {
     /// App-shell (non-repo) preferences — screen-capture toggle, locale, and the
     /// behavior prefs (lock mode, clear timers, autosync, app-lock flag) moved
     /// here from `RepoConfig`. Persists at `app.json`; survives `reset_config`.
-    pub(crate) app_config: app_config::AppConfigStore,
+    pub(crate) app_config: AppConfigStore,
     /// The Tauri app handle, so a migration that needs the Android Keystore
     /// (m0007 vault-key relocate) can reach `keystore()` without a
     /// signature change to the whole migration engine. `Some` in the live app
     /// (`init_state`), `None` on desktop and in tests (the keystore is inert /
     /// absent there, so keystore-touching migrations no-op).
-    pub(crate) app_handle: Option<tauri::AppHandle>,
+    pub(crate) app_handle: Option<AppHandle>,
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +154,7 @@ pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
 /// on the upgrader path (the auth-free alias is absent pre-m0007) without minting a new
 /// master that would orphan every existing envelope. First-run provisioning is
 /// [`provision_master`]'s job, called explicitly by [`startup_master_key`].
-async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
+async fn retrieve_master_or_none<R: Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
     let b64 = keystore::retrieve_master(ks).await.unwrap_or(None)?;
     decode_master_key(&b64)
 }
@@ -163,7 +164,7 @@ async fn retrieve_master_or_none<R: tauri::Runtime>(ks: &Keystore<R>) -> Option<
 /// Returns `None` on desktop (no Keystore) or if generation/sealing fails. A key that
 /// cannot be sealed is discarded rather than used unpersisted, so it can never orphan
 /// later envelopes behind a key the next run won't have.
-async fn provision_master<R: tauri::Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
+async fn provision_master<R: Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
     // Never overwrite an existing entry: a present entry (even a malformed one)
     // may have envelopes sealed under it, so minting a fresh key would orphan
     // them. Degrade to passthrough instead — this restores the pre-split self-heal
@@ -196,7 +197,7 @@ async fn provision_master<R: tauri::Runtime>(ks: &Keystore<R>) -> Option<[u8; 32
 /// `app_lock_enabled` is still probed (`keystore::has_app_lock_enabled`) so the frontend
 /// knows whether to show the app-lock overlay; only the vault key stays deferred
 /// to `app_unlock`. Returns `(master_key, app_lock_enabled)`.
-async fn startup_master_key<R: tauri::Runtime>(ks: &Keystore<R>) -> (Option<[u8; 32]>, bool) {
+async fn startup_master_key<R: Runtime>(ks: &Keystore<R>) -> (Option<[u8; 32]>, bool) {
     let app_lock_enabled = keystore::has_app_lock_enabled(ks).await;
     // Always retrieve the auth-free master (D). retrieve_master_or_none is safe on
     // the upgrader path (no generate-on-absent); provision_master is the explicit
@@ -239,9 +240,9 @@ async fn startup_master_key<R: tauri::Runtime>(ks: &Keystore<R>) -> (Option<[u8;
 /// Panics if the config directory cannot be determined (the `.expect` lives in
 /// the setup closure, before this is called).
 fn init_state(
-    app: &tauri::App<tauri::Wry>,
+    app: &App<Wry>,
     store: Arc<Store>,
-    app_config: app_config::AppConfigStore,
+    app_config: AppConfigStore,
     app_lock_enabled: bool,
 ) -> AppState {
     // Apply the persisted log level NOW (the sealed config is already loaded by
@@ -288,7 +289,7 @@ fn init_state(
         pending_identity: Mutex::new(None),
         // Defaults until the first unlock/set refreshes them from config;
         // pre-setup no op reads them.
-        lock_mode: Mutex::new(rustpass::LockMode::default()),
+        lock_mode: Mutex::new(LockMode::default()),
         clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
         clipboard_clear_handle: Mutex::new(None),
         clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
@@ -342,8 +343,8 @@ fn init_state(
 /// other targets: a no-op (the foreground sync covers desktop). Best-effort —
 /// errors are swallowed (a missed reschedule keeps the previous cadence).
 #[allow(clippy::unused_async)] // the Android branch awaits; the desktop branch is a no-op.
-pub(crate) async fn reschedule_background_sync<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+pub(crate) async fn reschedule_background_sync<R: Runtime>(
+    app: &AppHandle<R>,
     cadence: BackgroundSyncCadence,
 ) {
     #[cfg(target_os = "android")]
@@ -372,7 +373,7 @@ pub(crate) async fn reschedule_background_sync<R: tauri::Runtime>(
 /// Cancel the periodic background-sync schedule (called when `AutoSync`
 /// is turned off, since background sync is linked to `AutoSync`). No-op off-Android.
 #[allow(clippy::unused_async)] // the Android branch awaits; desktop is a no-op.
-pub(crate) async fn cancel_background_sync<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+pub(crate) async fn cancel_background_sync<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_background_sync::BackgroundSyncExt;
@@ -471,8 +472,7 @@ pub fn run() {
                 app_lock_enabled,
             );
             let store = Arc::new(Store::new(config_dir.clone(), master_key));
-            let app_config =
-                tauri::async_runtime::block_on(app_config::AppConfigStore::new(&config_dir));
+            let app_config = tauri::async_runtime::block_on(AppConfigStore::new(&config_dir));
             app_config.set_store(Arc::clone(&store));
             // Load the sealed config into the caches so the init scripts below
             // bake the PINNED locale/theme (new world: the merged sealed app.json;
@@ -657,7 +657,7 @@ pub fn run() {
 /// dialog), so read it as "lost window focus," not strictly "backgrounded"; the
 /// `Resumed` event is the reliable foreground signal.
 #[allow(clippy::needless_pass_by_value)] // signature dictated by `App::run`'s callback contract
-fn log_run_event<R: tauri::Runtime>(_app: &tauri::AppHandle<R>, event: tauri::RunEvent) {
+fn log_run_event<R: Runtime>(_app: &AppHandle<R>, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::Resumed => log::info!("app: resumed (foreground)"),
         tauri::RunEvent::ExitRequested { code, .. } => {
