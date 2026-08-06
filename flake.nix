@@ -40,17 +40,31 @@
 
       forEachSupportedSystem = f: transposeAttrs (lib.genAttrs (import systems) f);
     in
-    forEachSupportedSystem (system: {
-      devShells = import ./nix/devShells.nix {
-        inherit inputs system;
-      };
-    })
+    forEachSupportedSystem (
+      system:
+
+      let
+        pkgs = import inputs.nixpkgs {
+          inherit system;
+          config = {
+            allowUnfree = true;
+            android_sdk.accept_license = true;
+          };
+        };
+      in
+      {
+        devShells = import ./nix/devShells.nix { inherit inputs system pkgs; };
+
+        packages = import ./nix/packages.nix { inherit pkgs; };
+      }
+    )
     // {
       # fenix (the Rust toolchain input) publishes its prebuilt artifacts to its
       # own cachix cache (fenix.cachix.org), not cache.nixos.org. Without this
       # substituter, devShells cold-build the entire Rust toolchain from source.
       nixConfig = {
         extra-substituters = [ "https://fenix.cachix.org" ];
+
         extra-trusted-public-keys = [
           "fenix.cachix.org-1:ecJhr+RdYEdcVgUkjruiYhjbBloIEGov7bos90cZi0Q="
         ];

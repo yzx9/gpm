@@ -5,19 +5,15 @@
 # Dev-shell definitions, factored out of flake.nix. flake.nix imports this per
 # system and exposes the result directly as its `devShells` output.
 
-{ inputs, system }:
+{
+  inputs,
+  system,
+  pkgs,
+}:
 
 let
   inherit (pkgs) lib;
   inherit (inputs) fenix git-hooks;
-
-  pkgs = import inputs.nixpkgs {
-    inherit system;
-    config = {
-      allowUnfree = true;
-      android_sdk.accept_license = true;
-    };
-  };
 
   # Full Rust toolchain: host stable + the four Android targets.
   rustToolchain = fenix.packages.${system}.combine [
