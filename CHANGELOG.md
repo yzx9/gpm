@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Diagnostic log lines that come from the app interface — the lines you see in **Settings → Logs** and in an exported bug-report bundle — no longer repeat where they're from. Each used to say "frontend" twice over; the lines are now shorter and easier to read.
 - In **Settings**, the **Logs** entry moves up to sit right after **Repository**, grouped with the other reference pages — **Security**, **Permissions & data**, and **About** — just below the actual settings (General, Lock & identity, Repository). Those four pages explain or document the app rather than holding a setting, so they now read as one group instead of Logs sitting alone at the bottom.
 
+### Fixed
+
+- **Copy password** — and copying a TOTP code, a generated password, or an old revision's value — no longer fails with an error. The clipboard-clear notification's text was reaching the native layer in a form it couldn't read, so every copy broke at the last step; copying and the auto-clear notification now work as intended.
+
 ## [v0.17.0] - 2026-08-05
 
 ### Added

@@ -14,5 +14,8 @@ tauri = "2"
 serde = { workspace = true }
 log = { workspace = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

@@ -41,10 +41,9 @@ export interface BiometricPromptText {
 
 /**
  * Localized clipboard-clear notification text. `bodyTemplate` carries a `{secs}`
- * hole; Rust substitutes the auto-clear window at post time (it owns `secs`),
- * so this is the RAW message (`tm`, not `t`) — interpolating here would consume
- * the token before Rust sees it. Fields are `undefined` when the bundle is
- * missing (native layer falls back).
+ * hole; Rust substitutes the auto-clear window at post time (it owns `secs`), so
+ * the hole must survive into the string the native layer receives. Fields are
+ * `undefined` when the bundle is missing (native layer falls back).
  */
 export interface ClipboardNotifyText {
   title: string | undefined;
@@ -92,11 +91,18 @@ export function appLockUnlockPrompt(): BiometricPromptText {
 /** Clipboard-clear notification text (title, body template, channel name/desc). */
 export function clipboardNotifyText(): ClipboardNotifyText {
   const bodyKey = "native.clipboard.autoClearBody";
-  // `tm` returns the raw message (no interpolation), so the `{secs}` hole
-  // survives for Rust to substitute at post time. Gated by `te` so a missing
-  // bundle yields `undefined` (→ native fallback) rather than a key-path string.
+  // Resolve the body template to a STRING with the `{secs}` hole intact, for
+  // Rust to substitute the auto-clear window at post time. Must use `t` (which
+  // evaluates the message), NOT `tm`: under `@intlify/unplugin-vue-i18n`
+  // precompilation `tm` returns the compiled message AST object rather than the
+  // raw string, and passing that object through IPC makes the backend's
+  // `body_template: Option<String>` reject it (`invalid type: map, expected a
+  // string`). Feeding the literal "{secs}" back as the `secs` named arg keeps
+  // the token in the resolved string for Rust to replace. Gated by `te` so a
+  // missing bundle yields `undefined` (→ native fallback) rather than a
+  // key-path string.
   const bodyTemplate = i18n.global.te(bodyKey)
-    ? (i18n.global.tm(bodyKey) as string)
+    ? i18n.global.t(bodyKey, { secs: "{secs}" })
     : undefined;
   return {
     title: tx("native.clipboard.title"),

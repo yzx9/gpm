@@ -431,4 +431,39 @@ mod tests {
         let r = resolve_notification_text(None, 12, "App", "Auto-clears in {secs}s", "App", "App");
         assert_eq!(r.body, "Auto-clears in 12s");
     }
+
+    /// The `notify_text: Option<NotifyText>` command arg is deserialized from the
+    /// frontend's camelCase object at the IPC boundary — pin that contract so a
+    /// future field-rename or a string-vs-struct type drift on either side fails
+    /// here instead of surfacing at runtime as `invalid type: map, expected a
+    /// string` (or vice-versa).
+    #[test]
+    fn notify_text_deserializes_from_frontend_ipc_payload() {
+        // Exact shape `clipboardNotifyText()` sends (see app/src/i18n/native.ts).
+        let payload = serde_json::json!({
+            "title": "gpm",
+            "bodyTemplate": "Tap to clear · auto-clears in {secs}s",
+            "channelName": "Clipboard",
+            "channelDescription": "Notifies when a secret is on the clipboard so you can clear it"
+        });
+        let n: NotifyText =
+            serde_json::from_value(payload).expect("frontend payload must map to NotifyText");
+        assert_eq!(n.title.as_deref(), Some("gpm"));
+        assert_eq!(
+            n.body_template.as_deref(),
+            Some("Tap to clear · auto-clears in {secs}s")
+        );
+        assert_eq!(n.channel_name.as_deref(), Some("Clipboard"));
+        assert_eq!(
+            n.channel_description.as_deref(),
+            Some("Notifies when a secret is on the clipboard so you can clear it")
+        );
+
+        // The `notify?` (optional) case: an absent/null arg resolves to `None`.
+        assert!(
+            serde_json::from_value::<Option<NotifyText>>(serde_json::Value::Null)
+                .unwrap()
+                .is_none()
+        );
+    }
 }
