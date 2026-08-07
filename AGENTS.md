@@ -5,12 +5,12 @@ gpm is an Android-first, age-only gopass password client built with Tauri v2 + R
 ## Commands
 
 ```bash
-just test              # Run all tests (backend + frontend + plugin)
-just lint              # Clippy -D warnings + vue-tsc --noEmit
-just fmt               # rustfmt + prettier
-just dev               # Desktop dev server with hot reload
-just android-debug     # Build debug APK
-just android-dev       # Android dev server (requires device/emulator)
+just test  # Run all tests (backend + frontend + plugin)
+just lint  # Clippy -D warnings + vue-tsc --noEmit
+just fmt   # rustfmt + prettier
+just dev   # Desktop dev server with hot reload
+just android-debug  # Build debug APK
+just android-dev    # Android dev server (requires device/emulator)
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for dev environment setup and known issues.
@@ -23,15 +23,13 @@ SPA web app with Vue3 + TypeScript.
 
 ### Backend — `crates/rustpass/`
 
-The crate implements encryption, decryption, Git operations, and repository file management, with its core functionality encapsulated in a `Store` facade. It is an async-first crate built on `tokio`, using `tokio::fs` for all file I/O, while Git and scrypt operations are wrapped in `spawn_blocking`. It is a library crate only — no UI or CLI; the Tauri app (`app/src-tauri/`) exposes its `Store` as commands.
+The crate implements encryption, decryption, Git operations, and repository file management, with its core functionality encapsulated in a `Store` facade. It is an async-first crate built on `tokio`, using `tokio::fs` for all file I/O, while Git and scrypt operations are wrapped in `spawn_blocking`. It is a library crate only — no UI or CLI.
 
 `rustpass` was designed to be compatible with and conceptually aligned with `gopass`, drawing heavily from its architecture and design principles, while intentionally narrowing its scope in the current implementation phase.
 
 ### Tauri app — `app/src-tauri/`
 
-Async Tauri commands, shared app state (`AppState`), and the entry point (`run()`). `lib.rs` is a thin shell — just
-`AppState` + `run()`; every command group lives in its own `pub(crate)` module under `app/src-tauri/src/`, registered in
-`run()`'s `invoke_handler`.
+Async Tauri commands, shared app state (`AppState`), and the entry point (`run()`).
 
 ### Tauri Plugins — `crates/tauri-plugin-*/`
 
@@ -39,14 +37,14 @@ Local Tauri plugin crates. Each follows the standard Tauri mobile-plugin layout:
 
 A plugin crate exists to be **publishable as a standalone, app-agnostic primitive**; anything tightly coupled to gpm (key aliases, business logic, store internals) belongs in the app, not a plugin. The plugins below carry no gpm identifiers for this reason.
 
-- `tauri-plugin-safe-area` — provides Android safe-area insets to the WebView via standard plugin IPC + events
-- `tauri-plugin-keystore` — a **generic** Android Keystore seal for caller-supplied bytes, under a caller-chosen policy (auth-free, or biometric-gated via a per-use `BiometricPrompt`); hardware-backed AES/GCM. The public Rust API is bytes (`store(&[u8])` / `retrieve() -> Vec<u8>`); the value crosses the IPC as base64, which the plugin crate encodes/decodes itself. `alias`/`prefs`/`policy`/`prompt` are all caller-supplied — the plugin carries no gpm identifiers or brand strings (the app passes them from `keystore.rs`). gpm uses it for the identity passphrase (biometric-gated), the at-rest master key (auth-free), and the App Lock vault key (biometric-gated)
-- `tauri-plugin-file-picker` — opens the Android Storage Access Framework picker and reads the picked file's bytes into Rust (backend-only; desktop falls back to `tauri-plugin-dialog`)
-- `tauri-plugin-file-save` — saves a staged file to a user-picked destination via Android SAF `ACTION_CREATE_DOCUMENT`, owning the Kotlin write for a real error path (backend-only; desktop falls back to `tauri-plugin-dialog`'s save)
-- `tauri-plugin-screen-secure` — toggles Android `FLAG_SECURE` for per-route screen-capture protection on sensitive screens (frontend calls `set_secure(bool)`; desktop no-op, gated by `screen_secure_available()`)
-- `tauri-plugin-clipboard-notify` — a **generic** sticky-notification + tap-to-clear: posts a sticky Android notification with caller-resolved text while something is on the clipboard; the tap clears natively and sets a manual-clear flag the Rust clear timer polls (no Kotlin→Rust event — the flag is polled over `run_mobile_plugin_async`). Backend-only; inert no-ops on desktop. gpm uses it for the clipboard-clear notification
-- `tauri-plugin-device-info` — surfaces Android hardware/OS build fields, the WebView user-agent, and display metrics to Rust for the diagnostics export (backend-only; desktop gets a minimal OS/arch/version fallback)
-- `tauri-plugin-background-work` — a **generic**, worker-agnostic periodic-`WorkManager` scheduler: enqueues/cancels a caller-named worker class (FQN resolved via `Class.forName`) under a network constraint (backend-only; inert no-ops on desktop, where the foreground sync covers it).
+- `tauri-plugin-safe-area` — Android safe-area insets to the WebView via standard plugin IPC + events
+- `tauri-plugin-keystore` — Android Keystore seal for caller-supplied bytes, under a caller-chosen policy; hardware-backed AES/GCM
+- `tauri-plugin-file-picker` — opens the Android Storage Access Framework picker and reads the picked file's bytes
+- `tauri-plugin-file-save` — saves a staged file to a user-picked destination via Android SAF `ACTION_CREATE_DOCUMENT`
+- `tauri-plugin-screen-secure` — toggles Android `FLAG_SECURE` for per-route screen-capture protection on sensitive screens.
+- `tauri-plugin-clipboard-notify` — sticky-notification + tap-to-clear; the tap clears natively and sets a manual-clear flag the Rust clear timer polls
+- `tauri-plugin-device-info` — surfaces Android hardware/OS build fields, the WebView user-agent, and display metrics to Rust for the diagnostics export
+- `tauri-plugin-background-work` — worker-agnostic periodic-`WorkManager` scheduler: enqueues/cancels a caller-named worker class under a network constraint
 
 ## Security Model
 
@@ -65,9 +63,11 @@ See [SECURITY.md](docs/SECURITY.md) for the full threat model and known limitati
 
 ## Testing
 
-Backend tests are in-module plus integration tests. Frontend tests are vitest in `app/src/**/*.test.ts`. The fast local gates have a blind spot: `just test` and `just lint` compile on the host and never build `#[cfg(target_os = "android")]` code, and `just test-plugin` runs the plugins' JVM tests without compiling the app's Kotlin — so a green fast gate does not mean the Android build is green. The full `tauri android build` is slow (minutes) — decide whether your change needs it, but run it (or the quicker `cargo check --target aarch64-linux-android`) when a change touches android-gated code (a JNI shim, a plugin's `android/` code, Kotlin) rather than skipping it on the strength of the fast gates.
+Backend tests are in-module plus integration tests. Frontend tests are vitest in `app/src/**/*.test.ts`. The fast local gates have a blind spot: `just test` and `just lint` compile on the host and never build `#[cfg(target_os = "android")]` code, and `just test-plugin` runs the plugins' JVM tests without compiling the app's Kotlin — so a green fast gate does not mean the Android build is green.
 
 The local Android plugins' Robolectric/JVM unit tests run via `just test-plugin`. The gate is gated on `app/src-tauri/gen/android/tauri.settings.gradle` — gitignored, generated by `tauri android build/dev` — so run `just android-debug` once to materialize it.
+
+The full `tauri android build` is slow (minutes) — decide whether your change needs it, but run it (or the quicker `cargo check --target aarch64-linux-android`) when a change touches android-gated code (a JNI shim, a plugin's `android/` code, Kotlin) rather than skipping it on the strength of the fast gates.
 
 ## Conventions
 
