@@ -19,16 +19,25 @@ import { invoke } from "@tauri-apps/api/core";
 /** Kind of identity to mint for the create flow (mirrors Rust `CreateIdentityKind`). */
 export type CreateIdentityKind = "age" | "ssh";
 
+/** A crypto/identity key type (mirrors Rust `KeyType`, including `"gpg"`). */
+export type KeyType =
+  | "x25519"
+  | "ssh_ed25519"
+  | "ssh_rsa"
+  | "plugin"
+  | "post_quantum"
+  | "gpg";
+
 /** A public recipient the store encrypts to (from `list_recipients`). */
 export interface RecipientInfo {
   public_key: string;
   comment: string | null;
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
+  key_type: KeyType;
 }
 
 /** Identity validation result from `validate_identity`. */
 export interface IdentityInfoResult {
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
+  key_type: KeyType;
   encrypted: boolean;
   /** Derived public recipient (`null` for encrypted SSH awaiting unlock). */
   recipient: string | null;
@@ -36,13 +45,23 @@ export interface IdentityInfoResult {
 
 /** Identity metadata from `pick_identity_file` — bytes stay backend-side. */
 export interface PickedIdentityResult {
-  key_type: "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum";
+  key_type: KeyType;
   encrypted: boolean;
   /** Best-effort display name from the picker (null if unknown). */
   filename: string | null;
   /** Derived public key. Present when already usable (unencrypted); null until
    *  a passphrase is verified for an encrypted file. */
   recipient: string | null;
+  /** GPG key's primary user id (e.g. `Jordan <jordan@example.com>`); null for
+   *  non-GPG identities. */
+  user_id: string | null;
+  /** GPG key's full fingerprint; null for non-GPG identities. */
+  fingerprint: string | null;
+  /** GPG membership probe: `true`/`false` if the identity's membership in the
+   *  cloned store's recipients was determined, `null` when there is no store or
+   *  no recipients to match against (and for non-GPG identities). Drives the GPG
+   *  tab's match badge; the authoritative gate is `completeSetupFromFile`. */
+  is_recipient: boolean | null;
 }
 
 /** Result of `verify_picked_identity` — the public key once unlocked. */

@@ -63,6 +63,9 @@ const loadingRecipients = ref(false);
 const loadingIdentity = ref(false);
 const identitySource = ref<"paste" | "file">("paste");
 const pickedFile = ref<PickedIdentityResult | null>(null);
+// A picked GPG key's S2K passphrase has been verified at setup (catches a wrong
+// key/passphrase before the user relies on it). Reset on every pick / paste.
+const gpgVerified = ref(false);
 const picking = ref(false);
 const verifying = ref(false);
 const deriving = ref(false);
@@ -100,6 +103,12 @@ const hasSshRecipients = computed(() =>
     (r) => r.key_type === "ssh_ed25519" || r.key_type === "ssh_rsa",
   ),
 );
+
+// A GPG key has been picked: drive the GPG-aware panel off the picked key type
+// (the identity TYPE decides the backend). The age recipients list reads the age
+// backend and is empty/misleading for a GPG store, so it's hidden once a GPG key
+// is picked; membership comes from the picked key's `is_recipient` probe.
+const gpgPicked = computed(() => pickedFile.value?.key_type === "gpg");
 
 const canReuseSshKey = computed(
   () =>
@@ -184,6 +193,17 @@ async function fetchRecipients() {
 function validateStep2(): string | null {
   if (identitySource.value === "file") {
     if (!pickedFile.value) return t("setup.identity.validation.errNoFile");
+    if (gpgPicked.value) {
+      // GPG: membership comes from the pick's `is_recipient` probe (not the age
+      // string-match below, which reads the wrong backend). A key definitively
+      // NOT a recipient can't decrypt the store — block before the user spends a
+      // passphrase on it (the authoritative gate is save_identity; this pre-warns).
+      if (pickedFile.value?.is_recipient === false)
+        return t("setup.identity.noMatchWarning");
+      if (!gpgVerified.value)
+        return t("setup.identity.validation.errGpgVerifyFirst");
+      return null;
+    }
     if (!pickedFile.value.recipient)
       return t("setup.identity.validation.errUnlockFileFirst");
   } else {
@@ -258,6 +278,7 @@ async function onPickFile() {
     isIdentityEncrypted.value = info.encrypted;
     derivedRecipient.value = info.recipient;
     malformedIdentity.value = false;
+    gpgVerified.value = false;
     passphrase.value = "";
     identitySource.value = "file";
     identity.value = ""; // watch is guarded in file mode
@@ -280,6 +301,9 @@ async function onVerify() {
     const res = await verifyPickedIdentity(passphrase.value);
     if (pickedFile.value) pickedFile.value.recipient = res.recipient;
     derivedRecipient.value = res.recipient;
+    // GPG: the S2K passphrase validated — the key is usable. (The recipient was
+    // already known from public-packet data; this marks the verify gate passed.)
+    if (gpgPicked.value) gpgVerified.value = true;
   } catch (e) {
     const appError = e as AppError;
     // The backend abandoned the file on failure — drop it and return to paste.
@@ -322,6 +346,7 @@ function onUsePaste() {
   isIdentityEncrypted.value = false;
   derivedRecipient.value = null;
   malformedIdentity.value = false;
+  gpgVerified.value = false;
   passphrase.value = "";
   identity.value = "";
   clearPendingIdentity().catch(() => {});
@@ -461,16 +486,27 @@ onUnmounted(clearPendingFile);
     <p class="text-xs text-muted">{{ t("setup.identity.intro") }}</p>
     <p class="text-xs text-muted">{{ t("common.setup.introAppKey") }}</p>
 
-    <!-- Recipients list (read-only context; the match is derived, not selected) -->
-    <div v-if="loadingRecipients" class="text-center py-4 text-sm text-muted">
+    <!-- Recipients list (read-only context; the match is derived, not selected).
+         For a GPG store this reads the age backend (clone default) and is empty;
+         the GPG pick panel below carries the real GPG UX once a key is picked. -->
+    <!-- For a GPG store listRecipients reads the age backend (clone default) and
+         is empty/misleading, so the whole list is hidden once a GPG key is picked;
+         the GPG pick panel below carries the real GPG membership UX. -->
+    <div
+      v-if="!gpgPicked && loadingRecipients"
+      class="text-center py-4 text-sm text-muted"
+    >
       {{ t("setup.identity.loadingRecipients") }}
     </div>
 
-    <BaseAlert v-else-if="recipients.length === 0" variant="info">
+    <BaseAlert v-else-if="!gpgPicked && recipients.length === 0" variant="info">
       {{ t("setup.identity.noRecipientsAlert") }}
     </BaseAlert>
 
-    <div v-else class="flex flex-col gap-2 max-h-56 overflow-y-auto">
+    <div
+      v-else-if="!gpgPicked"
+      class="flex flex-col gap-2 max-h-56 overflow-y-auto"
+    >
       <div
         v-for="r in recipients"
         :key="r.public_key"
@@ -553,9 +589,91 @@ onUnmounted(clearPendingFile);
         :disabled="loadingIdentity || identitySource === 'file'"
       />
 
-      <!-- Picked-file panel: the bytes live in backend state, not here -->
+      <!-- Picked GPG key: uid + fingerprint + membership badge + S2K verify.
+           Bytes live in backend state; only public metadata is shown. -->
       <div
-        v-if="identitySource === 'file' && pickedFile"
+        v-if="identitySource === 'file' && gpgPicked"
+        class="flex flex-col gap-2 text-xs bg-input border border-edge rounded-md p-2 px-2.5"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <span class="min-w-0 truncate inline-flex items-center gap-1">
+            <BaseIcon
+              :icon="FileText"
+              :size="14"
+              class="inline-block align-middle shrink-0"
+            />
+            <span class="truncate">{{
+              pickedFile?.filename || t("setup.identity.fileTypeFallback")
+            }}</span>
+            <span
+              class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-edge text-muted"
+              >{{ t("setup.identity.badgeGpg") }}</span
+            >
+          </span>
+          <BaseButton
+            variant="link"
+            size="xs"
+            tone="danger"
+            class="shrink-0"
+            @click="onUsePaste"
+          >
+            {{ t("setup.identity.fileRemove") }}
+          </BaseButton>
+        </div>
+
+        <div v-if="pickedFile?.user_id" class="font-medium break-all">
+          {{ pickedFile.user_id }}
+        </div>
+        <div v-if="pickedFile?.fingerprint" class="flex flex-col gap-0.5">
+          <span class="text-muted">{{
+            t("setup.identity.gpgFingerprint")
+          }}</span>
+          <code class="font-mono break-all">{{ pickedFile.fingerprint }}</code>
+        </div>
+
+        <!-- Membership badge: drives the match display for GPG (per the design,
+             not the age string-match, which reads the wrong backend). -->
+        <span
+          v-if="pickedFile?.is_recipient === true"
+          class="shrink-0 self-start text-[10px] font-medium px-1.5 py-0.5 rounded bg-accent text-on-accent"
+          >{{ t("setup.identity.gpgRecipient") }}</span
+        >
+        <span
+          v-else-if="pickedFile?.is_recipient === false"
+          class="shrink-0 self-start text-[10px] font-medium px-1.5 py-0.5 rounded bg-edge text-muted"
+          >{{ t("setup.identity.gpgNotRecipient") }}</span
+        >
+
+        <!-- S2K passphrase verify (required before Complete). -->
+        <div v-if="!gpgVerified" class="flex flex-col gap-1">
+          <BaseInput
+            v-model="passphrase"
+            type="password"
+            :placeholder="t('setup.identity.gpgPassphrasePlaceholder')"
+            autocomplete="off"
+            :disabled="verifying"
+          />
+          <BaseButton
+            variant="secondary"
+            :disabled="verifying || !passphrase"
+            @click="onVerify"
+          >
+            <BaseIcon :icon="KeyRound" />
+            {{
+              verifying
+                ? t("setup.identity.gpgVerifyLoading")
+                : t("setup.identity.gpgVerifyButton")
+            }}
+          </BaseButton>
+        </div>
+        <BaseAlert v-else variant="success">{{
+          t("setup.identity.gpgVerified")
+        }}</BaseAlert>
+      </div>
+
+      <!-- Picked-file panel (age/SSH): the bytes live in backend state, not here -->
+      <div
+        v-else-if="identitySource === 'file' && pickedFile"
         class="flex flex-col gap-2 text-xs bg-input border border-edge rounded-md p-2 px-2.5"
       >
         <div class="flex items-center justify-between gap-2">

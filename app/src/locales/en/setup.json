@@ -1,5 +1,5 @@
 {
-  "tagline": "Age-only gopass password client",
+  "tagline": "gopass password client",
   "mode": {
     "label": "Mode",
     "clone": "Clone an existing store",
@@ -106,6 +106,14 @@
     "badgePlugin": "Plugin",
     "badgeSsh": "SSH",
     "badgeYourKey": "your key",
+    "badgeGpg": "GPG",
+    "gpgFingerprint": "Fingerprint",
+    "gpgRecipient": "✓ recipient of this store",
+    "gpgNotRecipient": "not a recipient of this store",
+    "gpgPassphrasePlaceholder": "Passphrase to unlock this GPG key",
+    "gpgVerifyButton": "Verify",
+    "gpgVerifyLoading": "Verifying…",
+    "gpgVerified": "✓ Passphrase verified.",
     "unsupportedPq": "Post-quantum age keys aren't supported yet.",
     "unsupportedPlugin": "age-plugin identities aren't supported for decryption yet.",
     "malformed": "This doesn't look like a valid age or SSH key.",
@@ -132,6 +140,7 @@
       "errIdentityFormat": "Identity must be an age key (AGE-SECRET-KEY-...) or SSH private key",
       "errSshPassRequired": "SSH key passphrase is required",
       "errVerifyFirst": "Verify your SSH key first",
+      "errGpgVerifyFirst": "Verify your GPG key's passphrase first",
       "errAckRequired": "Please acknowledge that this passphrase cannot be recovered."
     },
     "err": {

@@ -344,6 +344,10 @@ onMounted(() => {
             {{ t("settings.repo.title") }}
           </h2>
           <div class="text-sm text-muted break-all">{{ config.url }}</div>
+          <div class="text-xs text-muted mt-1">
+            {{ t("settings.repo.backend") }}:
+            {{ config.crypto === "gpg" ? "GPG" : "age" }}
+          </div>
         </BaseCard>
 
         <!-- Commit identity -->

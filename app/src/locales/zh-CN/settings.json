@@ -30,7 +30,8 @@
     "failed": "无法保存主题 —— 请重试"
   },
   "repo": {
-    "title": "仓库"
+    "title": "仓库",
+    "backend": "后端"
   },
   "gitAuth": {
     "title": "Git 认证",

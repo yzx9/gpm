@@ -1,5 +1,5 @@
 {
-  "tagline": "仅使用 age 的 gopass 密码客户端",
+  "tagline": "gopass 密码客户端",
   "mode": {
     "label": "模式",
     "clone": "克隆已有仓库",
@@ -106,6 +106,14 @@
     "badgePlugin": "插件",
     "badgeSsh": "SSH",
     "badgeYourKey": "你的密钥",
+    "badgeGpg": "GPG",
+    "gpgFingerprint": "指纹",
+    "gpgRecipient": "✓ 是此仓库的接收方",
+    "gpgNotRecipient": "不是此仓库的接收方",
+    "gpgPassphrasePlaceholder": "用于解锁此 GPG 密钥的口令",
+    "gpgVerifyButton": "验证",
+    "gpgVerifyLoading": "验证中…",
+    "gpgVerified": "✓ 口令已验证。",
     "unsupportedPq": "暂不支持后量子 age 密钥。",
     "unsupportedPlugin": "age-plugin 身份暂不支持用于解密。",
     "malformed": "这看起来不是有效的 age 或 SSH 密钥。",
@@ -132,6 +140,7 @@
       "errIdentityFormat": "身份必须是 age 密钥（AGE-SECRET-KEY-...）或 SSH 私钥",
       "errSshPassRequired": "必须提供 SSH 密钥口令",
       "errVerifyFirst": "请先验证你的 SSH 密钥",
+      "errGpgVerifyFirst": "请先验证你的 GPG 密钥口令",
       "errAckRequired": "请确认你知晓此口令无法恢复。"
     },
     "err": {

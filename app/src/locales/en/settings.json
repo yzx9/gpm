@@ -30,7 +30,8 @@
     "failed": "Couldn't save theme — try again"
   },
   "repo": {
-    "title": "Repository"
+    "title": "Repository",
+    "backend": "Backend"
   },
   "gitAuth": {
     "title": "Git Authentication",
