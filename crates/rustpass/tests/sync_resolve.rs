@@ -29,8 +29,17 @@ use std::sync::Arc;
 use common::*;
 use rustpass::GitAuth;
 use rustpass::SyncOutcome;
-use rustpass::crypto;
+use rustpass::crypto::{self, CryptoBackend, GpgBackend};
 use rustpass::store::{DivergenceChoice, EntryConflictChoice, ExpectedEntry, ExpectedKind, Store};
+
+/// Committed system-gpg RSA-2048 fixture key (S2K-passphrase-protected secret),
+/// its armored public half, and a secret encrypted to it by desktop gpg. Reused
+/// by the GPG keep-mine integration test (D7) so it need not GPG-encrypt itself.
+const FIXTURE_SECRET: &[u8] = include_bytes!("fixtures/gpg/secret.asc");
+const FIXTURE_PUBLIC: &[u8] = include_bytes!("fixtures/gpg/public.asc");
+const FIXTURE_GPG_ENCRYPTED: &[u8] = include_bytes!("fixtures/gpg/gpg-encrypted.gpg");
+const FIXTURE_PASSPHRASE: &str = "test-passphrase-fixture-only";
+const EXPECTED_PLAINTEXT: &[u8] = b"gpg-to-rpgp interop plaintext";
 
 /// Write an encrypted `.age` entry into the store's working repo as an unpushed
 /// local commit. `plaintext` is encrypted to `recipient` so the store can decrypt
@@ -197,6 +206,105 @@ async fn keep_mine_re_encrypts_to_current_recipients() {
         crypto::decrypt_bytes(&pushed, id2.as_bytes(), None).expect("R2 can decrypt"),
         b"mine-secret",
         "keep mine must re-encrypt to the new recipient set"
+    );
+}
+
+/// D7 (GPG keep-mine integration): the divergence/keep-mine pipeline is
+/// ext-aware, but the leaf unit tests can't prove the cross-layer hand-off works
+/// for a GPG store — GPG caches the S2K-unlocked armor (a different operational
+/// form than age's bare key) and resolves the recipient pool from `.public-keys/`
+/// mid-resolve. This drives a real GPG store through pull → divergence →
+/// keep-mine → re-encrypt → push and asserts the local `.gpg` secret survives,
+/// decrypts, and the bare tip advances. Mirrors keep_mine_replays_local_secrets_onto_remote.
+#[tokio::test]
+async fn keep_mine_replays_local_gpg_secret_onto_remote() {
+    let recipient = GpgBackend
+        .identity_recipient(str::from_utf8(FIXTURE_SECRET).unwrap(), None)
+        .expect("derive fixture recipient");
+    let gpg_id = format!("{recipient}\n");
+    let pubkey_path = format!(".public-keys/{recipient}");
+    // A GPG store: `.gpg-id` + `.public-keys/<recipient>` + a base `.gpg` secret
+    // (the committed fixture ciphertext, already encrypted to the fixture key).
+    let (bare_dir, _clone) = create_test_git_repo_with(
+        vec![],
+        vec![
+            ("base.gpg", FIXTURE_GPG_ENCRYPTED),
+            (".gpg-id", gpg_id.as_bytes()),
+            (pubkey_path.as_str(), FIXTURE_PUBLIC),
+        ],
+        // recipient_str is unused — no .age entries are committed.
+        "age1qcpwGY9xztuw39d8pe8cx3uyhu2v8pz39f6tje0x06d8tnz5eyqqt8z6e2",
+    );
+
+    let config_dir = tempfile::tempdir().unwrap();
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    // Clone (leaves crypto at the age default) then save the GPG identity —
+    // save_identity is the authority that flips crypto to "gpg" and resolves the
+    // backend. Unlock caches the S2K-stripped armor keep-mine reuses.
+    store
+        .clone_only_with(
+            bare_dir.path().to_str().unwrap(),
+            &GitAuth::None,
+            None,
+            None,
+        )
+        .await
+        .expect("clone");
+    store
+        .save_identity(str::from_utf8(FIXTURE_SECRET).unwrap(), None)
+        .await
+        .expect("save gpg identity");
+    store
+        .unlock(FIXTURE_PASSPHRASE)
+        .await
+        .expect("unlock fixture key");
+
+    let repo_path = store.config().await.expect("config").local_path;
+    // Local diverges: an unpushed `.gpg` secret (reusing the fixture ciphertext,
+    // already encrypted to the fixture key the store holds).
+    local_commit_files(
+        Path::new(&repo_path),
+        &[("mine.gpg", FIXTURE_GPG_ENCRYPTED)],
+        "local adds mine",
+    );
+    // Remote diverges on an unrelated non-secret file.
+    commit_plain_files_to_bare(
+        bare_dir.path(),
+        vec![("remote-note.txt", b"remote-only")],
+        "remote adds unrelated",
+    );
+
+    let tip = bare_head_oid(bare_dir.path());
+    let result = store
+        .resolve_sync_divergence(&cancel_slot(), &tip, DivergenceChoice::KeepMine, None)
+        .await
+        .expect("keep mine on a GPG store");
+    assert!(result.changed, "HEAD should advance");
+    assert!(
+        bare_head_oid(bare_dir.path()).starts_with(&result.head),
+        "the keep-mine commit was pushed"
+    );
+
+    // The local `.gpg` secret survived keep-mine and decrypts through GpgBackend.
+    assert_eq!(
+        store
+            .get("mine")
+            .await
+            .expect("get mine")
+            .password()
+            .as_bytes(),
+        EXPECTED_PLAINTEXT,
+        "the local GPG secret survived the keep-mine re-encrypt"
+    );
+    assert_eq!(
+        store
+            .get("base")
+            .await
+            .expect("get base")
+            .password()
+            .as_bytes(),
+        EXPECTED_PLAINTEXT,
+        "the base GPG secret is still readable"
     );
 }
 

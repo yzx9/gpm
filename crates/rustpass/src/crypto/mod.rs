@@ -244,6 +244,35 @@ pub trait CryptoBackend: Send + Sync {
     /// key today; an S2K-protected GPG key once `GpgBackend` lands. Pure CPU op
     /// — synchronous. See [`age::is_ssh_identity_encrypted`] for the age impl.
     fn identity_requires_passphrase(&self, identity_bytes: &[u8]) -> bool;
+
+    /// Is `identity` a recipient of the store whose recipients `view` reads?
+    /// **Tri-state** — the membership question is not always answerable:
+    ///
+    /// - `Ok(true)` — the identity is definitively one of the store's recipients.
+    /// - `Ok(false)` — the identity is definitively NOT a recipient.
+    /// - `Err(_)` — membership could not be determined (the recipient pool is
+    ///   incomplete / unreadable). Surfaced as a distinct "repo looks incomplete"
+    ///   error rather than a silent allow, per the GPG setup design.
+    ///
+    /// The age backend compares the derived recipient string against the parsed
+    /// `.age-recipients` (binary — every recipient is self-describing). The GPG
+    /// backend resolves each `.gpg-id` token through its `.public-keys/<token>`
+    /// pubkey by primary fingerprint, because a token may be a long key id OR a
+    /// full fingerprint (a naive string compare would false-reject full-fp
+    /// stores). `passphrase` is the age backend's recipient-derivation passphrase
+    /// (needed for an encrypted SSH identity); GPG ignores it — the fingerprint is
+    /// public-packet data.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidIdentity` if the identity can't be parsed; `StoreError`/I/O if the
+    /// recipient pool can't be read (the GPG "repo looks incomplete" case).
+    async fn identity_is_recipient(
+        &self,
+        identity: &str,
+        passphrase: Option<&str>,
+        view: &dyn RepoFileView,
+    ) -> Result<bool, Error>;
 }
 
 /// The age crypto backend — the sole [`CryptoBackend`] implementation.
@@ -387,5 +416,18 @@ impl CryptoBackend for AgeBackend {
 
     fn identity_requires_passphrase(&self, identity_bytes: &[u8]) -> bool {
         is_ssh_identity_encrypted(identity_bytes)
+    }
+
+    async fn identity_is_recipient(
+        &self,
+        identity: &str,
+        passphrase: Option<&str>,
+        view: &dyn RepoFileView,
+    ) -> Result<bool, Error> {
+        // Every age recipient is self-describing, so a string compare against the
+        // parsed index is authoritative (binary — no "incomplete pool" case).
+        let derived = self.identity_recipient(identity, passphrase)?;
+        let recipients = self.list_recipients(view).await?;
+        Ok(recipients.iter().any(|r| r.public_key == derived))
     }
 }

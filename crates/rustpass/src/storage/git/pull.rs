@@ -11,6 +11,7 @@ use std::path::Path;
 
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 
+use crate::crypto::SecretExt;
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
 use crate::storage::{
@@ -44,6 +45,7 @@ pub(super) fn pull_repo(
     policy: &AuthenticityConfig,
     cancel: Option<&CancelToken>,
     progress: Option<&ProgressSender>,
+    ext: SecretExt,
 ) -> Result<SyncOutcome, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -70,11 +72,14 @@ pub(super) fn pull_repo(
 
     // Off mode: temp-ref fetch + fast-forward (divergence surfaced, not errored).
     if policy.mode == VerifyMode::Off {
-        return transport::cancelled_or(pull_off(&repo, &mut remote, callbacks), cancel);
+        return transport::cancelled_or(pull_off(&repo, &mut remote, callbacks, ext), cancel);
     }
 
     // Audit / Enforce: verify-before-checkout.
-    transport::cancelled_or(pull_verified(&repo, &mut remote, callbacks, policy), cancel)
+    transport::cancelled_or(
+        pull_verified(&repo, &mut remote, callbacks, policy, ext),
+        cancel,
+    )
 }
 
 /// Read-only auth/connectivity probe: fetch `origin`'s current branch into a
@@ -160,6 +165,7 @@ fn pull_off(
     repo: &Repository,
     remote: &mut git2::Remote<'_>,
     callbacks: RemoteCallbacks<'_>,
+    ext: SecretExt,
 ) -> Result<SyncOutcome, Error> {
     let branch_name = repo
         .head()?
@@ -216,7 +222,7 @@ fn pull_off(
             }))
         }
         FetchClass::Diverged => {
-            let div = divergence::divergence_info(repo, pre_oid, fetched_oid)?;
+            let div = divergence::divergence_info(repo, pre_oid, fetched_oid, ext)?;
             cleanup();
             Ok(SyncOutcome::Diverged(div))
         }
@@ -287,6 +293,7 @@ fn pull_verified(
     remote: &mut git2::Remote<'_>,
     callbacks: RemoteCallbacks<'_>,
     policy: &AuthenticityConfig,
+    ext: SecretExt,
 ) -> Result<SyncOutcome, Error> {
     let mode = policy.mode;
 
@@ -369,7 +376,7 @@ fn pull_verified(
             }))
         }
         FetchClass::Diverged => {
-            let div = divergence::divergence_info(repo, pre_oid, fetched_oid)?;
+            let div = divergence::divergence_info(repo, pre_oid, fetched_oid, ext)?;
             cleanup();
             Ok(SyncOutcome::Diverged(div))
         }
@@ -518,8 +525,15 @@ mod tests {
         let oid = create_empty_commit(&repo, &test_signature());
 
         let policy = AuthenticityConfig::default();
-        let outcome = pull_repo(dir.path(), &GitAuth::None, &policy, None, None)
-            .expect("pull must no-op, not error, without origin");
+        let outcome = pull_repo(
+            dir.path(),
+            &GitAuth::None,
+            &policy,
+            None,
+            None,
+            SecretExt::AGE,
+        )
+        .expect("pull must no-op, not error, without origin");
         match outcome {
             SyncOutcome::FastForwarded(r) => {
                 assert!(!r.changed, "no-op pull reports no change");

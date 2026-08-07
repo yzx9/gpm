@@ -5,6 +5,7 @@ use std::str;
 
 use tokio::fs;
 
+use crate::crypto::{CryptoBackend, GpgBackend};
 use crate::error::{Error, ErrorCode};
 use crate::identity::{self, validate_identity_format};
 use crate::recipient::serialize_recipients;
@@ -244,5 +245,144 @@ impl Store {
             .await?;
 
         Ok(())
+    }
+
+    /// Preview a GPG/OpenPGP secret key's public metadata for the setup pick
+    /// step: primary user id, full fingerprint, the gopass recipient id
+    /// (`0x`+16hex), and a membership probe against the cloned store. All
+    /// public-packet data — no passphrase needed — so the UI can show
+    /// "<uid> (<fingerprint>)" plus a membership badge before the passphrase
+    /// prompt. `is_recipient` is `None` when there is no store or no recipients
+    /// to match against. Does NOT mutate the store or resolve a backend; the
+    /// authoritative membership gate + crypto-kind persist run in
+    /// [`Store::save_identity`].
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::InvalidIdentity`] if the armor is unparseable;
+    /// [`ErrorCode::StoreError`]/I/O if the recipient pool can't be read for the
+    /// membership probe.
+    pub async fn gpg_identity_preview(&self, identity: &str) -> Result<GpgIdentityPreview, Error> {
+        // uid + fingerprint are public-packet data — parse off the async thread.
+        // rpgp parses attacker-controllable picked bytes, so `catch_unwind` the
+        // parse (the codebase convention — see `identity_recipient`): a panic on
+        // malformed armor surfaces as `InvalidIdentity` (the contract the docstring
+        // promises + the UI's "invalid identity" branch keys on), not a silent
+        // `StoreError` from the `JoinError`.
+        let identity_bytes = identity.as_bytes().to_vec();
+        let (user_id, fingerprint) = tokio::task::spawn_blocking(move || {
+            let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let sk = crate::crypto::openpgp::parse_armored_secret_key(&identity_bytes)?;
+                let fp = crate::crypto::openpgp::primary_fingerprint(&sk.to_public_key());
+                let uid = crate::crypto::openpgp::primary_user_id(&sk);
+                Ok::<_, Error>((uid, fp))
+            }));
+            match parsed {
+                Ok(Ok(vals)) => Ok(vals),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(Error::new(
+                    ErrorCode::InvalidIdentity,
+                    "GPG key armor could not be parsed (malformed)",
+                )),
+            }
+        })
+        .await??;
+
+        let recipient = GpgBackend.identity_recipient(identity, None)?;
+
+        let is_recipient = match self.config.load_repo_config().await {
+            Ok(rc) => {
+                self.probe_membership(&rc, identity, Some("gpg"), None)
+                    .await?
+            }
+            Err(e) if e.code == "NO_REPO" => None,
+            Err(e) => return Err(e),
+        };
+
+        Ok(GpgIdentityPreview {
+            user_id,
+            fingerprint,
+            recipient,
+            is_recipient,
+        })
+    }
+}
+
+/// Public metadata for a picked GPG/OpenPGP secret key, returned by
+/// [`Store::gpg_identity_preview`] so the setup pick panel can display the key
+/// (uid + fingerprint + membership) before asking for its S2K passphrase.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GpgIdentityPreview {
+    /// The key's primary user id (e.g. `Jordan <jordan@example.com>`), if any.
+    pub user_id: Option<String>,
+    /// The key's full primary fingerprint.
+    pub fingerprint: String,
+    /// The gopass recipient id (`0x` + last 16 hex of the fingerprint).
+    pub recipient: String,
+    /// `Some(true)`/`Some(false)` if membership against the cloned store's
+    /// recipients was definitively determined; `None` if there is no store or no
+    /// recipients to match against. The authoritative gate is `save_identity`.
+    pub is_recipient: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `gpg_identity_preview` parses a generated GPG key's public metadata:
+    /// primary user id, the full fingerprint, and the gopass recipient id
+    /// (`0x` + last 16 hex of the fingerprint). With no store configured, the
+    /// membership probe is `None` (nothing to match against).
+    #[tokio::test]
+    async fn gpg_identity_preview_parses_public_metadata() {
+        let uid = "preview user <preview@gpm.local>";
+        let (sk, _pk) = crate::crypto::openpgp::generate_keypair(uid, None).expect("keygen");
+        let armor = crate::crypto::openpgp::armor_secret_key(&sk).expect("armor");
+        // No repo configured — preview still parses; is_recipient is None.
+        let config_dir = tempfile::tempdir().unwrap();
+        let store = Store::new(config_dir.path().to_path_buf(), None);
+        let preview = store
+            .gpg_identity_preview(&armor)
+            .await
+            .expect("parse a generated GPG key");
+        assert_eq!(preview.user_id.as_deref(), Some(uid));
+        assert!(
+            !preview.fingerprint.is_empty(),
+            "fingerprint must be derived"
+        );
+        assert!(
+            preview.recipient.starts_with("0x") && preview.recipient.len() == 2 + 16,
+            "recipient is gopass Key.ID() (0x + 16 hex), got {}",
+            preview.recipient
+        );
+        assert_eq!(
+            preview.recipient,
+            format!("0x{}", &preview.fingerprint[24..]),
+            "recipient is the last 16 hex of the fingerprint"
+        );
+        assert_eq!(
+            preview.is_recipient, None,
+            "no store → membership undetermined"
+        );
+    }
+
+    /// The parse-isolation contract on `gpg_identity_preview`: malformed armor (a
+    /// truncated PGP block) surfaces as `InvalidIdentity`, never a panic crossing
+    /// `spawn_blocking` (rpgp panics on crafted packets). The wrap returns
+    /// `InvalidIdentity` for BOTH a parse error (`Ok(Err)`) and a panic (`Err`) —
+    /// so this asserts the user-facing contract regardless of which rpgp takes.
+    #[tokio::test]
+    async fn gpg_identity_preview_malformed_armor_is_invalid_identity() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let store = Store::new(config_dir.path().to_path_buf(), None);
+        let malformed = "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\ntruncated garbage";
+        let err = store
+            .gpg_identity_preview(malformed)
+            .await
+            .expect_err("malformed armor must error, not panic");
+        assert_eq!(
+            err.code, "INVALID_IDENTITY",
+            "malformed armor surfaces as InvalidIdentity, not a JoinError/StoreError"
+        );
     }
 }

@@ -27,7 +27,7 @@ use zeroize::Zeroizing;
 use crate::crypto::openpgp::{
     armor_secret_key, decrypt_with_unlocked_key, encrypt_to_selected_subkeys,
     parse_armored_public_key, parse_armored_secret_key, primary_fingerprint,
-    secret_key_is_encrypted, strip_passphrase,
+    secret_key_fingerprint, secret_key_is_encrypted, strip_passphrase,
 };
 use crate::crypto::{
     BackendKind, CryptoBackend, CryptoProfile, GPG_PUBLIC_KEYS_DIR, GPG_RECIPIENTS_FILE, SecretExt,
@@ -121,39 +121,10 @@ impl CryptoBackend for GpgBackend {
         identity: &[u8],
         view: &dyn RepoFileView,
     ) -> Result<Vec<u8>, Error> {
-        let tokens: Vec<String> = self
-            .list_recipients(view)
-            .await?
-            .into_iter()
-            .map(|r| r.public_key)
-            .collect();
-
         // Read each recipient's armored pubkey via the gopass token==filename
-        // invariant: `.public-keys/<verbatim token>`. Do NOT canonicalize the
-        // token — gopass guarantees it is the pubkey filename, not a normalized id.
-        let mut armors: Vec<String> = Vec::with_capacity(tokens.len());
-        for token in &tokens {
-            let path = format!("{GPG_PUBLIC_KEYS_DIR}/{token}");
-            let bytes = view.read(&path).await.map_err(|e| {
-                if e.code == "ENTRY_NOT_FOUND" {
-                    Error::new(
-                        ErrorCode::InvalidIdentity,
-                        format!(
-                            "recipient {token} listed in .gpg-id has no .public-keys/{token} entry"
-                        ),
-                    )
-                } else {
-                    e
-                }
-            })?;
-            let armor = str::from_utf8(&bytes).map_err(|e| {
-                Error::new(
-                    ErrorCode::InvalidIdentity,
-                    format!("recipient {token} pubkey is not valid UTF-8: {e}"),
-                )
-            })?;
-            armors.push(armor.to_string());
-        }
+        // invariant (`.public-keys/<verbatim token>`); shared with
+        // [`CryptoBackend::identity_is_recipient`].
+        let armors = self.read_recipient_armors(view).await?;
 
         let plaintext = Zeroizing::new(plaintext.to_vec());
         let identity = Zeroizing::new(identity.to_vec());
@@ -162,8 +133,7 @@ impl CryptoBackend for GpgBackend {
             // what we write. Match by primary fingerprint — a gopass `.gpg-id`
             // token may be a long key id where our key reports its fingerprint,
             // so a naive string compare misfires on non-canonical stores.
-            let unlocked = parse_armored_secret_key(&identity)?;
-            let our_pubkey = unlocked.to_public_key();
+            let our_pubkey = parse_armored_secret_key(&identity)?.to_public_key();
             let our_fingerprint = primary_fingerprint(&our_pubkey);
 
             let mut pubkeys: Vec<_> = Vec::with_capacity(armors.len() + 1);
@@ -218,11 +188,10 @@ impl CryptoBackend for GpgBackend {
         _passphrase: Option<&str>,
     ) -> Result<String, Error> {
         let bytes = identity.as_bytes();
-        // Isolate the whole op — `to_public_key` + `primary_fingerprint` are rpgp
-        // calls over attacker-controllable identity bytes, not just the parse.
+        // Isolate the whole op — the parse + fingerprint are rpgp calls over
+        // attacker-controllable identity bytes, not just the parse.
         catch_unwind(AssertUnwindSafe(|| {
-            let sk = parse_armored_secret_key(bytes)?;
-            let fp = primary_fingerprint(&sk.to_public_key());
+            let fp = secret_key_fingerprint(bytes)?;
             if fp.len() < 25 {
                 return Err(Error::new(
                     ErrorCode::InvalidIdentity,
@@ -247,6 +216,74 @@ impl CryptoBackend for GpgBackend {
             })),
             Ok(Ok(true))
         )
+    }
+
+    async fn identity_is_recipient(
+        &self,
+        identity: &str,
+        _passphrase: Option<&str>,
+        view: &dyn RepoFileView,
+    ) -> Result<bool, Error> {
+        // Resolve each recipient's pubkey (hard-errors if the pool is incomplete
+        // — a `.gpg-id` token with no `.public-keys/<token>` entry → `Err`, the
+        // "repo looks incomplete" case, never a silent allow). Then match primary
+        // fingerprints; no passphrase needed (public-packet data). A token may be
+        // a long key id OR a full fingerprint, so the comparison is by fingerprint
+        // — not a naive string compare against `identity_recipient`'s `0x`+16hex.
+        let armors = self.read_recipient_armors(view).await?;
+        let identity = Zeroizing::new(identity.as_bytes().to_vec());
+        blocking(move || {
+            let our_fp = secret_key_fingerprint(&identity)?;
+            for armor in &armors {
+                if primary_fingerprint(&parse_armored_public_key(armor)?) == our_fp {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })
+        .await
+    }
+}
+
+impl GpgBackend {
+    /// Read each `.gpg-id` recipient's armored pubkey via the gopass
+    /// token==filename invariant (`.public-keys/<verbatim token>` — do NOT
+    /// canonicalize the token; gopass guarantees it is the pubkey filename).
+    /// Shared by [`CryptoBackend::encrypt`] (to build the recipient set) and
+    /// [`CryptoBackend::identity_is_recipient`] (to resolve fingerprints). A token
+    /// with no `.public-keys/<token>` entry is a hard error — the recipient pool is
+    /// incomplete, not silently empty.
+    async fn read_recipient_armors(&self, view: &dyn RepoFileView) -> Result<Vec<String>, Error> {
+        let tokens: Vec<String> = self
+            .list_recipients(view)
+            .await?
+            .into_iter()
+            .map(|r| r.public_key)
+            .collect();
+        let mut armors: Vec<String> = Vec::with_capacity(tokens.len());
+        for token in &tokens {
+            let path = format!("{GPG_PUBLIC_KEYS_DIR}/{token}");
+            let bytes = view.read(&path).await.map_err(|e| {
+                if e.code == "ENTRY_NOT_FOUND" {
+                    Error::new(
+                        ErrorCode::InvalidIdentity,
+                        format!(
+                            "recipient {token} listed in .gpg-id has no .public-keys/{token} entry"
+                        ),
+                    )
+                } else {
+                    e
+                }
+            })?;
+            let armor = str::from_utf8(&bytes).map_err(|e| {
+                Error::new(
+                    ErrorCode::InvalidIdentity,
+                    format!("recipient {token} pubkey is not valid UTF-8: {e}"),
+                )
+            })?;
+            armors.push(armor.to_string());
+        }
+        Ok(armors)
     }
 }
 
@@ -489,6 +526,82 @@ mod tests {
             .await
             .expect("decrypt");
         assert_eq!(decrypted, b"cross-form");
+    }
+
+    /// Membership is by primary fingerprint, so a key listed by its FULL
+    /// fingerprint (gopass's canonicalizeRecipient case-0) — not the
+    /// `identity_recipient` `0x`+16hex — is still recognized. Pins the
+    /// `save_identity` gate's correctness for non-canonical stores.
+    #[tokio::test]
+    async fn gpg_identity_is_recipient_matches_full_fingerprint_token() {
+        let me = gen_key(Some(PASSPHRASE));
+        let dir = tempfile::tempdir().unwrap();
+        let public_keys_dir = dir.path().join(GPG_PUBLIC_KEYS_DIR);
+        std::fs::create_dir(&public_keys_dir).unwrap();
+        // .gpg-id + .public-keys/<full-fp> use the full fingerprint as the token.
+        std::fs::write(
+            dir.path().join(GPG_RECIPIENTS_FILE),
+            format!("{}\n", me.fingerprint),
+        )
+        .unwrap();
+        std::fs::write(public_keys_dir.join(&me.fingerprint), &me.pubkey).unwrap();
+
+        let backend = GpgBackend;
+        let view = RepoFiles::new(&GitStorage, dir.path());
+        assert!(
+            backend
+                .identity_is_recipient(&me.at_rest, None, &view)
+                .await
+                .expect("member check"),
+            "a key listed by full fingerprint is a recipient"
+        );
+    }
+
+    #[tokio::test]
+    async fn gpg_identity_is_recipient_true_for_a_listed_key() {
+        let me = gen_key(Some(PASSPHRASE));
+        let dir = gpg_store(&[&me]);
+        let view = RepoFiles::new(&GitStorage, dir.path());
+        assert!(
+            GpgBackend
+                .identity_is_recipient(&me.at_rest, None, &view)
+                .await
+                .expect("member check")
+        );
+    }
+
+    #[tokio::test]
+    async fn gpg_identity_is_recipient_false_for_an_unlisted_key() {
+        let me = gen_key(Some(PASSPHRASE));
+        let other = gen_key(Some(PASSPHRASE));
+        let dir = gpg_store(&[&other]); // only `other` is a recipient
+        let view = RepoFiles::new(&GitStorage, dir.path());
+        assert!(
+            !GpgBackend
+                .identity_is_recipient(&me.at_rest, None, &view)
+                .await
+                .expect("member check"),
+            "a key not in .gpg-id is not a recipient"
+        );
+    }
+
+    /// An incomplete recipient pool (a `.gpg-id` token with no `.public-keys/`
+    /// entry) is an `Err`, not a silent `Ok(false)` — the "repo looks incomplete"
+    /// case the membership contract distinguishes from "definitely not a member".
+    #[tokio::test]
+    async fn gpg_identity_is_recipient_errors_when_pool_is_incomplete() {
+        let me = gen_key(Some(PASSPHRASE));
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(GPG_PUBLIC_KEYS_DIR)).unwrap();
+        // .gpg-id lists a token whose .public-keys/<token> is missing.
+        std::fs::write(dir.path().join(GPG_RECIPIENTS_FILE), "0xDEADBEEFCAFEBABE\n").unwrap();
+
+        let view = RepoFiles::new(&GitStorage, dir.path());
+        let err = GpgBackend
+            .identity_is_recipient(&me.at_rest, None, &view)
+            .await
+            .expect_err("incomplete pool must error, not silently allow");
+        assert_eq!(err.code, "INVALID_IDENTITY");
     }
 
     /// ensureOurKeyID: our key absent from `.gpg-id` (only another key listed) —

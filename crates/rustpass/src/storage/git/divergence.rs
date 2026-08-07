@@ -17,8 +17,8 @@
 //!   resolve_keep_mine ──── plan ───▶ keep_local_plan       (fetch the reviewed
 //!   ◀── KeepLocalPlan {               tip, verify its commit
 //!         replays: [ciphertext          range, classify the local-
-//!         blobs], deletes, … }          only .age set; return
-//!   decrypt each blob (crypto)          CIPHERTEXT blobs + deletes)
+//!         blobs], deletes, … }          only secret (.age/.gpg) set;
+//!   decrypt each blob (crypto)          return CIPHERTEXT blobs + deletes)
 //!   re-encrypt to CURRENT recipients
 //!   ──── advance ─────────────────▶ keep_local_advance     (move HEAD to the
 //!                                                          reviewed tip; no
@@ -35,6 +35,7 @@ use std::path::Path;
 use git2::Repository;
 
 use super::history::blob_at_commit;
+use crate::crypto::SecretExt;
 use crate::error::{Error, ErrorCode};
 use crate::signing::{self, AuthenticityConfig, VerifyMode};
 use crate::storage::{
@@ -53,6 +54,7 @@ pub(super) fn preview_divergence(
     repo_path: &Path,
     auth: &GitAuth,
     cancel: Option<&crate::storage::CancelToken>,
+    ext: SecretExt,
 ) -> Result<SyncDivergence, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -65,7 +67,7 @@ pub(super) fn preview_divergence(
     let cleanup = || {
         drop(repo.find_reference(&temp_ref).and_then(|mut r| r.delete()));
     };
-    let div = divergence_info(&repo, pre_oid, fetched_oid)?;
+    let div = divergence_info(&repo, pre_oid, fetched_oid, ext)?;
     cleanup();
     Ok(div)
 }
@@ -78,6 +80,7 @@ pub(super) fn divergence_info(
     repo: &Repository,
     local_oid: git2::Oid,
     remote_oid: git2::Oid,
+    ext: SecretExt,
 ) -> Result<SyncDivergence, Error> {
     let base = repo.merge_base(local_oid, remote_oid)?;
     let local_ahead = count_ahead(repo, local_oid, base)?;
@@ -96,13 +99,13 @@ pub(super) fn divergence_info(
             // Present locally, absent remotely → deleted by an adopt.
             git2::Delta::Deleted => {
                 if let Some(p) = delta.old_file().path() {
-                    classify_loss(p, &mut local_only, &mut other);
+                    classify_loss(p, ext, &mut local_only, &mut other);
                 }
             }
             // Present on both sides but differing (incl. rename/copy) → overwritten.
             git2::Delta::Modified | git2::Delta::Renamed | git2::Delta::Copied => {
                 if let Some(p) = delta.old_file().path() {
-                    classify_loss(p, &mut modified, &mut other);
+                    classify_loss(p, ext, &mut modified, &mut other);
                 }
             }
             // Added remotely (absent locally): adopting remote gains it — not a loss.
@@ -129,37 +132,39 @@ fn count_ahead(repo: &Repository, tip: git2::Oid, base: git2::Oid) -> Result<usi
     Ok(walk.filter_map(Result::ok).count())
 }
 
-/// Classify one local-side file loss for the divergence preview: `.age` files
-/// become entry names (suffix stripped) and land in `secrets`; anything else
-/// lands in `other` by path.
-fn classify_loss(path: &Path, secrets: &mut Vec<String>, other: &mut Vec<String>) {
+/// Classify one local-side file loss for the divergence preview: secret files
+/// (the crypto backend's `ext` — `.age` / `.gpg`) become entry names (suffix
+/// stripped) and land in `secrets`; anything else lands in `other` by path.
+fn classify_loss(path: &Path, ext: SecretExt, secrets: &mut Vec<String>, other: &mut Vec<String>) {
     let s = path.to_string_lossy().into_owned();
-    if is_age_entry(path) {
-        secrets.push(s.trim_end_matches(".age").to_string());
+    if is_secret_entry(path, ext) {
+        secrets.push(s.trim_end_matches(ext.as_str()).to_string());
     } else {
         other.push(s);
     }
 }
 
-/// `.age`-entry changes on one side of a diff vs the base tree: paths the side
+/// Secret-entry changes on one side of a diff vs the base tree: paths the side
 /// added/modified (with the side's blob, for replay) and paths it deleted. A
 /// rename counts as delete(old) + add(new). Used for BOTH sides of a "keep mine"
 /// plan — the local side yields what to replay; the remote side yields the
 /// touched-path set for conflict detection (its blobs are unused).
-struct AgeDiff {
+struct EntryDiff {
     /// `(rel_path, blob_bytes)` the side has at `side_oid`.
     changed: Vec<(String, Vec<u8>)>,
     /// Worktree-relative paths the side deleted.
     deleted: Vec<String>,
 }
 
-/// Diff `base_tree` → `side_tree` and collect the `.age` changes on the side.
-fn age_diff_side(
+/// Diff `base_tree` → `side_tree` and collect the secret (`ext` — `.age` /
+/// `.gpg`) changes on the side.
+fn entry_diff_side(
     repo: &Repository,
     base_tree: &git2::Tree<'_>,
     side_tree: &git2::Tree<'_>,
     side_oid: git2::Oid,
-) -> Result<AgeDiff, Error> {
+    ext: SecretExt,
+) -> Result<EntryDiff, Error> {
     let mut changed: Vec<(String, Vec<u8>)> = Vec::new();
     let mut deleted: Vec<String> = Vec::new();
     for delta in repo
@@ -169,7 +174,7 @@ fn age_diff_side(
         match delta.status() {
             git2::Delta::Added | git2::Delta::Modified | git2::Delta::Copied => {
                 if let Some(p) = delta.new_file().path()
-                    && is_age_entry(p)
+                    && is_secret_entry(p, ext)
                 {
                     let rel = p.to_string_lossy().into_owned();
                     let blob = blob_at_commit(repo, side_oid, &rel).unwrap_or_default();
@@ -178,7 +183,7 @@ fn age_diff_side(
             }
             git2::Delta::Deleted => {
                 if let Some(p) = delta.old_file().path()
-                    && is_age_entry(p)
+                    && is_secret_entry(p, ext)
                 {
                     deleted.push(p.to_string_lossy().into_owned());
                 }
@@ -186,12 +191,12 @@ fn age_diff_side(
             // A rename is delete(old) + add(new).
             git2::Delta::Renamed => {
                 if let Some(old) = delta.old_file().path()
-                    && is_age_entry(old)
+                    && is_secret_entry(old, ext)
                 {
                     deleted.push(old.to_string_lossy().into_owned());
                 }
                 if let Some(new) = delta.new_file().path()
-                    && is_age_entry(new)
+                    && is_secret_entry(new, ext)
                 {
                     let rel = new.to_string_lossy().into_owned();
                     let blob = blob_at_commit(repo, side_oid, &rel).unwrap_or_default();
@@ -201,14 +206,17 @@ fn age_diff_side(
             _ => {}
         }
     }
-    Ok(AgeDiff { changed, deleted })
+    Ok(EntryDiff { changed, deleted })
 }
 
-/// Whether `path` is an `.age` secret (case-insensitive suffix).
-fn is_age_entry(path: &Path) -> bool {
+/// Whether `path` is a secret of the crypto backend's `ext` (`.age` / `.gpg`),
+/// matched case-insensitively on the extension. `ext.as_str()` carries a leading
+/// dot which `Path::extension` excludes, so the dot is stripped before compare.
+fn is_secret_entry(path: &Path, ext: SecretExt) -> bool {
+    let want = ext.as_str().trim_start_matches('.');
     path.extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("age"))
+        .is_some_and(|e| e.eq_ignore_ascii_case(want))
 }
 
 /// Defense-in-depth: ensure a worktree-relative path from a git tree diff resolves
@@ -230,7 +238,7 @@ fn rel_within_repo(rel: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// If a `.age` entry was changed on BOTH sides (an irreconcilable same-secret
+/// If a secret entry was changed on BOTH sides (an irreconcilable same-secret
 /// conflict), return the `PushRejected` error. A local replay collides with ANY
 /// remote touch; a local delete collides only with a non-delete remote change
 /// (both-deleted is agreement, not a conflict). The caller cleans up before
@@ -239,6 +247,7 @@ fn keep_local_conflict(
     replays: &[KeepLocalReplay],
     deletes: &[String],
     remote_touched: &HashMap<String, bool>,
+    ext: SecretExt,
 ) -> Result<(), Error> {
     for r in replays {
         if remote_touched.contains_key(&r.rel_path) {
@@ -246,7 +255,7 @@ fn keep_local_conflict(
                 ErrorCode::PushRejected,
                 format!(
                     "Can't keep mine: \"{}\" changed on both sides. Adopt the remote or cancel.",
-                    r.rel_path.trim_end_matches(".age")
+                    r.rel_path.trim_end_matches(ext.as_str())
                 ),
             ));
         }
@@ -258,7 +267,7 @@ fn keep_local_conflict(
                 format!(
                     "Can't keep mine: \"{}\" was deleted locally but changed remotely. \
                      Adopt the remote or cancel.",
-                    d.trim_end_matches(".age")
+                    d.trim_end_matches(ext.as_str())
                 ),
             ));
         }
@@ -269,17 +278,18 @@ fn keep_local_conflict(
 /// Compute the "keep mine" plan: fetch the remote tip, refuse if it moved past
 /// the reviewed `expected_remote_oid`, verify the remote-only range under the
 /// authenticity policy (mirroring `adopt_remote` in [`super::pull`]), then compute
-/// which local `.age` entries to replay (re-encrypt) and which to re-delete on the
-/// tip. Does NOT move HEAD — the caller decrypts/re-encrypts, then
-/// [`keep_local_advance`] + [`keep_local_finalize`] apply it.
+/// which local secret entries (`ext` — `.age` / `.gpg`) to replay (re-encrypt) and
+/// which to re-delete on the tip. Does NOT move HEAD — the caller
+/// decrypts/re-encrypts, then [`keep_local_advance`] + [`keep_local_finalize`]
+/// apply it.
 ///
-/// Refuses ([`ErrorCode::PushRejected`]) when a `.age` entry was changed on BOTH
+/// Refuses ([`ErrorCode::PushRejected`]) when a secret entry was changed on BOTH
 /// sides (an irreconcilable same-secret conflict) — the user must adopt the
-/// remote or cancel; gpm never merges `.age` blobs.
+/// remote or cancel; gpm never merges secret blobs.
 ///
-/// Non-secret local changes (`.age-recipients`, templates) are NOT replayed:
-/// "keep mine" adopts the remote's non-secret files verbatim and re-encrypts only
-/// secrets onto them. gpm is single-identity today, so local recipient edits do
+/// Non-secret local changes (`.age-recipients`/`.gpg-id`, templates) are NOT
+/// replayed: "keep mine" adopts the remote's non-secret files verbatim and
+/// re-encrypts only secrets onto them. gpm is single-identity today, so local
 /// not arise; multi-recipient overwrite-safety is deferred (TODO).
 pub(super) fn keep_local_plan(
     repo_path: &Path,
@@ -287,6 +297,7 @@ pub(super) fn keep_local_plan(
     policy: &AuthenticityConfig,
     expected_remote_oid: &str,
     cancel: Option<&crate::storage::CancelToken>,
+    ext: SecretExt,
 ) -> Result<KeepLocalOutcome, Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
@@ -350,7 +361,7 @@ pub(super) fn keep_local_plan(
     let remote_tree = repo.find_commit(fetched_oid)?.tree()?;
 
     // Local changes vs base: entries to replay (added/modified) or re-delete.
-    let local_diff = age_diff_side(&repo, &base_tree, &local_tree, pre_oid)?;
+    let local_diff = entry_diff_side(&repo, &base_tree, &local_tree, pre_oid, ext)?;
     let replays: Vec<KeepLocalReplay> = local_diff
         .changed
         .into_iter()
@@ -358,9 +369,9 @@ pub(super) fn keep_local_plan(
         .collect();
     let deletes = local_diff.deleted;
 
-    // Remote changes vs base: every `.age` path the remote touched (value = was
+    // Remote changes vs base: every secret path the remote touched (value = was
     // it a deletion?), for same-secret conflict detection.
-    let remote_diff = age_diff_side(&repo, &base_tree, &remote_tree, fetched_oid)?;
+    let remote_diff = entry_diff_side(&repo, &base_tree, &remote_tree, fetched_oid, ext)?;
     let mut remote_touched: HashMap<String, bool> = HashMap::new();
     for (p, _) in remote_diff.changed {
         remote_touched.insert(p, false);
@@ -370,8 +381,8 @@ pub(super) fn keep_local_plan(
     }
 
     // Refuse irreconcilable same-secret conflicts (both sides touched the same
-    // `.age` entry). See [`keep_local_conflict`].
-    if let Err(e) = keep_local_conflict(&replays, &deletes, &remote_touched) {
+    // secret entry). See [`keep_local_conflict`].
+    if let Err(e) = keep_local_conflict(&replays, &deletes, &remote_touched, ext) {
         cleanup();
         return Err(e);
     }
@@ -471,4 +482,78 @@ pub(super) fn keep_local_finalize(
         .target()
         .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "No HEAD after keep-mine commit"))?;
     Ok(util::short_hash(&head))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::SecretExt;
+
+    /// `is_secret_entry` matches the crypto backend's own extension,
+    /// case-insensitively, and — load-bearing for GPG — a `.gpg` file is NOT an
+    /// age entry (and vice versa). Before ext-awareness every path was tested
+    /// against a hardcoded `.age`, so a GPG store's secrets were never classified
+    /// as secrets at all.
+    #[test]
+    fn is_secret_entry_matches_the_backends_extension_case_insensitively() {
+        assert!(is_secret_entry(Path::new("a/b.age"), SecretExt::AGE));
+        assert!(is_secret_entry(Path::new("a/b.gpg"), SecretExt::GPG));
+        // Case-insensitive on the extension.
+        assert!(is_secret_entry(Path::new("a/b.AGE"), SecretExt::AGE));
+        assert!(is_secret_entry(Path::new("a/b.GpG"), SecretExt::GPG));
+        // Cross-backend: a .gpg secret is not an age entry, and vice versa.
+        assert!(!is_secret_entry(Path::new("a/b.gpg"), SecretExt::AGE));
+        assert!(!is_secret_entry(Path::new("a/b.age"), SecretExt::GPG));
+        // Non-secret files (including the `.gpg-id` recipients index and pubkeys)
+        // are never entries.
+        assert!(!is_secret_entry(Path::new(".gpg-id"), SecretExt::GPG));
+        assert!(!is_secret_entry(
+            Path::new(".age-recipients"),
+            SecretExt::AGE
+        ));
+        assert!(!is_secret_entry(Path::new("README.md"), SecretExt::AGE));
+    }
+
+    /// The keep-mine data-loss regression at the classification leaf: a `.gpg`
+    /// secret on a GPG store routes into `secrets` (so keep-mine replays it),
+    /// never into `other`. Under the age extension the same path is `other`.
+    #[test]
+    fn classify_loss_routes_secret_by_extension_not_hardcoded_age() {
+        let mut secrets = Vec::new();
+        let mut other = Vec::new();
+        classify_loss(
+            Path::new("tw/github.gpg"),
+            SecretExt::GPG,
+            &mut secrets,
+            &mut other,
+        );
+        assert_eq!(secrets, vec!["tw/github".to_string()]);
+        assert!(
+            other.is_empty(),
+            ".gpg under the GPG ext must be a secret, not 'other'"
+        );
+
+        // Same path under the age extension is NOT a secret.
+        let mut secrets = Vec::new();
+        let mut other = Vec::new();
+        classify_loss(
+            Path::new("tw/github.gpg"),
+            SecretExt::AGE,
+            &mut secrets,
+            &mut other,
+        );
+        assert!(secrets.is_empty());
+        assert_eq!(other, vec!["tw/github.gpg".to_string()]);
+
+        // Symmetric: an .age secret under the age extension is a secret.
+        let mut secrets = Vec::new();
+        let mut other = Vec::new();
+        classify_loss(
+            Path::new("tw/github.age"),
+            SecretExt::AGE,
+            &mut secrets,
+            &mut other,
+        );
+        assert_eq!(secrets, vec!["tw/github".to_string()]);
+    }
 }

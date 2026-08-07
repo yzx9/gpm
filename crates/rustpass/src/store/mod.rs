@@ -189,6 +189,7 @@ pub use crate::storage::{
 pub use app_state::{clamp_lock_mode, normalize_clear_secs};
 pub use entries::RevisionContent;
 pub use paging::{RankedPage, rank_entries, slice_page};
+pub use setup::GpgIdentityPreview;
 
 impl Store {
     /// Create a new `Store` backed by the given config directory, with only the

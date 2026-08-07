@@ -238,10 +238,10 @@ pub struct GitProgress {
 /// running on the blocking thread.
 pub type ProgressSender = mpsc::Sender<GitProgress>;
 
-/// A local-side `.age` entry to replay onto the remote tip during a "keep mine"
-/// divergence resolution: its worktree-relative path plus its ciphertext blob at
-/// the local HEAD. The caller decrypts + re-encrypts the blob — git has no
-/// identity, so the crypto stays in `Store`.
+/// A local-side secret entry (`.age`/`.gpg`) to replay onto the remote tip during
+/// a "keep mine" divergence resolution: its worktree-relative path plus its
+/// ciphertext blob at the local HEAD. The caller decrypts + re-encrypts the blob
+/// — git has no identity, so the crypto stays in `Store`.
 ///
 /// Plaintext **never** enters the storage layer: this is the type-system half of
 /// the no-rebase keep-mine contract (plaintext never enters the storage
@@ -250,7 +250,7 @@ pub type ProgressSender = mpsc::Sender<GitProgress>;
 /// ciphertext back to `keep_local_finalize`.
 #[derive(Debug, Clone)]
 pub struct KeepLocalReplay {
-    /// Worktree-relative path, e.g. `servers/db.age`.
+    /// Worktree-relative path, e.g. `servers/db.age` (or `.gpg`).
     pub rel_path: String,
     /// The entry's ciphertext at the local HEAD, to decrypt + re-encrypt.
     pub blob: Vec<u8>,
@@ -264,10 +264,10 @@ pub struct KeepLocalPlan {
     /// — a second fetch could race past the reviewed tip and bypass the
     /// authenticity check under Enforce).
     pub fetched_oid: String,
-    /// Local-side `.age` entries to re-encrypt + write onto the tip.
+    /// Local-side secret entries (`.age`/`.gpg`) to re-encrypt + write onto the tip.
     pub replays: Vec<KeepLocalReplay>,
-    /// Local-side `.age` entries to re-delete on the tip (local deletions that
-    /// "keep mine" preserves).
+    /// Local-side secret entries (`.age`/`.gpg`) to re-delete on the tip (local
+    /// deletions that "keep mine" preserves).
     pub deletes: Vec<String>,
     /// Authenticity outcome for the returned [`SyncResult`] (the remote-only
     /// range's verification). `blocked` is false here — a block is returned as
@@ -507,6 +507,7 @@ pub trait StorageBackend: Send + Sync {
     async fn pull(
         &self,
         ctx: &StorageCtx<'_>,
+        ext: SecretExt,
         cancel: Option<CancelToken>,
         progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error>;
@@ -535,13 +536,14 @@ pub trait StorageBackend: Send + Sync {
     async fn preview_divergence(
         &self,
         ctx: &StorageCtx<'_>,
+        ext: SecretExt,
         cancel: Option<CancelToken>,
     ) -> Result<SyncDivergence, Error>;
 
-    /// Compute the "keep mine" replay plan: which local `.age` entries to
-    /// re-encrypt onto the reviewed remote tip. Returns CIPHERTEXT blobs —
-    /// plaintext never enters the storage layer — or [`KeepLocalOutcome::Blocked`]
-    /// if Enforce refused the remote-only range.
+    /// Compute the "keep mine" replay plan: which local secret entries (`ext` —
+    /// `.age` / `.gpg`) to re-encrypt onto the reviewed remote tip. Returns
+    /// CIPHERTEXT blobs — plaintext never enters the storage layer — or
+    /// [`KeepLocalOutcome::Blocked`] if Enforce refused the remote-only range.
     ///
     /// # Errors
     ///
@@ -551,6 +553,7 @@ pub trait StorageBackend: Send + Sync {
         &self,
         ctx: &StorageCtx<'_>,
         expected_remote_oid: &str,
+        ext: SecretExt,
         cancel: Option<CancelToken>,
     ) -> Result<KeepLocalOutcome, Error>;
 
@@ -828,10 +831,10 @@ pub struct SyncDivergence {
     /// back to [`crate::store::Store::resolve_sync_divergence`] so we adopt
     /// exactly what was reviewed (no stale-confirmation TOCTOU).
     pub remote_tip: String,
-    /// Secret entries (`.age` stripped) present locally, absent remotely —
+    /// Secret entries (extension stripped) present locally, absent remotely —
     /// **deleted** by "adopt remote".
     pub local_only_entries: Vec<String>,
-    /// Secret entries present on both sides whose `.age` bytes differ —
+    /// Secret entries present on both sides whose bytes differ —
     /// **overwritten** by "adopt remote". (May over-report identical-plaintext
     /// re-encryptions until the decrypt-and-compare enhancement lands.)
     pub modified_entries: Vec<String>,
@@ -997,7 +1000,7 @@ pub enum EntryConflictChoice {
 pub enum DivergenceChoice {
     /// Discard local-only changes and adopt the reviewed remote tip exactly.
     AdoptRemote,
-    /// Keep local changes: re-encrypt the local-only `.age` entries onto the
+    /// Keep local changes: re-encrypt the local-only secret entries onto the
     /// reviewed remote tip (with the current recipient set) and push. Refused
     /// ([`crate::error::ErrorCode::PushRejected`]) for an irreconcilable
     /// same-secret conflict or an undecryptable local entry — the user must

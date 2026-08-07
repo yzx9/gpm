@@ -3,10 +3,15 @@
 
 use std::path::Path;
 use std::str;
+use std::sync::Arc;
 
+use crate::crypto::{
+    AgeBackend, CryptoBackend, GPG_RECIPIENTS_FILE, GpgBackend, RECIPIENTS_FILE, SecretExt,
+};
 use crate::error::{Error, ErrorCode};
 use crate::identity::{self, IdentityType, classify_identity, validate_identity_format};
 use crate::recipient::Recipient;
+use crate::storage::RepoFiles;
 
 // Impl-split submodule: mod.rs is the shared scope for Store's split impl, so a
 // super-glob is the idiomatic import (pedantic flags it; scoped allow).
@@ -166,8 +171,9 @@ impl Store {
     ///
     /// Used by the biometric enable flow to reject a wrong passphrase before
     /// sealing it. For age-encrypted identities this runs the scrypt decrypt;
-    /// for encrypted SSH keys it decrypts the key; for plaintext or
-    /// unencrypted identities it is a no-op success.
+    /// for encrypted SSH keys and S2K-protected GPG keys it validates without
+    /// producing output; for plaintext or unencrypted identities it is a no-op
+    /// success.
     ///
     /// # Errors
     ///
@@ -190,7 +196,7 @@ impl Store {
             IdentityType::AgeEncrypted => {
                 crypto.unlock_identity(&bytes, passphrase).await?;
             }
-            IdentityType::SshEd25519 | IdentityType::SshRsa => {
+            IdentityType::SshEd25519 | IdentityType::SshRsa | IdentityType::PgpSecretKey => {
                 crypto
                     .validate_identity_passphrase(&bytes, passphrase)
                     .await?;
@@ -251,33 +257,52 @@ impl Store {
 
         let itype = classify_identity(identity_bytes);
 
-        // SSH keys need the passphrase to decrypt the private key for recipient
-        // derivation; native x25519 keys are never passphrase-protected.
-        let recipient_passphrase = match itype {
-            IdentityType::SshEd25519 | IdentityType::SshRsa => passphrase,
+        // The backend kind this identity selects (R079 locked decision #1: the
+        // identity TYPE drives backend selection): `"gpg"` for an OpenPGP secret
+        // key, the age built-in (`None`) otherwise. There is no separate
+        // "confirm backend" step.
+        let kind: Option<&str> = match itype {
+            IdentityType::PgpSecretKey => Some("gpg"),
             _ => None,
         };
-        let derived_recipient = self
-            .crypto()?
-            .identity_recipient(identity, recipient_passphrase)?;
 
-        // Read the recipients to match the identity against. A tampered/corrupt
-        // index on a configured repo (symlink, non-UTF-8, I/O error) must FAIL
-        // here — the old `unwrap_or_default()` swallowed it to empty, skipping
-        // the match and accepting any pasted identity against a store whose
-        // recipients we could not actually read. The only tolerated case is
-        // NO_REPO (no store configured yet — nothing to match against); a
-        // genuine fresh store also reads as `Ok(empty)` (missing index).
-        let known_recipients = match self.list_recipients().await {
-            Ok(r) => r,
-            Err(e) if e.code == "NO_REPO" => Vec::new(),
+        // Load the repo config once. `None` means no store is configured yet (a
+        // fresh create / clone-first flow) — both the membership gate and the
+        // crypto-kind persist below are skipped in that case.
+        let repo = match self.config.load_repo_config().await {
+            Ok(rc) => Some(rc),
+            Err(e) if e.code == "NO_REPO" => None,
             Err(e) => return Err(e),
         };
-        if !known_recipients.is_empty() {
-            let matches = known_recipients
-                .iter()
-                .any(|r| r.public_key == derived_recipient);
-            if !matches {
+
+        if let Some(rc) = &repo {
+            let repo_path = Path::new(&rc.local_path).to_path_buf();
+
+            // Flip-guard: refuse a backend switch that would orphan the store's
+            // existing secrets of the other extension (they'd vanish from `list`
+            // and from keep-mine replay) OR its recipients marker — a store
+            // defined by its marker but with zero secrets of that extension yet
+            // (a freshly-initialized store) must still not be silently flipped, or
+            // the marker becomes a relic and future secrets of the orphaned
+            // extension are invisible. The backend self-defends so a UI bug or
+            // future re-setup flow can't silently brick the store.
+            self.assert_no_conflicting_secrets(kind, &repo_path).await?;
+
+            // Membership gate on a TRANSIENT backend (shared with the setup pick
+            // step's preview probe via [`Self::probe_membership`]). x25519/GPG
+            // derive their recipient from public-packet data (no passphrase);
+            // only an encrypted SSH key needs its passphrase. `None` (no
+            // recipients to match against) and `Some(true)` pass; `Some(false)`
+            // rejects; `Err` (incomplete `.public-keys` pool, tampered index)
+            // propagates rather than silently allowing.
+            let recipient_passphrase = match itype {
+                IdentityType::SshEd25519 | IdentityType::SshRsa => passphrase,
+                _ => None,
+            };
+            if let Some(false) = self
+                .probe_membership(rc, identity, kind, recipient_passphrase)
+                .await?
+            {
                 return Err(Error::new(
                     ErrorCode::InvalidIdentity,
                     "Identity does not match any recipient in the repository",
@@ -285,16 +310,123 @@ impl Store {
             }
         }
 
-        // Only native x25519 keys support optional seal encryption; SSH keys
-        // are stored as-is.
+        // Only native x25519 keys support optional seal encryption; SSH and GPG
+        // keys are stored as-is (they rely on their own native passphrase
+        // protection), matching age's design. GPG must NOT get an age-encryption
+        // layer here — that would scrypt-encrypt the S2K armor and brick the
+        // identity at rest.
         let storage_passphrase = match itype {
-            IdentityType::SshEd25519 | IdentityType::SshRsa => None,
+            IdentityType::SshEd25519 | IdentityType::SshRsa | IdentityType::PgpSecretKey => None,
             _ => passphrase,
         };
+
+        // Save the identity FIRST (the durable fact), then correct `repo.json`'s
+        // crypto kind to match it. `save_identity` is the crypto-persistence
+        // authority: it sets `crypto` SYMMETRICALLY — age → `None`, gpg →
+        // `Some("gpg")` — writing only when the value changes (a fresh age setup
+        // already has `crypto: None`, so no churn), so a stale kind left by an
+        // earlier partial save self-heals on the next save. Saving the identity
+        // before the kind persist means a persist failure leaves identity +
+        // stale-kind (recoverable by re-saving) — never `crypto=gpg` stranded
+        // with no identity. The kind persist + slot swap run only when a repo is
+        // configured; the create/clone-first flow has no `repo.json` yet (its
+        // later clone writes `crypto: None`).
         self.config
             .save_identity(identity_bytes, storage_passphrase)
             .await?;
+        if let Some(mut rc) = repo {
+            if rc.crypto.as_deref() != kind {
+                rc.crypto = kind.map(str::to_string);
+                self.config.save_repo_config_full(&rc).await?;
+            }
+            self.resolve_and_set_crypto(kind)?;
+        }
         Ok(())
+    }
+
+    /// Refuse a crypto-backend flip that would orphan the store's existing
+    /// secrets OR recipients marker of the other extension. If the identity
+    /// being saved selects backend `kind` (`Some("gpg")` → `.gpg`, else `.age`),
+    /// switching backends makes any secrets of the OTHER extension unreachable —
+    /// they'd vanish from `list` and from keep-mine replay. The guard refuses
+    /// when EITHER the orphaned extension has secret files already, OR its root
+    /// recipients marker is present: a store defined by its marker but with zero
+    /// secrets of that extension yet (a freshly-initialized store) must still not
+    /// be silently flipped, or the marker becomes a relic and future secrets of
+    /// the orphaned extension are invisible.
+    async fn assert_no_conflicting_secrets(
+        &self,
+        kind: Option<&str>,
+        repo_path: &Path,
+    ) -> Result<(), Error> {
+        // The backend orphaned by this identity + its root recipients marker.
+        let (orphaned_ext, orphaned_marker) = match kind {
+            Some("gpg") => (SecretExt::AGE, RECIPIENTS_FILE),
+            _ => (SecretExt::GPG, GPG_RECIPIENTS_FILE),
+        };
+        let repo_path = repo_path.to_path_buf();
+        let (count, marker_present) = tokio::task::spawn_blocking(move || {
+            let count = list_entries(&repo_path, orphaned_ext).map_or(0, |v| v.len());
+            // `metadata` (not `try_exists`) for MSRV-friendliness; a marker file
+            // present is the signal. An unreadable marker degrades to "absent"
+            // here, matching the secret-count's `map_or(0)` fail-open — the
+            // marker check is additional defense, the secret count still applies.
+            let marker_present = std::fs::metadata(repo_path.join(orphaned_marker)).is_ok();
+            (count, marker_present)
+        })
+        .await
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("conflict scan: {e}")))?;
+        if count > 0 || marker_present {
+            let chosen = kind.unwrap_or("age");
+            let orphaned = orphaned_ext.as_str().trim_start_matches('.');
+            return Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                format!(
+                    "Can't save this {chosen} identity: the store is already set up for \
+                     {orphaned} ({count} secret(s) and its {orphaned_marker} recipients file \
+                     present). Saving it would switch the backend and make the store's \
+                     {orphaned} secrets unreachable. Use an identity that matches the store's \
+                     existing secrets.",
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Membership probe on a TRANSIENT backend for `kind` — no shared-slot
+    /// mutation. Returns:
+    /// - `Ok(None)` — the store has no recipients to match against (an
+    ///   uninitialized store), so there is nothing to gate on;
+    /// - `Ok(Some(true))` / `Ok(Some(false))` — the identity is / is not a
+    ///   recipient, definitively;
+    /// - `Err(_)` — the recipient pool is incomplete or unreadable (the GPG
+    ///   "repo looks incomplete" case).
+    ///
+    /// Shared by [`Self::save_identity`] (the authority gate) and
+    /// [`Self::gpg_identity_preview`] (the setup pick probe). `passphrase` is the
+    /// recipient-derivation passphrase (only an encrypted SSH key needs it; GPG
+    /// ignores it — the fingerprint is public-packet data).
+    pub(super) async fn probe_membership(
+        &self,
+        rc: &RepoConfig,
+        identity: &str,
+        kind: Option<&str>,
+        passphrase: Option<&str>,
+    ) -> Result<Option<bool>, Error> {
+        let storage = self.storage()?;
+        let view = RepoFiles::new(&*storage, Path::new(&rc.local_path));
+        let backend: Arc<dyn CryptoBackend> = match kind {
+            Some("gpg") => Arc::new(GpgBackend),
+            _ => Arc::new(AgeBackend),
+        };
+        if backend.list_recipients(&view).await?.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(
+            backend
+                .identity_is_recipient(identity, passphrase, &view)
+                .await?,
+        ))
     }
 
     /// Get identity bytes for decryption.
@@ -354,10 +486,10 @@ impl Store {
                     "Identity is already encrypted — use change_passphrase instead",
                 ));
             }
-            IdentityType::SshEd25519 | IdentityType::SshRsa => {
+            IdentityType::SshEd25519 | IdentityType::SshRsa | IdentityType::PgpSecretKey => {
                 return Err(Error::new(
                     ErrorCode::IdentityNotEncrypted,
-                    "SSH keys are not encrypted by gpm; use the SSH key's native passphrase",
+                    "SSH and GPG keys are not re-encrypted by gpm; use the key's native passphrase",
                 ));
             }
             _ => {}
@@ -738,6 +870,48 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf(), None);
         store.resolve_and_set_crypto(None).unwrap();
         let err = store.validate_passphrase("nope").await.unwrap_err();
+        assert_eq!(err.code, "WRONG_PASSPHRASE");
+    }
+
+    /// B4b: a GPG key must NOT be re-encrypted by gpm's age seal — `set_passphrase`
+    /// rejects it (same brick bug class as the SSH rejection), reachable from
+    /// Settings once a GPG store exists.
+    #[tokio::test]
+    async fn set_passphrase_rejects_gpg_key() {
+        let (sk, _pk) =
+            crypto::openpgp::generate_keypair("gpm test <test@gpm.local>", None).expect("keygen");
+        let armor = crypto::openpgp::armor_secret_key(&sk).expect("armor");
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf(), None);
+        config.save_identity(armor.as_bytes(), None).await.unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        let err = store.set_passphrase("new").await.unwrap_err();
+        assert_eq!(
+            err.code, "IDENTITY_NOT_ENCRYPTED",
+            "a GPG key must not be re-encrypted by gpm's age seal"
+        );
+    }
+
+    /// B5: `validate_passphrase` checks a GPG key's S2K passphrase (the gate
+    /// `enable_biometric_unlock` uses before sealing the passphrase). A wrong
+    /// passphrase surfaces as `WRONG_PASSPHRASE`, not a silent success.
+    #[tokio::test]
+    async fn validate_passphrase_checks_gpg_s2k() {
+        let passphrase = "test-gpg-passphrase";
+        let (sk, _pk) =
+            crypto::openpgp::generate_keypair("gpm test <test@gpm.local>", Some(passphrase))
+                .expect("keygen");
+        let armor = crypto::openpgp::armor_secret_key(&sk).expect("armor");
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf(), None);
+        config.save_identity(armor.as_bytes(), None).await.unwrap();
+        let store = Store::new(dir.path().to_path_buf(), None);
+        store.resolve_and_set_crypto(Some("gpg")).unwrap();
+        store
+            .validate_passphrase(passphrase)
+            .await
+            .expect("the right GPG passphrase validates");
+        let err = store.validate_passphrase("wrong").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
     }
 }

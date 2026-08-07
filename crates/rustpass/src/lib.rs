@@ -85,9 +85,9 @@ pub use storage::{
     CancelSlot, CancelToken, GitAuth, GitProgress, ProgressSender, StoreBuilder, pick_auth,
 };
 pub use store::{
-    CommitIdentity, DivergenceChoice, EntryConflictChoice, ExpectedEntry, ExpectedKind, RankedPage,
-    RevisionContent, Store, SyncDivergence, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
-    clamp_lock_mode, normalize_clear_secs,
+    CommitIdentity, DivergenceChoice, EntryConflictChoice, ExpectedEntry, ExpectedKind,
+    GpgIdentityPreview, RankedPage, RevisionContent, Store, SyncDivergence, SyncOutcome,
+    SyncResult, WriteOutcome, WriteResult, clamp_lock_mode, normalize_clear_secs,
 };
 pub use totp::{Otp, extract, generate_at};
 

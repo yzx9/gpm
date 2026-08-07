@@ -245,12 +245,13 @@ impl Store {
     ) -> Result<SyncResult, Error> {
         let rcs = self.rcs_ctx().await?;
         let expected = expected_remote_oid.to_string();
+        let ext = self.secret_ext()?;
 
         // 1. Plan: fetch once, stale-guard, authenticity-verify, compute the
         //    replay set + conflict detection. Does NOT move HEAD.
         let plan = match self
             .storage()?
-            .keep_local_plan(&rcs.ctx(), &expected, cancel.clone())
+            .keep_local_plan(&rcs.ctx(), &expected, ext, cancel.clone())
             .await?
         {
             KeepLocalOutcome::Blocked(result) => return Ok(result),
@@ -278,7 +279,7 @@ impl Store {
                     format!(
                         "Can't keep mine: \"{}\" can't be decrypted to re-encrypt. \
                              Adopt the remote or cancel.",
-                        r.rel_path.trim_end_matches(".age")
+                        r.rel_path.trim_end_matches(ext.as_str())
                     ),
                 )
             })?;
@@ -476,7 +477,10 @@ impl Store {
         cancel: Option<CancelToken>,
     ) -> Result<SyncDivergence, Error> {
         let rcs = self.rcs_ctx().await?;
-        self.storage()?.preview_divergence(&rcs.ctx(), cancel).await
+        let ext = self.secret_ext()?;
+        self.storage()?
+            .preview_divergence(&rcs.ctx(), ext, cancel)
+            .await
     }
 
     /// Acquire the cross-process repo lock. Non-blocking; on contention
@@ -548,7 +552,10 @@ impl Store {
         progress: Option<ProgressSender>,
     ) -> Result<SyncOutcome, Error> {
         let rcs = self.rcs_ctx().await?;
-        self.storage()?.pull(&rcs.ctx(), cancel, progress).await
+        let ext = self.secret_ext()?;
+        self.storage()?
+            .pull(&rcs.ctx(), ext, cancel, progress)
+            .await
     }
 
     /// Push the current branch to `origin`.

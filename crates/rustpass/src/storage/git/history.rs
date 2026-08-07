@@ -5,7 +5,7 @@
 //! Per-revision content reads for the git backend — the content half of secret
 //! revision history (RFC R027). [`blob_at_commit`] reads a secret's ciphertext
 //! at a specific commit; it is shared by the keep-mine replay planner
-//! ([`super::divergence::age_diff_side`]) and the per-secret revision view
+//! ([`super::divergence::entry_diff_side`]) and the per-secret revision view
 //! ([`StorageBackend::blob_at_revision`](crate::storage::StorageBackend::blob_at_revision)).
 
 use std::path::Path;

@@ -98,6 +98,33 @@ pub(crate) fn primary_fingerprint(key: &SignedPublicKey) -> String {
     format!("{}", key.fingerprint())
 }
 
+/// The full primary fingerprint of the public half of an armored secret key
+/// (parse → `to_public_key` → [`primary_fingerprint`]). The fingerprint is
+/// public-packet data, so this needs **no passphrase** — it works on the at-rest
+/// S2K-locked identity as well as the unlocked operational bytes. The single
+/// derivation path shared by the gopass recipient-id (`identity_recipient`), the
+/// membership check (`identity_is_recipient`), and `encrypt`'s `ensureOurKeyID`.
+///
+/// # Errors
+///
+/// `InvalidIdentity` if the armor is unparseable.
+pub(crate) fn secret_key_fingerprint(identity: &[u8]) -> Result<String, Error> {
+    let sk = parse_armored_secret_key(identity)?;
+    Ok(primary_fingerprint(&sk.to_public_key()))
+}
+
+/// The key's primary user id (e.g. `Jordan <jordan@example.com>`), if it has
+/// one. Public-packet data — no passphrase needed — so it can be shown during
+/// setup _before_ the user enters the key's passphrase. Returns `None` for a key
+/// with no user ids, or one whose uid is not valid UTF-8 (rare).
+#[must_use]
+pub(crate) fn primary_user_id(sk: &SignedSecretKey) -> Option<String> {
+    sk.details
+        .users
+        .first()
+        .and_then(|u| u.id.as_str().map(String::from))
+}
+
 /// Parse an armored detached PGP signature (the `gpgsig` content of a
 /// GPG-signed git commit).
 ///
@@ -725,6 +752,22 @@ mod tests {
     }
 
     // ===================== crypto tests (RFC 0036) =====================
+
+    #[test]
+    fn primary_user_id_returns_the_keys_uid() {
+        // A generated key's primary user id round-trips through armor + parse, so
+        // the setup flow can show "<uid> (<fingerprint>)" before asking for the
+        // passphrase. No passphrase is needed (public-packet data).
+        let uid = "Jordan <jordan@example.com>";
+        let (sk, _pk) = generate_keypair(uid, None).expect("keygen");
+        assert_eq!(primary_user_id(&sk).as_deref(), Some(uid));
+
+        // A key with no user id → None.
+        // (generate_keypair always sets one, so build the empty-uid case by
+        // checking the fixture instead — it carries "gpm test <test@gpm.local>".)
+        let fixture = parse_armored_secret_key(FIXTURE_SECRET).expect("parse fixture");
+        assert!(primary_user_id(&fixture).is_some(), "fixture key has a uid");
+    }
 
     #[test]
     fn self_roundtrip_no_passphrase() {

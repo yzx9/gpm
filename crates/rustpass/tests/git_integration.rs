@@ -123,7 +123,7 @@ async fn pull_fast_forward_succeeds() {
     };
     let result = expect_fast_forwarded(
         GitStorage
-            .pull(&ctx, None, None)
+            .pull(&ctx, crypto::SecretExt::AGE, None, None)
             .await
             .expect("pull should succeed"),
     );
@@ -157,7 +157,7 @@ async fn pull_no_changes() {
     };
     let result = expect_fast_forwarded(
         GitStorage
-            .pull(&ctx, None, None)
+            .pull(&ctx, crypto::SecretExt::AGE, None, None)
             .await
             .expect("pull should succeed"),
     );
@@ -180,7 +180,9 @@ async fn pull_nonexistent_repo_errors() {
         commit_name: None,
         commit_email: None,
     };
-    let result = GitStorage.pull(&ctx, None, None).await;
+    let result = GitStorage
+        .pull(&ctx, crypto::SecretExt::AGE, None, None)
+        .await;
     let err = result.expect_err("pull on non-repo dir should fail");
     assert_eq!(
         err.code, "NO_REPO",
