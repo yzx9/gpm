@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.17.2] - 2026-08-07
+
 ### Fixed
 
 - After upgrading from **0.17.0**, turning on **App Lock** with biometrics no longer fails with "Stored vault key is malformed", and your at-rest settings and secrets decrypt again. A change in 0.17.1 altered how the on-device key store stored the encryption keys on Android, so keys written by 0.17.0 couldn't be read back — which broke both the App Lock vault and the keys that protect your data at rest. Keys are now read in a way that accepts the 0.17.0 format (and the short-lived 0.17.1 one), so your lock and your data recover on update with nothing for you to do.
@@ -456,7 +458,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.17.2...HEAD
+[v0.17.2]: https://github.com/yzx9/gpm/compare/v0.17.1...v0.17.2
 [v0.17.1]: https://github.com/yzx9/gpm/compare/v0.17.0...v0.17.1
 [v0.17.0]: https://github.com/yzx9/gpm/compare/v0.16.1...v0.17.0
 [v0.16.1]: https://github.com/yzx9/gpm/compare/v0.16.0...v0.16.1
