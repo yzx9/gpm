@@ -20,6 +20,8 @@ export type BiometricErrorCode =
   | "KEYSTORE_NOT_SET"
   /** Catch-all biometric failure. */
   | "KEYSTORE_FAILED"
+  /** Sealed passphrase slot decrypted to non-UTF-8 bytes (corrupt — re-enable biometric). */
+  | "BIOMETRIC_CORRUPT_SLOT"
   /** Stored passphrase is stale (age path self-heals). */
   | "WRONG_PASSPHRASE";
 

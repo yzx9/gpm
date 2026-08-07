@@ -11,6 +11,7 @@ tauri-plugin = { version = "2", features = ["build"] }
 
 [dependencies]
 tauri = "2"
+base64 = { workspace = true }
 serde = { workspace = true }
 log = { workspace = true }
 

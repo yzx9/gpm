@@ -2,11 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Generic Android Keystore storage for a caller-supplied secret string, under a
+// Generic Android Keystore storage for caller-supplied bytes, under a
 // caller-chosen policy: auth-free (no prompt, survives biometric changes) OR
 // biometric-gated (a BiometricPrompt per use). The alias, prefs name,
 // key-generation policy, and prompt text are ALL caller-supplied — this plugin
-// carries no app-specific identifiers or brand strings. The crypto pattern
+// carries no app-specific identifiers or brand strings. The value is opaque
+// bytes: the Rust side base64-encodes them for the JSON IPC, and this side
+// decodes that to raw bytes BEFORE encrypting (so the ciphertext is of the raw
+// bytes, NOT their UTF-8 — the v0.17.0 on-disk format). The crypto pattern
 // (AndroidKeyStore AES/GCM key, optionally bound to a BiometricPrompt
 // CryptoObject with prompts on BOTH encrypt and decrypt) is adapted from
 // impiece/tauri-plugin-keystore (Apache-2.0).
@@ -36,7 +39,6 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import java.nio.charset.Charset
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -46,8 +48,6 @@ import javax.crypto.spec.GCMParameterSpec
 private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 private const val PREF_CT = "ct"
 private const val PREF_IV = "iv"
-
-private val UTF_8: Charset = Charsets.UTF_8
 
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
@@ -105,6 +105,17 @@ internal fun decodeBlob(ivB64: String?, ctB64: String?): Pair<ByteArray, ByteArr
     if (ivB64 == null || ctB64 == null) return null
     return Pair(Base64.decode(ivB64, Base64.NO_WRAP), Base64.decode(ctB64, Base64.NO_WRAP))
 }
+
+/** Base64-decode the IPC `value` (the secret) back to the raw bytes to encrypt.
+ *  The plugin seals opaque bytes: the Rust side base64-encodes them for the JSON
+ *  IPC (`Base64.NO_WRAP`, matching its engine), and this reverses it so the
+ *  ciphertext is of the raw bytes — NOT their UTF-8 (the v0.17.0 on-disk
+ *  format). Pure. */
+internal fun decodeValue(valueB64: String): ByteArray = Base64.decode(valueB64, Base64.NO_WRAP)
+
+/** Base64-encode the decrypted bytes for the IPC `value` response (the inverse of
+ *  [decodeValue]). Pure. */
+internal fun encodeValue(plain: ByteArray): String = Base64.encodeToString(plain, Base64.NO_WRAP)
 
 /** System Security-settings intent — the fingerprint/biometric enrollment
  *  surface. Robolectric-tested (Intent construction needs the Android runtime). */
@@ -363,7 +374,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun store(invoke: Invoke) {
         val args = invoke.parseArgs(StoreArgs::class.java)
-        val plainBytes = args.value.toByteArray(UTF_8)
+        val plainBytes = decodeValue(args.value)
 
         val cipher = try {
             generateKey(
@@ -465,7 +476,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
                 val plain = cipher.doFinal(ciphertext)
                 try {
                     val ret = JSObject()
-                    ret.put("value", String(plain, UTF_8))
+                    ret.put("value", encodeValue(plain))
                     invoke.resolve(ret)
                 } finally {
                     plain.fill(0)
@@ -500,7 +511,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
                         val plain = authCipher.doFinal(ciphertext)
                         try {
                             val ret = JSObject()
-                            ret.put("value", String(plain, UTF_8))
+                            ret.put("value", encodeValue(plain))
                             invoke.resolve(ret)
                         } finally {
                             plain.fill(0)

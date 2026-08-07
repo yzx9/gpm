@@ -183,23 +183,23 @@ pub(crate) trait KvKeystore {
     async fn alias_state(&self, alias: &str, prefs: &str) -> Result<AliasState, KeystoreError>;
     /// Delete an alias's key + ciphertext.
     async fn delete(&self, alias: &str, prefs: &str) -> Result<(), KeystoreError>;
-    /// Seal `value` at `alias` under `policy`.
+    /// Seal `value` (raw bytes) at `alias` under `policy`.
     async fn store(
         &self,
-        value: &str,
+        value: &[u8],
         alias: &str,
         prefs: &str,
         policy: KeyPolicy,
         prompt: Option<&ResolvedPromptText>,
     ) -> Result<(), KeystoreError>;
-    /// Retrieve the value sealed at `alias`.
+    /// Retrieve the raw bytes sealed at `alias`.
     async fn retrieve(
         &self,
         alias: &str,
         prefs: &str,
         policy: KeyPolicy,
         prompt: Option<&ResolvedPromptText>,
-    ) -> Result<String, KeystoreError>;
+    ) -> Result<Vec<u8>, KeystoreError>;
 }
 
 impl<R: Runtime> KvKeystore for Keystore<R> {
@@ -211,7 +211,7 @@ impl<R: Runtime> KvKeystore for Keystore<R> {
     }
     async fn store(
         &self,
-        value: &str,
+        value: &[u8],
         alias: &str,
         prefs: &str,
         policy: KeyPolicy,
@@ -225,65 +225,79 @@ impl<R: Runtime> KvKeystore for Keystore<R> {
         prefs: &str,
         policy: KeyPolicy,
         prompt: Option<&ResolvedPromptText>,
-    ) -> Result<String, KeystoreError> {
+    ) -> Result<Vec<u8>, KeystoreError> {
         Keystore::retrieve(self, alias, prefs, policy, prompt).await
     }
 }
 
-/// Retrieve the auth-free master key (Base64), or `None` if not provisioned /
-/// desktop. Non-prompting.
+/// A retrieved key slot decrypted but its bytes are neither a raw 32-byte key
+/// nor a base64-of-one (see [`interpret_key_bytes`]). Distinct from "absent" so a
+/// caller never silently re-mints over a key that may have envelopes sealed under
+/// it (D1) — it surfaces re-setup instead.
+fn malformed_key() -> KeystoreError {
+    KeystoreError {
+        code: "KEYSTORE_MALFORMED".to_string(),
+        message: "Stored key is malformed".to_string(),
+    }
+}
+
+/// Retrieve the auth-free master key, or `None` if not provisioned / desktop.
+/// Non-prompting. Three states: `Ok(None)` = slot absent (first run / desktop),
+/// `Ok(Some)` = key, `Err(KEYSTORE_MALFORMED)` = slot present but its bytes are
+/// not a usable key (do NOT mint over it — see [`crate::provision_master`]).
 pub(crate) async fn retrieve_master<K: KvKeystore>(
     ks: &K,
-) -> Result<Option<String>, KeystoreError> {
+) -> Result<Option<[u8; 32]>, KeystoreError> {
     match ks
         .retrieve(MASTER_ALIAS, MASTER_PREFS, MASTER_FREE_POLICY, None)
         .await
     {
-        Ok(b) => Ok(Some(b)),
+        Ok(bytes) => match crate::interpret_key_bytes(&bytes) {
+            Some(key) => Ok(Some(key)),
+            None => Err(malformed_key()),
+        },
         Err(e) if is_not_set_or_unavailable(&e) => Ok(None),
         Err(e) => Err(e),
     }
 }
 
-/// Seal the auth-free master key (Base64) into the Keystore. Non-prompting.
+/// Seal the auth-free master key (raw bytes) into the Keystore. Non-prompting.
 pub(crate) async fn store_master<K: KvKeystore>(
     ks: &K,
-    key_b64: &str,
+    key: &[u8; 32],
 ) -> Result<(), KeystoreError> {
-    ks.store(
-        key_b64,
-        MASTER_ALIAS,
-        MASTER_PREFS,
-        MASTER_FREE_POLICY,
-        None,
-    )
-    .await
+    ks.store(key, MASTER_ALIAS, MASTER_PREFS, MASTER_FREE_POLICY, None)
+        .await
 }
 
-/// Retrieve a biometric-gated slot key (Base64), or `None` if nothing is sealed.
-/// **Shows a `BiometricPrompt`** (DECRYPT) only when something IS sealed — a
-/// missing slot returns `None` with no prompt.
+/// Retrieve a biometric-gated slot key, or `None` if nothing is sealed. **Shows a
+/// `BiometricPrompt`** (DECRYPT) only when something IS sealed — a missing slot
+/// returns `None` with no prompt. Same 3-state as [`retrieve_master`] (absent /
+/// key / malformed).
 pub(crate) async fn retrieve_slot<K: KvKeystore>(
     ks: &K,
     slot: BiometricSlot,
     prompt: Option<&PromptText>,
-) -> Result<Option<String>, KeystoreError> {
+) -> Result<Option<[u8; 32]>, KeystoreError> {
     let resolved = resolve_app_lock_prompt(prompt);
     match ks
         .retrieve(slot.alias(), slot.prefs(), VAULT_POLICY, Some(&resolved))
         .await
     {
-        Ok(b) => Ok(Some(b)),
+        Ok(bytes) => match crate::interpret_key_bytes(&bytes) {
+            Some(key) => Ok(Some(key)),
+            None => Err(malformed_key()),
+        },
         Err(e) if is_not_set_or_unavailable(&e) => Ok(None),
         Err(e) => Err(e),
     }
 }
 
-/// Seal a value (Base64) into a biometric-gated slot. **Shows a `BiometricPrompt`**
+/// Seal a value (raw bytes) into a biometric-gated slot. **Shows a `BiometricPrompt`**
 /// (ENCRYPT). `slot` selects vault vs legacy.
 pub(crate) async fn store_slot<K: KvKeystore>(
     ks: &K,
-    value: &str,
+    value: &[u8],
     slot: BiometricSlot,
     prompt: Option<&PromptText>,
 ) -> Result<(), KeystoreError> {
@@ -327,6 +341,7 @@ pub(crate) async fn has_app_lock_enabled<K: KvKeystore>(ks: &K) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
 
     #[test]
     fn biometric_slot_alias_and_prefs() {
@@ -374,7 +389,7 @@ mod tests {
     // recording mock so no Android Keystore is needed.
 
     type MockRetrieve = (String, String, KeyPolicy);
-    type MockStore = (String, String, String, KeyPolicy);
+    type MockStore = (Vec<u8>, String, String, KeyPolicy);
 
     /// Recording [`KvKeystore`] mock: captures every call's alias/prefs/policy and
     /// returns programmable values. `Mutex` (not `tokio::sync`) because no await
@@ -384,7 +399,7 @@ mod tests {
         stores: std::sync::Mutex<Vec<MockStore>>,
         deletes: std::sync::Mutex<Vec<(String, String)>>,
         alias_states: std::sync::Mutex<Vec<(String, String)>>,
-        retrieve_ret: std::sync::Mutex<Result<String, KeystoreError>>,
+        retrieve_ret: std::sync::Mutex<Result<Vec<u8>, KeystoreError>>,
         alias_state_ret: std::sync::Mutex<AliasState>,
         /// Per-alias overrides; when absent for a probed alias, falls back to
         /// `alias_state_ret`. Lets a test distinguish vault vs legacy probes.
@@ -398,7 +413,7 @@ mod tests {
                 stores: std::sync::Mutex::new(Vec::new()),
                 deletes: std::sync::Mutex::new(Vec::new()),
                 alias_states: std::sync::Mutex::new(Vec::new()),
-                retrieve_ret: std::sync::Mutex::new(Ok(String::new())),
+                retrieve_ret: std::sync::Mutex::new(Ok(Vec::new())),
                 alias_state_ret: std::sync::Mutex::new(AliasState {
                     present: false,
                     usable: false,
@@ -406,7 +421,7 @@ mod tests {
                 alias_state_overrides: std::sync::Mutex::new(std::collections::HashMap::new()),
             }
         }
-        fn with_retrieve(self, r: Result<String, KeystoreError>) -> Self {
+        fn with_retrieve(self, r: Result<Vec<u8>, KeystoreError>) -> Self {
             *self.retrieve_ret.lock().unwrap() = r;
             self
         }
@@ -449,14 +464,14 @@ mod tests {
         }
         async fn store(
             &self,
-            value: &str,
+            value: &[u8],
             alias: &str,
             prefs: &str,
             policy: KeyPolicy,
             _prompt: Option<&ResolvedPromptText>,
         ) -> Result<(), KeystoreError> {
             self.stores.lock().unwrap().push((
-                value.to_string(),
+                value.to_vec(),
                 alias.to_string(),
                 prefs.to_string(),
                 policy,
@@ -469,7 +484,7 @@ mod tests {
             prefs: &str,
             policy: KeyPolicy,
             _prompt: Option<&ResolvedPromptText>,
-        ) -> Result<String, KeystoreError> {
+        ) -> Result<Vec<u8>, KeystoreError> {
             self.retrieves
                 .lock()
                 .unwrap()
@@ -480,11 +495,9 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_master_passes_master_alias_and_free_policy() {
-        let mock = MockKeystore::new().with_retrieve(Ok("key".to_string()));
-        assert_eq!(
-            retrieve_master(&mock).await.unwrap().as_deref(),
-            Some("key")
-        );
+        let key = rustpass::seal::generate_master_key().unwrap();
+        let mock = MockKeystore::new().with_retrieve(Ok(key.to_vec()));
+        assert_eq!(retrieve_master(&mock).await.unwrap(), Some(key));
         assert_eq!(
             *mock.retrieves.lock().unwrap(),
             vec![(
@@ -506,12 +519,13 @@ mod tests {
 
     #[tokio::test]
     async fn store_master_passes_master_alias_and_free_policy() {
+        let key = rustpass::seal::generate_master_key().unwrap();
         let mock = MockKeystore::new();
-        store_master(&mock, "key").await.unwrap();
+        store_master(&mock, &key).await.unwrap();
         assert_eq!(
             *mock.stores.lock().unwrap(),
             vec![(
-                "key".to_string(),
+                key.to_vec(),
                 MASTER_ALIAS.to_string(),
                 MASTER_PREFS.to_string(),
                 MASTER_FREE_POLICY
@@ -521,8 +535,9 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_slot_passes_each_slots_alias_and_vault_policy() {
+        let key = rustpass::seal::generate_master_key().unwrap();
         for slot in [BiometricSlot::Vault, BiometricSlot::Legacy] {
-            let mock = MockKeystore::new().with_retrieve(Ok("k".to_string()));
+            let mock = MockKeystore::new().with_retrieve(Ok(key.to_vec()));
             retrieve_slot(&mock, slot, None).await.unwrap();
             assert_eq!(
                 *mock.retrieves.lock().unwrap(),
@@ -538,13 +553,14 @@ mod tests {
 
     #[tokio::test]
     async fn store_slot_passes_each_slots_alias_and_vault_policy() {
+        let value = [0xAA_u8; 32];
         for slot in [BiometricSlot::Vault, BiometricSlot::Legacy] {
             let mock = MockKeystore::new();
-            store_slot(&mock, "v", slot, None).await.unwrap();
+            store_slot(&mock, &value, slot, None).await.unwrap();
             assert_eq!(
                 *mock.stores.lock().unwrap(),
                 vec![(
-                    "v".to_string(),
+                    value.to_vec(),
                     slot.alias().to_string(),
                     slot.prefs().to_string(),
                     VAULT_POLICY
@@ -714,5 +730,78 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err2.code, code, "{code}: retrieve_slot should propagate");
         }
+    }
+
+    // ── D1 (3-state) + D3 (v0.17.1 read compat) ────────────────────────────
+
+    #[tokio::test]
+    async fn retrieve_master_returns_malformed_for_bad_bytes() {
+        // D1: a present slot whose bytes are neither 32 raw nor a base64-of-32
+        // must surface Err(KEYSTORE_MALFORMED), NOT collapse to Ok(None) — so the
+        // caller never silently re-mints over it.
+        let mock = MockKeystore::new().with_retrieve(Ok(vec![0u8; 7]));
+        let err = retrieve_master(&mock).await.unwrap_err();
+        assert_eq!(err.code, "KEYSTORE_MALFORMED");
+    }
+
+    #[tokio::test]
+    async fn retrieve_master_reads_utf8_of_base64_shape() {
+        // D3: the v0.17.1 on-disk form (UTF-8 bytes of a base64 key) is read via
+        // the interpret_key_bytes fallback, not rejected as malformed.
+        let key = rustpass::seal::generate_master_key().unwrap();
+        let b64_bytes = crate::B64.encode(key).into_bytes();
+        let mock = MockKeystore::new().with_retrieve(Ok(b64_bytes));
+        assert_eq!(retrieve_master(&mock).await.unwrap(), Some(key));
+    }
+
+    #[tokio::test]
+    async fn retrieve_slot_returns_malformed_for_bad_bytes() {
+        let mock = MockKeystore::new().with_retrieve(Ok(vec![0u8; 5]));
+        let err = retrieve_slot(&mock, BiometricSlot::Vault, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "KEYSTORE_MALFORMED");
+    }
+
+    #[tokio::test]
+    async fn provision_master_mints_when_slot_absent() {
+        // Absent (NOT_SET) ⇒ mint + store a fresh key.
+        let mock = MockKeystore::new().with_retrieve(Err(KeystoreError {
+            code: "KEYSTORE_NOT_SET".to_string(),
+            message: String::new(),
+        }));
+        assert!(
+            crate::provision_master(&mock).await.is_some(),
+            "should mint"
+        );
+        assert_eq!(
+            mock.stores.lock().unwrap().len(),
+            1,
+            "should store the minted key"
+        );
+    }
+
+    #[tokio::test]
+    async fn provision_master_does_not_mint_over_malformed() {
+        // D1: a present-but-malformed slot must NOT be minted over (it may have
+        // envelopes sealed under it). Degrade to None instead.
+        let mock = MockKeystore::new().with_retrieve(Ok(vec![0u8; 9]));
+        assert!(
+            crate::provision_master(&mock).await.is_none(),
+            "must NOT mint over a malformed key"
+        );
+        assert!(
+            mock.stores.lock().unwrap().is_empty(),
+            "must NOT store over a malformed key"
+        );
+    }
+
+    #[tokio::test]
+    async fn provision_master_does_not_mint_when_already_present() {
+        // An already-present usable key ⇒ no re-mint (would orphan envelopes).
+        let key = rustpass::seal::generate_master_key().unwrap();
+        let mock = MockKeystore::new().with_retrieve(Ok(key.to_vec()));
+        assert!(crate::provision_master(&mock).await.is_none());
+        assert!(mock.stores.lock().unwrap().is_empty());
     }
 }

@@ -14,6 +14,7 @@ use tauri_plugin_keystore::{Keystore, KeystoreExt};
 use tokio::task::JoinHandle;
 
 use crate::app_config::{AppConfigStore, BackgroundSyncCadence};
+use crate::keystore::KvKeystore;
 use crate::setup::PendingIdentity;
 
 mod app_config;
@@ -141,44 +142,67 @@ pub(crate) struct AppState {
 pub(crate) const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
-/// Decode a Base64 master key to 32 bytes, or `None` if malformed/wrong length.
+/// Decode a Base64 master key (a JNI-bridge base64 string) to 32 bytes, or
+/// `None` if malformed/wrong length. Scope is now the headless-sync JNI bridge
+/// (`jni_sync::run_headless_sync` receives the key as a base64 string from
+/// Kotlin); the live keystore read path interprets raw bytes via
+/// [`interpret_key_bytes`] instead.
 pub(crate) fn decode_master_key(b64: &str) -> Option<[u8; 32]> {
     let bytes: Vec<u8> = B64.decode(b64).ok()?;
     bytes.try_into().ok()
 }
 
+/// Interpret retrieved keystore bytes as a 32-byte seal key, accepting BOTH the
+/// v0.17.0 on-disk format (32 raw key bytes) and the transitional v0.17.1 format
+/// (the UTF-8 bytes of a base64-encoded key). Returns `None` if neither yields a
+/// 32-byte key. New writes are always 32 raw bytes (the v0.17.0 format); the
+/// UTF-8-of-base64 branch is read-only compatibility for keys sealed by v0.17.1.
+// TODO: v1.0.0 — remove the v0.17.1 UTF-8-of-base64 read compat (the fallback
+// branch below); by then no in-the-wild key uses that format.
+pub(crate) fn interpret_key_bytes(bytes: &[u8]) -> Option<[u8; 32]> {
+    // v0.17.0 / current format: 32 raw key bytes. (A v0.17.1 key is the UTF-8 of
+    // a 44-char base64 string = 44 bytes, so 32 is unambiguously the raw form.)
+    if bytes.len() == 32 {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(bytes);
+        return Some(key);
+    }
+    // v0.17.1 compat: the bytes are the UTF-8 of a base64-encoded key.
+    let s = std::str::from_utf8(bytes).ok()?;
+    let decoded: Vec<u8> = B64.decode(s).ok()?;
+    decoded.try_into().ok()
+}
+
 /// Fetch the sealed master key if present — **retrieve-only, never generates**.
 ///
-/// Returns `None` on desktop (no Keystore), if the Keystore is unavailable, or if no
-/// key is sealed yet. Crucially this does NOT generate on absent, so it is safe to call
-/// on the upgrader path (the auth-free alias is absent pre-m0007) without minting a new
+/// Returns `None` on desktop (no Keystore), if the Keystore is unavailable, if no
+/// key is sealed yet, OR if a sealed key is malformed (degrade, never mint).
+/// Crucially this does NOT generate on absent, so it is safe to call on the
+/// upgrader path (the auth-free alias is absent pre-m0007) without minting a new
 /// master that would orphan every existing envelope. First-run provisioning is
 /// [`provision_master`]'s job, called explicitly by [`startup_master_key`].
 async fn retrieve_master_or_none<R: Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
-    let b64 = keystore::retrieve_master(ks).await.unwrap_or(None)?;
-    decode_master_key(&b64)
+    keystore::retrieve_master(ks).await.unwrap_or(None)
 }
 
 /// Generate + seal a fresh master key (first-run provisioning).
 ///
-/// Returns `None` on desktop (no Keystore) or if generation/sealing fails. A key that
-/// cannot be sealed is discarded rather than used unpersisted, so it can never orphan
-/// later envelopes behind a key the next run won't have.
-async fn provision_master<R: Runtime>(ks: &Keystore<R>) -> Option<[u8; 32]> {
-    // Never overwrite an existing entry: a present entry (even a malformed one)
-    // may have envelopes sealed under it, so minting a fresh key would orphan
-    // them. Degrade to passthrough instead — this restores the pre-split self-heal
-    // (a garbled decode used to return None without touching the entry).
-    if keystore::retrieve_master(ks)
-        .await
-        .unwrap_or(None)
-        .is_some()
-    {
-        return None;
+/// Returns `None` on desktop (no Keystore), if generation/sealing fails, OR if a
+/// key slot is already present — an **absent** slot is the only mint path. A
+/// present-but-malformed slot is NOT minted over (it may have envelopes sealed
+/// under it, so minting would orphan them); the caller degrades to passthrough.
+/// A key that cannot be sealed is discarded rather than used unpersisted, so it
+/// can never orphan later envelopes behind a key the next run won't have.
+pub(crate) async fn provision_master<K: KvKeystore>(ks: &K) -> Option<[u8; 32]> {
+    // Mint ONLY on an absent slot. A present slot — even a malformed one — may
+    // have envelopes sealed under it; minting over it would orphan them.
+    match keystore::retrieve_master(ks).await {
+        Ok(None) => {}
+        Ok(Some(_)) | Err(_) => return None,
     }
     let key = rustpass::seal::generate_master_key().ok()?;
     // Seal before adopting — an unpersisted key would orphan future envelopes.
-    keystore::store_master(ks, &B64.encode(key)).await.ok()?;
+    keystore::store_master(ks, &key).await.ok()?;
     Some(key)
 }
 
@@ -718,5 +742,38 @@ mod decode_master_key_tests {
     fn malformed_base64_returns_none() {
         // Non-base64 characters ⇒ decode fails ⇒ None, no panic.
         assert_eq!(decode_master_key("!!!not-base64!!!"), None);
+    }
+}
+
+#[cfg(test)]
+mod interpret_key_bytes_tests {
+    use super::*;
+
+    #[test]
+    fn thirty_two_raw_bytes_is_a_key() {
+        // v0.17.0 / current format: the raw key bytes.
+        let key = rustpass::seal::generate_master_key().unwrap();
+        assert_eq!(interpret_key_bytes(&key), Some(key));
+    }
+
+    #[test]
+    fn utf8_of_base64_is_a_key_v0171_compat() {
+        // D3: the v0.17.1 on-disk form — the UTF-8 bytes of a base64 key — is
+        // read back via the fallback, not rejected.
+        let key = rustpass::seal::generate_master_key().unwrap();
+        let bytes = B64.encode(key).into_bytes();
+        assert_eq!(interpret_key_bytes(&bytes), Some(key));
+    }
+
+    #[test]
+    fn non_key_bytes_are_none() {
+        // Neither 32 raw bytes nor a base64-of-32 ⇒ None (the caller maps this
+        // to KEYSTORE_MALFORMED).
+        assert_eq!(interpret_key_bytes(&[0u8; 7]), None); // too short; NUL isn't base64
+        assert_eq!(interpret_key_bytes(&[]), None);
+        // Valid base64 but decodes to != 32 bytes ("aaaa" → 3 bytes).
+        assert_eq!(interpret_key_bytes(b"aaaa"), None);
+        // Invalid UTF-8 ⇒ the from_utf8().ok()? None branch (a non-32-length slot).
+        assert_eq!(interpret_key_bytes(&[0xff, 0xfe]), None);
     }
 }

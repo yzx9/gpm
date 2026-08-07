@@ -38,10 +38,8 @@
 
 use std::sync::atomic::Ordering;
 
-use base64::Engine;
 use rustpass::Error;
 use tauri_plugin_keystore::KeystoreExt;
-use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::keystore::BiometricSlot;
@@ -84,14 +82,11 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     //    its own marker, and a re-mint would strand it under the old vault key.
     if state.store.is_identity_under_master().await {
         let vault = rustpass::seal::generate_master_key()?;
-        let vault_b64 = Zeroizing::new(crate::B64.encode(vault));
         // One-time ENCRYPT prompt (prompt text `None` → Kotlin fallback strings;
         // this is a one-shot migration). A cancel/reject ⇒ Pending so the next
         // app_unlock retries; nothing is stranded (master auth-free, identity
         // still under the master and readable via the bridge).
-        if let Err(e) =
-            crate::keystore::store_slot(ks, &vault_b64, BiometricSlot::Vault, None).await
-        {
+        if let Err(e) = crate::keystore::store_slot(ks, &vault, BiometricSlot::Vault, None).await {
             log::warn!("0007_vault_key: vault ENCRYPT deferred: {e:?}");
             return Ok(MigrationOutcome::Pending);
         }

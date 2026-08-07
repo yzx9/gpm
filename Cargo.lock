@@ -5710,6 +5710,7 @@ dependencies = [
 name = "tauri-plugin-keystore"
 version = "0.17.1"
 dependencies = [
+ "base64 0.22.1",
  "log",
  "serde",
  "serde_json",

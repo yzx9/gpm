@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.lang.reflect.Modifier
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -107,6 +108,33 @@ class KeystorePluginTest {
         val decoded = decodeBlob("", "")!!
         assertEquals(0, decoded.first.size)
         assertEquals(0, decoded.second.size)
+    }
+
+    // ── value byte-flow (encodeValue/decodeValue) ────────────────────────
+    //
+    // The regression guard for the v0.17.0→v0.17.1 fix: the plugin must seal the
+    // RAW bytes the caller passes (Base64 over IPC, decoded before encrypt), NOT
+    // their UTF-8. `decodeValue`/`encodeValue` are the inverse pair over
+    // `Base64.NO_WRAP`, matching the Rust plugin crate's STANDARD engine.
+
+    @Test
+    fun decodeValue_encodeValue_roundTripsArbitraryBytes() {
+        // Arbitrary bytes (incl. non-UTF-8: 0x80, 0xff, 0x00) round-trip — the
+        // 32 raw key bytes stored by the v0.17.0 on-disk format are such bytes,
+        // so this proves the value flow never String-ifies the key.
+        val raw = byteArrayOf(0, 1, 2, 0x7f, 0x80.toByte(), 0xff.toByte(), 0x00, 0x42)
+        assertEquals(raw.toList(), decodeValue(encodeValue(raw)).toList())
+    }
+
+    @Test
+    fun encodeValue_isNoWrapBase64_matchingRustStandard() {
+        // A 32-byte key → 44-char one-line base64 (no line wrap), the wire shape
+        // the Rust plugin crate's STANDARD engine produces.
+        val key = ByteArray(32) { it.toByte() }
+        val b64 = encodeValue(key)
+        assertEquals(44, b64.length)
+        assertFalse(b64.contains("\n"))
+        assertEquals(key.toList(), decodeValue(b64).toList())
     }
 
     // mapBiometricState — exhaustive over the canAuthenticate() returns the page

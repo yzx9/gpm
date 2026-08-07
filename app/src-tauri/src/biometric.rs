@@ -111,6 +111,24 @@ fn require_encrypted_identity(is_encrypted: bool) -> Result<(), Error> {
     }
 }
 
+/// Decode retrieved passphrase bytes to a [`Zeroizing`] UTF-8 string, wiping the
+/// bytes on a decode failure. age passphrases are UTF-8, so non-UTF-8 bytes mean
+/// a corrupt seal → [`BiometricError`] (`BIOMETRIC_CORRUPT_SLOT`). Wrapping in
+/// [`Zeroizing`] before the decode keeps the wipe-everything hygiene on the rare
+/// failure path (the bytes are cleared when the [`Zeroizing`] drops, not freed
+/// raw). Pure + unit-testable (the `biometric_unlock` command needs an
+/// `AppHandle`, so the decode stays here).
+fn passphrase_from_bytes(bytes: Vec<u8>) -> Result<Zeroizing<String>, BiometricError> {
+    let bytes = Zeroizing::new(bytes);
+    match std::str::from_utf8(&bytes) {
+        Ok(s) => Ok(Zeroizing::new(s.to_owned())),
+        Err(_) => Err(BiometricError {
+            code: "BIOMETRIC_CORRUPT_SLOT".to_string(),
+            message: "Sealed passphrase slot is corrupt".to_string(),
+        }),
+    }
+}
+
 /// Enable biometric unlock: validate the passphrase, then seal it behind a
 /// biometric prompt (encrypt also needs auth for a
 /// `setUserAuthenticationRequired` key).
@@ -134,7 +152,7 @@ pub(crate) async fn enable_biometric_unlock(
     let resolved = keystore::resolve_prompt(prompt_text.as_ref());
     app.keystore()
         .store(
-            &passphrase,
+            passphrase.as_bytes(),
             PASSPHRASE_ALIAS,
             PASSPHRASE_PREFS,
             PASSPHRASE_POLICY,
@@ -156,9 +174,12 @@ pub(crate) async fn biometric_unlock(
     prompt_text: Option<PromptText>,
 ) -> Result<(), BiometricError> {
     log::info!("biometric: unlock");
-    // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used.
+    // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used. The
+    // bytes go straight to passphrase_from_bytes so they're wrapped in
+    // Zeroizing (and wiped on a corrupt-slot decode failure) with no
+    // intermediate unwrapped copy.
     let resolved = keystore::resolve_prompt(prompt_text.as_ref());
-    let passphrase = Zeroizing::new(
+    let passphrase = passphrase_from_bytes(
         app.keystore()
             .retrieve(
                 PASSPHRASE_ALIAS,
@@ -167,7 +188,7 @@ pub(crate) async fn biometric_unlock(
                 Some(&resolved),
             )
             .await?,
-    );
+    )?;
 
     if let Err(e) = identity::unlock_and_arm(&state, &app, &passphrase).await {
         if e.code == "WRONG_PASSPHRASE" &&
@@ -209,5 +230,18 @@ mod tests {
         let err = require_encrypted_identity(false).unwrap_err();
         assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
         assert!(require_encrypted_identity(true).is_ok());
+    }
+
+    #[test]
+    fn passphrase_from_bytes_accepts_valid_utf8() {
+        let p = passphrase_from_bytes(b"hunter2".to_vec()).unwrap();
+        assert_eq!(&*p, "hunter2");
+    }
+
+    #[test]
+    fn passphrase_from_bytes_rejects_non_utf8_as_corrupt_slot() {
+        // 0xff/0xfe are never valid UTF-8 start bytes ⇒ corrupt slot.
+        let err = passphrase_from_bytes(vec![0xff, 0xfe, 0xc0]).unwrap_err();
+        assert_eq!(err.code, "BIOMETRIC_CORRUPT_SLOT");
     }
 }

@@ -2,21 +2,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tauri plugin that seals a caller-supplied **secret string** into the Android
-//! Keystore (hardware-backed AES/GCM) under a caller-chosen policy — either
-//! **auth-free** (no prompt, survives biometric changes) or **biometric-gated**
-//! (a `BiometricPrompt` per use) — and retrieves it on demand. The plugin is
-//! generic: the Keystore alias, prefs name, key-generation policy, and prompt
-//! text are all supplied by the caller — it carries no app-specific identifiers
-//! or brand strings.
+//! Tauri plugin that seals caller-supplied **bytes** into the Android Keystore
+//! (hardware-backed AES/GCM) under a caller-chosen policy — either **auth-free**
+//! (no prompt, survives biometric changes) or **biometric-gated** (a
+//! `BiometricPrompt` per use) — and retrieves them on demand. The plugin is
+//! generic: it treats the value as opaque bytes, and the Keystore alias, prefs
+//! name, key-generation policy, and prompt text are all supplied by the caller —
+//! it carries no app-specific identifiers or brand strings.
 //!
-//! The secret flows Kotlin → Rust and never reaches the `WebView`. On
-//! non-Android targets the plugin is registered but inert (operations report
-//! `unavailable` / empty).
+//! The public Rust API is bytes (`store(&[u8])` / `retrieve() -> Vec<u8>`); the
+//! Tauri mobile-plugin IPC carries the value as a base64 string, which this
+//! crate encodes/decodes at the boundary so callers never see base64. The bytes
+//! flow Kotlin → Rust and never reach the `WebView`. On non-Android targets the
+//! plugin is registered but inert (operations report `unavailable` / empty).
 
 #[cfg(not(target_os = "android"))]
 use std::marker::PhantomData;
 
+#[cfg(target_os = "android")]
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "android")]
 use tauri::plugin::mobile::PluginInvokeError;
@@ -26,6 +30,14 @@ use tauri::{Manager, Runtime};
 /// Android package hosting the `KeystorePlugin` Kotlin class.
 #[cfg(target_os = "android")]
 const PLUGIN_IDENTIFIER: &str = "xyz.yzx9.gpm.keystore";
+
+/// Base64 engine for the value crossing the Rust↔Kotlin IPC (standard alphabet,
+/// padded, no line-wrap — identical to Android's `Base64.NO_WRAP`). The public
+/// API is raw bytes; this only transports them as a JSON-IPC string. (Android
+/// only — the non-Android stubs never touch the IPC transport.)
+#[cfg(target_os = "android")]
+const B64: base64::engine::general_purpose::GeneralPurpose =
+    base64::engine::general_purpose::STANDARD;
 
 // ---------------------------------------------------------------------------
 // Error type (unified across mobile/desktop)
@@ -318,12 +330,13 @@ impl<R: Runtime> Keystore<R> {
             .map_err(map_invoke_err)
     }
 
-    /// Seal `value` into the Keystore at `alias`. **Shows a biometric prompt**
-    /// (CryptoObject ENCRYPT) when `policy.auth_required` — the key needs user
-    /// auth for encrypt too. The `Invoke` stays open across the prompt and is
+    /// Seal `value` (raw bytes) into the Keystore at `alias`. **Shows a biometric
+    /// prompt** (CryptoObject ENCRYPT) when `policy.auth_required` — the key needs
+    /// user auth for encrypt too. The `Invoke` stays open across the prompt and is
     /// resolved only from a terminal biometric callback. Auth-free policy seals
     /// directly with no prompt. `prompt` supplies already-resolved prompt text
-    /// (see [`resolve_prompt_text`]).
+    /// (see [`resolve_prompt_text`]). The bytes are base64-encoded for the IPC
+    /// transport; the on-disk ciphertext is of the raw bytes.
     ///
     /// # Errors
     ///
@@ -332,7 +345,7 @@ impl<R: Runtime> Keystore<R> {
     /// the key is dead, or the invoke fails.
     pub async fn store(
         &self,
-        value: &str,
+        value: &[u8],
         alias: &str,
         prefs: &str,
         policy: KeyPolicy,
@@ -341,7 +354,7 @@ impl<R: Runtime> Keystore<R> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Payload<'a> {
-            value: &'a str,
+            value: String,
             alias: &'a str,
             prefs: &'a str,
             auth_required: bool,
@@ -356,7 +369,7 @@ impl<R: Runtime> Keystore<R> {
             .run_mobile_plugin_async::<()>(
                 "store",
                 Payload {
-                    value,
+                    value: B64.encode(value),
                     alias,
                     prefs,
                     auth_required: policy.auth_required,
@@ -372,10 +385,12 @@ impl<R: Runtime> Keystore<R> {
             .map_err(map_invoke_err)
     }
 
-    /// Retrieve the sealed value at `alias`. **Shows a biometric prompt**
-    /// (CryptoObject DECRYPT) when `policy.auth_required`. The value is returned
-    /// here (Rust side only) and wrapped in `Zeroizing<String>` by the caller.
-    /// `prompt` supplies already-resolved prompt text.
+    /// Retrieve the sealed value (raw bytes) at `alias`. **Shows a biometric
+    /// prompt** (CryptoObject DECRYPT) when `policy.auth_required`. The value is
+    /// returned here (Rust side only); a secret-bearing caller wraps it in
+    /// `Zeroizing`. `prompt` supplies already-resolved prompt text. The IPC
+    /// carries the decrypted bytes as base64, decoded here so the caller gets raw
+    /// bytes.
     ///
     /// # Errors
     ///
@@ -388,7 +403,7 @@ impl<R: Runtime> Keystore<R> {
         prefs: &str,
         policy: KeyPolicy,
         prompt: Option<&ResolvedPromptText>,
-    ) -> Result<String, KeystoreError> {
+    ) -> Result<Vec<u8>, KeystoreError> {
         #[derive(Deserialize)]
         struct Resp {
             value: String,
@@ -422,8 +437,13 @@ impl<R: Runtime> Keystore<R> {
                 },
             )
             .await
-            .map(|r| r.value)
             .map_err(map_invoke_err)
+            .and_then(|r| {
+                B64.decode(&r.value).map_err(|_| KeystoreError {
+                    code: "KEYSTORE_FAILED".to_string(),
+                    message: "keystore returned malformed base64".to_string(),
+                })
+            })
     }
 }
 
@@ -491,7 +511,7 @@ impl<R: Runtime> Keystore<R> {
     #[expect(clippy::unused_async)]
     pub async fn store(
         &self,
-        _value: &str,
+        _value: &[u8],
         _alias: &str,
         _prefs: &str,
         _policy: KeyPolicy,
@@ -512,7 +532,7 @@ impl<R: Runtime> Keystore<R> {
         _prefs: &str,
         _policy: KeyPolicy,
         _prompt: Option<&ResolvedPromptText>,
-    ) -> Result<String, KeystoreError> {
+    ) -> Result<Vec<u8>, KeystoreError> {
         Err(KeystoreError::unavailable())
     }
 }
