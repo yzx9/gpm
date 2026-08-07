@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Platform transport for the git backend: the Android HTTPS CA-bundle
 //! workaround, libgit2 credential/progress/cancel callbacks, the shared

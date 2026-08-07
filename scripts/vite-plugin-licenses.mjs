@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 // Vite plugin: ensures `public/licenses.json` exists (and is fresh) before the
 // dev server serves or the production bundle is written. Runs once per server

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
 import vue from "@vitejs/plugin-vue";

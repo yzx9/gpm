@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Low-level `OpenPGP` (rpgp) wrapper — the shared seam for both GPG
 //! commit-signature verification (RFC 0009) and the future GPG crypto backend

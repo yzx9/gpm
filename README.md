@@ -41,15 +41,14 @@ comprehensive pull requests are welcome!
 Please check out [DEVELOPMENT.md](DEVELOPMENT.md) for guidelines.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
-gpm by you, as defined in the [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) license,
-without any additional terms or conditions.
+gpm by you, as defined in the Apache-2.0 license, shall be dual licensed under the terms of the
+[License](#license) section below, without any additional terms or conditions.
 
 Thanks goes to these wonderful people:
 
 [![Contributors](https://contrib.rocks/image?repo=yzx9/gpm)](https://github.com/yzx9/gpm/graphs/contributors)
 
-## LICENSE
+## License
 
-This work is licensed under a <a rel="license" href="https://www.apache.org/licenses/">Apache-2.0</a>.
-
-Copyright (c) 2026, Zexin Yuan
+This project is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT), at your option.

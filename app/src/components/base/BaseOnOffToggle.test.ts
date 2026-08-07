@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz> //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";

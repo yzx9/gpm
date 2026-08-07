@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! App-launch biometric gate (RFC 0028) — an opt-in lock that gates the **age
 //! identity** behind a biometric, so the secrets themselves stay unreadable

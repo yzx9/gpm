@@ -185,8 +185,13 @@ Contributions are welcome! We follow standard GitHub flow:
 4. Open a pull request with a clear description of the problem and solution
 5. Address review feedback and iterate
 
-This project is licensed under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0). By
-contributing, you agree that your contributions will be licensed under the same terms.
+This project is dual-licensed under the [MIT] or [Apache 2.0] license, at your option — see
+[LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE). By contributing, you agree that
+your contributions will be dual licensed under the same terms, without any additional terms or
+conditions.
+
+[MIT]: https://opensource.org/license/mit
+[Apache 2.0]: https://www.apache.org/licenses/LICENSE-2.0
 
 ## Releasing
 

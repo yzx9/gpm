@@ -1,6 +1,6 @@
 <!-- SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz> -->
 <!-- -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <!-- Per-entry edit/delete conflict modal (R026). Two-step like DivergenceModal:
      a selection sheet (pick keep-theirs / keep-mine), then a centered contextual

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Backend-only device-info plugin for gpm's diagnostics export: surfaces the
 //! Android hardware/OS build fields (`Build.MANUFACTURER`/`MODEL`/`BRAND`,

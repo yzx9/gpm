@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Secret-read commands — list, decrypt-and-copy, and decrypt-and-show. The
 //! read side of the store, mirroring [`crate::write`] on the write side.

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Tauri plugin toggling Android `FLAG_SECURE` for per-page screen-capture
 //! protection. The frontend calls `set_secure(bool)` per route (blocked when

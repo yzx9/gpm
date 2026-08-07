@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT OR Apache-2.0
 #
 # Orchestrate a release: validate the new version, bump it across project files,
 # commit, tag, then optionally push to origin.

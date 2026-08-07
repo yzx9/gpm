@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Backend-only file-save plugin: saves a staged file to a destination the user
 //! picks — Android Storage Access Framework (`ACTION_CREATE_DOCUMENT`) on

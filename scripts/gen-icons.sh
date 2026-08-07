@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT OR Apache-2.0
 
 # Regenerate Tauri's native app icons (src-tauri/icons/) and the web favicon
 # sizes (public/icon-*.png) from the single source assets/app-icon.png.

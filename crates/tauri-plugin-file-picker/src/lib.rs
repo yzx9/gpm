@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Tauri plugin that opens a native file picker and reads the picked file's
 //! bytes into Rust — the Storage Access Framework (`ACTION_OPEN_DOCUMENT`) on

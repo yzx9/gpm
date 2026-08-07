@@ -4,7 +4,7 @@
   "version": "0.17.2",
   "type": "module",
   "author": "Zexin Yuan <gpm@yzx9.xyz> (https://github.com/yzx9)",
-  "license": "Apache-2.0",
+  "license": "MIT OR Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",

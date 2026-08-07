@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Biometric unlock commands — seal/retrieve the identity passphrase behind the
 //! Android Keystore's biometric-gated `BiometricPrompt`.

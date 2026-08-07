@@ -1,6 +1,6 @@
 <!-- SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz> -->
 <!-- -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <!-- Shared divergence resolution modal — used by manual Sync (pull/sync path)
      AND by save-triggered divergences (create/edit/delete). Two-step: a

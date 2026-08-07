@@ -1,6 +1,6 @@
 <!-- SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz> -->
 <!-- -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <!-- Shared Enforce-block modal — reused by the Sync path and the save path's
      `authenticity_blocked` outcome. Lists the offending commits and offers the

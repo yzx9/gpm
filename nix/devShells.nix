@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT OR Apache-2.0
 
 # Dev-shell definitions, factored out of flake.nix. flake.nix imports this per
 # system and exposes the result directly as its `devShells` output.

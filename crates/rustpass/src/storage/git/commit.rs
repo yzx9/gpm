@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The git "write" surface — gopass's `gitCommitAndPush` half: `clone_repo`,
 //! `init_repo`, `remote_add`, stage+commit (add / remove / initial), and `push`.

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Per-revision content reads for the git backend — the content half of secret
 //! revision history (RFC R027). [`blob_at_commit`] reads a secret's ciphertext

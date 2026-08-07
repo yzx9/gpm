@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The verbose-logging deadline timer: a cancellable, generation-guarded task
 //! that reverts the runtime log gate from Debug back to Info when the verbose

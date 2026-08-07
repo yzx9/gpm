@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error node:path is a nodejs module (project ships no @types/node)

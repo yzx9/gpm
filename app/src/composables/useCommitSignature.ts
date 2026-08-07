@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 /** Commit-signature display helpers — the locale-aware status label plus the
  * pure predicates and signer-fingerprint extractor that mirror the Rust

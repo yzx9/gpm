@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Shared helpers for the [`super`] git backend unit tests. Declared
 //! `#[cfg(test)]` from the module root, so this file only compiles under test.

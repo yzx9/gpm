@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Clipboard-out commands and the shared write-then-auto-clear helper. The
 //! clear is armed via [`crate::identity::arm_clipboard_clear`] (cancellable,

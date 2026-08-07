@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Backend-only native file picker for gpm: opens the Android Storage Access
 // Framework picker (ACTION_OPEN_DOCUMENT) and reads the picked file's bytes via

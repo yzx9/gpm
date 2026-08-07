@@ -8,7 +8,7 @@ members = ["crates/*", "app/src-tauri"]
 version = "0.17.2"
 authors = ["Zexin Yuan"]
 edition = "2024"
-license = "Apache-2.0"
+license = "MIT OR Apache-2.0"
 
 [workspace.lints.rust]
 trivial_casts = "warn"

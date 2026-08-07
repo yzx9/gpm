@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! read-command cores — the decrypt-and-show glue that needs a live `AppState`
 //! and a runtime (so it can't live in `rustpass`). Drives `show_password_core`

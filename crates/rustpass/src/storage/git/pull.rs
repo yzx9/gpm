@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The sync "read-in" surface: fetch + classify the local-vs-remote relation,
 //! verify the new commit range under the authenticity policy, and conditionally

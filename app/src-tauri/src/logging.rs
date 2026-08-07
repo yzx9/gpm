@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! In-app diagnostics viewer commands — read and clear the rotated log file the
 //! `tauri-plugin-log` `LogDir` target writes under `app_log_dir()`. The plugin

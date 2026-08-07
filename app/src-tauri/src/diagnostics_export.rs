@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Diagnostics export bundle: assembles the full rotated log, the non-secret
 //! user settings, a redacted view of the repository configuration, a device-info

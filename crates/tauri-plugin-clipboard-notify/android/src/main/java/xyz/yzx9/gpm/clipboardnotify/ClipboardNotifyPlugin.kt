@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Sticky Android notification shown while a secret is on the clipboard. The
 // notification's body tap fires an explicit-broadcast PendingIntent that the

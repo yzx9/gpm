@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! gpm-specific Keystore configuration: the alias/prefs names, key policies,
 //! and brand fallbacks that the generic keystore plugin carries **no** knowledge

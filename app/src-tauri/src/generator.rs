@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Zexin Yuan <gpm@yzx9.xyz>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Password generator command. Stateless — pure CSPRNG work over the rustpass
 //! generator, no store access. The result is a [`Zeroizing<String>`] so the

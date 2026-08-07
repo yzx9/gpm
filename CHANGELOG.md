@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- gpm's license broadened from **Apache-2.0** to **MIT OR Apache-2.0** — you can now use, modify, and distribute gpm under either license, at your option. This matches the convention used across the Rust ecosystem. Existing use under Apache-2.0 is unaffected; the new MIT option is purely additional.
+
 ## [v0.17.2] - 2026-08-07
 
 ### Fixed
