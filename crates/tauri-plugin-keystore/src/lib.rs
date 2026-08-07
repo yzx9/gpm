@@ -62,7 +62,7 @@ impl KeystoreError {
     #[must_use]
     pub fn unavailable() -> Self {
         Self {
-            code: "KEYSTORE_UNAVAILABLE".to_string(),
+            code: KeystoreErrorCode::Unavailable.as_str().to_string(),
             message: "Keystore is not available on this device".to_string(),
         }
     }
@@ -74,15 +74,69 @@ impl KeystoreError {
 fn map_invoke_err(err: PluginInvokeError) -> KeystoreError {
     match err {
         PluginInvokeError::InvokeRejected(resp) => KeystoreError {
-            code: resp.code.unwrap_or_else(|| "KEYSTORE_FAILED".to_string()),
+            code: resp
+                .code
+                .unwrap_or_else(|| KeystoreErrorCode::Failed.as_str().to_string()),
             message: resp
                 .message
                 .unwrap_or_else(|| "Keystore operation failed".to_string()),
         },
         other => KeystoreError {
-            code: "KEYSTORE_FAILED".to_string(),
+            code: KeystoreErrorCode::Failed.as_str().to_string(),
             message: other.to_string(),
         },
+    }
+}
+
+/// The stable `KEYSTORE_*` error codes the Kotlin plugin emits over the IPC
+/// reject channel, mirrored on the Rust side. The Kotlin plugin is the single
+/// source of these strings (`KeystoreErrorCode` in `KeystorePlugin.kt`); this
+/// enum mirrors that set, and a checked-in contract file
+/// (`contracts/keystore-error-codes.json` at the plugin root) pins the two
+/// together — a code renamed on either side without updating the contract
+/// fails the mirror test on that side. `KeystoreError` still carries
+/// `code: String` for now; this enum is the typed mirror the contract test
+/// (and, later, `KeystoreError` itself) consumes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeystoreErrorCode {
+    /// User dismissed the biometric prompt / chose the negative button.
+    Cancelled,
+    /// Catch-all keystore failure.
+    Failed,
+    /// The Keystore key was invalidated (e.g. all biometrics removed).
+    KeyInvalidated,
+    /// Too many failed attempts; temporarily locked out.
+    Lockout,
+    /// Nothing is sealed at the alias.
+    NotSet,
+    /// Biometric/keystore hardware or enrollment unavailable.
+    Unavailable,
+}
+
+impl KeystoreErrorCode {
+    /// Every variant — the exhaustive set, kept in sync with the contract file
+    /// by [`tests::keystore_error_codes_match_contract`]. When the codegen
+    /// pipeline lands this hand list is replaced by `strum::EnumIter`.
+    pub const ALL: &'static [Self] = &[
+        Self::Cancelled,
+        Self::Failed,
+        Self::KeyInvalidated,
+        Self::Lockout,
+        Self::NotSet,
+        Self::Unavailable,
+    ];
+
+    /// The wire string emitted over the IPC reject channel.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cancelled => "KEYSTORE_CANCELLED",
+            Self::Failed => "KEYSTORE_FAILED",
+            Self::KeyInvalidated => "KEYSTORE_KEY_INVALIDATED",
+            Self::Lockout => "KEYSTORE_LOCKOUT",
+            Self::NotSet => "KEYSTORE_NOT_SET",
+            Self::Unavailable => "KEYSTORE_UNAVAILABLE",
+        }
     }
 }
 
@@ -440,7 +494,7 @@ impl<R: Runtime> Keystore<R> {
             .map_err(map_invoke_err)
             .and_then(|r| {
                 B64.decode(&r.value).map_err(|_| KeystoreError {
-                    code: "KEYSTORE_FAILED".to_string(),
+                    code: KeystoreErrorCode::Failed.as_str().to_string(),
                     message: "keystore returned malformed base64".to_string(),
                 })
             })
@@ -584,7 +638,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BiometricState, KeyPolicy, PromptText, resolve_prompt_text};
+    use super::{BiometricState, KeyPolicy, KeystoreErrorCode, PromptText, resolve_prompt_text};
 
     /// Pins the cross-layer contract: these exact `snake_case` strings are emitted
     /// by Kotlin's `mapBiometricState` and deserialized here.
@@ -666,5 +720,40 @@ mod tests {
         assert_eq!(r.title, "Title");
         assert_eq!(r.subtitle.as_deref(), Some("Sub"));
         assert_eq!(r.negative, "Nope");
+    }
+
+    /// Cross-language contract pin: the Rust [`KeystoreErrorCode`] mirror must
+    /// emit exactly the wire strings the Kotlin plugin does. The single source
+    /// of truth is `contracts/keystore-error-codes.json` at the plugin root
+    /// (shared with the Kotlin JVM test, which reads the same file as a
+    /// resource). A code renamed on either side without updating the contract
+    /// fails this test or the Kotlin one — closing the silent Kotlin↔Rust
+    /// rename-drift hole that a Rust-rooted codegen pipeline cannot reach (the
+    /// codes originate in Kotlin).
+    #[test]
+    fn keystore_error_codes_match_contract() {
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../contracts/keystore-error-codes.json"))
+                .expect("contract file is valid JSON");
+        let expected: std::collections::BTreeSet<&str> = contract
+            .as_array()
+            .expect("contract is a JSON array")
+            .iter()
+            .map(|v| v.as_str().expect("contract entries are strings"))
+            .collect();
+        let actual: std::collections::BTreeSet<&str> = KeystoreErrorCode::ALL
+            .iter()
+            .copied()
+            .map(KeystoreErrorCode::as_str)
+            .collect();
+        assert_eq!(
+            expected.len(),
+            KeystoreErrorCode::ALL.len(),
+            "contract file and KeystoreErrorCode::ALL disagree on count"
+        );
+        assert_eq!(
+            expected, actual,
+            "contract file and KeystoreErrorCode::as_str disagree on the wire strings"
+        );
     }
 }

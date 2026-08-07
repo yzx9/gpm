@@ -41,34 +41,34 @@ class KeystorePluginTest {
 
     @Test
     fun mapErrorCode_cancellations() {
-        assertEquals("KEYSTORE_CANCELLED", mapErrorCode(BiometricPrompt.ERROR_USER_CANCELED))
-        assertEquals("KEYSTORE_CANCELLED", mapErrorCode(BiometricPrompt.ERROR_NEGATIVE_BUTTON))
-        assertEquals("KEYSTORE_CANCELLED", mapErrorCode(BiometricPrompt.ERROR_CANCELED))
+        assertEquals(KeystoreErrorCode.CANCELLED, mapErrorCode(BiometricPrompt.ERROR_USER_CANCELED))
+        assertEquals(KeystoreErrorCode.CANCELLED, mapErrorCode(BiometricPrompt.ERROR_NEGATIVE_BUTTON))
+        assertEquals(KeystoreErrorCode.CANCELLED, mapErrorCode(BiometricPrompt.ERROR_CANCELED))
     }
 
     @Test
     fun mapErrorCode_unavailable() {
-        assertEquals("KEYSTORE_UNAVAILABLE", mapErrorCode(BiometricPrompt.ERROR_HW_NOT_PRESENT))
-        assertEquals("KEYSTORE_UNAVAILABLE", mapErrorCode(BiometricPrompt.ERROR_HW_UNAVAILABLE))
-        assertEquals("KEYSTORE_UNAVAILABLE", mapErrorCode(BiometricPrompt.ERROR_NO_BIOMETRICS))
-        assertEquals("KEYSTORE_UNAVAILABLE", mapErrorCode(BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL))
-        assertEquals("KEYSTORE_UNAVAILABLE", mapErrorCode(BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED))
+        assertEquals(KeystoreErrorCode.UNAVAILABLE, mapErrorCode(BiometricPrompt.ERROR_HW_NOT_PRESENT))
+        assertEquals(KeystoreErrorCode.UNAVAILABLE, mapErrorCode(BiometricPrompt.ERROR_HW_UNAVAILABLE))
+        assertEquals(KeystoreErrorCode.UNAVAILABLE, mapErrorCode(BiometricPrompt.ERROR_NO_BIOMETRICS))
+        assertEquals(KeystoreErrorCode.UNAVAILABLE, mapErrorCode(BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL))
+        assertEquals(KeystoreErrorCode.UNAVAILABLE, mapErrorCode(BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED))
     }
 
     @Test
     fun mapErrorCode_lockout() {
-        assertEquals("KEYSTORE_LOCKOUT", mapErrorCode(BiometricPrompt.ERROR_LOCKOUT))
-        assertEquals("KEYSTORE_LOCKOUT", mapErrorCode(BiometricPrompt.ERROR_LOCKOUT_PERMANENT))
+        assertEquals(KeystoreErrorCode.LOCKOUT, mapErrorCode(BiometricPrompt.ERROR_LOCKOUT))
+        assertEquals(KeystoreErrorCode.LOCKOUT, mapErrorCode(BiometricPrompt.ERROR_LOCKOUT_PERMANENT))
     }
 
     @Test
     fun mapErrorCode_unknownCodesCollapseToFailed() {
         // Framework codes not handled above collapse to the default bucket.
-        assertEquals("KEYSTORE_FAILED", mapErrorCode(BiometricPrompt.ERROR_UNABLE_TO_PROCESS))
-        assertEquals("KEYSTORE_FAILED", mapErrorCode(BiometricPrompt.ERROR_NO_SPACE))
-        assertEquals("KEYSTORE_FAILED", mapErrorCode(BiometricPrompt.ERROR_TIMEOUT))
+        assertEquals(KeystoreErrorCode.FAILED, mapErrorCode(BiometricPrompt.ERROR_UNABLE_TO_PROCESS))
+        assertEquals(KeystoreErrorCode.FAILED, mapErrorCode(BiometricPrompt.ERROR_NO_SPACE))
+        assertEquals(KeystoreErrorCode.FAILED, mapErrorCode(BiometricPrompt.ERROR_TIMEOUT))
         // An entirely unknown code also collapses.
-        assertEquals("KEYSTORE_FAILED", mapErrorCode(99999))
+        assertEquals(KeystoreErrorCode.FAILED, mapErrorCode(99999))
     }
 
     @Test
@@ -289,5 +289,27 @@ class KeystorePluginTest {
         val nested = """{"value":"x","alias":"a","prefs":"p","policy":{"authRequired":true}}"""
         val args = tauriLikeMapper.readValue(nested, StoreArgs::class.java)
         assertEquals(false, args.authRequired)
+    }
+
+    // ── Cross-language contract: Kotlin error codes ↔ Rust mirror ──────
+    //
+    // The single source of truth for the KEYSTORE_* code SET is the checked-in
+    // `contracts/keystore-error-codes.json` at the plugin root, shared with the
+    // Rust plugin crate's mirror test (which reads the same file via
+    // `include_str!`). This pins the Kotlin enum to it; a code renamed or added
+    // on either side without updating the contract fails this test or the Rust
+    // one — closing the silent Kotlin↔Rust rename-drift hole that Rust-rooted
+    // codegen cannot reach (these codes originate here, in Kotlin). The file is
+    // exposed to the test classpath by the `../contracts` resource srcDir in
+    // build.gradle.kts.
+    @Test
+    fun keystoreErrorCode_enum_matches_cross_language_contract() {
+        val contract = KeystorePluginTest::class.java
+            .getResourceAsStream("/keystore-error-codes.json")!!
+            .bufferedReader().use { it.readText() }
+        val expected: Set<String> =
+            tauriLikeMapper.readValue(contract, Array<String>::class.java).toSet()
+        val actual: Set<String> = KeystoreErrorCode.values().map { it.wire }.toSet()
+        assertEquals(expected, actual)
     }
 }

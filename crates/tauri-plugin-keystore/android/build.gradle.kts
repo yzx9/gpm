@@ -35,6 +35,16 @@ android {
             isIncludeAndroidResources = true
         }
     }
+
+    // Expose the plugin-root contract fixture (`../contracts`) to the JVM unit
+    // test classpath so the cross-language code-set pin can read
+    // `/keystore-error-codes.json` as a resource (the Rust mirror test reads
+    // the same file via `include_str!`).
+    sourceSets {
+        getByName("test") {
+            resources.srcDir("../contracts")
+        }
+    }
 }
 
 dependencies {

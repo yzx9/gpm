@@ -52,24 +52,40 @@ private const val PREF_IV = "iv"
 /** GCM authentication tag length, in bits. */
 private const val GCM_TAG_BITS = 128
 
-/** Map a [BiometricPrompt] error code to a stable `KEYSTORE_*` code. Pure: the
- *  `ERROR_*` constants are compile-time-inlined `static final int`, so the
+/** The stable `KEYSTORE_*` error codes this plugin emits over the IPC reject
+ *  channel. The single source of these strings on the Kotlin side: every
+ *  `invoke.reject(..., code)` and [mapErrorCode] return goes through [wire], so
+ *  the literal forms live only here. The Rust plugin crate mirrors this set,
+ *  and a checked-in contract file (`contracts/keystore-error-codes.json` at the
+ *  plugin root) pins the two together — a code renamed on either side without
+ *  updating the contract fails the contract test on that side. */
+enum class KeystoreErrorCode(val wire: String) {
+    CANCELLED("KEYSTORE_CANCELLED"),
+    FAILED("KEYSTORE_FAILED"),
+    KEY_INVALIDATED("KEYSTORE_KEY_INVALIDATED"),
+    LOCKOUT("KEYSTORE_LOCKOUT"),
+    NOT_SET("KEYSTORE_NOT_SET"),
+    UNAVAILABLE("KEYSTORE_UNAVAILABLE"),
+}
+
+/** Map a [BiometricPrompt] error code to a stable [KeystoreErrorCode]. Pure:
+ *  the `ERROR_*` constants are compile-time-inlined `static final int`, so the
  *  extracted function carries no runtime dependency on `androidx.biometric`. */
-internal fun mapErrorCode(code: Int): String = when (code) {
+internal fun mapErrorCode(code: Int): KeystoreErrorCode = when (code) {
     BiometricPrompt.ERROR_USER_CANCELED,
     BiometricPrompt.ERROR_NEGATIVE_BUTTON,
     BiometricPrompt.ERROR_CANCELED,
-    -> "KEYSTORE_CANCELLED"
+    -> KeystoreErrorCode.CANCELLED
     BiometricPrompt.ERROR_HW_NOT_PRESENT,
     BiometricPrompt.ERROR_HW_UNAVAILABLE,
     BiometricPrompt.ERROR_NO_BIOMETRICS,
     BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
     BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
-    -> "KEYSTORE_UNAVAILABLE"
+    -> KeystoreErrorCode.UNAVAILABLE
     BiometricPrompt.ERROR_LOCKOUT,
     BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
-    -> "KEYSTORE_LOCKOUT"
-    else -> "KEYSTORE_FAILED"
+    -> KeystoreErrorCode.LOCKOUT
+    else -> KeystoreErrorCode.FAILED
 }
 
 /** Class name only — never leak crypto internals or secret data. */
@@ -387,7 +403,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             encryptionCipher(args.alias)
         } catch (e: Exception) {
             plainBytes.fill(0)
-            invoke.reject(safeName(e), "KEYSTORE_FAILED")
+            invoke.reject(safeName(e), KeystoreErrorCode.FAILED.wire)
             return
         }
 
@@ -399,7 +415,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
                 ciphertext.fill(0)
                 invoke.resolve()
             } catch (e: Exception) {
-                invoke.reject(safeName(e), "KEYSTORE_FAILED")
+                invoke.reject(safeName(e), KeystoreErrorCode.FAILED.wire)
             } finally {
                 plainBytes.fill(0)
             }
@@ -408,7 +424,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
         val fa = fragmentActivity() ?: run {
             plainBytes.fill(0)
-            invoke.reject("not FragmentActivity", "KEYSTORE_UNAVAILABLE")
+            invoke.reject("not FragmentActivity", KeystoreErrorCode.UNAVAILABLE.wire)
             return
         }
         val prompt = BiometricPrompt(
@@ -424,7 +440,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
                         ciphertext.fill(0)
                         invoke.resolve()
                     } catch (e: Exception) {
-                        invoke.reject(safeName(e), "KEYSTORE_FAILED")
+                        invoke.reject(safeName(e), KeystoreErrorCode.FAILED.wire)
                     } finally {
                         plainBytes.fill(0)
                     }
@@ -432,7 +448,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
 
                 override fun onAuthenticationError(code: Int, errString: CharSequence) {
                     plainBytes.fill(0)
-                    invoke.reject(errString.toString(), mapErrorCode(code))
+                    invoke.reject(errString.toString(), mapErrorCode(code).wire)
                 }
 
                 // Non-terminal (wrong finger): leave the prompt open.
@@ -450,7 +466,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             // resolve_prompt_text with authRequired=true); `authenticate` could
             // throw synchronously too. Zeroize the to-be-sealed secret either way.
             plainBytes.fill(0)
-            invoke.reject(safeName(e), "KEYSTORE_FAILED")
+            invoke.reject(safeName(e), KeystoreErrorCode.FAILED.wire)
         }
     }
 
@@ -465,7 +481,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(RetrieveArgs::class.java)
 
         val (iv, ciphertext) = readCipherData(prefs(args.prefs)) ?: run {
-            invoke.reject("nothing stored", "KEYSTORE_NOT_SET")
+            invoke.reject("nothing stored", KeystoreErrorCode.NOT_SET.wire)
             return
         }
 
@@ -482,13 +498,13 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
                     plain.fill(0)
                 }
             } catch (e: Exception) {
-                invoke.reject(safeName(e), "KEYSTORE_FAILED")
+                invoke.reject(safeName(e), KeystoreErrorCode.FAILED.wire)
             }
             return
         }
 
         val fa = fragmentActivity() ?: run {
-            invoke.reject("not FragmentActivity", "KEYSTORE_UNAVAILABLE")
+            invoke.reject("not FragmentActivity", KeystoreErrorCode.UNAVAILABLE.wire)
             return
         }
         val cipher = try {
@@ -496,7 +512,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
         } catch (e: Exception) {
             // Includes KeyPermanentlyInvalidatedException when all biometrics
             // were removed since the key was generated → re-setup required.
-            invoke.reject(safeName(e), "KEYSTORE_KEY_INVALIDATED")
+            invoke.reject(safeName(e), KeystoreErrorCode.KEY_INVALIDATED.wire)
             return
         }
 
@@ -517,12 +533,12 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
                             plain.fill(0)
                         }
                     } catch (e: Exception) {
-                        invoke.reject(safeName(e), "KEYSTORE_FAILED")
+                        invoke.reject(safeName(e), KeystoreErrorCode.FAILED.wire)
                     }
                 }
 
                 override fun onAuthenticationError(code: Int, errString: CharSequence) {
-                    invoke.reject(errString.toString(), mapErrorCode(code))
+                    invoke.reject(errString.toString(), mapErrorCode(code).wire)
                 }
 
                 override fun onAuthenticationFailed() {}
