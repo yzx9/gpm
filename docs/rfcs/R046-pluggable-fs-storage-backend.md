@@ -168,8 +168,8 @@ injection seam this RFC's pluggable backends ride; that RFC is the concrete
 "how a backend is selected and constructed" behind this RFC's seam.
 
 The storage-side analog of the crypto multi-backend abstraction (which the GPG
-backend exercises). Relates to `0036-gpg-crypto-backend.md` — the crypto backend
-that reshaped its trait when a second backend arrived; this is the same lesson on
+backend exercises). Relates to the shipped GPG backend (spec 004 / A006) — the crypto
+backend that reshaped its trait when a second backend arrived; this is the same lesson on
 the storage side (the filesystem trait is shaped by its second, non-POSIX
 backend). Composed with `0047-filename-encrypting-storage-backend.md`, which
 layers on a storage backend to protect the metadata this backend would otherwise

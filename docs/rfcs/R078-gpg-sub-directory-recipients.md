@@ -28,7 +28,7 @@ mis-routing is a correctness and security gap, not merely a missing convenience.
 
 gopass resolves recipients per secret by walking up from the secret's directory
 to the nearest `.gpg-id`. gpm's GPG backend resolves one recipients index at the
-repo root, established in R036. The read path is unaffected by the difference;
+repo root, established in the GPG backend (spec 004). The read path is unaffected by the difference;
 only the encrypt path is.
 
 Interim v1 stance: the limitation is documented, with no detection or special
@@ -63,5 +63,5 @@ fixture. ~small for the read-only mitigation (2), should it be wanted first.
 
 ## Depends on / Supersedes
 
-Relates to R036 (GPG crypto backend, which established the root-only recipient
-resolution) and `docs/specs/004-encryption-gpg`.
+Relates to the shipped GPG backend (`docs/specs/004-encryption-gpg`, which
+established the root-only recipient resolution).

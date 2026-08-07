@@ -1,37 +1,36 @@
-# gpm — Android-first age-only gopass password client
+# gpm — Android-first gopass-compatible password client
 
-A read-only, age-only, gopass-compatible password client for Android (and desktop), built on
-**Tauri v2 + Rust + Vue 3**.
+A gopass-compatible password client for Android (and desktop), built on **Tauri v2 + Rust + Vue 3**.
+It opens existing **age** and **GPG/OpenPGP** gopass repositories; new stores it creates are age-only.
 
-## Why
+## Highlights
 
-There is no Android GUI client that can read age-encrypted gopass/password-store repositories. The
-Android Password Store app is unmaintained and GPG-only. gopass itself is Go/CLI-only. People
-resort to running gopass inside Termux on Android.
-
-**gpm fills this gap.**
+- **Drop-in gopass compatibility.** Clone an existing gopass or password-store repository and it just works — gpm reads and writes the standard on-disk format, age or GPG. If something doesn't interoperate with `gopass`, [it's a bug](https://github.com/yzx9/gpm/issues).
+- **age and GPG/OpenPGP, both first-class.** Existing Android clients are GPG-only; gpm also opens age-encrypted gopass stores — age is gopass's modern alternative to GPG. Full list, read, write, and sync for both backends (native x25519, SSH, age-plugin recipients; and GPG/OpenPGP). New stores are age-only; existing GPG stores are opened as-is. No system `gpg` required.
+- **A modern Android client for gopass.** Tauri v2 + Rust — biometric unlock, on-device encryption via the Android Keystore, and a native feel. No Termux, no CLI.
+- **Private by design.** No cloud, no analytics, no accounts. Secrets sync over **git to a repo you control**. A password is decrypted and copied entirely on the Rust side and never reaches the WebView, and decrypted material is wiped after every use.
+- **Fully open source.** Every line is public and auditable — no proprietary components, no black-box crypto. Dual-licensed under **MIT or Apache-2.0** (your choice): use it, audit it, fork it, self-host it.
 
 ## Security Model
 
-- **Age-only** — no GPG, no cloud, no analytics, no Autofill
 - **Copy password never touches WebView** — decrypts and copies entirely on the Rust side
-- **Show password auto-clear** — with page-leave cleanup in Vue
+- **Show password auto-clear** — with page-leave cleanup
 - **Zeroize-per-decrypt** — identity bytes wiped after every decrypt call
+- **At-rest encryption** — on Android, the repo config and identity are sealed with AES-256-GCM under a Keystore key
 - **Safe error messages** — no secrets in logs, errors, or toasts
+
+See [SECURITY.md](docs/SECURITY.md) for the full threat model.
 
 ## Features
 
-- Clone a gopass age-encrypted password store from a Git URL (HTTPS + PAT or SSH key)
-- Decrypt entries encrypted to native x25519 keys (`age1...`) or SSH keys (`ssh-ed25519`, `ssh-rsa`)
-- List all `.age` entries with display names
-- Search entries by name (fuzzy, case-insensitive)
-- Copy password to clipboard (password never reaches WebView)
-- View password with auto-clear and page-leave cleanup
-- View notes metadata
+- Clone a gopass store from a Git URL (HTTPS + PAT or SSH key) — age or GPG/OpenPGP
+- List and search entries (fuzzy, case-insensitive) with display names
+- Copy a password (never reaches the WebView) or reveal it with auto-clear
 - Create and edit secrets with gopass-compatible templates
-- Pull and push updates over git (fast-forward only), with optional auto-sync on every save
-- Generate ed25519 SSH keys on-device, or paste existing keys
-- View SSH public key and export private key from settings
+- Browse a secret's past revisions and recover an old value
+- Sync over git (fast-forward only), with optional auto-sync on every save and a per-entry keep-yours / keep-theirs resolve on collision
+- Generate ed25519 SSH keys on-device, or import existing age / SSH / GPG keys
+- Android: biometric unlock, screen-capture protection, background sync
 
 ## Contribution
 

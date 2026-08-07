@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- gpm can now **open and use an existing GPG/OpenPGP-encrypted gopass store** — clone it, import a GPG secret key through the file picker, verify the key's passphrase, then list, copy, and create secrets just like an age store. This is for people with legacy or work-mandated GPG repos; no system `gpg` is needed and it works the same on Android and desktop. (New stores gpm creates are still age-only; in-app GPG key generation and recipient management are not part of this yet.)
+
 ### Changed
 
 - gpm's license broadened from **Apache-2.0** to **MIT OR Apache-2.0** — you can now use, modify, and distribute gpm under either license, at your option. This matches the convention used across the Rust ecosystem. Existing use under Apache-2.0 is unaffected; the new MIT option is purely additional.

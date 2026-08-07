@@ -7,12 +7,13 @@ scope: gpg
 
 # 004 — GPG Encryption
 
-> Status: In flight · Last verified: 2026-08-05
-> Current: the backend is implemented, interops with system gopass, and is wired through
-> the Store for read and write (`Store::get`/`Store::set` route to `GpgBackend` once
-> `repo.json` selects it). Remaining: the setup sub-flow (no path writes `crypto:"gpg"`
-> or accepts a GPG identity — setup rejects PGP keys), the keyring-management UI, and a
-> write-side Store integration test.
+> Status: v1 shipped · Last verified: 2026-08-07
+> Current: the backend interops with system gopass and is wired through the Store for
+> read and write, AND the setup sub-flow ships — clone a gopass-GPG store, import an
+> existing GPG secret key via the file picker, verify its S2K passphrase, and use it
+> (list/copy/create). `save_identity` is the crypto-persistence authority that writes
+> `crypto:"gpg"`. Remaining: in-app GPG key generation, the recipient-keyring-management
+> UI, and GPG paste import (file-pick only in v1).
 
 ## 1. Introduction
 
@@ -42,10 +43,10 @@ GPG); work without a system gpg, identically on Android and desktop.
 
 ### Functionality
 
-- The backend is implemented, interops with system gopass, and is wired through the
-  Store for both read and write. **Not yet done:** the setup sub-flow (setup rejects
-  PGP keys; no path configures a GPG store), the keyring-management UI, and write-side
-  Store integration coverage.
+- The backend interops with system gopass and is wired through the Store for both read
+  and write; the setup sub-flow ships (open an existing GPG store: clone → import a GPG
+  secret key → verify its S2K passphrase → use). **Not yet done:** in-app GPG key
+  generation, the recipient-keyring-management UI, and GPG paste import (file-pick only).
 
 ### Compatibility
 
@@ -78,6 +79,8 @@ See <./security.md>.
 
 - **Shipped:** the GPG side of signature verification (shared with 005); the `GpgBackend`
   trait impl (encrypt/decrypt/unlock/recipients/profile) and its Store wiring for read and
-  write, proven against system-gpg fixtures.
-- **Now:** the setup sub-flow (GPG keygen/import + persisting `crypto:"gpg"`), the
-  keyring-management UI, and a write-side Store integration test.
+  write, proven against system-gpg fixtures; the v1 setup sub-flow (open an existing GPG
+  store via file-pick import + S2K verify, with `save_identity` as the crypto-persistence
+  authority) and a write-side Store integration test.
+- **Now:** in-app GPG key generation, the recipient-keyring-management UI, and GPG paste
+  import (file-pick only in v1).

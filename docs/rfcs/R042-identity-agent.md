@@ -98,7 +98,7 @@ session-cache policy. Trivial now: this RFC is the deferred-work record.
 
 ## Depends on / Supersedes
 
-Relates to `0036-gpg-crypto-backend` (whose trait reshape raised the question),
+Relates to the shipped GPG backend (spec 004 / A006, whose trait reshape raised the question),
 `0030-age-plugin-yubikey` (the first consumer that will force the session
 cache), and `0009-gpg-signature-verification` (unrelated, but shares the rpgp
 seam). Supersedes an earlier same-day call to put the identity cache on the

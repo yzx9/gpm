@@ -28,14 +28,14 @@ gpm now encrypts (in-app secret creation), so the encrypt-to-attacker surface is
 
 ## Depends on / Supersedes
 
-Deferred until `R036-gpg-crypto-backend` lands and gpm grows a recipients-
-management flow. The pin is only worth building once a secret can be encrypted
-to a key the user did not vet — i.e. multi-recipient / team stores. gpm already
-encrypts to every entry in the recipients file, so the attack surface is real
-today for any team store; but the team stores gpm will actually open are
-predominantly GPG (the norm in gopass team/enterprise setups, per R036), and
-unreadable until R036 ships. Sequencing after R036 also dodges rework: R036
-makes the recipients file a per-backend property — exactly what the pin hashes.
+Deferred until gpm grows a recipients-management flow (R083). The pin is only
+worth building once a secret can be encrypted to a key the user did not vet —
+i.e. multi-recipient / team stores. gpm already encrypts to every entry in the
+recipients file, so the attack surface is real today for any team store; the team
+stores gpm will actually open are predominantly GPG (the norm in gopass
+team/enterprise setups) — now readable, since the GPG backend has shipped (spec
+004 / A006). The recipients file is already a per-backend property, which is
+exactly what the pin hashes.
 
 Separately, gpm has no recipients-management flow (no add / remove /
 acknowledge). The acknowledge half of this design has no home until that flow

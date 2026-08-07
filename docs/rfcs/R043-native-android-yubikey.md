@@ -104,7 +104,7 @@ touch, and an ECDH exchange every time, or a PIN cached only for the life of a
 transport session). The seam therefore has to move from "a cached bag of identity
 bytes" to "an identity handle that produces a per-operation file-key unwrap." This
 is the same kind of pressure on the crypto-backend/identity abstraction that the
-GPG backend (0036) already records — the abstraction was explicitly budgeted to be
+GPG backend (spec 004) already records — the abstraction was explicitly budgeted to be
 reshaped when a second identity model arrives, and a hardware-key identity is
 exactly such a model. Landing this RFC means landing that reshape, not bolting a
 branch onto the byte-cache.
@@ -194,9 +194,9 @@ should be sequenced alongside it rather than done twice.
 Depends on `0030-age-plugin-yubikey` — this is the Android follow-on 0030 explicitly
 deferred; the recipient recognition and the desktop decrypt path it ships are
 prerequisites, and the honest Android "not available" error 0030 added becomes the
-real implementation here. Relates to `0036-gpg-crypto-backend` and the crypto-backend
-abstraction it exercises: both record that the identity/backend abstraction will be
-reshaped when a second identity model arrives, and the hardware-identity seam lands
+real implementation here. Relates to the shipped GPG backend (spec 004 / A006) and the
+crypto-backend abstraction it exercises: both record that the identity/backend abstraction
+will be reshaped when a second identity model arrives, and the hardware-identity seam lands
 in that same reshape, not as a one-off. Relates to the keystore
 plugin as the architectural precedent for the in-process native-plugin plus
 injected-secret pattern this design reuses.

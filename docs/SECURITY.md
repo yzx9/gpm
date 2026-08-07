@@ -1,9 +1,10 @@
 # Security Model
 
-gpm is a local-first, age-encrypted gopass client. It clones a gopass repository to
-the device, decrypts entries on demand, copies/shows secrets, creates/edits/deletes
-them, and syncs over **git to a repo you control** (self-hosted — no third-party cloud).
-Secret encryption is **age-only** (a GPG/OpenPGP backend is in progress; see `specs/004`).
+gpm is a local-first gopass client (age- or GPG/OpenPGP-encrypted stores). It clones a
+gopass repository to the device, decrypts entries on demand, copies/shows secrets,
+creates/edits/deletes them, and syncs over **git to a repo you control** (self-hosted —
+no third-party cloud). Secret encryption supports **age and GPG/OpenPGP** backends —
+existing GPG stores are opened and used as-is; new stores are age-only (see `specs/004`).
 
 Feature-specific threat models live in `docs/specs/<NNN>/security.md`:
 001 entry access, 003 age, 004 GPG, 005 git storage & sync, 006 identities, 007 app lock,
