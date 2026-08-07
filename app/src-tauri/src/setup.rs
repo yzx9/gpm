@@ -5,6 +5,7 @@
 //! Setup & identity commands — repo clone, identity pick / verify / save, and
 //! the auth-state snapshot the router guard reads.
 
+use rustpass::crypto::{CryptoBackend, GpgBackend};
 use rustpass::error::ErrorCode;
 use rustpass::identity::{IdentityType, classify_identity};
 use rustpass::ssh;
@@ -65,6 +66,16 @@ pub(crate) struct PickedIdentityResult {
     /// Derived public key (recipient). `Some` only when the identity is already
     /// usable (unencrypted); `None` until a passphrase is verified.
     recipient: Option<String>,
+    /// GPG key's primary user id (e.g. `Jordan <jordan@example.com>`), shown
+    /// before the passphrase prompt. `None` for non-GPG identities.
+    user_id: Option<String>,
+    /// GPG key's full fingerprint (shown alongside the uid). `None` for non-GPG.
+    fingerprint: Option<String>,
+    /// GPG membership probe: `Some(true)`/`Some(false)` if the identity's
+    /// membership in the cloned store's recipients was determined, `None` when
+    /// there is no store / no recipients. Drives the GPG tab's match badge; the
+    /// authoritative gate is `save_identity`. `None` for non-GPG identities.
+    is_recipient: Option<bool>,
 }
 
 /// Returned by `verify_picked_identity` — the public key now that the encrypted
@@ -361,13 +372,13 @@ pub(crate) async fn pick_identity_file(
         )
     })?;
 
-    let (info, recipient) = match classify_identity(&picked.bytes) {
+    let (info, recipient, gpg) = match classify_identity(&picked.bytes) {
         IdentityType::X25519 | IdentityType::SshEd25519 | IdentityType::SshRsa => {
             let info = rustpass::recipient::validate_identity(text)?;
             // validate_identity already derives the recipient when no passphrase
             // is needed; reuse it instead of deriving a second time.
             let recipient = info.recipient.clone();
-            (info, recipient)
+            (info, recipient, None)
         }
         IdentityType::AgeEncrypted => {
             // A passphrase-encrypted x25519 identity (e.g. encrypted with age).
@@ -378,6 +389,7 @@ pub(crate) async fn pick_identity_file(
                     encrypted: true,
                     recipient: None,
                 },
+                None,
                 None,
             )
         }
@@ -404,13 +416,20 @@ pub(crate) async fn pick_identity_file(
             ));
         }
         IdentityType::PgpSecretKey => {
-            // Recognized GPG/OpenPGP secret key, but the GPG crypto backend's
-            // setup/import flow isn't wired yet (RFC 0036 — backend lands in a
-            // later phase). Reject clearly rather than silently mishandling.
-            return Err(Error::new(
-                ErrorCode::InvalidIdentity,
-                "GPG/OpenPGP identities aren't supported in setup yet (RFC 0036)",
-            ));
+            // GPG/OpenPGP secret key — stage the S2K armor and surface its public
+            // metadata (uid, fingerprint, recipient, membership) for the pick
+            // panel. The passphrase is verified next; the S2K armor is stored
+            // byte-unchanged (GPG keeps the S2K-locked form at rest). The
+            // authoritative membership gate + crypto-kind persist run in
+            // `save_identity` (complete step).
+            let preview = state.store.gpg_identity_preview(text).await?;
+            let info = IdentityInfo {
+                key_type: KeyType::Gpg,
+                encrypted: true,
+                recipient: Some(preview.recipient.clone()),
+            };
+            let recipient = Some(preview.recipient.clone());
+            (info, recipient, Some(preview))
         }
     };
 
@@ -419,6 +438,9 @@ pub(crate) async fn pick_identity_file(
         encrypted: info.encrypted,
         filename: picked.filename.clone(),
         recipient: recipient.clone(),
+        user_id: gpg.as_ref().and_then(|p| p.user_id.clone()),
+        fingerprint: gpg.as_ref().map(|p| p.fingerprint.clone()),
+        is_recipient: gpg.as_ref().and_then(|p| p.is_recipient),
     };
 
     // Hold the identity text (still encrypted for age-encrypted / SSH); drop any
@@ -505,6 +527,18 @@ pub(crate) async fn verify_picked(
             pending.identity = Zeroizing::new(bare_str.to_string());
             pending.info = bare_info;
             recipient.expect("a bare x25519 identity always derives a recipient")
+        }
+        // GPG: validate the S2K passphrase (throwaway check). The S2K armor is
+        // re-staged byte-unchanged — GPG stores the S2K-locked form at rest,
+        // unlike age which decrypts to a bare key. Recipient is public-packet
+        // data (no passphrase needed).
+        (KeyType::Gpg, true) => {
+            let identity_bytes = pending.identity.as_bytes().to_vec();
+            let pw = passphrase.clone();
+            GpgBackend
+                .validate_identity_passphrase(&identity_bytes, &pw)
+                .await?;
+            GpgBackend.identity_recipient(pending.identity.as_str(), None)?
         }
         _ => {
             return Err(Error::new(

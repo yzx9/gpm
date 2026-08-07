@@ -9,11 +9,19 @@
 //! picked identity lives only in memory until verified, and any verify failure
 //! (wrong passphrase, not-encrypted, …) **abandons** it.
 
+use rustpass::crypto::{CryptoBackend, GpgBackend};
 use rustpass::{IdentityInfo, KeyType};
 use zeroize::Zeroizing;
 
 use crate::setup;
 use crate::tests::{generate_test_keypair, make_unlocked_state};
+
+/// Committed system-gpg fixture key for the GPG `verify_picked` tests. The
+/// keygen primitive is `pub(crate)` in rustpass (unreachable from the app), so
+/// the test reuses the integration fixture. S2K-passphrase-protected.
+const GPG_FIXTURE_SECRET: &[u8] =
+    include_bytes!("../../../../crates/rustpass/tests/fixtures/gpg/secret.asc");
+const GPG_FIXTURE_PASSPHRASE: &str = "test-passphrase-fixture-only";
 
 /// A valid x25519 identity validates; garbage does not.
 #[tokio::test]
@@ -167,4 +175,71 @@ async fn verify_pasted_unencrypted_ssh_errors() {
         .await
         .expect_err("unencrypted SSH has nothing to verify");
     assert_eq!(err.code, "IDENTITY_NOT_ENCRYPTED");
+}
+
+/// `verify_picked` GPG branch: a correct S2K passphrase is validated (throwaway)
+/// and the S2K armor is re-staged BYTE-UNCHANGED — GPG stores the S2K-locked form
+/// at rest, unlike the age arm which decrypts to a bare key. A future refactor
+/// that accidentally mirrors the age arm (transforming `pending.identity`) would
+/// brick the identity at rest on the next save; the byte-equal assertion pins it.
+#[tokio::test]
+async fn verify_picked_correct_gpg_passphrase_re_stages_armor() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let armor = std::str::from_utf8(GPG_FIXTURE_SECRET).expect("fixture armor utf-8");
+    *state.pending_identity.lock().unwrap() = Some(setup::PendingIdentity {
+        identity: Zeroizing::new(armor.to_string()),
+        info: IdentityInfo {
+            key_type: KeyType::Gpg,
+            encrypted: true,
+            recipient: None,
+        },
+    });
+
+    let res = setup::verify_picked(&state, GPG_FIXTURE_PASSPHRASE.to_string())
+        .await
+        .expect("correct passphrase verifies");
+    // The recipient is public-packet data (gopass Key.ID.: 0x + last 16 hex).
+    let expected = GpgBackend
+        .identity_recipient(armor, None)
+        .expect("derive fixture recipient");
+    assert_eq!(res.recipient, expected);
+
+    // Load-bearing: the re-staged identity is the SAME S2K armor, byte-for-byte
+    // (not an unlocked/re-armored form, which the at-rest store can't use).
+    let guard = state.pending_identity.lock().unwrap();
+    let re_staged = guard
+        .as_ref()
+        .expect("a successful verify re-stores the identity")
+        .identity
+        .as_str();
+    assert_eq!(
+        re_staged, armor,
+        "the GPG S2K armor must be re-staged byte-unchanged"
+    );
+}
+
+/// `verify_picked` GPG branch: a wrong S2K passphrase surfaces
+/// `WRONG_PASSPHRASE` AND abandons the picked file (mirrors the SSH arm's
+/// take()/re-store contract — any error drops `pending_identity`).
+#[tokio::test]
+async fn verify_picked_wrong_gpg_passphrase_abandons() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+    let armor = std::str::from_utf8(GPG_FIXTURE_SECRET).expect("fixture armor utf-8");
+    *state.pending_identity.lock().unwrap() = Some(setup::PendingIdentity {
+        identity: Zeroizing::new(armor.to_string()),
+        info: IdentityInfo {
+            key_type: KeyType::Gpg,
+            encrypted: true,
+            recipient: None,
+        },
+    });
+
+    let err = setup::verify_picked(&state, "not-the-passphrase".to_string())
+        .await
+        .expect_err("wrong passphrase should error");
+    assert_eq!(err.code, "WRONG_PASSPHRASE");
+    assert!(
+        state.pending_identity.lock().unwrap().is_none(),
+        "a GPG verify failure must abandon the picked file"
+    );
 }
