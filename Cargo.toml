@@ -29,8 +29,8 @@ pedantic = "warn"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Generate TypeScript bindings from Rust types (R083 single-source codegen for
-# the IPC union mirrors). serde-compat (default-on) reads existing serde attrs.
+# Generate TypeScript bindings from Rust types (single-source codegen for the
+# IPC union mirrors). serde-compat (default-on) reads existing serde attrs.
 ts-rs = "12"
 log = "0.4"
 # `plugin` enables the age plugin protocol (age-plugin-yubikey etc.). The library

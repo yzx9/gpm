@@ -28,6 +28,10 @@ jobs:
           sh scripts/gen-icons.sh
           cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Check codegen freshness (R085)
+        shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
+        run: cargo run -p codegen -- --check
+
   frontend:
     runs-on: ubuntu-latest
     steps:

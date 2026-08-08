@@ -39,10 +39,22 @@ test-plugin:
 [group('test')]
 test: test-be test-fe test-plugin
 
-# Clippy + vue-tsc type check + locale key check
-lint: gen-icons check-i18n
+# Clippy + vue-tsc type check + locale key check + codegen freshness
+lint: gen-icons check-i18n check-codegen-fresh
   cargo clippy --all-targets --all-features -- -D warnings
   pnpm -C app exec vue-tsc --noEmit
+
+# Regenerate the checked-in TS mirrors of the Rust IPC enums from their single
+# source (R085). Run after changing a participating enum, then commit the result.
+[group('codegen')]
+gen-codegen:
+  cargo run -p codegen
+
+# Internal: fail if a checked-in generated TS file is stale — i.e. a Rust enum
+# changed without re-running `just gen-codegen` (R085 freshness gate).
+[private]
+check-codegen-fresh:
+  cargo run -p codegen -- --check
 
 # Reject duplicate keys in locale JSON (JSON.parse silently shadows repeats)
 check-i18n:
