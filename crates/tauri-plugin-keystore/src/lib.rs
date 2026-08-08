@@ -149,6 +149,7 @@ impl KeystoreErrorCode {
 /// `#[serde(rename_all = "snake_case")]`; the cross-layer string contract
 /// (Kotlin emitter ↔ Rust deserializer ↔ TS union) is pinned by tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum BiometricState {
     /// API 30+ with a STRONG (Class 3) biometric enrolled — biometric unlock usable.

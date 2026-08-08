@@ -5717,6 +5717,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-plugin",
+ "ts-rs",
 ]
 
 [[package]]

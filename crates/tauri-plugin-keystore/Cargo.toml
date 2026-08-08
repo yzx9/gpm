@@ -6,6 +6,13 @@ edition.workspace = true
 license.workspace = true
 links = "tauri-plugin-keystore"
 
+[features]
+# Enables the ts-rs::TS derive on `BiometricState` so the workspace codegen crate
+# (`crates/codegen`) can emit its TypeScript mirror. Off by default: the published
+# plugin must not pull ts-rs (or its proc-macro crate) into a consumer's build or
+# the Android artifact. Only the codegen crate enables this.
+ts-codegen = ["dep:ts-rs"]
+
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }
 
@@ -14,6 +21,7 @@ tauri = "2"
 base64 = { workspace = true }
 serde = { workspace = true }
 log = { workspace = true }
+ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
