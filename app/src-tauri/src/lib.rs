@@ -13,7 +13,11 @@ use tauri::{App, AppHandle, Manager, Runtime, WebviewWindowBuilder, Wry};
 use tauri_plugin_keystore::{Keystore, KeystoreExt};
 use tokio::task::JoinHandle;
 
-use crate::app_config::{AppConfigStore, BackgroundSyncCadence};
+use crate::app_config::AppConfigStore;
+// Re-exported so the workspace `codegen` crate can reach these IPC config
+// enums (the `app_config` module is otherwise private). They cross the
+// Rust↔TS boundary inside `AppConfig`; the codegen emits their TS mirrors (R085).
+pub use crate::app_config::{BackgroundSyncCadence, GateIdle, SecureScreenMode};
 use crate::keystore::KvKeystore;
 use crate::setup::PendingIdentity;
 

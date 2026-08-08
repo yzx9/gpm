@@ -2284,6 +2284,7 @@ dependencies = [
  "tauri-plugin-screen-secure",
  "tempfile",
  "tokio",
+ "ts-rs",
  "zeroize",
  "zip",
 ]

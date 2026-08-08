@@ -119,13 +119,20 @@ pub(crate) struct VerboseNotifyText {
 /// build deserializes to `Unknown` instead of failing the surrounding config
 /// parse (which would wipe the whole config back to defaults). The frontend
 /// treats `None` and `Unknown` as the sensitive default.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum SecureScreenMode {
+pub enum SecureScreenMode {
+    /// No screen-capture protection — `FLAG_SECURE` never set.
     Off,
+    /// `FLAG_SECURE` set only on routes that reveal secrets.
     Sensitive,
+    /// `FLAG_SECURE` always set — the whole app is hidden from capture/recents.
     Always,
+    /// Forward-compat deserialize sink — omitted from the generated TypeScript
+    /// (the frontend resolves unknown/absent values to `Sensitive`, so the union
+    /// deliberately excludes it).
     #[serde(other)]
+    #[ts(skip)]
     Unknown,
 }
 
@@ -136,11 +143,13 @@ pub(crate) enum SecureScreenMode {
 /// unified non-`None` default, `None`-means-off could not persist through
 /// `skip_serializing_if`). Mirrors `LockMode`'s shape (a lock-timeout mode).
 /// Serialized externally-tagged kebab-case: `"off"` / `{"after": secs}`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum GateIdle {
+pub enum GateIdle {
+    /// Never idle-lock the launch gate.
     Off,
-    After(u64),
+    /// Auto-lock the launch gate after this many seconds foregrounded-but-idle.
+    After(#[ts(type = "number")] u64),
 }
 
 /// The gate idle-timeout default for new installs (5 min). Deliberately coarser
@@ -326,19 +335,25 @@ impl AppConfig {
 /// Linked to `AutoSync`: background sync runs only when `AutoSync` is on AND
 /// cadence is not `Off`. Readable pre-unlock via the auth-free key, so the
 /// headless worker can read it without the vault key.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum BackgroundSyncCadence {
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+pub enum BackgroundSyncCadence {
+    /// No background sync (the default; opt in to schedule a periodic pull).
     #[default]
     #[serde(rename = "off")]
     Off,
+    /// Sync roughly every hour.
     #[serde(rename = "1h")]
     Hours1,
+    /// Sync roughly every 6 hours.
     #[serde(rename = "6h")]
     Hours6,
+    /// Sync roughly every 12 hours.
     #[serde(rename = "12h")]
     Hours12,
+    /// Sync roughly every day.
     #[serde(rename = "1d")]
     Days1,
+    /// Sync roughly every 3 days.
     #[serde(rename = "3d")]
     Days3,
 }
