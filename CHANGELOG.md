@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- gpm can now **open and use an existing GPG/OpenPGP-encrypted gopass store** — clone it, import a GPG secret key through the file picker, verify the key's passphrase, then list, copy, and create secrets just like an age store. This is for people with legacy or work-mandated GPG repos; no system `gpg` is needed and it works the same on Android and desktop. (New stores gpm creates are still age-only; in-app GPG key generation and recipient management are not part of this yet.)
+- gpm can now **open and use an existing GPG/OpenPGP-encrypted gopass store** — clone it, import a GPG secret key through the file picker, verify the key's passphrase, then list, copy, and create secrets just like an age store. This is for people with legacy or work-mandated GPG repos; no system `gpg` is needed and it works the same on Android and desktop. (In-app GPG key generation and recipient management are not part of this yet.)
+- gpm can now also **create a brand-new GPG/OpenPGP gopass store** on-device by importing an existing GPG secret key — the create-side counterpart to opening an existing store. The imported key seeds the store's recipient index (`.gpg-id` + `.public-keys/`) exactly as `gopass init` does — same two init commits and `diff.gpg` config — so a store created on your phone clones and decrypts cleanly under desktop gopass. Age remains the default for a fresh start; GPG is for users who already have a key.
 
 ### Changed
 

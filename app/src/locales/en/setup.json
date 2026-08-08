@@ -3,7 +3,8 @@
   "mode": {
     "label": "Mode",
     "clone": "Clone an existing store",
-    "create": "Create a new store"
+    "create": "Create a new store",
+    "createGpg": "Create a GPG store"
   },
   "auth": {
     "repoUrlLabel": "Git Repository URL",
@@ -79,6 +80,21 @@
       "errGeneration": "Generation failed",
       "errPush": "Initial push failed",
       "errPushSuffix": " — your store is saved locally and usable; the initial sync to the remote did not complete.",
+      "errCreate": "Create failed"
+    }
+  },
+  "createGpg": {
+    "heading": "Create a GPG store",
+    "intro": "Import an existing GPG/OpenPGP secret key to seed a brand-new, gopass-compatible store on this device. A remote is optional.",
+    "importButton": "📁 Import GPG key…",
+    "importLoading": "Reading…",
+    "noIdentityStaged": "No GPG key imported — the backend dropped it. Re-import.",
+    "validation": {
+      "errImportFirst": "Import a GPG key first",
+      "errVerifyFirst": "Verify your GPG key's passphrase first"
+    },
+    "err": {
+      "errImport": "Failed to read the GPG key",
       "errCreate": "Create failed"
     }
   },

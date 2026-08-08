@@ -573,6 +573,7 @@ pub fn run() {
             setup::clone_repo,
             setup::generate_identity,
             setup::create_store,
+            setup::create_gpg_store,
             setup::list_recipients,
             setup::validate_identity,
             setup::complete_setup,

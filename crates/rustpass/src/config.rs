@@ -555,7 +555,11 @@ impl Config {
         }
     }
 
-    /// Save repository configuration (URL + local path).
+    /// Save repository configuration (URL + local path), age crypto backend.
+    ///
+    /// Convenience wrapper for the age/clone setup case (`crypto: None`); the
+    /// GPG create path uses [`Self::save_repo_config_with_crypto`] with
+    /// `Some("gpg")`.
     ///
     /// # Errors
     ///
@@ -567,12 +571,30 @@ impl Config {
         auth: &GitAuth,
         local_path: &str,
     ) -> Result<(), Error> {
-        // Decompose the in-memory auth into the persisted flat fields. The
-        // single `GitAuth → RepoConfig fields` site (the reverse of
-        // `to_git_auth`, which resolves through `pick_auth`); the serialized
-        // shape stays flat `pat`/`ssh_key`/`ssh_passphrase`, so no on-disk
-        // migration. `username` is intentionally not persisted — see
-        // `GitAuth::from_ssh`.
+        self.save_repo_config_with_crypto(url, auth, local_path, None)
+            .await
+    }
+
+    /// Save repository configuration (URL + local path) with an explicit crypto
+    /// backend kind. The single `GitAuth → RepoConfig fields` decomposition site
+    /// (the reverse of `to_git_auth`, which resolves through `pick_auth`); the
+    /// serialized shape stays flat `pat`/`ssh_key`/`ssh_passphrase`, so no
+    /// on-disk migration. `username` is intentionally not persisted — see
+    /// `GitAuth::from_ssh`. `crypto` is `None` (age) for the age/clone setup
+    /// paths and `Some("gpg")` for the GPG create path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory cannot be created or the file
+    /// cannot be written.
+    pub async fn save_repo_config_with_crypto(
+        &self,
+        url: &str,
+        auth: &GitAuth,
+        local_path: &str,
+        crypto: Option<&str>,
+    ) -> Result<(), Error> {
+        // Decompose the in-memory auth into the persisted flat fields.
         let (pat, ssh_key, ssh_passphrase) = match auth {
             GitAuth::None => (None, None, None),
             GitAuth::Pat(token) => (Some(token.as_str()), None, None),
@@ -599,13 +621,11 @@ impl Config {
             // Setup always configures the git built-in; an `ext:` backend is
             // chosen only by its own (0046) setup path via `save_repo_config_full`.
             backend: None,
-            // Setup always configures the age built-in; a `"gpg"` crypto backend
-            // is chosen only by its own (0036) setup path via `save_repo_config_full`.
-            crypto: None,
+            crypto: crypto.map(String::from),
         };
         // Delegate to the atomic variant so `repo.json` is never observed
         // half-written (temp file + rename), matching `save_identity`. Matters
-        // for `create_store`'s bootstrap, which saves config after git init.
+        // for the create bootstraps, which save config after git init.
         self.save_repo_config_full(&config).await
     }
 

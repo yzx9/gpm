@@ -6,6 +6,7 @@
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import CloneFlow from "@/components/setup/CloneFlow.vue";
 import CreateFlow from "@/components/setup/CreateFlow.vue";
+import CreateGpgFlow from "@/components/setup/CreateGpgFlow.vue";
 import { useSecureClaim } from "@/composables";
 import { LockKeyhole } from "@lucide/vue";
 import { onMounted, ref } from "vue";
@@ -20,7 +21,7 @@ const { t } = useI18n();
 // mounts SetupPage and expects the clone flow to be live without any click.
 // Rendered as a <select> (not buttons) so it does not pollute
 // `findAll("button[type='button'])` — see the back-button ordering test.
-const mode = ref<"clone" | "create">("clone");
+const mode = ref<"clone" | "create" | "createGpg">("clone");
 
 // R031: setup collects git credentials + an identity (CloneFlow/CreateFlow
 // children), so hold a screen-capture claim for the route's lifetime. FLAG_SECURE
@@ -66,10 +67,12 @@ function onDone() {
         >
           <option value="clone">{{ t("setup.mode.clone") }}</option>
           <option value="create">{{ t("setup.mode.create") }}</option>
+          <option value="createGpg">{{ t("setup.mode.createGpg") }}</option>
         </select>
       </div>
 
       <CloneFlow v-if="mode === 'clone'" @done="onDone" />
+      <CreateGpgFlow v-else-if="mode === 'createGpg'" @done="onDone" />
       <CreateFlow v-else @done="onDone" />
     </div>
   </main>

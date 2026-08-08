@@ -614,7 +614,7 @@ pub(crate) fn armor_secret_key(sk: &SignedSecretKey) -> Result<String, Error> {
 /// # Errors
 ///
 /// `StoreError` if rpgp fails to serialize.
-#[allow(dead_code, clippy::default_trait_access)]
+#[allow(clippy::default_trait_access)]
 pub(crate) fn armor_public_key(pk: &SignedPublicKey) -> Result<String, Error> {
     pk.to_armored_string(Default::default())
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("armor public key: {e}")))

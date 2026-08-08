@@ -3,7 +3,8 @@
   "mode": {
     "label": "模式",
     "clone": "克隆已有仓库",
-    "create": "新建仓库"
+    "create": "新建仓库",
+    "createGpg": "创建 GPG 仓库"
   },
   "auth": {
     "repoUrlLabel": "Git 仓库地址",
@@ -79,6 +80,21 @@
       "errGeneration": "生成失败",
       "errPush": "首次推送失败",
       "errPushSuffix": " — 你的仓库已本地保存并可使用；与远程的首次同步未完成。",
+      "errCreate": "创建失败"
+    }
+  },
+  "createGpg": {
+    "heading": "创建 GPG 仓库",
+    "intro": "导入一个已有的 GPG/OpenPGP 私钥，在本设备上播种一个全新的、与 gopass 兼容的仓库。远程仓库可选。",
+    "importButton": "📁 导入 GPG 密钥…",
+    "importLoading": "读取中…",
+    "noIdentityStaged": "未导入 GPG 密钥——后端已丢弃，请重新导入。",
+    "validation": {
+      "errImportFirst": "请先导入 GPG 密钥",
+      "errVerifyFirst": "请先验证 GPG 密钥的口令"
+    },
+    "err": {
+      "errImport": "读取 GPG 密钥失败",
       "errCreate": "创建失败"
     }
   },

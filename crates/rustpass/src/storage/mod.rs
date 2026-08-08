@@ -455,6 +455,16 @@ pub trait StorageBackend: Send + Sync {
     /// Returns an error if the repo can't be opened or the remote already exists.
     async fn remote_add(&self, repo_path: &Path, name: &str, url: &str) -> Result<(), Error>;
 
+    /// Set a git config `key` → `value` in the repo's `.git/config` (gopass's
+    /// `fixConfig` step — e.g. `diff.gpg.binary` / `diff.gpg.textconv`, recorded
+    /// alongside the committed `.gitattributes` at create time). Local only; no
+    /// network contact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repo can't be opened or the config can't be set.
+    async fn set_config(&self, repo_path: &Path, key: &str, value: &str) -> Result<(), Error>;
+
     /// Stage `paths` and commit on HEAD. `kind` selects `git add` vs `git rm`;
     /// the commit identity comes from `ctx`. Returns the new HEAD short hash.
     ///

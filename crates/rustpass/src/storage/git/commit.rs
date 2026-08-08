@@ -327,6 +327,20 @@ pub(super) fn remote_add(repo_path: &Path, name: &str, url: &str) -> Result<(), 
     Ok(())
 }
 
+/// Set a git config `key` to `value` in the repo's `.git/config` (gopass's
+/// `fixConfig` step — e.g. `diff.gpg.binary`, `diff.gpg.textconv`, recorded
+/// alongside the committed `.gitattributes` at create time). Local only.
+///
+/// # Errors
+///
+/// Returns an error if the repo cannot be opened or the config value cannot be set.
+pub(super) fn set_config(repo_path: &Path, key: &str, value: &str) -> Result<(), Error> {
+    let repo = Repository::discover(repo_path)
+        .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+    repo.config()?.set_str(key, value)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::crypto::RECIPIENTS_FILE;

@@ -125,6 +125,22 @@ export async function createStore(
   });
 }
 
+/**
+ * Bootstrap a brand-new GPG/OpenPGP store from the staged (picked + S2K-verified)
+ * identity — seeds `.gpg-id` + `.public-keys/<token>` + gopass's two init
+ * commits, and (if a remote is given) records origin. Does NOT push, and does
+ * NOT consume the staged identity (`completeSetupFromFile` does, next). Pass
+ * `null` for the auth fields when there is no remote.
+ */
+export async function createGpgStore(
+  repoUrl: string | null,
+  pat: string | null,
+  sshKey: string | null,
+  sshPassphrase: string | null,
+): Promise<void> {
+  await invoke("create_gpg_store", { repoUrl, pat, sshKey, sshPassphrase });
+}
+
 /** List the store's public recipients (may be empty for a fresh local store). */
 export async function listRecipients(): Promise<RecipientInfo[]> {
   return invoke<RecipientInfo[]>("list_recipients");

@@ -296,6 +296,56 @@ pub(crate) async fn create_store(
         .inspect_err(|e| log::warn!("setup: create-store failed: {e}"))
 }
 
+/// Create a brand-new local GPG/OpenPGP gopass store, the GPG create alternative
+/// to [`clone_repo`]/[`create_store`]. Seeds `.gpg-id` + `.public-keys/<token>`
+/// from the staged identity (picked + S2K-verified by [`pick_identity_file`]/
+/// [`verify_picked_identity`]) and makes gopass's two init commits. When
+/// `repo_url` is given it records an `origin` remote (local only).
+///
+/// Does **not** push (the first push is a separate `push_repo` step after
+/// [`complete_setup_from_file`]) and does **not** consume the staged identity —
+/// [`complete_setup_from_file`] consumes it next to persist the secret. Auth
+/// fields are ignored when no `repo_url` is given.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn create_gpg_store(
+    state: State<'_, AppState>,
+    repo_url: Option<String>,
+    pat: Option<String>,
+    ssh_key: Option<String>,
+    ssh_passphrase: Option<String>,
+) -> Result<(), Error> {
+    log::info!("setup: create-gpg-store");
+    // Read (clone) the staged identity text — do NOT take() it; the subsequent
+    // complete_setup_from_file consumes it to persist the secret. Wrapped in
+    // Zeroizing so the cloned armor is wiped on drop, matching PendingIdentity.
+    let identity = {
+        let guard = state
+            .pending_identity
+            .lock()
+            .expect("pending_identity lock poisoned");
+        match &*guard {
+            Some(p) => Zeroizing::new(p.identity.as_str().to_string()),
+            None => {
+                return Err(Error::new(
+                    ErrorCode::NoIdentity,
+                    "No GPG identity staged — import a key first",
+                ));
+            }
+        }
+    };
+    let auth = rustpass::pick_auth(
+        pat.as_deref(),
+        ssh_key.as_deref(),
+        ssh_passphrase.as_deref(),
+    );
+    state
+        .store
+        .create_gpg_store(repo_url.as_deref(), &auth, &identity)
+        .await
+        .inspect_err(|e| log::warn!("setup: create-gpg-store failed: {e}"))
+}
+
 /// Read recipients from the cloned repository for setup step 2.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]

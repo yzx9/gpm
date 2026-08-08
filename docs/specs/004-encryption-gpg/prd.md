@@ -7,13 +7,15 @@ scope: gpg
 
 # 004 — GPG Encryption
 
-> Status: v1 shipped · Last verified: 2026-08-07
+> Status: v1 shipped · Last verified: 2026-08-08
 > Current: the backend interops with system gopass and is wired through the Store for
-> read and write, AND the setup sub-flow ships — clone a gopass-GPG store, import an
-> existing GPG secret key via the file picker, verify its S2K passphrase, and use it
-> (list/copy/create). `save_identity` is the crypto-persistence authority that writes
-> `crypto:"gpg"`. Remaining: in-app GPG key generation, the recipient-keyring-management
-> UI, and GPG paste import (file-pick only in v1).
+> read and write, AND both setup sub-flows ship — open an existing gopass-GPG store
+> (clone → import a GPG secret key → verify its S2K passphrase → use), or create a
+> brand-new one by importing a single key (gopass `init`: seeds `.gpg-id` +
+> `.public-keys/<token>`, the two init commits, `.gitattributes` + `diff.gpg` config).
+> `save_identity` is the crypto-persistence authority that writes `crypto:"gpg"`.
+> Remaining: in-app GPG key generation, the recipient-keyring-management UI, and GPG
+> paste import (file-pick only).
 
 ## 1. Introduction
 
@@ -81,6 +83,9 @@ See <./security.md>.
   trait impl (encrypt/decrypt/unlock/recipients/profile) and its Store wiring for read and
   write, proven against system-gpg fixtures; the v1 setup sub-flow (open an existing GPG
   store via file-pick import + S2K verify, with `save_identity` as the crypto-persistence
-  authority) and a write-side Store integration test.
+  authority) and a write-side Store integration test; and the create sub-flow (`Store::
+create_gpg_store` — import one key, seed `.gpg-id` + `.public-keys/<token>`, gopass's
+  two `init` commits + `.gitattributes`/`diff.gpg` config), proven against the system
+  `gpg` CLI.
 - **Now:** in-app GPG key generation, the recipient-keyring-management UI, and GPG paste
   import (file-pick only in v1).

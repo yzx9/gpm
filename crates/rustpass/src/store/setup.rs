@@ -4,12 +4,14 @@
 use std::str;
 
 use tokio::fs;
+use zeroize::Zeroizing;
 
-use crate::crypto::{CryptoBackend, GpgBackend};
+use crate::crypto::{CryptoBackend, GPG_PUBLIC_KEYS_DIR, GPG_RECIPIENTS_FILE, GpgBackend};
 use crate::error::{Error, ErrorCode};
 use crate::identity::{self, validate_identity_format};
 use crate::recipient::serialize_recipients;
-use crate::storage::{CancelToken, GitAuth, ProgressSender};
+use crate::signing::AuthenticityConfig;
+use crate::storage::{CancelToken, CommitKind, GitAuth, ProgressSender, StorageCtx};
 
 // Impl-split submodule: mod.rs is the shared scope for Store's split impl, so a
 // super-glob is the idiomatic import (pedantic flags it; scoped allow).
@@ -167,6 +169,207 @@ impl Store {
             }
             if let Err(cleanup) = self.config.clear_all().await {
                 log::warn!("create-store: config clear-all cleanup failed: {cleanup}");
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Derive the gopass seed material — the recipient token (`0x` + last 16 hex
+    /// of the primary fingerprint, gopass's `Key.ID()`) and the armored public
+    /// key — from an imported GPG secret key. Both are PUBLIC-packet data, so no
+    /// passphrase is needed (S2K only guards secret-key material). rpgp parses
+    /// attacker-controllable bytes, so the parse runs on a blocking thread inside
+    /// `catch_unwind` (mirroring `gpg_identity_preview`): a panic on malformed
+    /// armor surfaces as `InvalidIdentity`, never a runtime-unwinding `JoinError`.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::InvalidIdentity`] if the armor is unparseable; [`ErrorCode::StoreError`]
+    /// if the blocking task fails to join.
+    async fn derive_gpg_seed_material(identity: &str) -> Result<(String, String), Error> {
+        // Zeroizing: the imported armor is secret-key material — keep it
+        // wipe-on-drop, matching the `PendingIdentity`/`save_identity` discipline.
+        let identity_owned = Zeroizing::new(identity.to_string());
+        tokio::task::spawn_blocking(move || {
+            let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let sk =
+                    crate::crypto::openpgp::parse_armored_secret_key(identity_owned.as_bytes())?;
+                let pubkey = crate::crypto::openpgp::armor_public_key(&sk.to_public_key())?;
+                let token = GpgBackend.identity_recipient(identity_owned.as_str(), None)?;
+                Ok::<_, Error>((token, pubkey))
+            }));
+            match parsed {
+                Ok(Ok(vals)) => Ok(vals),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(Error::new(
+                    ErrorCode::InvalidIdentity,
+                    "GPG key armor could not be parsed (malformed)",
+                )),
+            }
+        })
+        .await
+        .map_err(|e| Error::new(ErrorCode::StoreError, format!("blocking task join: {e}")))?
+    }
+
+    /// Create a brand-new gopass-compatible GPG/OpenPGP store on device — the
+    /// GPG counterpart to [`create_store`](Store::create_store). The user imports
+    /// a single existing GPG secret key (`identity`); its recipient token seeds
+    /// `.gpg-id` and its armored public key seeds `.public-keys/<token>`.
+    ///
+    /// Mirrors gopass `init` (GPG/gitfs): `git init`, set the `diff.gpg`
+    /// diff-driver config, commit `.gitattributes`, seed `.gpg-id` +
+    /// `.public-keys/<token>`, commit "Add current content of password store",
+    /// and — when `repo_url` is given — record an `origin` remote. Provisioning
+    /// derives only PUBLIC seed material (token + armored pubkey) from the
+    /// imported secret; the secret itself is NOT persisted here — that is
+    /// [`save_identity`](Store::save_identity)'s job (the create flow calls
+    /// `complete_setup_from_file` afterwards).
+    ///
+    /// **No push.** The first push is a separate step ([`Store::push`]),
+    /// performed only after both the repo config and the identity are durable —
+    /// so the remote can never receive a store whose recipient's identity has
+    /// been lost locally (the orphan-recipient hole). Mirrors [`create_store`].
+    ///
+    /// Auth is ignored when no `repo_url` is given, so a stray credential can
+    /// never be persisted against an empty URL.
+    ///
+    /// On any failure after `git init`, the partial repo directory and any
+    /// config are removed so the next attempt starts clean.
+    ///
+    /// **Known limitation (shared with the open-existing flow):** a hardware /
+    /// OpenPGP-card key with no usable secret material is expected to be rejected
+    /// by the preceding verify step (`validate_identity_passphrase`); this method
+    /// does not re-check for it, since the public seed material it derives does
+    /// not need the secret.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidIdentity` if `identity` is empty or unparseable, or a
+    /// git/IO error if initialization, the config writes, the recipients writes,
+    /// the commits, the remote add, or config persistence fails.
+    pub async fn create_gpg_store(
+        &self,
+        repo_url: Option<&str>,
+        auth: &GitAuth,
+        identity: &str,
+    ) -> Result<(), Error> {
+        if identity.trim().is_empty() {
+            return Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                "Identity must not be empty",
+            ));
+        }
+
+        // Derive the public seed material (recipient token + armored pubkey) from
+        // the imported secret — passphrase-free, panic-isolated on a blocking
+        // thread. See [`Self::derive_gpg_seed_material`].
+        let (recipient_token, pubkey_armor) = Self::derive_gpg_seed_material(identity).await?;
+
+        // No URL → local-only store: ignore any stray auth (defensive; the
+        // frontend also validates), persisting no credentials against an empty
+        // URL. `none_auth` is named so the borrow outlives the awaited
+        // `bootstrap` block below (a throwaway `&GitAuth::None` would not).
+        let has_url = repo_url.is_some_and(|u| !u.trim().is_empty());
+        let url = repo_url.unwrap_or("");
+        let none_auth = GitAuth::None;
+        let auth = if has_url { auth } else { &none_auth };
+
+        let repo_dir = self.config.config_dir().join("repo");
+        // Remove the repo dir first, then clear the config — mirroring the
+        // failure-cleanup order below.
+        if repo_dir.exists() {
+            fs::remove_dir_all(&repo_dir).await?;
+        }
+        self.config.clear_all().await?;
+
+        let bootstrap = async {
+            self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
+            self.resolve_and_set_crypto(Some("gpg"))?;
+            self.storage()?.init_repo(&repo_dir).await?;
+
+            // gopass's `fixConfig`: record the diff-driver config that the
+            // committed `.gitattributes` (`*.gpg diff=gpg`) references. This is
+            // per-working-copy (`.git/config`); a desktop gopass re-creates it on
+            // clone via its own `fixConfig`, so it only affects gpm's own
+            // checkout (which never runs `git diff`). gpm sets it for
+            // gopass-faithfulness with the `.gitattributes` it pairs with.
+            self.storage()?
+                .set_config(&repo_dir, "diff.gpg.binary", "true")
+                .await?;
+            self.storage()?
+                .set_config(&repo_dir, "diff.gpg.textconv", "gpg --no-tty --decrypt")
+                .await?;
+
+            // Commit 1 (no parent): `.gitattributes` (gopass's
+            // "Configure git repository for gpg file diff.").
+            self.storage()?
+                .write_file_atomic(&repo_dir, ".gitattributes", b"*.gpg diff=gpg\n")
+                .await?;
+            self.storage()?
+                .commit_initial(
+                    &repo_dir,
+                    &[".gitattributes".to_string()],
+                    "Configure git repository for gpg file diff.",
+                )
+                .await?;
+
+            // Seed `.gpg-id` (the recipient token) + `.public-keys/<token>` (the
+            // armored public key, raw — NOT `serialize_recipients`, which would
+            // mangle the multi-line armor block). `write_file_atomic` creates the
+            // `.public-keys/` subdir implicitly.
+            let id_bytes = serialize_recipients(std::slice::from_ref(&recipient_token));
+            self.storage()?
+                .write_file_atomic(&repo_dir, GPG_RECIPIENTS_FILE, &id_bytes)
+                .await?;
+            let pubkey_rel = format!("{GPG_PUBLIC_KEYS_DIR}/{recipient_token}");
+            self.storage()?
+                .write_file_atomic(&repo_dir, &pubkey_rel, pubkey_armor.as_bytes())
+                .await?;
+
+            // Commit 2 (with parent): `.gpg-id` + `.public-keys/<token>` (gopass's
+            // "Add current content of password store"). The parented `commit`
+            // takes a `StorageCtx`; build a default one (no RepoConfig saved yet)
+            // — `commit_name: None` → the app-default identity, matching commit
+            // 1. Do NOT call `commit_initial` here: it hardcodes no-parent and
+            // would orphan commit 1.
+            let default_policy = AuthenticityConfig::default();
+            let ctx = StorageCtx {
+                repo_path: &repo_dir,
+                auth,
+                policy: &default_policy,
+                commit_name: None,
+                commit_email: None,
+            };
+            self.storage()?
+                .commit(
+                    &ctx,
+                    CommitKind::Add,
+                    &[GPG_RECIPIENTS_FILE.to_string(), pubkey_rel.clone()],
+                    "Add current content of password store",
+                )
+                .await?;
+
+            if has_url {
+                self.storage()?.remote_add(&repo_dir, "origin", url).await?;
+            }
+
+            let local_path = repo_dir.to_string_lossy().to_string();
+            self.config
+                .save_repo_config_with_crypto(url, auth, &local_path, Some("gpg"))
+                .await?;
+            Ok::<(), Error>(())
+        };
+
+        if let Err(e) = bootstrap.await {
+            // Best-effort cleanup: a partial repo dir or half-written config must
+            // not leave the store looking initialized. Cleanup failures are
+            // swallowed (the bootstrap error `e` is what we return) — log them.
+            if let Err(cleanup) = fs::remove_dir_all(&repo_dir).await {
+                log::warn!("create-gpg-store: partial-repo cleanup failed: {cleanup}");
+            }
+            if let Err(cleanup) = self.config.clear_all().await {
+                log::warn!("create-gpg-store: config clear-all cleanup failed: {cleanup}");
             }
             return Err(e);
         }
