@@ -1,4 +1,5 @@
 .agents/skills/
+app/src/api/generated/
 app/src-tauri/gen/android/
 app/dist/
 Cargo.lock

@@ -12,6 +12,20 @@
  * `import type` from here without forming a cycle.
  */
 
+// R085: these unions are generated from the Rust enums by `just gen-codegen`
+// (ts-rs). Imported here for internal use (AuthenticityConfig /
+// AuthenticityResult / IgnoredIssue / CommitSigInfo reference VerifyMode and
+// CommitSigStatus) and re-exported, so existing `@/api` imports resolve
+// unchanged. Single source of truth = the Rust enums.
+import type { SecureScreenMode } from "./generated/app";
+import type {
+  CommitSigStatus,
+  LockMode,
+  VerifyMode,
+} from "./generated/rustpass";
+
+export type { CommitSigStatus, LockMode, SecureScreenMode, VerifyMode };
+
 /** Universal IPC error envelope — `{ code, message }`. Sanitized of secrets backend-side. */
 export interface AppError {
   code: string;
@@ -22,12 +36,6 @@ export interface AppError {
 export function asAppError(e: unknown): AppError {
   return e as AppError;
 }
-
-/** Three-state screen-capture protection mode (mirrors Rust `SecureScreenMode`).
- *  Serialized kebab-case: `"off"` / `"sensitive"` / `"always"`. The backend may
- *  also send `"unknown"` (a forward-compat sink for a value from a newer build)
- *  or omit the field — `useSecureScreen` resolves both to `"sensitive"`. */
-export type SecureScreenMode = "off" | "sensitive" | "always";
 
 export interface RepoConfig {
   url: string;
@@ -50,9 +58,6 @@ export interface RepoConfig {
   authenticity?: AuthenticityConfig;
 }
 
-/** How the app auto-locks the identity cache (mirrors Rust `LockMode`). */
-export type LockMode = "immediate" | { idle: number } | "never";
-
 /** Default commit author identity (from `get_commit_identity_default`). */
 export interface CommitIdentity {
   name: string;
@@ -69,19 +74,6 @@ export interface AuthState {
 }
 
 // ── Repository authenticity ────────────────────────────────────────────────
-
-/** Verification mode (serde `lowercase`). */
-export type VerifyMode = "off" | "audit" | "enforce";
-
-/** A commit's verification outcome (serde tagged by `kind`, snake_case). */
-export type CommitSigStatus =
-  | { kind: "verified"; signer_fp: string }
-  | { kind: "untrusted_key"; signer_fp: string }
-  | { kind: "unverified_signature"; signer_fp: string }
-  | { kind: "unsigned" }
-  | { kind: "bad_signature" }
-  | { kind: "unsupported_format"; format: string }
-  | { kind: "unknown" };
 
 /** A trusted signing public key (public — no secret). */
 export interface TrustedKey {

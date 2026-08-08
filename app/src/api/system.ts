@@ -16,6 +16,11 @@ import {
 
 import type { LockMode, SecureScreenMode } from "./common";
 
+// R085: generated from the Rust enums by `just gen-codegen`.
+import type { BackgroundSyncCadence, GateIdle } from "./generated/app";
+
+export type { BackgroundSyncCadence, GateIdle };
+
 /**
  * Device/platform IPC — mirrors `src-tauri/src/app_config.rs` plus the local
  * `safe-area` and `screen-secure` Tauri plugins. These are the only frontend
@@ -43,16 +48,6 @@ export interface SafeAreaInsets {
  *    (the CSS `prefers-color-scheme` media query); `"light"` / `"dark"` ⇒ pinned.
  *  - `lock_mode` / `view_clear_secs` / `clipboard_clear_secs` / `autosync` /
  *    `biometric_app_lock` / `gate_idle`: behavior prefs (absent ⇒ default). */
-/** App-launch-gate in-app idle timeout. Mirrors Rust `GateIdle`: `"off"` = no
- * idle timer; `{ after: secs }` = lock after `secs` of foreground idle. Absent
- * on a fresh config ⇒ the default (After 300s). */
-export type GateIdle = "off" | { after: number };
-
-/** Periodic background-sync cadence. `"off"` (absent) ⇒ no periodic
- *  background sync; the foreground sync still runs. Linked to AutoSync: the
- *  background sync runs only when AutoSync is on AND cadence ≠ `"off"`. */
-export type BackgroundSyncCadence = "off" | "1h" | "6h" | "12h" | "1d" | "3d";
-
 /** The canonical gate-idle default (mirrors the backend: absent ⇒ After 300s). */
 export const DEFAULT_GATE_IDLE: GateIdle = { after: 300 };
 

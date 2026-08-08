@@ -6,6 +6,12 @@ import { describe, expect, it } from "vitest";
 
 import { classifyIdentity, isValidIdentity } from "./identity";
 
+// R085: the shared input→type spec consumed by BOTH this vitest and the Rust
+// `classify_identity` test (which reads the same JSON via include_str!). A
+// classifier branch added on one side without the other fails one of the two
+// tests — this pins the logic drift ts-rs cannot see.
+import classifierCases from "../../../crates/rustpass/contracts/identity-classifier-cases.json";
+
 describe("classifyIdentity", () => {
   it("classifies a native x25519 identity", () => {
     expect(classifyIdentity("AGE-SECRET-KEY-1TEST123")).toBe("x25519");
@@ -43,6 +49,10 @@ describe("isValidIdentity", () => {
     expect(isValidIdentity("AGE-SECRET-KEY-1TEST123")).toBe(true);
   });
 
+  it("accepts an armored PGP secret key (mirrors Rust validate_identity_format)", () => {
+    expect(isValidIdentity("-----BEGIN PGP PRIVATE KEY BLOCK-----")).toBe(true);
+  });
+
   it("rejects a plugin identity (decrypt not supported yet)", () => {
     expect(isValidIdentity("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ")).toBe(
       false,
@@ -52,4 +62,12 @@ describe("isValidIdentity", () => {
   it("rejects unknown content", () => {
     expect(isValidIdentity("not-a-key")).toBe(false);
   });
+});
+
+describe("classifyIdentity (cross-language fixture — R085)", () => {
+  for (const c of classifierCases) {
+    it(`classifies ${JSON.stringify(c.input)} as ${c.expected}`, () => {
+      expect(classifyIdentity(c.input)).toBe(c.expected);
+    });
+  }
 });

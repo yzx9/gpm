@@ -6,6 +6,11 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { BiometricPromptText } from "@/i18n/native";
 
+// R085: generated from the Rust `BiometricState` enum by `just gen-codegen`.
+import type { BiometricState } from "./generated/keystore";
+
+export type { BiometricState };
+
 /** Biometric error codes from the Kotlin plugin / Rust app layer. */
 export type BiometricErrorCode =
   /** Biometric storage unusable (desktop, Android <11, no biometric enrolled). */
@@ -30,19 +35,6 @@ export interface BiometricError {
   code: BiometricErrorCode | string;
   message: string;
 }
-
-/** Quad-state biometric availability — mirrors the Rust `BiometricState` enum /
- *  Kotlin `mapBiometricState` strings; the cross-layer contract is pinned by
- *  tests. Serialized from the backend as the snake_case string. */
-export type BiometricState =
-  /** API 30+ with a STRONG (Class 3) biometric enrolled — biometric unlock usable. */
-  | "available"
-  /** STRONG absent, nothing enrolled — the actionable "go enroll" case. */
-  | "no_enrollment"
-  /** STRONG absent but a weak (Class 2) print is enrolled — gpm needs Class 3. */
-  | "weak_enrolled"
-  /** No usable hardware / pre-API-30 / probe failure — nothing the user can fix. */
-  | "unavailable";
 
 /**
  * Thin wrappers over the biometric app commands in `src-tauri/src/lib.rs`.
