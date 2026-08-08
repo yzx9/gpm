@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+ts-rs = { workspace = true }
 age = { workspace = true }
 rand = { workspace = true }
 smallvec = { workspace = true }

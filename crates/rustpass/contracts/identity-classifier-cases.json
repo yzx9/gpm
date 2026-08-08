@@ -1,0 +1,17 @@
+[
+  { "input": "AGE-SECRET-KEY-PQ-1TEST", "expected": "post_quantum" },
+  { "input": "AGE-PLUGIN-TEST-1TESTKEY", "expected": "plugin" },
+  { "input": "AGE-SECRET-KEY-1TEST", "expected": "x25519" },
+  {
+    "input": "-----BEGIN AGE ENCRYPTED FILE-----",
+    "expected": "age_encrypted"
+  },
+  {
+    "input": "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+    "expected": "pgp_secret_key"
+  },
+  { "input": "-----BEGIN OPENSSH PRIVATE KEY-----", "expected": "ssh_ed25519" },
+  { "input": "-----BEGIN RSA PRIVATE KEY-----", "expected": "ssh_rsa" },
+  { "input": "-----BEGIN PRIVATE KEY-----", "expected": "ssh_ed25519" },
+  { "input": "not-a-valid-key", "expected": "unknown" }
+]

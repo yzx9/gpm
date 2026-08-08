@@ -48,7 +48,7 @@ use crate::error::{Error, ErrorCode};
 /// Severity ordering (drives the indicator colour and Enforce blocking) is:
 /// `Verified < UnsupportedFormat < Unsigned < UntrustedKey < BadSignature`,
 /// with `Unknown` treated as a (fail-closed) soft issue.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CommitSigStatus {
     /// Signed and the key is in the trusted set.
@@ -162,7 +162,7 @@ impl CommitSigStatus {
 // ---------------------------------------------------------------------------
 
 /// Tri-state per-repo verification mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum VerifyMode {
     /// No verification (today's behaviour; the default).

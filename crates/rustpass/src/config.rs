@@ -37,7 +37,9 @@ pub const DEFAULT_CLIPBOARD_CLEAR_SECS: u64 = 45;
 /// password can stay on screen until its own view-clear timer. `Idle(n)` is the
 /// classic session model (wipe after `n` seconds of inactivity); `Never` keeps
 /// the identity cached until a manual lock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default, ts_rs::TS,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum LockMode {
     /// Per-operation: wipe the identity immediately after each secret access.
@@ -45,7 +47,7 @@ pub enum LockMode {
     #[default]
     Immediate,
     /// Session: keep the identity cached, wipe after `n` seconds of inactivity.
-    Idle(u64),
+    Idle(#[ts(type = "number")] u64),
     /// Never auto-lock; the identity stays cached until a manual lock.
     Never,
 }

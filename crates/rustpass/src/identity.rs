@@ -8,12 +8,12 @@
 //! an age identity (x25519, SSH ed25519, SSH RSA, or age-encrypted) from its
 //! byte content. This eliminates prefix-check duplication across call sites.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, ErrorCode};
 
 /// The type of an age identity, detected from its byte content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum IdentityType {
     /// Native x25519 age key (`AGE-SECRET-KEY-...`).
@@ -313,5 +313,35 @@ mod tests {
             "PLUGIN_IDENTITY_NOT_SUPPORTED",
             "plugin identity must be rejected as not-yet-supported, not as invalid format"
         );
+    }
+
+    // --- cross-language classifier fixture (R085) -------------------------
+    //
+    // The shared input->type spec at `contracts/identity-classifier-cases.json`,
+    // also consumed by the TS vitest mirror (`app/src/utils/identity.spec.ts`).
+    // Adding/removing a classifier branch on either side without updating the
+    // other fails one of the two tests. This is the pin for the classifier LOGIC
+    // drift that ts-rs cannot see — ts-rs single-sources the *type union*, this
+    // fixture single-sources the *classification behaviour* (R085 D5).
+
+    #[derive(serde::Deserialize)]
+    struct ClassifierCase {
+        input: String,
+        expected: IdentityType,
+    }
+
+    #[test]
+    fn classify_identity_matches_cross_language_fixture() {
+        let cases: Vec<ClassifierCase> =
+            serde_json::from_str(include_str!("../contracts/identity-classifier-cases.json"))
+                .expect("classifier fixture JSON must deserialize");
+        for case in cases {
+            assert_eq!(
+                classify_identity(case.input.as_bytes()),
+                case.expected,
+                "for input prefix {:?}",
+                case.input,
+            );
+        }
     }
 }
