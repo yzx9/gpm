@@ -178,9 +178,9 @@ non-git provisioning value is unlocked once RFC 046's backends land.
 
 Depends on `0051-storage-backend-state-model.md` — provisioning and resolve are
 the two moments of the same stateful backend, and a backend that does not own
-its root has nowhere to own its provisioning. Depends on
-`0049-storage-backend-registration.md` for the built-in/extension dispatch that
-provisioning rides. Relates to `0046-pluggable-fs-storage-backend.md`, whose
+its root has nowhere to own its provisioning. Depends on the storage-backend
+registration mechanism (in code: `StorageRegistry`) for the built-in/extension
+dispatch that provisioning rides. Relates to `0046-pluggable-fs-storage-backend.md`, whose
 non-git backends are where decoupled, simpler provisioning earns its keep, and
 whose "git does not ride the abstraction" decision this RFC mirrors on the setup
 side. The setup-side companion to `0048-backend-owned-provenance-verification`:

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Storage-backend registration (RFC 0049).
+//! Storage-backend registration (built-in dispatch + `ext:` extensions).
 //!
 //! The seam that lets the app layer supply rustpass a storage backend it
 //! cannot construct itself — the motivating case being the Android cloud-
@@ -65,7 +65,7 @@ impl StorageRegistry {
     ///
     /// - `None` or `"git"` → the git built-in (constructed natively; the root
     ///   token is a filesystem path, threaded per-call today and owned by the
-    ///   backend once RFC 0046 reshapes the trait).
+    ///   backend once R051 reshapes the trait).
     /// - `"ext:<name>"` → the registered extension factory, handed `root`
     ///   opaquely.
     /// - Anything else → [`ErrorCode::BackendNotAvailable`] (an unregistered
@@ -84,7 +84,7 @@ impl StorageRegistry {
         match backend {
             None | Some(BUILTIN_GIT) => {
                 // GitStorage is a stateless unit struct today; the root token is
-                // threaded per-call (the concrete-path keying RFC 0046 reworks).
+                // threaded per-call (the concrete-path keying R051 reworks).
                 let _ = root;
                 Ok(Box::new(GitStorage))
             }
@@ -107,7 +107,7 @@ impl StorageRegistry {
     }
 }
 
-/// Construction-time host for the backend registry (RFC 0049).
+/// Construction-time host for the backend registry.
 ///
 /// Hosts **only** the registry — the sole piece of construction state that
 /// must be available before `Store` can parse its sealed config and that

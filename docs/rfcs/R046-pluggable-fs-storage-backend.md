@@ -162,10 +162,11 @@ carries an Android-specific build/verification cost like the other plugins.
 
 ## Depends on / Supersedes
 
-Depends on `0049-storage-backend-registration.md` — the registration mechanism
-(built-in backends plus the reserved extension namespace) that supplies the
-injection seam this RFC's pluggable backends ride; that RFC is the concrete
-"how a backend is selected and constructed" behind this RFC's seam.
+Depends on the storage-backend registration mechanism (in code:
+`StorageRegistry` + `StoreBuilder`) — the built-in backends plus the reserved
+extension namespace that supplies the injection seam this RFC's pluggable
+backends ride. That mechanism is the concrete "how a backend is selected and
+constructed" behind this RFC's seam.
 
 The storage-side analog of the crypto multi-backend abstraction (which the GPG
 backend exercises). Relates to the shipped GPG backend (spec 004 / A006) — the crypto

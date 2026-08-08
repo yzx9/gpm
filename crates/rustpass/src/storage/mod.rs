@@ -40,7 +40,7 @@ pub mod git;
 /// Re-entrant access to [`git::GitStorage`].
 pub use git::GitStorage;
 
-/// Storage-backend registration (RFC 0049): built-in dispatch + the reserved
+/// Storage-backend registration: built-in dispatch + the reserved
 /// `ext:` extension namespace, populated via [`StoreBuilder`] at startup.
 pub mod registry;
 pub(crate) use registry::StorageRegistry;
