@@ -220,7 +220,7 @@ fn secret_legacy_normalizes_to_modern_on_reparse() {
     assert_eq!(s1.body(), s2.body());
 }
 
-/// gopass parity (D5): an empty-value `Password:` header is not extracted and
+/// gopass parity: an empty-value `Password:` header is not extracted and
 /// stays in the body as `password:`.
 #[test]
 fn secret_legacy_empty_password_value_kept_in_body() {
@@ -229,7 +229,7 @@ fn secret_legacy_empty_password_value_kept_in_body() {
     assert_eq!(secret.body(), "password: \nfoo: Bar");
 }
 
-/// End-to-end TOTP interaction (D7): a legacy `Totp:` header is lowercased into
+/// End-to-end TOTP interaction: a legacy `Totp:` header is lowercased into
 /// the body as `totp:`, which gpm's case-sensitive TOTP detector then finds.
 /// Locks the lowercasing→detection chain against the real consumer.
 #[test]

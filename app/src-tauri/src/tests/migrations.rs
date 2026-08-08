@@ -112,7 +112,7 @@ async fn migrate_copies_non_default_prefs_and_preserves_app_prefs() {
     // m0003 converted the deprecated secure_screen:false into Off.
     assert_eq!(reloaded.secure_screen_mode, Some(SecureScreenMode::Off));
     // The Store's injected autosync cache was re-pushed to the migrated value
-    // (the D1 invariant — autosync_write must not read a stale pre-migration
+    // (the invariant — autosync_write must not read a stale pre-migration
     // `true` when the user had autosync off).
     assert!(
         !state.store.autosync(),
@@ -1164,7 +1164,7 @@ async fn m0008_unparseable_app_json_propagates_err_and_keeps_pref() {
     );
 }
 
-/// m0008 propagates a tampered sealed behavior slot as `Err` (D5): the engine
+/// m0008 propagates a tampered sealed behavior slot as `Err`: the engine
 /// retries, schema stays below target. Never silent-defaults behavior prefs.
 #[tokio::test]
 async fn m0008_corrupt_sealed_propagates_err() {

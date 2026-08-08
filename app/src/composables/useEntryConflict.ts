@@ -37,7 +37,7 @@ export interface EntryConflictPayload {
  *
  * `onLock` clears a pending conflict on a hard lock. Cancel reuses
  * `discardDivergence` to release the deferred identity-cache wipe the edit save
- * skipped (F4) — abandoning the modal must not strand the cached key.
+ * skipped — abandoning the modal must not strand the cached key.
  *
  * Must be called during a component's `setup()` (uses `useLockState`, `useI18n`).
  */
@@ -82,7 +82,7 @@ export function useEntryConflict(opts: {
   // A hard lock during a pending resolve dismisses the modal (mirrors useDivergence).
   // Also drop the captured plaintext — the page wipes its own refs, but this closure
   // holds a second copy that must not survive the lock or a route-away unmount
-  // (secret hygiene, R026 F1). `onLock` covers the hard-lock event; the unmount hook
+  // (secret hygiene). `onLock` covers the hard-lock event; the unmount hook
   // below covers a navigation away while the modal is open, where the modal's own
   // `cancelConflict` (which also nulls `pendingBody`) never fires.
   onLock(() => {
@@ -93,7 +93,7 @@ export function useEntryConflict(opts: {
   // `onLock` fires only on a hard-lock event — `useLockState.onLock` uses
   // `onScopeDispose` to unregister the listener, not to invoke it — so it does NOT
   // cover a page unmount. Null the captured plaintext on unmount too, mirroring the
-  // page's own `useWipeOnLeave` (R026: the unmount window of the F1 lock fix).
+  // page's own `useWipeOnLeave` (the unmount window of the lock fix).
   onBeforeUnmount(() => {
     pendingBody = null;
   });
@@ -108,7 +108,7 @@ export function useEntryConflict(opts: {
   }
 
   /** Dismiss without resolving. Reuses `discardDivergence` to release the deferred
-   *  identity-cache wipe an edit save skipped (F4) — no stranded cached key. */
+   *  identity-cache wipe an edit save skipped — no stranded cached key. */
   function cancelConflict() {
     if (!conflict.value) return;
     conflict.value = null;
@@ -131,7 +131,7 @@ export function useEntryConflict(opts: {
     try {
       const result =
         choice === "keep_mine" && (op === "edit" || op === "create")
-          ? // keep-mine edit/create re-encrypts → identity-gated (the F4-deferred
+          ? // keep-mine edit/create re-encrypts → identity-gated (the deferred
             // cache is still warm for edit; create prompts if it expired).
             await runWithAuth(() =>
               resolveEntryConflict(name, content, remote_tip, op, choice),

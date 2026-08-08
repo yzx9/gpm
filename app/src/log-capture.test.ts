@@ -42,7 +42,7 @@ describe("installConsoleCapture", () => {
     expect(origError).toHaveBeenCalledWith("boom");
   });
 
-  it("maps console.log → info (D2), console.info → info, console.debug → debug, console.warn → warn", () => {
+  it("maps console.log → info, console.info → info, console.debug → debug, console.warn → warn", () => {
     fakeConsole.log("l");
     fakeConsole.info("i");
     fakeConsole.debug("d");

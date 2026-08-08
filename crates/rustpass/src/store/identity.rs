@@ -894,7 +894,7 @@ mod tests {
         );
     }
 
-    /// B5: `validate_passphrase` checks a GPG key's S2K passphrase (the gate
+    /// `validate_passphrase` checks a GPG key's S2K passphrase (the gate
     /// `enable_biometric_unlock` uses before sealing the passphrase). A wrong
     /// passphrase surfaces as `WRONG_PASSPHRASE`, not a silent success.
     #[tokio::test]

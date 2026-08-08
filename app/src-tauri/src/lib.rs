@@ -759,7 +759,7 @@ mod interpret_key_bytes_tests {
 
     #[test]
     fn utf8_of_base64_is_a_key_v0171_compat() {
-        // D3: the v0.17.1 on-disk form — the UTF-8 bytes of a base64 key — is
+        // the v0.17.1 on-disk form — the UTF-8 bytes of a base64 key — is
         // read back via the fallback, not rejected.
         let key = rustpass::seal::generate_master_key().unwrap();
         let bytes = B64.encode(key).into_bytes();

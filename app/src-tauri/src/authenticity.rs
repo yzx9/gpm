@@ -358,7 +358,7 @@ pub(crate) async fn get_commit_signature(
 mod stage_gpg_key_tests {
     //! Unit tests for the pure `stage_gpg_key_from_bytes` helper — the size /
     //! UTF-8 / blank-label branches that `import_trusted_gpg_key_file` depends
-    //! on but can't itself be unit-tested for (it takes an `AppHandle`). D4.
+    //! on but can't itself be unit-tested for (it takes an `AppHandle`).
 
     use super::*;
 

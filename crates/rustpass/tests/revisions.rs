@@ -224,7 +224,7 @@ async fn pagination_and_single_commit_history() {
     );
 }
 
-/// A1 — the base-oid anchor survives a HEAD fast-forward between page turns.
+/// The base-oid anchor survives a HEAD fast-forward between page turns.
 /// Page 0 captures `base_oid`; a background sync then advances HEAD by two
 /// commits on the same secret. Page 1, anchored to page 0's `base_oid`, walks
 /// the SAME window page 0 did — no overlap with page 0 and no post-drift commit

@@ -63,7 +63,7 @@ const hasMore = ref(false);
 const loading = ref(false);
 const error = ref("");
 let reqId = 0; // monotonic; bumped per fetch so stale page responses are dropped
-// A1 — the HEAD oid captured on page 0 and passed back on every load-more so a
+// the HEAD oid captured on page 0 and passed back on every load-more so a
 // background sync can't drift the page window.
 let baseOid: string | undefined;
 // The newest revision (page 0's first row) is the live value — badge it.
@@ -381,7 +381,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <!-- D1: a revealed OLD value is unmistakably marked as a past version. -->
+      <!-- a revealed OLD value is unmistakably marked as a past version. -->
       <BaseAlert
         v-if="viewState === 'revealed'"
         variant="warning"

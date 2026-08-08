@@ -638,7 +638,7 @@ mod tests {
         init_server_timeouts();
     }
 
-    // ── auth-phase cancel (Part B1) ──────────────────────────────────────
+    // ── auth-phase cancel ──────────────────────────────────────
     //
     // `abort_if_cancelled` is the unit the credentials closures call; testing it
     // directly covers the auth-phase cancel without a server that challenges

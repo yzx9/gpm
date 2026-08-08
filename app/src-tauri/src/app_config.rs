@@ -1743,10 +1743,10 @@ mod tests {
         );
     }
 
-    /// D1: a migration-helper sequence (mirroring m0005's `save_pref` →
+    /// a migration-helper sequence (mirroring m0005's `save_pref` →
     /// `save_behavior` order) keeps both halves of the single cache coherent —
     /// each write+reload re-reads the other half from disk rather than
-    /// clobbering it. Pins the R074 write+reload path (decision D2).
+    /// clobbering it. Pins the write+reload path.
     #[tokio::test]
     async fn save_behavior_then_save_pref_keeps_both_halves_coherent() {
         let dir = tempdir().expect("tempdir");
@@ -1775,7 +1775,7 @@ mod tests {
         );
     }
 
-    /// D1 (reverse direction): `save_pref` then `save_behavior` keeps the
+    /// Reverse direction: `save_pref` then `save_behavior` keeps the
     /// display half coherent — the behavior write+reload must not clobber the
     /// just-written display half.
     #[tokio::test]

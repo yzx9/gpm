@@ -21,7 +21,7 @@
 //! ```
 //!
 //! 1. Read the display half from plaintext `pref.json` (`get_pref`).
-//! 2. **Single-unseal typed dispatch** (decision D3): unseal `app.json` once via
+//! 2. **Single-unseal typed dispatch**: unseal `app.json` once via
 //!    the dual-AAD `load_app_config` (reads the new `"app_config"` tag OR falls
 //!    back to the legacy `"app_behavior"` tag m0005/m0006 wrote) → try
 //!    `AppConfig` at schema ≥ 8 (already merged: a prior run crashed before
@@ -32,7 +32,7 @@
 //!    recoverable: re-run sees `pref.json`@7, step 2 detects the already-merged
 //!    `app.json`@8, deletes `pref.json`, no re-seal.
 //!
-//! **No app-lock defer** (decision D): the auth-free master key is loaded at
+//! **No app-lock defer**: the auth-free master key is loaded at
 //! `.setup()` always (including App Lock), so `has_master_key()` is true here.
 //! The vault key (the identity gate) stays biometric-gated — `m0007` still
 //! defers on it, but `m0008` runs only after `m0007` completes (the engine is
@@ -78,7 +78,7 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
     //    app_behavior tag).
     match state.store.load_app_config().await {
         Ok(bytes) => {
-            // D3 typed dispatch: a file the prior run already merged parses as an
+            // typed dispatch: a file the prior run already merged parses as an
             // AppConfig at schema >= 8 — it is authoritative, so skip the re-seal
             // and just drop the stale pref.json.
             if let Ok(existing) = serde_json::from_slice::<AppConfig>(&bytes)
@@ -111,12 +111,12 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
             write_merged_and_delete_pref(state, version, &pref, &BehaviorConfig::default()).await?;
         }
         Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => {
-            // Unreachable under decision D (auth-free key loaded at .setup()), but
+            // Unreachable (auth-free key loaded at .setup()), but
             // surface it so the engine retries rather than silently skipping.
             return Err(e);
         }
         Err(e) => {
-            // Tamper / corrupt: propagate as Err (D5) — persistent failure routes
+            // Tamper / corrupt: propagate as Err — persistent failure routes
             // to re-setup. Never silent-default security-relevant behavior prefs.
             return Err(e);
         }

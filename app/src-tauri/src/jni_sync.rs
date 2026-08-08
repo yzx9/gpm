@@ -154,7 +154,7 @@ mod jni {
     /// A single-threaded tokio runtime owned by the JNI entry. WorkManager's
     /// `ExistingPeriodicWorkPolicy::KEEP`/`REPLACE` prevents concurrent
     /// `block_on`s; `worker_threads(1)` is still safe if that invariant ever
-    /// breaks (A2).
+    /// breaks.
     fn runtime() -> &'static Runtime {
         static RT: OnceLock<Runtime> = OnceLock::new();
         RT.get_or_init(|| {

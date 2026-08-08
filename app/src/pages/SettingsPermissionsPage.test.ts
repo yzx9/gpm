@@ -225,7 +225,7 @@ describe("SettingsPermissionsPage", () => {
   });
 
   it("discards a stale probe result when a newer probe resolves first", async () => {
-    // The generation guard (probeGen) is the whole point of the F6 race defense;
+    // The generation guard (probeGen) is the whole point of the race defense;
     // a slower earlier probe must not overwrite the fresher state.
     let resolveFirst!: (v: boolean) => void;
     const firstPromise = new Promise<boolean>((r) => (resolveFirst = r));

@@ -34,7 +34,7 @@ use rustpass::store::{DivergenceChoice, EntryConflictChoice, ExpectedEntry, Expe
 
 /// Committed system-gpg RSA-2048 fixture key (S2K-passphrase-protected secret),
 /// its armored public half, and a secret encrypted to it by desktop gpg. Reused
-/// by the GPG keep-mine integration test (D7) so it need not GPG-encrypt itself.
+/// by the GPG keep-mine integration test so it need not GPG-encrypt itself.
 const FIXTURE_SECRET: &[u8] = include_bytes!("fixtures/gpg/secret.asc");
 const FIXTURE_PUBLIC: &[u8] = include_bytes!("fixtures/gpg/public.asc");
 const FIXTURE_GPG_ENCRYPTED: &[u8] = include_bytes!("fixtures/gpg/gpg-encrypted.gpg");
@@ -209,7 +209,7 @@ async fn keep_mine_re_encrypts_to_current_recipients() {
     );
 }
 
-/// D7 (GPG keep-mine integration): the divergence/keep-mine pipeline is
+/// GPG keep-mine integration: the divergence/keep-mine pipeline is
 /// ext-aware, but the leaf unit tests can't prove the cross-layer hand-off works
 /// for a GPG store — GPG caches the S2K-unlocked armor (a different operational
 /// form than age's bare key) and resolves the recipient pool from `.public-keys/`
@@ -1387,7 +1387,7 @@ async fn autosync_delete_refuses_when_entry_changed() {
 
 /// R026: a delete built on the v1 base is a `NoChange` (not an EntryConflict)
 /// when a teammate ALREADY removed the same entry on the remote — there's
-/// nothing to delete and nothing to conflict over (R026 D7). Pins the
+/// nothing to delete and nothing to conflict over. Pins the
 /// `WriteOutcome::NoChange` branch distinct from the EntryConflict-on-advance
 /// case in [`autosync_delete_refuses_when_entry_changed`].
 #[tokio::test]

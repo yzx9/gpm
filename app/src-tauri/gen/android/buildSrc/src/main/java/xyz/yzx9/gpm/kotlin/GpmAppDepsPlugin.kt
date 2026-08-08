@@ -9,7 +9,7 @@ import org.gradle.kotlin.dsl.configure
  * regenerated `app/build.gradle.kts` can't carry. Applied to `:app` from
  * `settings.gradle`'s `gradle.beforeProject` hook (Tauri re-renders
  * `app/build.gradle.kts` on every `tauri android build`, dropping manual edits
- * — R077/D8).
+ * — R077).
  *
  * Uses `pluginManager.withPlugin("com.android.application")` so it is safe to
  * apply before AGP: the `android` extension and the `implementation`/

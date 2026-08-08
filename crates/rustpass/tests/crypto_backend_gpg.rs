@@ -97,7 +97,7 @@ async fn gpg_store_decrypts_through_store_facade() {
     );
 }
 
-/// `save_identity` is the crypto-persistence authority (T3): starting from
+/// `save_identity` is the crypto-persistence authority: starting from
 /// `crypto: None` (the age built-in, as a fresh clone leaves it), saving a PGP
 /// key flips `repo.json.crypto` to `Some("gpg")`. The decrypt test above
 /// pre-sets `crypto: Some("gpg")`, so this is the one path that actually
@@ -144,7 +144,7 @@ async fn save_identity_persists_gpg_kind_from_none() {
     );
 }
 
-/// C2 flip-guard: saving a GPG identity into a store that holds `.age` secrets
+/// Flip-guard: saving a GPG identity into a store that holds `.age` secrets
 /// is refused — switching to the gpg backend would orphan them (they'd vanish
 /// from `list`). This store has no `.gpg-id`, so without the guard the
 /// membership gate would be skipped and the flip would silently brick the store.
@@ -184,7 +184,7 @@ async fn save_identity_refuses_gpg_flip_into_age_store() {
     );
 }
 
-/// F1 (marker hole): a store carrying the OTHER backend's root recipients marker
+/// Marker hole: a store carrying the OTHER backend's root recipients marker
 /// but ZERO secrets of that extension must still be refused — otherwise the
 /// marker becomes a relic and future secrets of the orphaned extension vanish
 /// from `list`. Here an age store (`.age-recipients` present, no `.age` secrets)

@@ -102,7 +102,7 @@ mod tests {
         assert_eq!(secret.password(), "super-secret");
     }
 
-    /// **Orphan-recipient atomicity (P1):** after `create_store` against a real
+    /// **Orphan-recipient atomicity:** after `create_store` against a real
     /// remote — but *before* the deferred first push — the remote must still be
     /// empty. The store is only pushed once `Store::push` is called explicitly
     /// (after the identity is durable), so a failure between create and push can

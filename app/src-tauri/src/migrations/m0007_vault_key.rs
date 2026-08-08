@@ -33,7 +33,7 @@
 //! re-minted) and the idempotent re-key finishes any partial file. The identity
 //! file is its own migration marker — no extra bookkeeping. A cancelled ENCRYPT
 //! prompt defers (`Pending`): the master is already auth-free and the identity
-//! is still under the master (readable via the D6 bridge), so the next
+//! is still under the master (readable via the vault bridge), so the next
 //! `app_unlock` retries cleanly.
 
 use std::sync::atomic::Ordering;
@@ -56,7 +56,7 @@ use crate::migrations::MigrationOutcome;
 /// generation, the re-key, or the schema write) propagates as `Err` so the
 /// engine retries on the next run with the schema still below 7.
 pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOutcome, Error> {
-    // 1. Cold start under App Lock: vault_seal is not keyed yet (the D6 bridge
+    // 1. Cold start under App Lock: vault_seal is not keyed yet (the vault bridge
     //    / vault retrieve happens in app_unlock, AFTER the biometric prompt).
     //    Defer — the next app_unlock retries from the top of the chain.
     if state.app_lock_enabled.load(Ordering::SeqCst) && !state.store.has_vault_key() {

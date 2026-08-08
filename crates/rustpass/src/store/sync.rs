@@ -122,7 +122,7 @@ impl Store {
             let current = self.entry_oid(&name).await?;
             // delete vs. an entry a teammate already removed: nothing to commit.
             // Distinct from `Written` so the UI toasts "already removed", not a
-            // fake delete commit (R026 D7).
+            // fake delete commit.
             if matches!(kind, ExpectedKind::Delete) && current.is_none() {
                 let head = self
                     .current_head_hash()

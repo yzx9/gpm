@@ -248,7 +248,7 @@ class KeystorePluginTest {
     // object — so the Kotlin Args MUST read them flat. A nested
     // `policy: KeyPolicyArgs?` would never bind (no `policy` key in the JSON)
     // and silently default to auth-free, defeating App Lock / biometric unlock
-    // (the P0 this suite guards against).
+    // (what this suite guards against).
 
     private val tauriLikeMapper = ObjectMapper()
         .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)

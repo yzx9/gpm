@@ -363,7 +363,7 @@ pub struct TrustSet {
 impl TrustSet {
     /// Build the trust set from the persisted config: SSH fingerprints +
     /// leniently-parsed GPG keys. Unparseable GPG entries are dropped here
-    /// (the Settings warning surface is a separate concern — see RFC 0009 D4);
+    /// (the Settings warning surface is a separate concern);
     /// a bad paste must not brick verification.
     pub(crate) fn from_config(cfg: &AuthenticityConfig) -> Self {
         let ssh_fingerprints = trusted_fingerprints(cfg);
@@ -513,7 +513,7 @@ pub fn status_of_commit(
             // rpgp processes attacker-controlled commit bytes (the `gpgsig`
             // header of every pulled commit). Isolate it so a panic on a
             // crafted packet surfaces as `Unknown` instead of unwinding through
-            // the whole `verify_range`/pull (RFC 0009 D3).
+            // the whole `verify_range`/pull.
             let outcome = catch_unwind(AssertUnwindSafe(|| {
                 let Ok(detached) = openpgp::parse_detached_signature(&sig) else {
                     log::debug!(
@@ -1508,7 +1508,7 @@ mod tests {
     }
 
     /// Pins the combined-trust predicate that the Enforce gate and the
-    /// last-key downgrade both key off (the C1 fix): a GPG-only trust set must
+    /// last-key downgrade both key off: a GPG-only trust set must
     /// count as "has a trusted key", or a GPG-only user could never enable
     /// Enforce.
     #[test]
@@ -1539,10 +1539,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert!(
-            gpg_only.has_any_trusted_key(),
-            "GPG key alone must count — the C1 fix"
-        );
+        assert!(gpg_only.has_any_trusted_key(), "GPG key alone must count");
     }
 
     // ── classification ────────────────────────────────────────────────────
@@ -1954,7 +1951,7 @@ mod tests {
     // signature, and verify it through the same pipeline real commits take
     // (extract_signature -> classify -> openpgp::verify_detached). This is an
     // rpgp-only round-trip (proves the plumbing); GnuPG-produced interop
-    // fixtures land separately (RFC 0009 D5).
+    // fixtures land separately.
 
     /// Generate a throwaway Ed25519 signing keypair for GPG tests (fast).
     fn test_gpg_secret_key() -> pgp::composed::SignedSecretKey {

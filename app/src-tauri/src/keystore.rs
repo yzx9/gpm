@@ -80,7 +80,7 @@ pub(crate) fn resolve_prompt(prompt: Option<&PromptText>) -> ResolvedPromptText 
 // Rust consts), not a stale copy. Since R076 `tauri-plugin-keystore` is the
 // single keystore plugin, so the retrieve is also a parallel of its auth-free
 // path; a shared Kotlin key-access module that dedupes against the plugin too
-// is deferred (D8-primary — the cross-module Gradle wiring is unproven).
+// is deferred (the cross-module Gradle wiring is unproven).
 
 /// Keystore alias for the auth-free at-rest master key.
 pub(crate) const MASTER_ALIAS: &str = "gpm_master_key";
@@ -233,7 +233,7 @@ impl<R: Runtime> KvKeystore for Keystore<R> {
 /// A retrieved key slot decrypted but its bytes are neither a raw 32-byte key
 /// nor a base64-of-one (see [`interpret_key_bytes`]). Distinct from "absent" so a
 /// caller never silently re-mints over a key that may have envelopes sealed under
-/// it (D1) — it surfaces re-setup instead.
+/// it — it surfaces re-setup instead.
 fn malformed_key() -> KeystoreError {
     KeystoreError {
         code: "KEYSTORE_MALFORMED".to_string(),
@@ -732,11 +732,11 @@ mod tests {
         }
     }
 
-    // ── D1 (3-state) + D3 (v0.17.1 read compat) ────────────────────────────
+    // ── 3-state slot + v0.17.1 read compat ────────────────────────────
 
     #[tokio::test]
     async fn retrieve_master_returns_malformed_for_bad_bytes() {
-        // D1: a present slot whose bytes are neither 32 raw nor a base64-of-32
+        // a present slot whose bytes are neither 32 raw nor a base64-of-32
         // must surface Err(KEYSTORE_MALFORMED), NOT collapse to Ok(None) — so the
         // caller never silently re-mints over it.
         let mock = MockKeystore::new().with_retrieve(Ok(vec![0u8; 7]));
@@ -746,7 +746,7 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_master_reads_utf8_of_base64_shape() {
-        // D3: the v0.17.1 on-disk form (UTF-8 bytes of a base64 key) is read via
+        // the v0.17.1 on-disk form (UTF-8 bytes of a base64 key) is read via
         // the interpret_key_bytes fallback, not rejected as malformed.
         let key = rustpass::seal::generate_master_key().unwrap();
         let b64_bytes = crate::B64.encode(key).into_bytes();
@@ -783,7 +783,7 @@ mod tests {
 
     #[tokio::test]
     async fn provision_master_does_not_mint_over_malformed() {
-        // D1: a present-but-malformed slot must NOT be minted over (it may have
+        // a present-but-malformed slot must NOT be minted over (it may have
         // envelopes sealed under it). Degrade to None instead.
         let mock = MockKeystore::new().with_retrieve(Ok(vec![0u8; 9]));
         assert!(

@@ -180,8 +180,8 @@ describe("useEntryConflict", () => {
     expect(invoke).toHaveBeenCalledWith("discard_divergence");
   });
 
-  it("hard lock wipes pendingBody — a subsequent keep_mine edit sends content:null (F1)", async () => {
-    // Pins the F1 fix: onLock must null the captured plaintext, not just the
+  it("hard lock wipes pendingBody — a subsequent keep_mine edit sends content:null", async () => {
+    // Pins the fix: onLock must null the captured plaintext, not just the
     // modal payload. Otherwise the closure holds a second copy of the secret
     // that survives the lock. Asserted indirectly: after a lock + re-unlock
     // (so runWithAuth stops parking), re-raising the conflict WITHOUT a fresh
@@ -192,7 +192,7 @@ describe("useEntryConflict", () => {
     handle.openConflict(PAYLOAD, "my-body");
     await flushPromises();
 
-    // Hard lock fires onLock → clears conflict + pendingBody (F1) and flips
+    // Hard lock fires onLock → clears conflict + pendingBody and flips
     // identityCached to false (mirrors a real idle/manual lock).
     lock.setLocked(true);
     await flushPromises();
@@ -244,8 +244,8 @@ describe("useEntryConflict", () => {
     expect(handle.conflict.value).toBeNull();
   });
 
-  it("unmount wipes pendingBody — a subsequent keep_mine edit sends content:null (F1 unmount window)", async () => {
-    // Pins the second F1 hook (onBeforeUnmount): a route-away while the modal is
+  it("unmount wipes pendingBody — a subsequent keep_mine edit sends content:null (unmount window)", async () => {
+    // Pins the second hook (onBeforeUnmount): a route-away while the modal is
     // open must null the captured plaintext. Asserted indirectly as the onLock
     // test — after unmount + a re-raised conflict WITHOUT recapturing a body,
     // keep_mine edit sends content:null (a surviving pendingBody would send
@@ -256,7 +256,7 @@ describe("useEntryConflict", () => {
     handle.openConflict(PAYLOAD, "my-body");
     await flushPromises();
 
-    // Unmount fires onBeforeUnmount → nulls pendingBody (the unmount half of F1).
+    // Unmount fires onBeforeUnmount → nulls pendingBody (the unmount half).
     wrapper.unmount();
     await flushPromises();
 

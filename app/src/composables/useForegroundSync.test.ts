@@ -162,7 +162,7 @@ describe("useForegroundSync", () => {
 
     fg.engage();
 
-    // F5: retained until a later clean sync reconciles — clearing on tap would
+    // retained until a later clean sync reconciles — clearing on tap would
     // let an unresolved divergence go silent while foregrounded.
     expect(fg.syncAttention.value).toEqual(DIVERGED);
     expect(router.push).toHaveBeenCalledWith({ name: "entries" });

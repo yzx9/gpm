@@ -126,7 +126,7 @@ describe("RevisionsPage", () => {
       await findLoadMore(wrapper).trigger("click");
       await flushPromises();
 
-      // The load-more call must anchor to page 0's base_oid (A1).
+      // The load-more call must anchor to page 0's base_oid.
       expect(invoke).toHaveBeenCalledWith("list_revisions", {
         entryPath: "servers/prod.age",
         offset: 50,
@@ -178,7 +178,7 @@ describe("RevisionsPage", () => {
         has_totp: false,
         attachment: null,
       });
-      // D1: the banner marks the revealed value as NOT the current one.
+      // the banner marks the revealed value as NOT the current one.
       expect(wrapper.text()).toContain("not your current value");
       // The revealed past value is on screen.
       expect(wrapper.text()).toContain("old-pw");

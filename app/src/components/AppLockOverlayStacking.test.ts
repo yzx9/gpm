@@ -80,7 +80,7 @@ describe("AppLockOverlay + DialogHost stacking", () => {
   });
 
   it("a gate-fired confirm renders AFTER the gate, so equal-z tree order puts it on top", async () => {
-    // Regression guard for the in-lock diagnostics confirm (P1): both the gate
+    // Regression guard for the in-lock diagnostics confirm: both the gate
     // and the gate-fired confirm resolve to z-index Z.gate, so paint order is
     // DOM/tree order (CSS2 §E). The confirm MUST follow the gate, else the
     // opaque gate hides it. App.vue keeps DialogHost last for this reason.

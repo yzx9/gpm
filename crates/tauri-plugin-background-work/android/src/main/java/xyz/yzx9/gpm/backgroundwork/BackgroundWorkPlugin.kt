@@ -52,7 +52,7 @@ class BackgroundWorkPlugin(private val activity: Activity) : Plugin(activity) {
                 workName,
             )
         } catch (e: ClassNotFoundException) {
-            // A wrong/stale worker FQN must surface, not silently no-op (D7-4).
+            // A wrong/stale worker FQN must surface, not silently no-op.
             invoke.reject("worker class not found: $workerClassName", "BG_WORKER_CLASS")
             return
         } catch (e: ClassCastException) {

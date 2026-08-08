@@ -1031,7 +1031,7 @@ mod tests {
         assert_eq!(cfg.load_identity().await.unwrap(), b"the-identity");
     }
 
-    /// Regression (R064 review P1): a crash mid-disable leaves `identity` under
+    /// Regression (R064 review): a crash mid-disable leaves `identity` under
     /// the master but `app_id_pass` under the vault. The `app_unlock` resume
     /// re-runs `rekey_identity_to_vault` on that mixed state. Pre-fix the call
     /// errored (`SealTampered` on `app_id_pass`, already under the vault) and

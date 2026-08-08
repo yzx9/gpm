@@ -82,7 +82,7 @@ const deleting = ref(false);
 // R026: the blob oid probed on mount (the base version) — sent on delete so a
 // stale delete surfaces entry_conflict instead of silently removing a teammate's
 // newer version. Non-secret; decoupled from reveal (delete-without-reveal is
-// still protected — D3).
+// still protected).
 const baseOid = ref<string | null>(null);
 const { cancelling, cancelSave } = useCancellableSave();
 
@@ -157,7 +157,7 @@ function humanizeSize(bytes: number): string {
 
 // R026: capture the entry's base version on mount for a base-version-aware
 // delete. Non-secret (no identity, no decrypt), so it runs unconditionally — a
-// delete-without-reveal stays protected (D3).
+// delete-without-reveal stays protected.
 async function probeVersion() {
   try {
     baseOid.value = await entryOidCmd(entryPath);
@@ -384,7 +384,7 @@ async function deleteSecret() {
       // history, which Android system back can't reopen.
       navBack(router, { name: "entries" });
     } else if (outcome.kind === "no_change") {
-      // R026: a teammate already removed it — nothing to commit (D7). Distinct
+      // a teammate already removed it — nothing to commit. Distinct
       // from `written` so we toast "already removed", not a fake delete commit.
       clear();
       toast.info(t("entry.alreadyRemoved"));

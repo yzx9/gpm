@@ -434,7 +434,7 @@ mod tests {
         assert_eq!(err.code, "INVALID_IDENTITY");
     }
 
-    /// G4: `identity_recipient` yields gopass's `Key.ID()` = `0x` + last 16 hex.
+    /// `identity_recipient` yields gopass's `Key.ID()` = `0x` + last 16 hex.
     #[test]
     fn identity_recipient_is_gopass_key_id() {
         let me = gen_key(Some(PASSPHRASE));
@@ -447,7 +447,7 @@ mod tests {
         );
     }
 
-    /// G1: .gpg-id parser keeps both id forms verbatim, skips comments/blanks.
+    /// .gpg-id parser keeps both id forms verbatim, skips comments/blanks.
     #[tokio::test]
     async fn list_recipients_parses_gpg_id_forms() {
         let dir = tempfile::tempdir().unwrap();
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(err.code, "STORE_ERROR");
     }
 
-    /// G2 + fingerprint matching: a store that lists our key by its FULL
+    /// Fingerprint matching: a store that lists our key by its FULL
     /// fingerprint (gopass's canonicalizeRecipient case-0 form) — not the
     /// `0x`+16hex `identity_recipient` produces — must still resolve and encrypt,
     /// because ensureOurKeyID matches by fingerprint, not token string.
@@ -652,7 +652,7 @@ mod tests {
         assert_eq!(err.code, "DECRYPT_FAILED");
     }
 
-    /// G6/G8: `identity_requires_passphrase` reflects the S2K state.
+    /// `identity_requires_passphrase` reflects the S2K state.
     #[test]
     fn identity_requires_passphrase_reflects_s2k() {
         let locked = gen_key(Some(PASSPHRASE));
@@ -661,7 +661,7 @@ mod tests {
         assert!(!GpgBackend.identity_requires_passphrase(plain.at_rest.as_bytes()));
     }
 
-    /// G7: `validate_identity_passphrase` gates on the S2K passphrase.
+    /// `validate_identity_passphrase` gates on the S2K passphrase.
     #[tokio::test]
     async fn validate_identity_passphrase_right_and_wrong() {
         let me = gen_key(Some(PASSPHRASE));

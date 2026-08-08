@@ -189,9 +189,9 @@ describe("createBackHandlerRegistry", () => {
     const b = vi.fn();
     const ha = reg.push(a, 1000);
     await registered();
-    expect(api.onBackButtonPress).toHaveBeenCalledTimes(1); // L1
+    expect(api.onBackButtonPress).toHaveBeenCalledTimes(1);
 
-    // Defer L1's unregister so a push during it can observe the overlap window.
+    // Defer the unregister so a push during it can observe the overlap window.
     let resolveUnreg: () => void = () => {};
     api.unregister.mockImplementationOnce(
       () =>
@@ -204,16 +204,16 @@ describe("createBackHandlerRegistry", () => {
     reg.push(b, 1000); // ensure: `releasing` true → defers B's subscribe
     await flushPromises();
     // B is NOT subscribed yet — it waits on the in-flight release. Without the
-    // `releasing` guard B would have subscribed already (2nd call) while L1 is
+    // `releasing` guard B would have subscribed already (2nd call) while a is
     // still live → a double-fire window. This assertion fails on the unfixed code.
     expect(api.onBackButtonPress).toHaveBeenCalledTimes(1);
 
-    resolveUnreg(); // L1 finishes unregistering
+    resolveUnreg(); // the unregister finishes
     await flushPromises(); // release re-triggers ensure → subscribe B
     api.resolveRegistration(); // B's subscribe completes
     await flushPromises();
 
-    expect(api.onBackButtonPress).toHaveBeenCalledTimes(2); // L1 then L2 — never both live
+    expect(api.onBackButtonPress).toHaveBeenCalledTimes(2); // a then b — never both live
     api.fireBack();
     expect(b).toHaveBeenCalledTimes(1); // exactly once, not twice
     expect(a).not.toHaveBeenCalled();

@@ -649,7 +649,7 @@ mod tests {
 
     #[test]
     fn parse_legacy_empty_password_value_kept_in_body() {
-        // gopass parity (D5): an empty-value `Password:` header is NOT extracted
+        // gopass parity: an empty-value `Password:` header is NOT extracted
         // (the `sv != ""` guard) and stays in the rendered body as `password:`.
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword:\nFoo: Bar").unwrap();
         assert_eq!(secret.password(), "");
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn parse_legacy_no_colon_header_falls_back_to_modern() {
-        // gopass parity (D6): a no-colon line in the header block is malformed →
+        // gopass parity: a no-colon line in the header block is malformed →
         // gopass falls back to ParseAKV(in) → password = the magic line.
         let secret =
             Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nthis has no colon\nmore body").unwrap();
@@ -692,7 +692,7 @@ mod tests {
 
     #[test]
     fn parse_legacy_orphan_fold_falls_back_to_modern() {
-        // gopass parity (D6): a continuation line with no preceding header is
+        // gopass parity: a continuation line with no preceding header is
         // malformed → fallback → password = the magic line.
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\n  orphan fold\nmore body").unwrap();
         assert_eq!(secret.password(), "GOPASS-SECRET-1.0");

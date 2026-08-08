@@ -91,7 +91,7 @@ where
 
 /// Wrap a local-only save in autosync + the auto-lock side effects (reset the
 /// idle timer; soft-wipe the identity under Immediate — but only on terminal
-/// outcomes, per D3). The orchestrator's [`WriteOutcome`] is passed through
+/// outcomes). The orchestrator's [`WriteOutcome`] is passed through
 /// unchanged so the frontend can route `NeedsDivergenceResolve` /
 /// `AuthenticityBlocked` to their modals.
 async fn do_save<R, F, Fut>(
@@ -112,7 +112,7 @@ where
     let outcome = autosync_write_command(state, app, expected, local_write).await;
     reset_lock_timer(state, app);
     reset_gate_idle_timer(state, app);
-    // D3: a NeedsDivergenceResolve still needs the cached identity for a keep-mine
+    // a NeedsDivergenceResolve still needs the cached identity for a keep-mine
     // resolve, so defer the wipe to resolve_sync_divergence; an EntryConflict
     // (R026) likewise keeps it cached for a keep-mine edit resolve. Every other
     // outcome (Written / AuthenticityBlocked / Err) is terminal — wipe now.
@@ -452,7 +452,7 @@ pub(crate) async fn resolve_sync_divergence(
         .inspect_err(|e| log::warn!("resolve failed: {e}"));
     reset_lock_timer(&state, &app);
     reset_gate_idle_timer(&state, &app);
-    // D3: terminal step for a deferred save-divergence — do the wipe the save
+    // terminal step for a deferred save-divergence — do the wipe the save
     // path skipped (no-op under Idle/Never; under Immediate it clears the
     // identity kept alive across the modal for keep-mine).
     maybe_soft_wipe(&state, &app).await;
