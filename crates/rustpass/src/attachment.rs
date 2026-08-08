@@ -224,6 +224,17 @@ mod tests {
         )
     }
 
+    /// A deprecated `GOPASS-SECRET-1.0` plaintext carrying a base64 attachment —
+    /// the legacy MIME envelope around the same two attribute headers + base64
+    /// body. The blank line before `{b64}` is load-bearing: without it the
+    /// no-colon base64 line makes `parse_legacy` fall back to the modern split.
+    /// `sec()` routes the magic first line through `parse_legacy`.
+    fn legacy_attachment_body(b64: &str) -> String {
+        format!(
+            "GOPASS-SECRET-1.0\nContent-Disposition: attachment; filename=\"photo.png\"\nContent-Transfer-Encoding: Base64\n\n{b64}"
+        )
+    }
+
     // ---- detection ----
 
     #[test]
@@ -240,7 +251,9 @@ mod tests {
     fn detects_lowercase_cte_key_like_gopass() {
         // gopass's isBase64Encoded accepts the lowercase key too (its docs show
         // it); gpm must as well, or the base64 body slips past detection and
-        // reaches the WebView. This is the R066 case the get_ci path fixes.
+        // reaches the WebView. The case-insensitive get_ci lookup catches this
+        // lowercased key for both modern secrets and the lowercased headers
+        // parse_legacy renders for legacy ones.
         let body = "\ncontent-disposition: attachment; filename=\"x.bin\"\ncontent-transfer-encoding: base64\nQUJD";
         let s = sec(body);
         assert!(has_attachment(&s));
@@ -289,6 +302,70 @@ mod tests {
         let secret = Secret::parse(plaintext.as_bytes()).unwrap();
         let att = extract(&secret).unwrap().expect("should detect attachment");
         assert_eq!(att.bytes(), &original[..]);
+        assert_eq!(att.filename(), Some("x.bin"));
+    }
+
+    #[test]
+    fn extract_round_trips_all_byte_values_through_legacy_parse() {
+        // The legacy `GOPASS-SECRET-1.0` envelope (magic + attachment headers + a
+        // blank line + the base64 body) must round-trip through `parse_legacy`
+        // exactly as the modern layout does. `parse_legacy` lowercases the header
+        // keys, so the marker reaches the consumer as a lowercased
+        // `content-transfer-encoding` — the case-insensitive lookup still detects
+        // it, and every byte survives.
+        let original: Vec<u8> = (0u8..=255).collect();
+        let b64 = STANDARD.encode(&original);
+        let plaintext = format!(
+            "GOPASS-SECRET-1.0\nContent-Disposition: attachment; filename=\"x.bin\"\nContent-Transfer-Encoding: Base64\n\n{b64}"
+        );
+        let secret = Secret::parse(plaintext.as_bytes()).unwrap();
+        assert_eq!(secret.password_bytes(), b""); // no Password header
+        assert!(
+            secret.is_attachment(),
+            "lowercased legacy CTE key must still be detected"
+        );
+        let att = extract(&secret)
+            .unwrap()
+            .expect("legacy attachment detected");
+        assert_eq!(att.bytes(), &original[..]);
+        assert_eq!(att.filename(), Some("x.bin"));
+    }
+
+    #[test]
+    fn extract_decodes_legacy_format_attachment() {
+        // A legacy attachment secret reaches the consumer with its two attachment
+        // headers lowercased into the body by `parse_legacy`; detection, metadata,
+        // and decode must all behave as on the modern path.
+        let s = sec(&legacy_attachment_body("QUJD"));
+        // Empty password pins the legacy route — the modern fallback would make
+        // the magic line the password.
+        assert_eq!(s.password_bytes(), b"");
+        assert!(has_attachment(&s));
+        let meta = metadata(&s).expect("legacy attachment metadata");
+        assert_eq!(meta.filename(), Some("photo.png"));
+        assert_eq!(meta.size(), 3);
+        let att = extract(&s).unwrap().expect("legacy attachment extract");
+        assert_eq!(att.bytes(), b"ABC");
+        assert_eq!(att.filename(), Some("photo.png"));
+    }
+
+    #[test]
+    fn extract_decodes_legacy_attachment_with_empty_password_header() {
+        // `parse_legacy` leaves an empty-value `Password:` header in the rendered
+        // body as a `password:` line. `attachment_payload` drops any line carrying
+        // the `": "` separator, so that rendered line must not corrupt the base64
+        // payload split.
+        let b64 = STANDARD.encode(b"ABC");
+        let plaintext = format!(
+            "GOPASS-SECRET-1.0\nPassword:\nContent-Disposition: attachment; filename=\"x.bin\"\nContent-Transfer-Encoding: Base64\n\n{b64}"
+        );
+        let secret = Secret::parse(plaintext.as_bytes()).unwrap();
+        assert_eq!(secret.password(), ""); // empty Password value is not extracted
+        assert!(secret.is_attachment());
+        let att = extract(&secret)
+            .unwrap()
+            .expect("legacy attachment with empty Password header");
+        assert_eq!(att.bytes(), b"ABC");
         assert_eq!(att.filename(), Some("x.bin"));
     }
 

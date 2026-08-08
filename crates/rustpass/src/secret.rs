@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn is_attachment_detects_cte_both_key_cases() {
-        // R066/T5: the legacy parser lowercases the CTE key, so a case-sensitive
+        // The legacy parser lowercases the CTE key, so a case-sensitive
         // lookup would miss it and the base64 body would leak to the WebView.
         for body in [
             "\nContent-Transfer-Encoding: base64\nQUJD",
