@@ -1,21 +1,36 @@
 # Secret Attribute Region (model gopass AKV headers as a first-class field)
 
 **Priority:** P2
-**Status:** Draft
-**Phase:** Future
+**Status:** Accepted
+**Phase:** Next
+
+## Progress
+
+Phased in the code as **Phase 2a** (shipped) and **Phase 2b** (pending — the remaining work this RFC now tracks).
+
+**Phase 2a — shipped** (`9b4cae2 refactor(secrets): model the AKV attribute region on Secret`). `Secret` carries an `attributes: Vec<Attribute>` field (byte-exact `Zeroizing<Vec<u8>>`, `Attribute { key, value }`), populated by `parse_attributes(body)` on **both** parse paths, with accessors `attributes()` / `get(key)` (exact, gopass `Get` parity) / `get_ci(key)` (case-insensitive) / `attribute_str(key)` / `is_attachment()`. The two read-side detectors migrated off body-scanning: TOTP reads `attribute_str("otpauth" | "totp")` (`totp.rs`), and attachment detection reads `Secret::is_attachment()` + `get_ci("Content-Disposition")` (`attachment.rs`). This closes consequence 2 (attachment detection) and the detection edge of consequence 3 at the read layer.
+
+In Phase 2a `attributes` is a **derived view** over `body` — `body()` still returns the whole blob with attribute lines inline, and the detectors work only because the attributes stay recoverable from that blob.
+
+**Phase 2b — pending.** Make `attributes` the source of truth instead of a derived view:
+
+1. **Split `body()`** to return free-text notes only (every `Key: Value` line leaves the body and lives in `attributes`); gopass `Body()` parity.
+2. **Display (`show_password`)**: surface `attributes` as named fields instead of dumping the raw blob into `notes`. The user-visible win — consequence 1.
+3. **Edit/reassemble**: round-trip `password + attributes + body` explicitly (frontend reassembly + `Secret::to_bytes`), so an edit can no longer silently drop attribute lines. Today it survives only because attributes are inline in `body`.
+4. **`parse_legacy` root cause**: stop lowercasing headers into `body`; preserve them as structured `Attribute`s, dissolving consequence 3 at the source (currently worked around via `get_ci`).
 
 ## What
 
-gpm should model gopass's **attribute region** — the `Key: Value` header lines that AKV secrets carry between the password and the free-text body — as a first-class part of `Secret`, instead of the current `password + opaque body` collapse. Today `Secret { password, body }` folds every attribute line into `body`, and each attribute consumer (TOTP presence, attachment detection, and — eventually — named-field metadata display) re-derives what it needs by re-scanning that body string. This RFC introduces a structured `attributes` representation so those consumers read from the model once, and so the legacy `GOPASS-SECRET-1.0` parse preserves attributes as structure instead of flattening them into body text.
+gpm should model gopass's **attribute region** — the `Key: Value` header lines that AKV secrets carry between the password and the free-text body — as a first-class part of `Secret`, instead of a `password + opaque body` collapse. **Phase 2a** shipped the structured `attributes` field and migrated the TOTP/attachment detectors off body-scanning (see Progress); **Phase 2b** — the remaining work — makes `attributes` the source of truth: `body()` returns free-text notes only, display shows named fields, edit round-trips attributes explicitly, and the legacy `GOPASS-SECRET-1.0` parse stops flattening headers into body text.
 
 This is a model-level refinement of the internal `Secret` representation that [001 Entry Access](../specs/001-entry-access/prd.md) relies on, not a standalone product feature; this RFC is its design home.
 
 ## Why
 
-The attachment work exposed a single shared root cause: **gpm has no attribute / structured-field awareness.** The decrypted-secret model assumes exactly one layout — first line is the password, everything after is an opaque body — so it cannot tell an attribute line from a free-text note. That one gap has three visible consequences, all worked around separately:
+The attachment work exposed a single shared root cause: **gpm had no attribute / structured-field awareness.** The decrypted-secret model assumed exactly one layout — first line is the password, everything after is an opaque body — so it could not tell an attribute line from a free-text note. That gap had three visible consequences, each worked around separately (2 and the detection edge of 3 are now resolved at the read layer by Phase 2a; 1 and 3's root cause remain for Phase 2b — see Progress):
 
 1. **Modern secrets' `key: value` metadata** (gopass conventions like `user:`, `url:`, `note:`) is folded into `body` and shown to the user as one text blob, not as named fields.
-2. **Attachments** are detected by `attachment::kv_value` re-scanning the body for `Content-Transfer-Encoding` / `Content-Disposition` on every call (`extract`, `has_attachment`, `metadata` each split the body again) — because the model has no attributes to read.
+2. **Attachments** were detected by re-scanning the body for `Content-Transfer-Encoding` / `Content-Disposition` on every call (`extract`, `has_attachment`, `metadata` each split the body again) — because the model had no attributes to read.
 3. **Legacy `GOPASS-SECRET-1.0` attributes** are rendered as lowercased `key: value` body text by `parse_legacy`. The legacy-attachment case is the sharpest edge: once rendered, the attachment headers ARE body text, so the "must not misfire on free text" guarantee weakens and an edit bakes the lowercased headers in place.
 
 A first-class attribute region dissolves all three: TOTP and attachment detection read `attributes`, metadata displays as named fields, and legacy attributes stay structured (the legacy-rendered-body detection problem never arises). gopass itself treats attributes as the load-bearing structure of a secret (AKV = Attribute-Key-Value); gpm aligning with that is the compatibility-conservative move, not a divergence.
@@ -24,12 +39,12 @@ A first-class attribute region dissolves all three: TOTP and attachment detectio
 
 **gopass's AKV layout.** A modern gopass secret is: line 1 = password; then zero or more `Key: Value` attribute lines; then the remaining free-text body. Verified against `~/git/gopass` `pkg/gopass/secrets/akv.go`: the parser keys off the `": "` separator — any line containing it is an attribute, every other line is body. It is **position-agnostic** (attributes are recognized anywhere, not only in a leading block), preserves insertion order, and allows duplicate keys (the legacy format leans on this — multiple `Password:` headers). `Body()` returns every non-`": "` line; `Get(key)`/`Set(key,val)`/`Keys()` are the attribute surface. Two gopass features gpm already cares about are _just attributes_: TOTP (`totp: otpauth://…`) and binary attachments (`Content-Disposition:` + `Content-Transfer-Encoding: Base64` + a base64 body).
 
-**Where gpm stands.** `Secret { password: Zeroizing<String>, body: Zeroizing<String> }` (`crates/rustpass/src/secret.rs`). Both parse paths produce this shape:
+**Where gpm stands.** `Secret { password: Zeroizing<Vec<u8>>, body: Zeroizing<Vec<u8>>, attributes: Vec<Attribute> }` (`crates/rustpass/src/secret.rs`). Phase 2a added `attributes` as a **derived view** over `body` — both parse paths still produce `password + body` bytes, then `parse_attributes` derives the attribute list from `body`; Phase 2b flips it to the source of truth.
 
 - Modern `Secret::parse`: first line → `password`, the rest → `body` verbatim (attribute lines and notes together).
-- Legacy `parse_legacy` (R054): parses the `GOPASS-SECRET-1.0` header block, lifts `Password:` → `password`, and renders every remaining header as a lowercased `key: value` line **into `body`**.
+- Legacy `parse_legacy` (the former R054): parses the `GOPASS-SECRET-1.0` header block, lifts `Password:` → `password`, and renders every remaining header as a lowercased `key: value` line **into `body`** — the flattening Phase 2b removes.
 
-So attributes exist only in gopass's format; gpm neither models nor enforces them, and recovers them on demand. `attachment::kv_value` and `totp::has_totp` are two independent ad-hoc scanners over the same body string, each re-splitting every call.
+So attributes are now modeled, but only as a recoverable view: `body()` still carries them inline, and `parse_legacy` still flattens headers into `body`. Phase 2a already moved TOTP and attachment detection off the old body scanners (`attachment::kv_value` is gone — detection is `Secret::is_attachment()` / `get_ci`); Phase 2b is the body split + display + edit + `parse_legacy` work.
 
 **The load-bearing decision: what `body()` means after.** Today `body()` returns "everything past the password," including attribute lines. Giving `Secret` an attribute field changes that contract: `body()` becomes the free-text notes only, and a new `attributes()` accessor carries the structured fields. Every current `body()` consumer must be re-examined:
 
