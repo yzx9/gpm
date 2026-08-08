@@ -64,7 +64,7 @@ impl Store {
         self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
         self.resolve_and_set_crypto(None)?;
         self.storage()?
-            .clone_repo(auth, repo_url, &repo_dir, cancel, progress)
+            .clone_repo(auth, repo_url, cancel, progress)
             .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();
@@ -137,21 +137,19 @@ impl Store {
         let bootstrap = async {
             self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
             self.resolve_and_set_crypto(None)?;
-            self.storage()?.init_repo(&repo_dir).await?;
+            self.storage()?.init_repo().await?;
 
             let recipients_bytes = serialize_recipients(&[recipient.to_string()]);
             self.storage()?
-                .write_file_atomic(&repo_dir, self.recipients_file()?, &recipients_bytes)
+                .write_file_atomic(self.recipients_file()?, &recipients_bytes)
                 .await?;
 
             let message = format!("Initialized Store for {recipient}");
             let rel_paths = vec![self.recipients_file()?.to_string()];
-            self.storage()?
-                .commit_initial(&repo_dir, &rel_paths, &message)
-                .await?;
+            self.storage()?.commit_initial(&rel_paths, &message).await?;
 
             if has_url {
-                self.storage()?.remote_add(&repo_dir, "origin", url).await?;
+                self.storage()?.remote_add("origin", url).await?;
             }
 
             let local_path = repo_dir.to_string_lossy().to_string();
@@ -439,7 +437,7 @@ impl Store {
 
         self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
         self.storage()?
-            .clone_repo(auth, repo_url, &repo_dir, cancel, progress)
+            .clone_repo(auth, repo_url, cancel, progress)
             .await?;
 
         let local_path = repo_dir.to_string_lossy().to_string();
@@ -494,10 +492,7 @@ impl Store {
         let recipient = GpgBackend.identity_recipient(identity, None)?;
 
         let is_recipient = match self.config.load_repo_config().await {
-            Ok(rc) => {
-                self.probe_membership(&rc, identity, Some("gpg"), None)
-                    .await?
-            }
+            Ok(_) => self.probe_membership(identity, Some("gpg"), None).await?,
             Err(e) if e.code == "NO_REPO" => None,
             Err(e) => return Err(e),
         };

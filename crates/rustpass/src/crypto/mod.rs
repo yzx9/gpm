@@ -26,7 +26,7 @@ use zeroize::Zeroizing;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity};
 use crate::recipient::{Recipient, parse_recipients};
-use crate::storage::{RecipientsIndexPresence, RepoFileView, validate_recipients_index_liveness};
+use crate::storage::{FilePresence, RepoFileView};
 
 /// The age encryption backend (a `CryptoBackend` implementation).
 pub mod age;
@@ -172,10 +172,12 @@ pub trait CryptoBackend: Send + Sync {
     ) -> Result<Zeroizing<Vec<u8>>, Error>;
 
     /// Resolve the parsed recipients the backend can encrypt to, reading the
-    /// backend's recipients index through `view`. The view carries the absolute
-    /// repo root (for the liveness guard) and reads repo-relative files, so the
-    /// backend needs nothing else to locate + parse its index. A future GPG
-    /// backend resolves fingerprint recipients through its own keyring here.
+    /// backend's recipients index through `view`. The view is bound to the
+    /// storage backend (so the liveness guard and the actual read share the
+    /// SAME owned root — no two-sources-of-truth) and exposes repo-relative
+    /// file ops, so the backend needs nothing else to locate + parse its index.
+    /// A future GPG backend resolves fingerprint recipients through its own
+    /// keyring here.
     ///
     /// Returns an empty list for a genuinely-missing index (an uninitialized
     /// store) — matching gopass, so setup can proceed.
@@ -340,12 +342,11 @@ impl CryptoBackend for AgeBackend {
 
     async fn list_recipients(&self, view: &dyn RepoFileView) -> Result<Vec<Recipient>, Error> {
         let recipients_filename = self.profile().recipients_filename;
-        let repo_path = view.repo_path();
         // Absent index → empty (uninitialized store); every other guard failure
         // (tampered index, missing checkout, I/O error) surfaces as a hard error.
-        if let RecipientsIndexPresence::Present =
-            validate_recipients_index_liveness(repo_path, recipients_filename).await?
-        {
+        // The guard runs behind the backend, so the root it lstat's matches the
+        // root the actual read uses (no per-op `local_path` vs owned-root gap).
+        if let FilePresence::Present = view.file_liveness(recipients_filename).await? {
             let bytes = view.read(recipients_filename).await?;
             // Propagate a non-UTF-8 index as a hard error: parsing `""` → empty
             // set would `ensureOurKeyID` to only our key and silently drop every

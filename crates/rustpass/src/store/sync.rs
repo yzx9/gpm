@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use std::future::Future;
-use std::path::Path;
 use std::str;
 use std::sync::atomic::Ordering;
 
@@ -290,16 +289,15 @@ impl Store {
         //    (objects still in the DB), so no second fetch can race past the
         //    reviewed tip and bypass the authenticity check under Enforce.
         let fetched = fetched_oid.clone();
-        self.storage()?
-            .keep_local_advance(&rcs.repo_path, &fetched)
-            .await?;
+        self.storage()?.keep_local_advance(&fetched).await?;
 
         // 4. Re-encrypt to the CURRENT (remote-tip) recipients + our own key
         //    (ensureOurKeyID) via the backend. It re-reads the recipients index
         //    and re-derives our recipient per entry — cheap for age, and the
-        //    replay set is small. The view binds to the advanced working tree.
+        //    replay set is small. The view binds to the storage backend (the
+        //    guard and the read share its owned root).
         let storage = self.storage()?;
-        let view = RepoFiles::new(&*storage, &rcs.repo_path);
+        let view = RepoFiles::new(&*storage);
         let mut ciphertexts: Vec<(String, Vec<u8>)> = Vec::with_capacity(decrypted.len());
         for (rel, plaintext) in decrypted {
             let ct = crypto.encrypt(&plaintext, &identity, &view).await?;
@@ -649,14 +647,14 @@ impl Store {
 
     // ── Repository authenticity ───────────────────────────────────────────
 
-    /// Load the current `RepoConfig` and build the per-op RCS context (repo
-    /// path, auth, policy, commit identity). `RepoConfig` is stable for the op's
-    /// duration — every caller runs under `write_mu` (or is a setup path with no
-    /// concurrency).
+    /// Load the current `RepoConfig` and build the per-op RCS context (auth,
+    /// policy, commit identity). `RepoConfig` is stable for the op's duration —
+    /// every caller runs under `write_mu` (or is a setup path with no
+    /// concurrency). The repo path is no longer carried here: the
+    /// backend owns it.
     pub(super) async fn rcs_ctx(&self) -> Result<RcsCtx, Error> {
         let repo_config = self.config.load_repo_config().await?;
         Ok(RcsCtx {
-            repo_path: Path::new(&repo_config.local_path).to_path_buf(),
             auth: repo_config.to_git_auth(),
             policy: repo_config.authenticity,
             commit_name: repo_config.commit_user_name,
@@ -708,11 +706,12 @@ impl Store {
     /// [`ErrorCode::CloneFailed`] on an auth failure, [`ErrorCode::NetworkError`]
     /// on a network problem.
     pub async fn verify_pat(&self, pat: String, cancel: Option<CancelToken>) -> Result<(), Error> {
-        let rc = self.config.load_repo_config().await?;
+        // Load the repo config so a no-repo state surfaces here (the backend owns
+        // its root now; the loaded config is otherwise unused).
+        let _rc = self.config.load_repo_config().await?;
         let auth = GitAuth::Pat(pat);
         let policy = AuthenticityConfig::default();
         let ctx = StorageCtx {
-            repo_path: Path::new(&rc.local_path),
             auth: &auth,
             policy: &policy,
             commit_name: None,

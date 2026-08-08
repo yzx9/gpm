@@ -20,14 +20,12 @@
 //! types also live here (relocated from `git.rs`) so the RCS trait methods can
 //! name them without a `storage → git` dependency.
 
-use std::path::Path;
+use std::fmt;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, mpsc};
-use std::{fmt, io};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::fs;
 
 use crate::crypto::SecretExt;
 use crate::entry::Entry;
@@ -286,21 +284,17 @@ pub enum KeepLocalOutcome {
 }
 
 /// Configuration an RCS operation needs from `Store`, built fresh from
-/// `RepoConfig` per op — the backend is stateless (config is user-mutable and
-/// unknown at construction time).
+/// `RepoConfig` per op — the per-op fields are user-mutable and unknown at
+/// construction time.
 ///
-/// `GitStorage` is stateless — the real durable state is git's on-disk index,
-/// re-attached each op via `Repository::discover` — so auth/policy/commit-
-/// identity are passed in here rather than held at backend construction.
-/// `RepoConfig` is user-mutable within the Store's lifetime (Settings edits),
-/// so holding these at construction would go stale on the next edit;
-/// `Store::new` also runs before any repo is configured, so there'd be nothing
-/// to hold. File-op methods (`get`/`set`/…) keep their per-call `repo_path` and
-/// don't take a `StorageCtx` — they need no auth/policy.
+/// The backend owns its working-tree root; the per-op auth/policy/
+/// commit-identity are still passed here because `RepoConfig` is user-mutable
+/// within the Store's lifetime (Settings edits), so holding these at
+/// construction would go stale on the next edit; `Store::new` also runs before
+/// any repo is configured, so there'd be nothing to hold. File-op methods
+/// (`get`/`set`/…) take no `StorageCtx` — they need no auth/policy.
 #[derive(Debug, Clone, Copy)]
 pub struct StorageCtx<'a> {
-    /// The repo working-tree root (`RepoConfig::local_path`).
-    pub repo_path: &'a Path,
     /// Git remote credentials (`RepoConfig::to_git_auth`).
     pub auth: &'a GitAuth,
     /// Repository authenticity policy (`RepoConfig::authenticity`).
@@ -339,15 +333,15 @@ pub enum CommitKind {
 /// setup/teardown, not content access.
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    /// List every secret entry under `repo_path` whose extension is `ext`
-    /// (alpha-sorted, `.git` skipped). `ext` is the crypto backend's typed
-    /// [`SecretExt`](crate::crypto::SecretExt) — storage is extension-agnostic
-    /// and matches whatever the caller passes.
+    /// List every secret entry whose extension is `ext` (alpha-sorted, `.git`
+    /// skipped), under the backend's owned root. `ext` is the crypto backend's
+    /// typed [`SecretExt`](crate::crypto::SecretExt) — storage is extension-
+    /// agnostic and matches whatever the caller passes.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::ErrorCode::NoRepo`] if `repo_path` doesn't exist.
-    async fn list(&self, repo_path: &Path, ext: SecretExt) -> Result<Vec<Entry>, Error>;
+    /// Returns [`crate::error::ErrorCode::NoRepo`] if the root doesn't exist.
+    async fn list(&self, ext: SecretExt) -> Result<Vec<Entry>, Error>;
 
     /// Read the bytes of a secret's `passfile` (a repo-relative path like
     /// `cloud/aws.age`). The caller builds `passfile` from the crypto backend's
@@ -358,9 +352,9 @@ pub trait StorageBackend: Send + Sync {
     /// [`crate::error::ErrorCode::EntryNotFound`] if the entry is missing or the
     /// resolved path escapes the repo; [`crate::error::ErrorCode::IoError`] on a
     /// read failure.
-    async fn get(&self, repo_path: &Path, passfile: &str) -> Result<Vec<u8>, Error>;
+    async fn get(&self, passfile: &str) -> Result<Vec<u8>, Error>;
 
-    /// Atomically write `ciphertext` to `<repo>/<passfile>`, creating parent
+    /// Atomically write `ciphertext` to `<root>/<passfile>`, creating parent
     /// directories. Temp-file + rename so a failure can't leave a half-written
     /// secret behind.
     ///
@@ -368,7 +362,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if the resolved path escapes
     /// the repo; otherwise an I/O error.
-    async fn set(&self, repo_path: &Path, passfile: &str, ciphertext: &[u8]) -> Result<(), Error>;
+    async fn set(&self, passfile: &str, ciphertext: &[u8]) -> Result<(), Error>;
 
     /// Remove entry `passfile`.
     ///
@@ -376,7 +370,27 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if missing or the path escapes
     /// the repo; otherwise an I/O error.
-    async fn delete(&self, repo_path: &Path, passfile: &str) -> Result<(), Error>;
+    async fn delete(&self, passfile: &str) -> Result<(), Error>;
+
+    /// Liveness/presence for a repo-relative file, run before a read that must
+    /// distinguish "absent (uninitialized)" from "present" from "tampered." Each
+    /// backend defines presence per its substrate (git: `lstat` + symlink
+    /// rejection; a future document-tree backend: its own presence semantics).
+    ///
+    /// A malicious clone can plant a symlink (dangling, or escaping the
+    /// checkout) at a crypto-owned path like the recipients index. Reading such
+    /// a plant as "absent → empty" would `ensureOurKeyID` on the next encrypt
+    /// and silently shrink the recipient set, so the file is `lstat`-checked
+    /// (without following symlinks) before it is read.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::ErrorCode::StoreError`] for a missing configured
+    /// checkout (the backend's root itself gone) or a non-regular file
+    /// (symlink, directory — possible tampering); an I/O error on a metadata
+    /// failure. A genuinely-missing file on an *existing* checkout is NOT an
+    /// error — it returns [`FilePresence::Absent`].
+    async fn file_liveness(&self, rel_path: &str) -> Result<FilePresence, Error>;
 
     /// Read an arbitrary repo-relative file (`.age-recipients`, `.gpg-id`,
     /// `.public-keys/<fpr>`, …) — the recipients index and any crypto-owned
@@ -388,7 +402,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if missing or the path escapes
     /// the repo; [`crate::error::ErrorCode::IoError`] on a read failure.
-    async fn read_file(&self, repo_path: &Path, rel_path: &str) -> Result<Vec<u8>, Error>;
+    async fn read_file(&self, rel_path: &str) -> Result<Vec<u8>, Error>;
 
     /// Atomically write `bytes` to an arbitrary repo-relative file, creating
     /// parent directories. The recipients-index write path (setup / add
@@ -398,12 +412,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if the path escapes the repo;
     /// otherwise an I/O error.
-    async fn write_file_atomic(
-        &self,
-        repo_path: &Path,
-        rel_path: &str,
-        bytes: &[u8],
-    ) -> Result<(), Error>;
+    async fn write_file_atomic(&self, rel_path: &str, bytes: &[u8]) -> Result<(), Error>;
 
     /// List repo-relative file paths under `rel_prefix` (non-recursive), for
     /// enumerating a crypto-owned directory such as GPG's `.public-keys/`.
@@ -413,20 +422,20 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// [`crate::error::ErrorCode::EntryNotFound`] if the prefix is missing or
     /// escapes the repo; otherwise an I/O error.
-    async fn list_dir(&self, repo_path: &Path, rel_prefix: &str) -> Result<Vec<String>, Error>;
+    async fn list_dir(&self, rel_prefix: &str) -> Result<Vec<String>, Error>;
 
     /// Look up the `.pass-template` that applies to `name`, walking up the tree
     /// (gopass `LookupTemplate`). `Ok(None)` when no template applies.
     ///
     /// # Errors
     ///
-    /// Returns an error only if `repo_path` can't be resolved; a missing
+    /// Returns an error only if the root can't be resolved; a missing
     /// template is `Ok(None)`.
-    async fn lookup_template(&self, repo_path: &Path, name: &str) -> Result<Option<String>, Error>;
+    async fn lookup_template(&self, name: &str) -> Result<Option<String>, Error>;
 
-    /// Clone `url` to `dest` over HTTPS/SSH with `auth`. Setup-time op — no
-    /// [`StorageCtx`] (there is no `RepoConfig` to build one from yet). An
-    /// existing `dest` is removed first.
+    /// Clone `url` into the backend's owned root over HTTPS/SSH with `auth`.
+    /// Setup-time op — no [`StorageCtx`] (there is no `RepoConfig` to build one
+    /// from yet). An existing root is removed first.
     ///
     /// # Errors
     ///
@@ -436,24 +445,24 @@ pub trait StorageBackend: Send + Sync {
         &self,
         auth: &GitAuth,
         url: &str,
-        dest: &Path,
         cancel: Option<CancelToken>,
         progress: Option<ProgressSender>,
     ) -> Result<(), Error>;
 
-    /// Initialize a new git repo at `repo_path` (no commits, no remote).
+    /// Initialize a new git repo at the backend's owned root (no commits, no
+    /// remote).
     ///
     /// # Errors
     ///
     /// Returns an error if `Repository::init` fails.
-    async fn init_repo(&self, repo_path: &Path) -> Result<(), Error>;
+    async fn init_repo(&self) -> Result<(), Error>;
 
     /// Add a remote `name` → `url` locally (no network contact).
     ///
     /// # Errors
     ///
     /// Returns an error if the repo can't be opened or the remote already exists.
-    async fn remote_add(&self, repo_path: &Path, name: &str, url: &str) -> Result<(), Error>;
+    async fn remote_add(&self, name: &str, url: &str) -> Result<(), Error>;
 
     /// Set a git config `key` → `value` in the repo's `.git/config` (gopass's
     /// `fixConfig` step — e.g. `diff.gpg.binary` / `diff.gpg.textconv`, recorded
@@ -484,12 +493,7 @@ pub trait StorageBackend: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the repo can't be opened or the commit fails.
-    async fn commit_initial(
-        &self,
-        repo_path: &Path,
-        paths: &[String],
-        message: &str,
-    ) -> Result<String, Error>;
+    async fn commit_initial(&self, paths: &[String], message: &str) -> Result<String, Error>;
 
     /// Push the current branch to `origin`. `cancel`/`progress` mirror [`pull`]:
     /// flipping the token aborts the in-flight push (via the sideband callback),
@@ -573,7 +577,7 @@ pub trait StorageBackend: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the repo can't be opened or the ref move fails.
-    async fn keep_local_advance(&self, repo_path: &Path, fetched_oid: &str) -> Result<(), Error>;
+    async fn keep_local_advance(&self, fetched_oid: &str) -> Result<(), Error>;
 
     /// Apply a keep-mine plan onto the (already-advanced) tip: write
     /// `ciphertexts`, apply `deletes`, commit, and push. Receives CIPHERTEXT —
@@ -597,9 +601,9 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`ErrorCode::NoRepo`] if no repo at `repo_path`;
+    /// [`ErrorCode::NoRepo`] if no repo at the root;
     /// [`ErrorCode::PullFfFailed`] if HEAD is unborn.
-    async fn current_head(&self, repo_path: &Path) -> Result<String, Error>;
+    async fn current_head(&self) -> Result<String, Error>;
 
     /// Read-only connectivity + auth probe: contact `origin` without moving HEAD
     /// (the git backend fetches into a throwaway ref). Used to validate a
@@ -632,7 +636,6 @@ pub trait StorageBackend: Send + Sync {
     /// (including an unparseable `commit_oid`).
     async fn blob_at_revision(
         &self,
-        repo_path: &Path,
         passfile: &str,
         commit_oid: &str,
     ) -> Result<Option<Vec<u8>>, Error>;
@@ -640,7 +643,7 @@ pub trait StorageBackend: Send + Sync {
     /// Blob oid of `rel_path` at HEAD, or `None` if absent at HEAD. Used to
     /// capture the read-time base version for base-version-aware edit/delete
     /// (RFC R026) and for the orchestrator's pre-write check.
-    async fn entry_oid(&self, repo_path: &Path, rel_path: &str) -> Result<Option<String>, Error>;
+    async fn entry_oid(&self, rel_path: &str) -> Result<Option<String>, Error>;
 
     /// The ciphertext bytes of `rel_path` AND its blob oid, both read from the
     /// SAME HEAD commit-tree snapshot — atomic, so a concurrent pull cannot pair
@@ -649,28 +652,28 @@ pub trait StorageBackend: Send + Sync {
     /// — the read path never pairs bytes with a stale/missing oid). Used by the
     /// reveal/edit read path so the captured base oid is tied to exactly the bytes
     /// the user saw (RFC R026).
-    async fn get_with_oid(
-        &self,
-        repo_path: &Path,
-        rel_path: &str,
-    ) -> Result<(Vec<u8>, String), Error>;
+    async fn get_with_oid(&self, rel_path: &str) -> Result<(Vec<u8>, String), Error>;
 }
 
-/// Read-only view of repo working-tree files, bound to a specific `repo_path`.
+/// Read-only view of repo working-tree files, bound to a [`StorageBackend`].
 ///
 /// Built by `Store` per-op and passed to the crypto backend (which has no other
-/// way to name repo files — it knows nothing of `repo_path`). The crypto
-/// backend's recipient resolution (age reads the recipients index; GPG reads
-/// `.gpg-id` + enumerates `.public-keys/`) goes through this. Writes do NOT —
-/// those stay `Store` → [`StorageBackend::write_file_atomic`] so storage keeps
-/// its exclusive-write invariant.
+/// way to name repo files). The crypto backend's recipient resolution (age reads
+/// the recipients index; GPG reads `.gpg-id` + enumerates `.public-keys/`) goes
+/// through this. Writes do NOT — those stay `Store` →
+/// [`StorageBackend::write_file_atomic`] so storage keeps its exclusive-write
+/// invariant. The liveness guard (`file_liveness`) is also backend-bound, so
+/// the guard and the actual recipients read source the SAME root — no
+/// two-sources-of-truth between a per-op `local_path` and the backend's owned
+/// root.
 #[async_trait]
 pub trait RepoFileView: Send + Sync {
-    /// The absolute working-tree root this view is bound to. Crypto backends use
-    /// it for the recipients-index liveness guard (a direct `lstat`), since
-    /// [`read`](Self::read) / [`list_dir`](Self::list_dir) are repo-relative and
-    /// can't name an absolute guard path.
-    fn repo_path(&self) -> &Path;
+    /// Liveness/presence for a repo-relative file, delegating to the bound
+    /// [`StorageBackend::file_liveness`]. The crypto backends use this to guard
+    /// their recipients-index read against a tampering plant (symlink,
+    /// directory, …) without a separate `exists`-then-`read` TOCTOU and without
+    /// a second source of truth for the repo root.
+    async fn file_liveness(&self, rel_path: &str) -> Result<FilePresence, Error>;
     /// Read a repo-relative file. Returns
     /// [`ErrorCode::EntryNotFound`](crate::error::ErrorCode) for a missing file
     /// — no `exists`-then-`read` race.
@@ -679,114 +682,49 @@ pub trait RepoFileView: Send + Sync {
     async fn list_dir(&self, rel_prefix: &str) -> Result<Vec<String>, Error>;
 }
 
-/// A [`RepoFileView`] bound to `storage` at `repo_path`.
+/// A [`RepoFileView`] bound to `storage`.
 ///
-/// `Store` constructs one per-op (cheap — two borrows) and hands
+/// `Store` constructs one per-op (cheap — one borrow) and hands
 /// `&RepoFiles as &dyn RepoFileView` to the crypto backend. Borrowed over `'a`,
-/// so the caller must hold `storage` + `repo_path` across the await (Store
-/// does — it owns both for the op's lifetime).
+/// so the caller must hold `storage` across the await (Store does — it owns the
+/// backend `Arc` for the op's lifetime).
 #[allow(missing_debug_implementations)]
 pub struct RepoFiles<'a> {
     storage: &'a dyn StorageBackend,
-    repo_path: &'a Path,
 }
 
 impl<'a> RepoFiles<'a> {
-    /// Bind a read-only file view to `storage` at `repo_path`.
-    pub fn new(storage: &'a dyn StorageBackend, repo_path: &'a Path) -> Self {
-        RepoFiles { storage, repo_path }
+    /// Bind a read-only file view to `storage`.
+    pub fn new(storage: &'a dyn StorageBackend) -> Self {
+        RepoFiles { storage }
     }
 }
 
 #[async_trait]
 impl RepoFileView for RepoFiles<'_> {
-    fn repo_path(&self) -> &Path {
-        self.repo_path
+    async fn file_liveness(&self, rel_path: &str) -> Result<FilePresence, Error> {
+        self.storage.file_liveness(rel_path).await
     }
     async fn read(&self, rel_path: &str) -> Result<Vec<u8>, Error> {
-        self.storage.read_file(self.repo_path, rel_path).await
+        self.storage.read_file(rel_path).await
     }
     async fn list_dir(&self, rel_prefix: &str) -> Result<Vec<String>, Error> {
-        self.storage.list_dir(self.repo_path, rel_prefix).await
+        self.storage.list_dir(rel_prefix).await
     }
 }
 
-/// Outcome of [`validate_recipients_index_liveness`] — whether the recipients
-/// index is safe to read, or genuinely absent (an uninitialized store).
+/// Outcome of [`StorageBackend::file_liveness`] — whether a repo-relative file
+/// is safe to read, or genuinely absent (e.g. an uninitialized store's
+/// recipients index).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecipientsIndexPresence {
-    /// The index doesn't exist but the checkout does — an uninitialized store.
-    /// The caller treats this as an empty recipient set (first-time setup).
+pub enum FilePresence {
+    /// The file doesn't exist but the checkout does — e.g. an uninitialized
+    /// store with no recipients index yet. The caller treats this as an empty
+    /// recipient set (first-time setup).
     Absent,
-    /// The index is a regular file, safe to read through
+    /// The file is a regular file, safe to read through
     /// [`StorageBackend::read_file`].
     Present,
-}
-
-/// Liveness/safety guard for the recipients index, run before any read.
-///
-/// A malicious clone can plant a symlink (dangling, or escaping the checkout) at
-/// the recipients path. Reading such a plant as "uninitialized → empty" would
-/// make the encrypt path `ensureOurKeyID` and silently re-encrypt to only the
-/// local key, shrinking the recipient set and pushing the result. So the index
-/// is `lstat`-checked (without following symlinks) before it is read.
-///
-/// Returns [`RecipientsIndexPresence::Absent`] for a genuinely-missing index
-/// (the repo dir exists, just no index yet — an uninitialized store), and
-/// [`RecipientsIndexPresence::Present`] when the index is a regular file safe to
-/// read. Every other case is a hard error: a configured-but-missing checkout
-/// (`repo_path` itself gone), a non-regular index (symlink, directory — possible
-/// tampering), or an I/O error.
-///
-/// # Errors
-///
-/// [`ErrorCode::StoreError`] for a missing configured checkout (`repo_path`
-/// itself gone) or a non-regular index (symlink, directory — possible
-/// tampering); [`ErrorCode::IoError`] on a metadata failure. A genuinely-missing
-/// index on an *existing* checkout is NOT an error — it returns
-/// [`RecipientsIndexPresence::Absent`].
-///
-/// This is a direct filesystem `lstat`, not a [`StorageBackend`] call — the
-/// guard must NOT follow symlinks, and `read_file` is repo-relative. Storage's
-/// own within-repo path guard still applies as defense-in-depth on the read.
-pub async fn validate_recipients_index_liveness(
-    repo_path: &Path,
-    recipients_rel: &str,
-) -> Result<RecipientsIndexPresence, Error> {
-    let recipients_path = repo_path.join(recipients_rel);
-    match fs::symlink_metadata(&recipients_path).await {
-        // The index is absent. Distinguish a genuine uninitialized store (repo
-        // dir exists, just no recipients index yet → absent) from a configured-
-        // but-missing checkout (repo_path itself gone → hard error): the latter
-        // must NOT read as empty, or `save_identity` would accept any identity
-        // against a store whose checkout it can't even see.
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            if fs::symlink_metadata(repo_path).await.is_err() {
-                return Err(Error::new(
-                    ErrorCode::StoreError,
-                    "configured repository checkout is missing",
-                ));
-            }
-            Ok(RecipientsIndexPresence::Absent)
-        }
-        Err(e) => Err(Error::new(
-            ErrorCode::IoError,
-            format!("Failed to read recipients index: {e}"),
-        )),
-        Ok(meta) => {
-            if !meta.is_file() {
-                // A symlink (dangling or escaping), directory, or other
-                // non-regular file is not a valid recipients index — reject
-                // loudly. Treating it as empty would `ensureOurKeyID` to only
-                // our key on the next encrypt.
-                return Err(Error::new(
-                    ErrorCode::StoreError,
-                    "recipients index is not a regular file — possible tampering",
-                ));
-            }
-            Ok(RecipientsIndexPresence::Present)
-        }
-    }
 }
 
 /// Result of a sync (pull) operation — aligned with gopass `Store.Sync`.
@@ -1048,51 +986,49 @@ mod tests {
         assert_eq!(format!("{:?}", GitAuth::None), "None");
     }
 
-    /// A regular recipients index is `Present` — safe to read through storage.
+    /// A regular file at the queried path is `Present` — safe to read through
+    /// storage. Backed by `GitStorage::file_liveness` (the liveness guard now
+    /// lives behind the backend so the guard and the actual read source the
+    /// SAME root — no two-sources-of-truth).
     #[tokio::test]
-    async fn liveness_regular_file_is_present() {
+    async fn file_liveness_regular_file_is_present() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join(".age-recipients"), b"age1abc\n")
-            .await
-            .unwrap();
-        let presence = validate_recipients_index_liveness(dir.path(), ".age-recipients")
-            .await
-            .unwrap();
-        assert_eq!(presence, RecipientsIndexPresence::Present);
+        std::fs::write(dir.path().join(".age-recipients"), b"age1abc\n").unwrap();
+        let storage = GitStorage::new(dir.path());
+        let presence = storage.file_liveness(".age-recipients").await.unwrap();
+        assert_eq!(presence, FilePresence::Present);
     }
 
-    /// A genuinely-missing index on an existing checkout is `Absent` — an
+    /// A genuinely-missing file on an existing checkout is `Absent` — an
     /// uninitialized store, not an error (so first-time setup proceeds).
     #[tokio::test]
-    async fn liveness_missing_index_is_absent() {
+    async fn file_liveness_missing_file_is_absent() {
         let dir = tempfile::tempdir().unwrap();
-        let presence = validate_recipients_index_liveness(dir.path(), ".age-recipients")
-            .await
-            .unwrap();
-        assert_eq!(presence, RecipientsIndexPresence::Absent);
+        let storage = GitStorage::new(dir.path());
+        let presence = storage.file_liveness(".age-recipients").await.unwrap();
+        assert_eq!(presence, FilePresence::Absent);
     }
 
-    /// A configured-but-missing checkout (repo dir gone) is a hard `StoreError`,
-    /// NOT `Absent` — `save_identity` must not accept any identity against a
-    /// store whose checkout it can't see.
+    /// A configured-but-missing checkout (the backend's owned root gone) is a
+    /// hard `StoreError`, NOT `Absent` — `save_identity` must not accept any
+    /// identity against a store whose checkout it can't see.
     #[tokio::test]
-    async fn liveness_missing_checkout_errors() {
+    async fn file_liveness_missing_checkout_errors() {
         let missing = PathBuf::from("/tmp/gpm_no_such_checkout_liveness_test_recipients");
         assert!(!missing.exists());
-        let err = validate_recipients_index_liveness(&missing, ".age-recipients")
-            .await
-            .unwrap_err();
+        let storage = GitStorage::new(&missing);
+        let err = storage.file_liveness(".age-recipients").await.unwrap_err();
         assert_eq!(
             err.code, "STORE_ERROR",
             "a missing configured checkout is an anomaly, not an empty store"
         );
     }
 
-    /// A dangling symlink at the index path is tampering — `lstat` sees the
+    /// A dangling symlink at the queried path is tampering — `lstat` sees the
     /// symlink itself (not its missing target) → not a regular file → hard error.
     #[cfg(unix)]
     #[tokio::test]
-    async fn liveness_dangling_symlink_errors() {
+    async fn file_liveness_dangling_symlink_errors() {
         use std::os::unix::fs::symlink;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1101,21 +1037,20 @@ mod tests {
             dir.path().join(".age-recipients"),
         )
         .unwrap();
-        let err = validate_recipients_index_liveness(dir.path(), ".age-recipients")
-            .await
-            .unwrap_err();
+        let storage = GitStorage::new(dir.path());
+        let err = storage.file_liveness(".age-recipients").await.unwrap_err();
         assert_eq!(
             err.code, "STORE_ERROR",
             "dangling symlink must be tampering, not an empty set"
         );
     }
 
-    /// An escaping symlink (points outside the repo) is tampering — `lstat` does
-    /// not follow it, so the regular-file check rejects before any read could
-    /// resolve + read the victim.
+    /// An escaping symlink (points outside the repo) is tampering — `lstat`
+    /// does not follow it, so the regular-file check rejects before any read
+    /// could resolve + read the victim.
     #[cfg(unix)]
     #[tokio::test]
-    async fn liveness_escaping_symlink_errors() {
+    async fn file_liveness_escaping_symlink_errors() {
         use std::os::unix::fs::symlink;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1123,29 +1058,25 @@ mod tests {
         let victim = external.path().join("victim");
         std::fs::write(&victim, b"age1stolen\n").unwrap();
         symlink(&victim, dir.path().join(".age-recipients")).unwrap();
-        let err = validate_recipients_index_liveness(dir.path(), ".age-recipients")
-            .await
-            .unwrap_err();
+        let storage = GitStorage::new(dir.path());
+        let err = storage.file_liveness(".age-recipients").await.unwrap_err();
         assert_eq!(
             err.code, "STORE_ERROR",
             "escaping symlink must be tampering, not adopted"
         );
     }
 
-    /// A directory at the index path is not a regular file — rejected as
-    /// tampering, the same as a symlink (the docstring enumerates both).
+    /// A directory at the queried path is not a regular file — rejected as
+    /// tampering, the same as a symlink (the trait docstring enumerates both).
     #[tokio::test]
-    async fn liveness_directory_at_index_errors() {
+    async fn file_liveness_directory_at_path_errors() {
         let dir = tempfile::tempdir().unwrap();
-        fs::create_dir(dir.path().join(".age-recipients"))
-            .await
-            .unwrap();
-        let err = validate_recipients_index_liveness(dir.path(), ".age-recipients")
-            .await
-            .unwrap_err();
+        std::fs::create_dir(dir.path().join(".age-recipients")).unwrap();
+        let storage = GitStorage::new(dir.path());
+        let err = storage.file_liveness(".age-recipients").await.unwrap_err();
         assert_eq!(
             err.code, "STORE_ERROR",
-            "a directory at the index path is tampering, not an empty set"
+            "a directory at the queried path is tampering, not an empty set"
         );
     }
 }

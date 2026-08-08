@@ -18,7 +18,7 @@ seeding: a provisioned backend is live but empty, and the recipients index (and,
 for revision-control backends, the initial commit that records it) is configured
 as a distinct step afterward. Serves the git-storage feature
 (`docs/specs/005-git-storage`) and the pluggable-storage-backend direction
-(RFCs 046–051).
+(RFCs 046–048; the registration and stateful-backend foundations ship in code).
 
 ## Why
 
@@ -56,12 +56,12 @@ provisioning is handle acquisition and nothing more.
 **Two construction moments, not one.** A backend and its root come into being in
 two distinct moments that the stateful-backend model must both cover. The later
 moment is _resolve_: on each unlock after the first, the Store rebuilds a backend
-from a persisted type and root token (RFC 051's subject). The first moment is
+from a persisted type and root token (the stateful-backend model). The first moment is
 _provision_: the one-time act that creates the root in the first place — clone,
 init, or handle acquisition — and establishes the type and root that resolve will
-later replay. RFC 051 owns resolve; this RFC owns provision. They share the same
+later replay. Resolve reconstructs the backend; this RFC owns provision. They share the same
 stateful backend (a backend owning its root); this RFC is how that backend and
-its root are born, 051 is how they are rebuilt.
+its root are born; resolve is how they are rebuilt.
 
 **Provisioning is not a uniform trait method; it rides the existing dispatch.**
 The inputs differ per backend — clone takes a URL and credentials, SAF
@@ -160,7 +160,7 @@ boundary — the same conclusion the stateful-backend model reaches.
    implementations.** Rejected as timing: the setup-on-facade coupling is the
    blocker that makes a second backend hard to add in the first place, and the
    resolve/provision split is a foundational decision the stateful-backend family
-   should make once, up front — the same reasoning RFC 051 gives for making the
+   should make once, up front — the same reasoning behind making the
    state-model decision ahead of the backends that stand on it.
 
 ## Effort
@@ -171,12 +171,12 @@ recipients seeding into a distinct post-provision step (including detaching the
 initial commit from provisioning on the revision-control create path), and
 reworking the setup command layer to consume a provisioned backend. No new
 backend ships here — the git built-in is the only provisioning implementation —
-mirroring how RFC 051 moves the trait without shipping a new backend. The
+mirroring how the stateful-backend move reshaped the trait without shipping a new backend. The
 non-git provisioning value is unlocked once RFC 046's backends land.
 
 ## Depends on / Supersedes
 
-Depends on `0051-storage-backend-state-model.md` — provisioning and resolve are
+Depends on the stateful-backend model (the backend owns its root) — provisioning and resolve are
 the two moments of the same stateful backend, and a backend that does not own
 its root has nowhere to own its provisioning. Depends on the storage-backend
 registration mechanism (in code: `StorageRegistry`) for the built-in/extension

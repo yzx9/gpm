@@ -258,19 +258,22 @@ impl Store {
         Ok(self.crypto()?.profile().secret_extension)
     }
 
-    /// Read + parse the recipients index at `repo_path`, delegating the liveness
-    /// guard + read + parse to the crypto backend through a [`RepoFiles`] view.
-    /// Returns empty for a genuinely-missing file (an uninitialized store); every
-    /// other failure (tampered index, missing checkout, non-UTF-8, I/O error) is a
-    /// hard error — see [`crate::storage::validate_recipients_index_liveness`]
-    /// for why "empty" is unsafe for a tampered/escaping index.
-    pub(super) async fn read_recipients_raw(
-        &self,
-        repo_path: &Path,
-    ) -> Result<Vec<Recipient>, Error> {
+    /// Read + parse the recipients index, delegating the liveness guard and
+    /// read+parse to the crypto backend through a [`RepoFiles`] view bound to
+    /// the resolved storage backend.
+    ///
+    /// Returns empty for a genuinely-missing file (an uninitialized store).
+    /// Every other failure mode is a hard error: tampered index, missing
+    /// checkout, non-UTF-8, or an I/O error. Treating a tampered/escaping index
+    /// as empty would silently shrink the recipient set on the next encrypt.
+    ///
+    /// The view (and therefore the guard) is bound to the backend's owned root,
+    /// so the liveness check and the actual read source the SAME root — no
+    /// per-op `local_path` vs owned-root gap.
+    pub(super) async fn read_recipients_raw(&self) -> Result<Vec<Recipient>, Error> {
         let storage = self.storage()?;
         let crypto = self.crypto()?;
-        let view = RepoFiles::new(&*storage, repo_path);
+        let view = RepoFiles::new(&*storage);
         crypto.list_recipients(&view).await
     }
 
@@ -282,8 +285,7 @@ impl Store {
 
     /// The full hash of the current HEAD commit, for provenance fields.
     pub(super) async fn current_head_hash(&self) -> Result<String, Error> {
-        let repo_path = self.repo_path().await?;
-        self.storage()?.current_head(&repo_path).await
+        self.storage()?.current_head().await
     }
 }
 
@@ -296,10 +298,11 @@ mod tests {
 
     /// A symlink planted at the recipients index (dangling, or pointing outside
     /// the repo) must be rejected as tampering — not read as "uninitialized" →
-    /// empty → silent recipient-set shrink on the next encrypt. The `lstat` guard
-    /// in `read_recipients_raw` catches both symlink shapes without following
-    /// them. Hits the private method directly (same module), so no `repo.json`
-    /// setup is needed.
+    /// empty → silent recipient-set shrink on the next encrypt. The `lstat`
+    /// guard behind `read_recipients_raw` (in `StorageBackend::file_liveness`)
+    /// catches both symlink shapes without following them. Hits the private
+    /// method directly (same module), so no `repo.json` setup is needed; the
+    /// guard's root is the backend's owned root (pinned at `resolve_and_set`).
     #[tokio::test]
     #[cfg(unix)]
     async fn read_recipients_raw_rejects_symlinked_index() {
@@ -316,10 +319,7 @@ mod tests {
             repo_dir.path().join(".age-recipients"),
         )
         .unwrap();
-        let err = store
-            .read_recipients_raw(repo_dir.path())
-            .await
-            .unwrap_err();
+        let err = store.read_recipients_raw().await.unwrap_err();
         assert_eq!(
             err.code, "STORE_ERROR",
             "dangling symlink must be tampering, not an empty set"
@@ -337,10 +337,7 @@ mod tests {
             .resolve_and_set(Some("git"), &repo_dir2.path().to_string_lossy())
             .unwrap();
         store2.resolve_and_set_crypto(None).unwrap();
-        let err = store2
-            .read_recipients_raw(repo_dir2.path())
-            .await
-            .unwrap_err();
+        let err = store2.read_recipients_raw().await.unwrap_err();
         assert_eq!(
             err.code, "STORE_ERROR",
             "escaping symlink must be tampering, not adopted"
@@ -355,7 +352,7 @@ mod tests {
             .resolve_and_set(Some("git"), &repo_dir3.path().to_string_lossy())
             .unwrap();
         store3.resolve_and_set_crypto(None).unwrap();
-        let got = store3.read_recipients_raw(repo_dir3.path()).await.unwrap();
+        let got = store3.read_recipients_raw().await.unwrap();
         assert_eq!(got.len(), 1, "regular index still parses");
 
         // Missing index → empty (uninitialized store), unchanged.
@@ -366,18 +363,14 @@ mod tests {
             .unwrap();
         store4.resolve_and_set_crypto(None).unwrap();
         assert!(
-            store4
-                .read_recipients_raw(repo_dir4.path())
-                .await
-                .unwrap()
-                .is_empty(),
+            store4.read_recipients_raw().await.unwrap().is_empty(),
             "missing index is an uninitialized store, not an error"
         );
 
-        // Configured-but-missing checkout (repo.json pointed at a dir that's
-        // gone): a bare "index absent" must NOT read as empty here — that would
-        // let save_identity accept any identity against a store whose checkout
-        // it can't see. Hard error instead.
+        // Configured-but-missing checkout (the backend's owned root is gone): a
+        // bare "index absent" must NOT read as empty here — that would let
+        // save_identity accept any identity against a store whose checkout it
+        // can't see. Hard error instead.
         let missing_checkout = PathBuf::from("/tmp/gpm_no_such_checkout_12345_age_recipients");
         assert!(!missing_checkout.exists());
         let store5 = Store::new(missing_checkout.clone(), None);
@@ -386,11 +379,7 @@ mod tests {
             .unwrap();
         store5.resolve_and_set_crypto(None).unwrap();
         assert_eq!(
-            store5
-                .read_recipients_raw(&missing_checkout)
-                .await
-                .unwrap_err()
-                .code,
+            store5.read_recipients_raw().await.unwrap_err().code,
             "STORE_ERROR",
             "a missing configured checkout is an anomaly, not an empty store"
         );
@@ -402,9 +391,9 @@ mod tests {
     async fn unresolved_storage_returns_backend_not_available() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
-        // read_recipients_raw calls storage() directly (repo_path passed
-        // explicitly — no repo_config load that would mask the error).
-        let err = store.read_recipients_raw(dir.path()).await.unwrap_err();
+        // read_recipients_raw calls storage() directly (no repo_config load that
+        // would mask the error).
+        let err = store.read_recipients_raw().await.unwrap_err();
         assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
     }
 

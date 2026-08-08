@@ -56,7 +56,9 @@ pub struct Store {
     /// encrypt/decrypt `.await`s without holding the mutex guard. Safe to share:
     /// every backend is a stateless unit struct (`AgeBackend`, `GpgBackend`) —
     /// `GpgBackend`'s keyring is read through `RepoFileView` per call, never held
-    /// on the struct. A stateful backend would need re-review before sharing.
+    /// on the struct. The git storage backend now holds `root: PathBuf` (cheap,
+    /// `Send+Sync`, `Arc`-share-safe); a future backend holding an acquired SAF
+    /// handle or open `Repository` still needs case-by-case review.
     crypto: Mutex<Option<Arc<dyn CryptoBackend>>>,
     /// The storage backend (git today; `ext:` extensions via the registry).
     /// Lazily resolved post-unlock — the backend type + root live in sealed
@@ -118,8 +120,6 @@ impl fmt::Debug for Store {
 /// to each storage-backend call. Owning the fields here lets the borrowed ctx
 /// stay alive across the op's `await`s.
 struct RcsCtx {
-    /// Repo working-tree root.
-    repo_path: PathBuf,
     /// Git remote credentials.
     auth: GitAuth,
     /// Repository authenticity policy.
@@ -134,7 +134,6 @@ impl RcsCtx {
     /// The borrowing view the storage-backend trait methods take.
     fn ctx(&self) -> StorageCtx<'_> {
         StorageCtx {
-            repo_path: &self.repo_path,
             auth: &self.auth,
             policy: &self.policy,
             commit_name: self.commit_name.as_deref(),

@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 use std::hash::BuildHasher;
-use std::path::Path;
 use std::str;
 
 use tokio::task::spawn_blocking;
@@ -56,9 +55,7 @@ impl Store {
         offset: usize,
         limit: usize,
     ) -> Result<RankedPage, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path).to_path_buf();
-        let entries = self.storage()?.list(&repo_path, self.secret_ext()?).await?;
+        let entries = self.storage()?.list(self.secret_ext()?).await?;
         let q = query.to_string();
         Ok(spawn_blocking(move || slice_page(rank_entries(entries, &q), offset, limit)).await?)
     }
@@ -85,12 +82,9 @@ impl Store {
     /// Returns an error if the entry does not exist, the identity is missing,
     /// the identity is encrypted but not unlocked, or decryption fails.
     pub async fn get(&self, name: &str) -> Result<Secret, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path);
-
         let encrypted = self
             .storage()?
-            .get(repo_path, &passfile_rel(name, self.secret_ext()?))
+            .get(&passfile_rel(name, self.secret_ext()?))
             .await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let crypto = self.crypto()?;
@@ -110,10 +104,8 @@ impl Store {
     /// [`ErrorCode::EntryNotFound`] if the entry is absent at HEAD (fail-closed),
     /// [`ErrorCode::NoRepo`] if no repo is found, or a git/crypto error.
     pub async fn get_with_oid(&self, name: &str) -> Result<(Secret, String), Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path);
         let passfile = passfile_rel(name, self.secret_ext()?);
-        let (encrypted, oid) = self.storage()?.get_with_oid(repo_path, &passfile).await?;
+        let (encrypted, oid) = self.storage()?.get_with_oid(&passfile).await?;
         let identity_bytes = self.get_identity_bytes().await?;
         let crypto = self.crypto()?;
         let decrypted = crypto.decrypt(&encrypted, &identity_bytes).await?;
@@ -131,10 +123,8 @@ impl Store {
     /// [`ErrorCode::NoRepo`] if no repo is found, or a git error. Returns
     /// `Ok(None)` (not an error) when the entry is absent at HEAD.
     pub async fn entry_oid(&self, name: &str) -> Result<Option<String>, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path);
         let passfile = passfile_rel(name, self.secret_ext()?);
-        self.storage()?.entry_oid(repo_path, &passfile).await
+        self.storage()?.entry_oid(&passfile).await
     }
 
     /// Encrypt and write a secret to the store, then commit **locally** (no
@@ -164,9 +154,7 @@ impl Store {
     pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
         let rcs = self.rcs_ctx().await?;
-        let passfile = self
-            .encrypt_and_write(name, plaintext, &rcs.repo_path)
-            .await?;
+        let passfile = self.encrypt_and_write(name, plaintext).await?;
         let head = self
             .commit_local(
                 &rcs,
@@ -203,7 +191,7 @@ impl Store {
 
         // Existence + within-repo guard + remove the worktree file. The index
         // removal is staged in the commit below.
-        self.storage()?.delete(&rcs.repo_path, &passfile).await?;
+        self.storage()?.delete(&passfile).await?;
 
         let head = self
             .commit_local(
@@ -253,8 +241,7 @@ impl Store {
     ///
     /// Returns an error if the store is not configured.
     pub async fn lookup_template(&self, name: &str) -> Result<Option<String>, Error> {
-        let repo_path = self.repo_path().await?;
-        self.storage()?.lookup_template(&repo_path, name).await
+        self.storage()?.lookup_template(name).await
     }
 
     /// Create a secret, applying a matching `.pass-template` if one exists
@@ -360,26 +347,23 @@ impl Store {
     /// Encrypt `plaintext` to the store recipients (ensuring our own key is
     /// included) and write it to `<name>.age` atomically. Returns the passfile
     /// path relative to the repo root.
-    async fn encrypt_and_write(
-        &self,
-        name: &str,
-        plaintext: &[u8],
-        repo_path: &Path,
-    ) -> Result<String, Error> {
+    async fn encrypt_and_write(&self, name: &str, plaintext: &[u8]) -> Result<String, Error> {
         let passfile = passfile_rel(name, self.secret_ext()?);
 
         // Encrypt to the store's recipients plus our own key (ensureOurKeyID),
-        // reading the index through a view — the backend owns recipient
-        // resolution + the encrypt step now.
+        // reading the index through a view bound to the storage backend — the
+        // backend owns recipient resolution + the encrypt step, and the
+        // recipients liveness guard now runs behind the same backend (no
+        // per-op `local_path` vs owned-root gap on the guard).
         let identity_bytes = self.get_identity_bytes().await?;
         let storage = self.storage()?;
-        let view = RepoFiles::new(&*storage, repo_path);
+        let view = RepoFiles::new(&*storage);
         let ciphertext = self
             .crypto()?
             .encrypt(plaintext, &identity_bytes, &view)
             .await?;
 
-        storage.set(repo_path, &passfile, &ciphertext).await?;
+        storage.set(&passfile, &ciphertext).await?;
         Ok(passfile)
     }
 
@@ -435,13 +419,11 @@ impl Store {
         name: &str,
         commit_oid: &str,
     ) -> Result<RevisionContent, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path);
         let passfile = passfile_rel(name, self.secret_ext()?);
 
         let encrypted = self
             .storage()?
-            .blob_at_revision(repo_path, &passfile, commit_oid)
+            .blob_at_revision(&passfile, commit_oid)
             .await?;
         let Some(encrypted) = encrypted else {
             return Ok(RevisionContent::Deleted);

@@ -225,9 +225,12 @@ impl Store {
     /// Returns an error if the repo is not configured or the recipients file
     /// exists but cannot be read.
     pub async fn list_recipients(&self) -> Result<Vec<Recipient>, Error> {
-        let repo_config = self.config.load_repo_config().await?;
-        let repo_path = Path::new(&repo_config.local_path);
-        self.read_recipients_raw(repo_path).await
+        // Touching repo_config here keeps the "repo not configured" surface —
+        // the read itself no longer needs local_path (the backend owns the root
+        // and the liveness guard runs behind it), but we still want a missing
+        // repo.json to surface as `NoRepo` rather than reaching the backend.
+        let _repo_config = self.config.load_repo_config().await?;
+        self.read_recipients_raw().await
     }
 
     /// Save the age identity.
@@ -300,7 +303,7 @@ impl Store {
                 _ => None,
             };
             if let Some(false) = self
-                .probe_membership(rc, identity, kind, recipient_passphrase)
+                .probe_membership(identity, kind, recipient_passphrase)
                 .await?
             {
                 return Err(Error::new(
@@ -408,13 +411,12 @@ impl Store {
     /// ignores it — the fingerprint is public-packet data).
     pub(super) async fn probe_membership(
         &self,
-        rc: &RepoConfig,
         identity: &str,
         kind: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<Option<bool>, Error> {
         let storage = self.storage()?;
-        let view = RepoFiles::new(&*storage, Path::new(&rc.local_path));
+        let view = RepoFiles::new(&*storage);
         let backend: Arc<dyn CryptoBackend> = match kind {
             Some("gpg") => Arc::new(GpgBackend),
             _ => Arc::new(AgeBackend),

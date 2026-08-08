@@ -64,8 +64,7 @@ impl StorageRegistry {
     /// backend.
     ///
     /// - `None` or `"git"` → the git built-in (constructed natively; the root
-    ///   token is a filesystem path, threaded per-call today and owned by the
-    ///   backend once R051 reshapes the trait).
+    ///   token is a filesystem path consumed as the backend's owned root).
     /// - `"ext:<name>"` → the registered extension factory, handed `root`
     ///   opaquely.
     /// - Anything else → [`ErrorCode::BackendNotAvailable`] (an unregistered
@@ -83,10 +82,9 @@ impl StorageRegistry {
     ) -> Result<Box<dyn StorageBackend>, Error> {
         match backend {
             None | Some(BUILTIN_GIT) => {
-                // GitStorage is a stateless unit struct today; the root token is
-                // threaded per-call (the concrete-path keying R051 reworks).
-                let _ = root;
-                Ok(Box::new(GitStorage))
+                // GitStorage owns its working-tree root; the root token is
+                // consumed here as the backend's owned root.
+                Ok(Box::new(GitStorage::new(PathBuf::from(root))))
             }
             Some(name) if name.starts_with(EXT_PREFIX) => {
                 let factory = self.extensions.get(name).ok_or_else(|| {
@@ -226,13 +224,15 @@ mod tests {
     fn register_storage_rejects_non_ext_prefix() {
         let mut b = StoreBuilder::new();
         assert!(
-            b.register_storage("git", |_| Ok(Box::new(GitStorage)))
+            b.register_storage("git", |_| Ok(Box::new(GitStorage::new(PathBuf::from("/")))))
                 .is_err(),
             "\"git\" is a built-in, not an extension"
         );
         assert!(
-            b.register_storage("cloud-folder", |_| Ok(Box::new(GitStorage)))
-                .is_err(),
+            b.register_storage("cloud-folder", |_| {
+                Ok(Box::new(GitStorage::new(PathBuf::from("/"))))
+            })
+            .is_err(),
             "extension names must carry the ext: prefix"
         );
     }
@@ -241,11 +241,15 @@ mod tests {
     #[test]
     fn register_storage_rejects_duplicates() {
         let mut b = StoreBuilder::new();
-        b.register_storage("ext:mock", |_| Ok(Box::new(GitStorage)))
-            .expect("first registration succeeds");
+        b.register_storage("ext:mock", |_| {
+            Ok(Box::new(GitStorage::new(PathBuf::from("/"))))
+        })
+        .expect("first registration succeeds");
         assert!(
-            b.register_storage("ext:mock", |_| Ok(Box::new(GitStorage)))
-                .is_err(),
+            b.register_storage("ext:mock", |_| Ok(Box::new(GitStorage::new(
+                PathBuf::from("/")
+            ))))
+            .is_err(),
             "duplicate registration is rejected"
         );
     }
@@ -279,7 +283,7 @@ mod tests {
         let called_closure = called.clone();
         b.register_storage("ext:mock", move |_root| {
             called_closure.store(true, Ordering::SeqCst);
-            Ok(Box::new(GitStorage))
+            Ok(Box::new(GitStorage::new(PathBuf::from("/"))))
         })
         .unwrap();
         let r = StorageRegistry {
@@ -300,7 +304,7 @@ mod tests {
         let called_closure = called.clone();
         b.register_storage("ext:mock", move |_| {
             called_closure.store(true, Ordering::SeqCst);
-            Ok(Box::new(GitStorage))
+            Ok(Box::new(GitStorage::new(PathBuf::from("/"))))
         })
         .unwrap();
         let r = StorageRegistry {
@@ -318,8 +322,10 @@ mod tests {
     #[test]
     fn builder_is_reusable() {
         let mut b = StoreBuilder::new();
-        b.register_storage("ext:mock", |_| Ok(Box::new(GitStorage)))
-            .unwrap();
+        b.register_storage("ext:mock", |_| {
+            Ok(Box::new(GitStorage::new(PathBuf::from("/"))))
+        })
+        .unwrap();
         let _s1 = b.build(PathBuf::from("/tmp/a"), None);
         let _s2 = b.build(PathBuf::from("/tmp/b"), None);
         // Two stores constructed from one builder without panic.

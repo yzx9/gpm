@@ -45,7 +45,8 @@ async fn encrypt_ensures_our_recipient_when_absent_from_index() {
     std::fs::write(dir.path().join(TEST_RECIPIENTS_FILE), index).unwrap();
 
     let backend = AgeBackend;
-    let view = RepoFiles::new(&GitStorage, dir.path());
+    let storage = GitStorage::new(dir.path());
+    let view = RepoFiles::new(&storage);
 
     let plaintext = b"the-package-password";
     let ciphertext = backend
@@ -69,7 +70,8 @@ async fn list_recipients_round_trips_and_treats_missing_as_empty() {
 
     // Missing index → empty (uninitialized store).
     let dir = tempfile::tempdir().unwrap();
-    let view = RepoFiles::new(&GitStorage, dir.path());
+    let storage = GitStorage::new(dir.path());
+    let view = RepoFiles::new(&storage);
     let got = backend
         .list_recipients(&view)
         .await
@@ -104,7 +106,8 @@ async fn list_recipients_rejects_non_utf8_index() {
     )
     .unwrap();
     let backend = AgeBackend;
-    let view = RepoFiles::new(&GitStorage, dir.path());
+    let storage = GitStorage::new(dir.path());
+    let view = RepoFiles::new(&storage);
     let err = backend
         .list_recipients(&view)
         .await

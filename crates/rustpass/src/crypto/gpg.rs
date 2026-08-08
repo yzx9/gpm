@@ -34,7 +34,7 @@ use crate::crypto::{
 };
 use crate::error::{Error, ErrorCode};
 use crate::recipient::{KeyType, Recipient};
-use crate::storage::{RecipientsIndexPresence, RepoFileView, validate_recipients_index_liveness};
+use crate::storage::{FilePresence, RepoFileView};
 
 /// The GPG/OpenPGP crypto backend. Stateless unit struct — see the module docs.
 #[derive(Debug, Default, Clone, Copy)]
@@ -98,10 +98,7 @@ impl CryptoBackend for GpgBackend {
     }
 
     async fn list_recipients(&self, view: &dyn RepoFileView) -> Result<Vec<Recipient>, Error> {
-        let repo_path = view.repo_path();
-        if let RecipientsIndexPresence::Present =
-            validate_recipients_index_liveness(repo_path, GPG_RECIPIENTS_FILE).await?
-        {
+        if let FilePresence::Present = view.file_liveness(GPG_RECIPIENTS_FILE).await? {
             let bytes = view.read(GPG_RECIPIENTS_FILE).await?;
             let content = str::from_utf8(&bytes).map_err(|e| {
                 Error::new(
@@ -377,7 +374,8 @@ mod tests {
         let me = gen_key(Some(PASSPHRASE));
         let dir = gpg_store(&[&me]);
         let backend = GpgBackend;
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         let unlocked = backend
             .unlock_identity(me.at_rest.as_bytes(), PASSPHRASE)
             .await
@@ -399,7 +397,8 @@ mod tests {
         let me = gen_key(None);
         let dir = gpg_store(&[&me]);
         let backend = GpgBackend;
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         // An unprotected key unlocks with any passphrase (remove_password no-op).
         let unlocked = backend
             .unlock_identity(me.at_rest.as_bytes(), "")
@@ -458,7 +457,8 @@ mod tests {
             format!("# comment\n\n0x0123456789ABCDEF\n{long_fp}\n# tail\n"),
         )
         .unwrap();
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         let got = GpgBackend.list_recipients(&view).await.expect("parse");
         assert_eq!(
             got.len(),
@@ -473,7 +473,8 @@ mod tests {
     #[tokio::test]
     async fn list_recipients_absent_index_is_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         let got = GpgBackend
             .list_recipients(&view)
             .await
@@ -485,7 +486,8 @@ mod tests {
     async fn list_recipients_rejects_non_utf8_index() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(GPG_RECIPIENTS_FILE), b"0xabc\n\xff\xfe\n").unwrap();
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         let err = GpgBackend
             .list_recipients(&view)
             .await
@@ -512,7 +514,8 @@ mod tests {
         std::fs::write(public_keys_dir.join(&me.fingerprint), &me.pubkey).unwrap();
 
         let backend = GpgBackend;
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         let unlocked = backend
             .unlock_identity(me.at_rest.as_bytes(), PASSPHRASE)
             .await
@@ -547,7 +550,8 @@ mod tests {
         std::fs::write(public_keys_dir.join(&me.fingerprint), &me.pubkey).unwrap();
 
         let backend = GpgBackend;
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         assert!(
             backend
                 .identity_is_recipient(&me.at_rest, None, &view)
@@ -561,7 +565,8 @@ mod tests {
     async fn gpg_identity_is_recipient_true_for_a_listed_key() {
         let me = gen_key(Some(PASSPHRASE));
         let dir = gpg_store(&[&me]);
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         assert!(
             GpgBackend
                 .identity_is_recipient(&me.at_rest, None, &view)
@@ -575,7 +580,8 @@ mod tests {
         let me = gen_key(Some(PASSPHRASE));
         let other = gen_key(Some(PASSPHRASE));
         let dir = gpg_store(&[&other]); // only `other` is a recipient
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         assert!(
             !GpgBackend
                 .identity_is_recipient(&me.at_rest, None, &view)
@@ -596,7 +602,8 @@ mod tests {
         // .gpg-id lists a token whose .public-keys/<token> is missing.
         std::fs::write(dir.path().join(GPG_RECIPIENTS_FILE), "0xDEADBEEFCAFEBABE\n").unwrap();
 
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         let err = GpgBackend
             .identity_is_recipient(&me.at_rest, None, &view)
             .await
@@ -612,7 +619,8 @@ mod tests {
         let other = gen_key(Some(PASSPHRASE));
         let dir = gpg_store(&[&other]); // only `other` listed
         let backend = GpgBackend;
-        let view = RepoFiles::new(&GitStorage, dir.path());
+        let storage = GitStorage::new(dir.path());
+        let view = RepoFiles::new(&storage);
         let unlocked = backend
             .unlock_identity(me.at_rest.as_bytes(), PASSPHRASE)
             .await
