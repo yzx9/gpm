@@ -248,14 +248,22 @@ done
         );
     }
 
-    /// Split a secret plaintext into `(password, body)` the way gpm's parser
-    /// will: first line is the password, the remainder is the body. gpm strips
-    /// trailing whitespace from the body, so the expected body carries no
-    /// trailing newline.
-    fn expected_password_body(plaintext: &str) -> (&str, &str) {
+    /// Split a secret plaintext into `(password, free-text body)` the way gpm's
+    /// parser and gopass's `Body()` do: first line is the password; the body is
+    /// every subsequent line that is NOT a `Key: Value` pair (the free-text
+    /// notes), trailing newline trimmed. Attribute lines (`": "`) are excluded —
+    /// gpm models them as structured attributes, not body (R069 phase 2b).
+    fn expected_password_body(plaintext: &str) -> (&str, String) {
         match plaintext.split_once('\n') {
-            Some((pw, body)) => (pw, body.trim_end_matches('\n')),
-            None => (plaintext, ""),
+            Some((pw, body)) => {
+                let free_text: String = body
+                    .split('\n')
+                    .filter(|l| !l.contains(": "))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (pw, free_text.trim_end_matches('\n').to_string())
+            }
+            None => (plaintext, String::new()),
         }
     }
 
@@ -335,7 +343,7 @@ done
                 .expect("gpm decrypts the gopass-written entry");
             let (pw, body) = expected_password_body(plaintext);
             assert_eq!(secret.password(), pw, "password mismatch for {name}");
-            assert_eq!(secret.body(), body, "body mismatch for {name}");
+            assert_eq!(secret.body(), body.as_str(), "body mismatch for {name}");
         }
     }
 
@@ -652,7 +660,7 @@ done
             .expect("gpm decrypts the gopass-pushed entry");
         let (want_pw, want_body) = expected_password_body(gopass_plaintext);
         assert_eq!(secret.password(), want_pw);
-        assert_eq!(secret.body(), want_body);
+        assert_eq!(secret.body(), want_body.as_str());
 
         // ── Direction 2: gpm writes + pushes → gopass pulls ───────────────────
         // Invariant: gpm's HEAD == bare tip (just pulled) and nothing pushed in
@@ -868,7 +876,7 @@ done
             );
             assert_eq!(
                 secret.body(),
-                gopass_body,
+                gopass_body.as_str(),
                 "{name}: gpm body must match gopass's render"
             );
             // Guard against regressing back to the magic-as-password bug.

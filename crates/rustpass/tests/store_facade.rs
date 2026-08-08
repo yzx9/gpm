@@ -64,7 +64,7 @@ async fn store_facade_full_lifecycle() {
         .await
         .expect("get should succeed");
     assert_eq!(secret.password(), "AWS-KEY");
-    assert!(secret.body().contains("user: admin"));
+    assert_eq!(secret.get("user"), Some(b"admin".as_slice()));
 
     // 5. Sync (no changes)
     let sync_result = expect_fast_forwarded(store.sync().await.expect("sync should succeed"));

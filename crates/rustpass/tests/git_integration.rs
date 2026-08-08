@@ -263,12 +263,14 @@ async fn full_workflow_clone_list_decrypt() {
         "AWS-SECRET-KEY",
         "password must match first line of plaintext"
     );
-    assert!(
-        parsed.body().contains("user: admin"),
-        "body must contain subsequent lines"
+    assert_eq!(
+        parsed.get("user"),
+        Some(b"admin".as_slice()),
+        "user attribute must be present"
     );
-    assert!(
-        parsed.body().contains("root account"),
-        "body must contain all lines after the first"
+    assert_eq!(
+        parsed.attribute_str("notes"),
+        Some("root account"),
+        "notes attribute must carry the root-account value"
     );
 }

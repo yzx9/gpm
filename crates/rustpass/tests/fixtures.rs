@@ -114,8 +114,8 @@ fn test_parse_multi_line() {
     let content = b"my-password\nusername: alice\nurl: https://example.com";
     let secret = Secret::parse(content).unwrap();
     assert_eq!(secret.password(), "my-password");
-    assert!(secret.body().contains("username: alice"));
-    assert!(secret.body().contains("url: https://example.com"));
+    assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+    assert_eq!(secret.attribute_str("url"), Some("https://example.com"));
 }
 
 #[test]

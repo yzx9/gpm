@@ -64,7 +64,7 @@ async fn create_applies_content_template() {
 
     let secret = store.get("email/gmail").await.expect("get");
     assert_eq!(secret.password(), "s3kr3t");
-    assert!(secret.body().contains("user:"));
+    assert_eq!(secret.get("user"), Some(b"".as_slice()));
     assert!(secret.body().contains("url:"));
 }
 
@@ -80,7 +80,7 @@ async fn create_without_template_is_verbatim() {
 
     let secret = store.get("plain/entry").await.expect("get");
     assert_eq!(secret.password(), "just-a-password");
-    assert!(secret.body().contains("note: hi"));
+    assert_eq!(secret.get("note"), Some(b"hi".as_slice()));
 }
 
 /// Template variables `.Name`, `.Path`, `.Dir` resolve to the entry's parts.
@@ -170,8 +170,8 @@ async fn create_from_website_preset() {
     // Generated at the prefixed path derived from url + username.
     let secret = store.get("websites/example.com/alice").await.expect("get");
     assert_eq!(secret.password(), "hunter2");
-    assert!(secret.body().contains("url: example.com"));
-    assert!(secret.body().contains("username: alice"));
+    assert_eq!(secret.get("url"), Some(b"example.com".as_slice()));
+    assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
 }
 
 /// `create_from_preset` (pin) generates a numerical-PIN secret under `pin/`.
@@ -191,8 +191,8 @@ async fn create_from_pin_preset() {
 
     let secret = store.get("pin/bank/app").await.expect("get");
     assert_eq!(secret.password(), "1234");
-    assert!(secret.body().contains("authority: bank"));
-    assert!(secret.body().contains("application: app"));
+    assert_eq!(secret.get("authority"), Some(b"bank".as_slice()));
+    assert_eq!(secret.get("application"), Some(b"app".as_slice()));
 }
 
 /// An unknown preset id is rejected.

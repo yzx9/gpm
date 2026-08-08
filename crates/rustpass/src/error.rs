@@ -79,6 +79,10 @@ pub enum ErrorCode {
     /// A gopass binary attachment was detected but its base64 body could not be
     /// decoded (corrupt or not actually base64).
     AttachmentInvalid,
+    /// A secret's structured parts are invalid (an attribute key contains the
+    /// `": "` separator or a newline, or a value contains a newline) — it could
+    /// not be reassembled without corrupting the on-disk round-trip.
+    SecretInvalid,
 }
 
 /// Safe error type that never contains secret content.
@@ -123,6 +127,7 @@ impl Error {
                 ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
                 ErrorCode::RepoBusy => "REPO_BUSY",
                 ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
+                ErrorCode::SecretInvalid => "SECRET_INVALID",
             }
             .to_string(),
             message: message.into(),
@@ -222,6 +227,7 @@ mod tests {
             ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
             ErrorCode::RepoBusy => "REPO_BUSY",
             ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
+            ErrorCode::SecretInvalid => "SECRET_INVALID",
         }
     }
 
@@ -255,6 +261,7 @@ mod tests {
             ErrorCode::PluginIdentityNotSupported,
             ErrorCode::BackendNotAvailable,
             ErrorCode::AttachmentInvalid,
+            ErrorCode::SecretInvalid,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -296,6 +303,7 @@ mod tests {
             ErrorCode::PluginIdentityNotSupported,
             ErrorCode::BackendNotAvailable,
             ErrorCode::AttachmentInvalid,
+            ErrorCode::SecretInvalid,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");

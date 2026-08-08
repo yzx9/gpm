@@ -120,7 +120,7 @@ async fn set_writes_encrypts_and_commits_locally() {
     assert!(entries.iter().any(|e| e.name == "cloud/aws/root"));
     let secret = store.get("cloud/aws/root").await.expect("get");
     assert_eq!(secret.password(), "s3kr3t-password");
-    assert!(secret.body().contains("user: admin"));
+    assert_eq!(secret.get("user"), Some(b"admin".as_slice()));
 }
 
 /// Regression smoke for the DEFAULT identity: a plaintext x25519 key (no

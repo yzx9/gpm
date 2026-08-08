@@ -10,8 +10,11 @@ use crate::error::{Error, ErrorCode};
 
 /// A decrypted secret — aligned with `gopass.Secret`.
 ///
-/// In memory: first line = password, remainder = body (key-value pairs +
-/// freeform notes). [`Secret::parse`] also reads the deprecated
+/// In memory: first line = password; the remainder is split into a structured
+/// `attributes` region (gopass AKV `Key: Value` pairs) and a free-text `body`
+/// (gopass `Body()` — every line that is NOT a `Key: Value` pair). This is the
+/// R069 phase-2b model: `attributes` is the source of truth and `body()` returns
+/// free-text notes only. [`Secret::parse`] also reads the deprecated
 /// `GOPASS-SECRET-1.0` format (which carries the password in a `Password:`
 /// header) and normalizes it into this shape; see [`parse_legacy`].
 ///
@@ -26,25 +29,33 @@ use crate::error::{Error, ErrorCode};
 /// and never written back. See ADR A005.
 pub struct Secret {
     password: Zeroizing<Vec<u8>>,
+    /// Free-text notes only (gopass `Body()` parity): every line that contained
+    /// the gopass `": "` separator has been lifted into `attributes`.
     body: Zeroizing<Vec<u8>>,
-    /// The parsed `Key: Value` attribute region (gopass AKV), as a derived view
-    /// over [`Secret::body`]: every body line containing the gopass `": "`
-    /// separator becomes one [`Attribute`], in order, duplicates preserved. In
-    /// this phase `body()` still returns the raw blob (attributes inline); these
-    /// accessors let the TOTP/attachment detectors stop re-scanning it. Phase 2b
-    /// flips `body()` to free-text-only and makes `attributes` the source of truth.
+    /// The parsed `Key: Value` attribute region (gopass AKV), as the source of
+    /// truth: ordered, duplicate-tolerant. Both halves are decrypted content, so
+    /// both are [`Zeroizing`]; the [`fmt::Debug`] impl redacts them — never
+    /// derive it, or a stray log line leaks the pair.
     attributes: Vec<Attribute>,
 }
 
 /// One `Key: Value` line from a secret's attribute region (gopass AKV). Both
 /// halves are decrypted content, so both are [`Zeroizing`]; the [`fmt::Debug`]
 /// impl redacts them — never derive it, or a stray log line leaks the pair.
+#[derive(PartialEq, Eq)]
 pub struct Attribute {
     key: Zeroizing<Vec<u8>>,
     value: Zeroizing<Vec<u8>>,
 }
 
 impl Attribute {
+    /// Construct a new attribute from byte parts (used by `from_parts`).
+    pub(crate) fn new(key: Vec<u8>, value: Vec<u8>) -> Self {
+        Self {
+            key: Zeroizing::new(key),
+            value: Zeroizing::new(value),
+        }
+    }
     /// The attribute key as raw bytes (byte-exact, never lossy).
     #[must_use]
     pub fn key(&self) -> &[u8] {
@@ -96,11 +107,11 @@ impl Secret {
         self.password.as_slice()
     }
 
-    /// Returns the body (all content after the first line) as a UTF-8 view.
+    /// Returns the free-text body (every post-password line that is NOT a
+    /// `Key: Value` pair — gopass `Body()` parity) as a UTF-8 view.
     ///
-    /// In gopass AKV format this typically contains `key: value` metadata lines
-    /// followed by optional freeform notes. Returns an empty `&str` when the
-    /// stored bytes aren't valid UTF-8 — use [`Secret::body_bytes`] then.
+    /// Returns an empty `&str` when the stored bytes aren't valid UTF-8 — use
+    /// [`Secret::body_bytes`] then.
     #[must_use]
     pub fn body(&self) -> &str {
         std::str::from_utf8(self.body.as_slice()).unwrap_or("")
@@ -112,7 +123,8 @@ impl Secret {
         self.body.as_slice()
     }
 
-    /// Whether both the password and body are valid UTF-8.
+    /// Whether the password, every attribute key/value, and the body are all
+    /// valid UTF-8.
     ///
     /// `false` marks a secret that can't be safely round-tripped through a
     /// UTF-8 text editor — the UI edit-blocks it so its lossy view is never
@@ -123,16 +135,21 @@ impl Secret {
     #[must_use]
     pub fn is_utf8(&self) -> bool {
         std::str::from_utf8(self.password.as_slice()).is_ok()
+            && self.attributes.iter().all(|a| {
+                std::str::from_utf8(a.key.as_slice()).is_ok()
+                    && std::str::from_utf8(a.value.as_slice()).is_ok()
+            })
             && std::str::from_utf8(self.body.as_slice()).is_ok()
     }
 
     /// Whether the password (first line) is valid UTF-8.
     ///
-    /// Narrower than [`Secret::is_utf8`] (which requires both password and
-    /// body): `copy_password` only ever places the password on the (UTF-8)
-    /// clipboard, so a UTF-8 password with a non-UTF-8 body is still copyable.
-    /// Editing round-trips the whole secret through a text editor, so the
-    /// edit-block uses the stricter [`Secret::is_utf8`].
+    /// Narrower than [`Secret::is_utf8`] (which requires the password,
+    /// attributes, and body to all be UTF-8): `copy_password` only ever places
+    /// the password on the (UTF-8) clipboard, so a UTF-8 password with a
+    /// non-UTF-8 body is still copyable. Editing round-trips the whole secret
+    /// through a text editor, so the edit-block uses the stricter
+    /// [`Secret::is_utf8`].
     #[must_use]
     pub fn password_is_utf8(&self) -> bool {
         std::str::from_utf8(self.password.as_slice()).is_ok()
@@ -185,27 +202,87 @@ impl Secret {
         })
     }
 
-    /// Serialize back to the modern on-disk plaintext: `password\n body`, or
-    /// just `password` when the body is empty. Byte-exact inverse of
-    /// [`Secret::parse`] for modern secrets (the only format gpm writes).
+    /// Serialize back to the modern on-disk plaintext in canonical order:
+    /// `password`, then each attribute as `key: value`, then the free-text body.
+    /// Byte-exact inverse of [`Secret::parse`] for secrets already in this order
+    /// (the common case); interleaved secrets canonicalize on round-trip, which
+    /// stays gopass-readable (gopass's reader is position-agnostic over `": "`).
     #[must_use]
     pub fn to_bytes(&self) -> Zeroizing<Vec<u8>> {
         let pw = self.password.as_slice();
-        let bd = self.body.as_slice();
-        let mut out = Vec::with_capacity(pw.len() + 1 + bd.len());
+        let has_content = !self.attributes.is_empty() || !self.body.is_empty();
+        let mut out =
+            Vec::with_capacity(pw.len() + self.attributes.len() * 32 + self.body.len() + 16);
         out.extend_from_slice(pw);
-        if !bd.is_empty() {
-            out.push(b'\n');
-            out.extend_from_slice(bd);
+        if !has_content {
+            return Zeroizing::new(out); // password-only, no trailing newline
+        }
+        out.push(b'\n');
+        for (i, a) in self.attributes.iter().enumerate() {
+            if i > 0 {
+                out.push(b'\n');
+            }
+            out.extend_from_slice(a.key.as_slice());
+            out.extend_from_slice(b": ");
+            out.extend_from_slice(a.value.as_slice());
+        }
+        if !self.body.is_empty() {
+            if !self.attributes.is_empty() {
+                out.push(b'\n');
+            }
+            out.extend_from_slice(self.body.as_slice());
         }
         Zeroizing::new(out)
+    }
+
+    /// Build a `Secret` from its structured parts — the single-source assembler
+    /// for the edit/create write path ([`Secret::to_bytes`] then serializes it).
+    ///
+    /// Validates that the password contains no newline, no attribute key
+    /// contains the gopass `": "` separator or a newline, and no value contains
+    /// a newline — otherwise the reassembled plaintext would re-parse to a
+    /// different structure (silent corruption).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::SecretInvalid`] when the password contains a newline, an
+    /// attribute key contains `": "` or a newline, or an attribute value contains
+    /// a newline.
+    pub fn from_parts(
+        password: Vec<u8>,
+        attributes: Vec<Attribute>,
+        body: Vec<u8>,
+    ) -> Result<Self, Error> {
+        // A newline breaks the first-line invariant; `": "` in a password is fine.
+        if password.as_slice().contains(&b'\n') {
+            return Err(Error::new(
+                ErrorCode::SecretInvalid,
+                "password contains a newline",
+            ));
+        }
+        for a in &attributes {
+            if a.key.as_slice().contains(&b'\n')
+                || a.value.as_slice().contains(&b'\n')
+                || a.key.as_slice().windows(2).any(|w| w == b": ")
+            {
+                return Err(Error::new(
+                    ErrorCode::SecretInvalid,
+                    "attribute key contains \": \" or a newline, or value contains a newline",
+                ));
+            }
+        }
+        Ok(Self {
+            password: Zeroizing::new(password),
+            attributes,
+            body: Zeroizing::new(body),
+        })
     }
 
     /// Parse decrypted bytes into a `Secret`.
     ///
     /// Recognizes two plaintext layouts:
-    /// - **Modern** (what gpm writes): first line is the password, the rest is
-    ///   the body.
+    /// - **Modern** (what gpm writes): first line is the password; the rest is
+    ///   partitioned into attributes (`Key: Value` lines) and free-text body.
     /// - **Legacy `GOPASS-SECRET-1.0`** (read-only compat for gopass secrets
     ///   written mid-2020–v1.13): the password lives in a `Password:` header;
     ///   see [`parse_legacy`].
@@ -232,28 +309,31 @@ impl Secret {
         // so detect the magic and parse it. On a malformed header block gopass
         // falls back to its modern text parse (password = first line = the
         // magic); `parse_legacy` signals that by returning `None`, and we reuse
-        // `modern_split_bytes` — the same path non-legacy secrets take.
+        // the modern path — the same path non-legacy secrets take.
         let first_line = normalized.split(|&b| b == b'\n').next().unwrap_or(&[]);
-        let (password, body) = if first_line.trim_ascii() == LEGACY_MAGIC {
-            // The MIME header state machine in `parse_legacy` is text-based, so
-            // hand it a (lossy, for rare non-UTF-8 legacy) `&str` view and store
-            // the resulting strings as bytes.
+        // The MIME header state machine in `parse_legacy` is text-based, so hand
+        // it a (lossy, for rare non-UTF-8 legacy) `&str` view. On a malformed
+        // header block it returns None and we fall back to the modern split
+        // (gopass's cascade: PermanentError → ParseAKV → password = the magic).
+        let legacy = if first_line.trim_ascii() == LEGACY_MAGIC {
             let text = String::from_utf8_lossy(&normalized);
-            match parse_legacy(&text) {
-                Some((pw, bd)) => (
-                    Zeroizing::new(pw.as_str().as_bytes().to_vec()),
-                    Zeroizing::new(bd.as_str().as_bytes().to_vec()),
-                ),
-                None => modern_split_bytes(&normalized),
-            }
+            parse_legacy(&text).map(|(pw, header_attrs, post_body)| {
+                // The post-header body is split with the same position-agnostic
+                // rule as a modern body (gopass `Body()` drops any ": " line).
+                let (body_attrs, free_body) = split_attrs(&post_body);
+                let mut attrs = header_attrs;
+                attrs.extend(body_attrs);
+                (pw, attrs, free_body)
+            })
         } else {
-            modern_split_bytes(&normalized)
+            None
         };
+        let (password, attributes, body) = legacy.unwrap_or_else(|| modern_split(&normalized));
 
         Ok(Self {
-            attributes: parse_attributes(body.as_slice()),
             password,
-            body,
+            attributes,
+            body: Zeroizing::new(body),
         })
     }
 }
@@ -261,23 +341,58 @@ impl Secret {
 /// The deprecated gopass MIME magic line, as bytes.
 const LEGACY_MAGIC: &[u8] = b"GOPASS-SECRET-1.0";
 
-/// Split `normalized` the modern way: first line is the password, everything
-/// after the first `\n` is the body. Byte-exact inverse of [`Secret::to_bytes`].
-/// Also the gopass-parity fallback for a malformed legacy header block — gopass
-/// re-parses the whole input as its modern text format, so the magic line
-/// becomes the password.
-fn modern_split_bytes(normalized: &[u8]) -> (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>) {
+/// Output of [`parse_legacy`]: `(password, header attributes, post-header body)`.
+type LegacyParts = (Zeroizing<Vec<u8>>, Vec<Attribute>, Vec<u8>);
+
+/// Split `normalized` into the password (first line) and the remainder (after
+/// the first `\n`). The password is `Zeroizing`; the remainder is plain bytes
+/// handed to [`split_attrs`].
+fn split_first_line(normalized: &[u8]) -> (Zeroizing<Vec<u8>>, Vec<u8>) {
     if let Some(newline_pos) = normalized.iter().position(|&b| b == b'\n') {
-        // `newline_pos` is the '\n': split the password off, then skip the '\n'.
         let (pw, rest) = normalized.split_at(newline_pos);
-        let body = rest.get(1..).unwrap_or(&[]);
-        (Zeroizing::new(pw.to_vec()), Zeroizing::new(body.to_vec()))
+        // `rest` starts at the '\n' (index 0); skip it.
+        let after = rest.get(1..).unwrap_or(&[]);
+        (Zeroizing::new(pw.to_vec()), after.to_vec())
     } else {
-        (
-            Zeroizing::new(normalized.to_vec()),
-            Zeroizing::new(Vec::new()),
-        )
+        (Zeroizing::new(normalized.to_vec()), Vec::new())
     }
+}
+
+/// The modern AKV split: first line is the password, the rest is partitioned
+/// into attributes (`Key: Value` lines) and free-text body. Also the
+/// gopass-parity fallback for a malformed legacy header block.
+fn modern_split(normalized: &[u8]) -> (Zeroizing<Vec<u8>>, Vec<Attribute>, Vec<u8>) {
+    let (pw, rest) = split_first_line(normalized);
+    let (attrs, body) = split_attrs(&rest);
+    (pw, attrs, body)
+}
+
+/// Partition the post-password bytes into (attributes, free-text body), gopass
+/// AKV parity: each line containing the `": "` separator becomes one
+/// [`Attribute`] (key = bytes before the first `": "`, value = bytes after,
+/// untrimmed — gopass does not trim attribute values, see gopass issue #2873);
+/// every other line is free-text body. Attribute order and duplicate keys are
+/// preserved. Byte-oriented, so a non-UTF-8 body still yields byte-exact
+/// attributes. The free-text body is the non-`": "` lines joined by `\n` (no
+/// trailing newline).
+fn split_attrs(rest: &[u8]) -> (Vec<Attribute>, Vec<u8>) {
+    let mut attrs = Vec::new();
+    let mut body: Vec<u8> = Vec::new();
+    let mut first_body_line = true;
+    for line in rest.split(|&b| b == b'\n') {
+        if let Some(pos) = line.windows(2).position(|w| w == b": ") {
+            let (key, sep_and_value) = line.split_at(pos);
+            let value = sep_and_value.split_at(2).1; // drop the ": "
+            attrs.push(Attribute::new(key.to_vec(), value.to_vec()));
+        } else {
+            if !first_body_line {
+                body.push(b'\n');
+            }
+            body.extend_from_slice(line);
+            first_body_line = false;
+        }
+    }
+    (attrs, body)
 }
 
 /// Normalize decrypted bytes for parsing: CRLF → LF, then trim trailing ASCII
@@ -300,71 +415,28 @@ fn normalize_bytes(content: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Parse the `Key: Value` attribute region out of a body blob: every line
-/// containing the gopass `": "` separator becomes one [`Attribute`], in source
-/// order, duplicates preserved. The key is the bytes before the first `": "`,
-/// the value the bytes after it (untrimmed — gopass does not trim attribute
-/// values, see gopass issue #2873). Byte-oriented, so it never needs the body to
-/// be valid UTF-8 — a non-UTF-8 body still yields byte-exact attributes.
-fn parse_attributes(body: &[u8]) -> Vec<Attribute> {
-    body.split(|&b| b == b'\n')
-        .filter_map(|line| {
-            // gopass's kvSep is the literal ": " — find its first occurrence.
-            let pos = line.windows(2).position(|w| w == b": ")?;
-            // `pos` is the colon's index; the matching window ": " occupies
-            // [pos, pos+2), so both split_at calls are in bounds.
-            let (key, sep_and_value) = line.split_at(pos);
-            let value = sep_and_value.split_at(2).1; // drop the ": "
-            Some(Attribute {
-                key: Zeroizing::new(key.to_vec()),
-                value: Zeroizing::new(value.to_vec()),
-            })
-        })
-        .collect()
-}
-
 /// Parse the deprecated `GOPASS-SECRET-1.0` format — read-only compatibility
 /// with gopass secrets written between mid-2020 and v1.13 (Jan 2021). gpm never
-/// writes this format; an edit through gpm normalizes to the modern text format
-/// (the frontend reassembles `${pw}\n${body}` and Rust encrypts verbatim).
+/// writes this format; an edit through gpm normalizes to the modern text format.
 ///
 /// `normalized` is the full plaintext after CRLF→LF + trailing trim, whose first
 /// line (trimmed) is the magic `GOPASS-SECRET-1.0`; the caller discriminates and
 /// commits to legacy.
 ///
-/// Returns `Some(password, body)` on a well-formed legacy parse, or `None` when
-/// the header block is malformed (a header line with no colon, or a continuation
-/// line with no preceding header) — the caller then falls back to
-/// [`modern_split_bytes`], matching gopass's cascade (`PermanentError` →
-/// `ParseAKV(in)` → password = the magic line).
+/// Returns `Some(password, header_attrs, post-header-body)` on a well-formed
+/// legacy parse, or `None` when the header block is malformed (a header line
+/// with no colon, or a continuation line with no preceding header) — the caller
+/// then falls back to the modern split, matching gopass's cascade
+/// (`PermanentError` → `ParseAKV(in)` → password = the magic line).
 ///
 /// gopass parity (verified against `pkg/gopass/secrets/secparse`):
 /// - The `Password:` header is extracted only when its first value is non-empty;
-///   an empty-value `Password:` is left in the rendered body as `password:`
+///   an empty-value `Password:` is kept as an `Attribute { key: "password", "" }`
 ///   (gopass gates both `Get` and `Del` on `sv != ""`).
 /// - Remaining header keys are lowercased (matching gopass's `strings.ToLower`)
-///   and rendered in source order.
-///
-/// ```text
-/// after_magic lines
-///    │
-///    ▼
-///  ┌────────────────────── in header region? ──────────────────────┐
-///  │ blank line ──► body = rest; STOP                              │
-///  │ ws-led, cur_key set ──► fold (append, single-space)           │
-///  │ ws-led, no cur_key  ──► None  (orphan → modern_split fallback)│
-///  │ has ':' ──► flush pending; new header (first-colon, lc key)   │
-///  │ else    ──► None  (no-colon → modern_split fallback)          │
-///  │ EOF     ──► flush last; body = ""                             │
-///  └───────────────────────────────────────────────────────────────┘
-///    │ flush: v = val.trim_end()
-///    │   key=="password", first value non-empty → pw=v, drop ALL password
-///    │   key=="password", first value empty     → keep ALL as "password:"
-///    │   else                                    → rendered.push("key: v")
-///    ▼
-///  body = rendered.join("\n") + body_text  →  Some((password, body))
-/// ```
-fn parse_legacy(normalized: &str) -> Option<(Zeroizing<String>, Zeroizing<String>)> {
+///   and kept as structured `Attribute`s in source order — no longer flattened
+///   into the body.
+fn parse_legacy(normalized: &str) -> Option<LegacyParts> {
     // Skip the magic first line.
     let after_magic = match normalized.find('\n') {
         Some(i) => &normalized[i + 1..],
@@ -374,7 +446,7 @@ fn parse_legacy(normalized: &str) -> Option<(Zeroizing<String>, Zeroizing<String
 
     let mut password: Option<String> = None;
     let mut password_seen = false; // has the first `Password:` header been flushed?
-    let mut rendered: Vec<String> = Vec::new();
+    let mut header_attrs: Vec<Attribute> = Vec::new();
     let mut cur_key: Option<String> = None;
     let mut cur_val = String::new();
     let mut body_start_idx = lines.len(); // default: no body (headers ran to EOF)
@@ -408,7 +480,7 @@ fn parse_legacy(normalized: &str) -> Option<(Zeroizing<String>, Zeroizing<String
             &mut cur_val,
             &mut password,
             &mut password_seen,
-            &mut rendered,
+            &mut header_attrs,
         );
         let (key_raw, val_raw) = line.split_at(colon);
         cur_key = Some(key_raw.to_ascii_lowercase());
@@ -421,38 +493,32 @@ fn parse_legacy(normalized: &str) -> Option<(Zeroizing<String>, Zeroizing<String
         &mut cur_val,
         &mut password,
         &mut password_seen,
-        &mut rendered,
+        &mut header_attrs,
     );
 
     let body_text = lines.get(body_start_idx..).unwrap_or_default().join("\n");
-    let body_text = body_text.trim_end();
-
-    let body = if rendered.is_empty() {
-        body_text.to_string()
-    } else if body_text.is_empty() {
-        rendered.join("\n")
-    } else {
-        format!("{}\n{}", rendered.join("\n"), body_text)
-    };
+    // `trim_end` is load-bearing: the normalized input already had trailing
+    // whitespace stripped, but the header block may end with a blank-line
+    // terminator whose join leaves a trailing newline.
+    let body_bytes = body_text.trim_end().as_bytes().to_vec();
 
     Some((
-        Zeroizing::new(password.unwrap_or_default()),
-        // `trim_end` is load-bearing: a final empty-value header (e.g. an empty
-        // `Password:`) renders as "key: " with a trailing space.
-        Zeroizing::new(body.trim_end().to_string()),
+        Zeroizing::new(password.unwrap_or_default().into_bytes()),
+        header_attrs,
+        body_bytes,
     ))
 }
 
 /// Commit the pending header (`cur_key`/`cur_val`) into either the password slot
-/// or the rendered body. Mirrors gopass's `Password` handling: extraction (and
-/// dropping from the render) is gated on the FIRST `Password:` header having a
-/// non-empty value.
+/// or the header-attribute list. Mirrors gopass's `Password` handling: extraction
+/// (and dropping) is gated on the FIRST `Password:` header having a non-empty
+/// value.
 fn flush(
     cur_key: &mut Option<String>,
     cur_val: &mut String,
     password: &mut Option<String>,
     password_seen: &mut bool,
-    rendered: &mut Vec<String>,
+    header_attrs: &mut Vec<Attribute>,
 ) {
     let Some(key) = cur_key.take() else {
         cur_val.clear();
@@ -464,18 +530,17 @@ fn flush(
         *password_seen = true;
         if first && !value.is_empty() {
             // First Password is non-empty → extract it and drop every Password
-            // header from the render (gopass: hdr.Get + hdr.Del, both gated on
-            // `sv != ""`).
+            // header (gopass: hdr.Get + hdr.Del, both gated on `sv != ""`).
             *password = Some(value.to_string());
         } else if password.is_some() {
             // A previous Password was extracted → drop this one too.
         } else {
-            // First Password was empty (or a later one when it was) → gopass
-            // leaves all Password headers in place; render this one.
-            rendered.push(format!("{key}: {value}"));
+            // First Password was empty → gopass leaves all Password headers in
+            // place; keep this one as a structured attribute.
+            header_attrs.push(Attribute::new(key.into_bytes(), value.as_bytes().to_vec()));
         }
     } else {
-        rendered.push(format!("{key}: {value}"));
+        header_attrs.push(Attribute::new(key.into_bytes(), value.as_bytes().to_vec()));
     }
     cur_val.clear();
 }
@@ -489,6 +554,7 @@ mod tests {
         let secret = Secret::parse(b"hunter2").unwrap();
         assert_eq!(secret.password(), "hunter2");
         assert_eq!(secret.body(), "");
+        assert!(secret.attributes().is_empty());
     }
 
     #[test]
@@ -496,8 +562,10 @@ mod tests {
         let content = b"hunter2\nusername: alice\nurl: example.com";
         let secret = Secret::parse(content).unwrap();
         assert_eq!(secret.password(), "hunter2");
-        assert!(secret.body().contains("username: alice"));
-        assert!(secret.body().contains("url: example.com"));
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.get("url"), Some(b"example.com".as_slice()));
+        // No free-text line → empty body.
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
@@ -546,7 +614,8 @@ mod tests {
     fn parse_unicode_content() {
         let secret = Secret::parse("密码123\n用户: 张三\n网址: example.com".as_bytes()).unwrap();
         assert_eq!(secret.password(), "密码123");
-        assert!(secret.body().contains("用户: 张三"));
+        assert_eq!(secret.attribute_str("用户"), Some("张三"));
+        assert_eq!(secret.attribute_str("网址"), Some("example.com"));
     }
 
     #[test]
@@ -564,7 +633,8 @@ mod tests {
             Secret::parse(b"GOPASS-SECRET-1.0\nPassword: hunter2\nusername: alice\n\nfree text")
                 .unwrap();
         assert_eq!(secret.password(), "hunter2");
-        assert_eq!(secret.body(), "username: alice\nfree text");
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "free text");
     }
 
     #[test]
@@ -574,17 +644,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(secret.password(), "p");
+        let pairs: Vec<(&[u8], &[u8])> = secret
+            .attributes()
+            .iter()
+            .map(|a| (a.key(), a.value()))
+            .collect();
         assert_eq!(
-            secret.body(),
-            "username: alice\nurl: example.com\ntype: ssh"
+            pairs,
+            vec![
+                (b"username".as_slice(), b"alice".as_slice()),
+                (b"url".as_slice(), b"example.com".as_slice()),
+                (b"type".as_slice(), b"ssh".as_slice()),
+            ]
         );
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
     fn parse_legacy_no_password_header() {
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\nusername: alice\n\nnotes").unwrap();
         assert_eq!(secret.password(), "");
-        assert_eq!(secret.body(), "username: alice\nnotes");
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "notes");
     }
 
     #[test]
@@ -593,7 +674,8 @@ mod tests {
             Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nnote: line one\n  line two\n\nbody")
                 .unwrap();
         assert_eq!(secret.password(), "p");
-        assert_eq!(secret.body(), "note: line one line two\nbody");
+        assert_eq!(secret.attribute_str("note"), Some("line one line two"));
+        assert_eq!(secret.body(), "body");
     }
 
     #[test]
@@ -607,7 +689,8 @@ mod tests {
     fn parse_legacy_no_body_eof_terminates_headers() {
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nusername: alice").unwrap();
         assert_eq!(secret.password(), "p");
-        assert_eq!(secret.body(), "username: alice");
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
@@ -617,7 +700,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(secret.password(), "hunter2");
-        assert_eq!(secret.body(), "username: alice\nbody");
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "body");
     }
 
     #[test]
@@ -644,16 +728,22 @@ mod tests {
             Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nurl: https://example.com:8080/path")
                 .unwrap();
         assert_eq!(secret.password(), "p");
-        assert_eq!(secret.body(), "url: https://example.com:8080/path");
+        assert_eq!(
+            secret.get("url"),
+            Some(b"https://example.com:8080/path".as_slice())
+        );
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
     fn parse_legacy_empty_password_value_kept_in_body() {
         // gopass parity: an empty-value `Password:` header is NOT extracted
-        // (the `sv != ""` guard) and stays in the rendered body as `password:`.
+        // (the `sv != ""` guard) and stays as a structured `password` attribute.
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword:\nFoo: Bar").unwrap();
         assert_eq!(secret.password(), "");
-        assert_eq!(secret.body(), "password: \nfoo: Bar");
+        assert_eq!(secret.get("password"), Some(b"".as_slice()));
+        assert_eq!(secret.get("foo"), Some(b"Bar".as_slice()));
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
@@ -670,7 +760,9 @@ mod tests {
         let secret =
             Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nTotp: ABCD\nNote: x\n").unwrap();
         assert_eq!(secret.password(), "p");
-        assert_eq!(secret.body(), "totp: ABCD\nnote: x");
+        assert_eq!(secret.get("totp"), Some(b"ABCD".as_slice()));
+        assert_eq!(secret.get("note"), Some(b"x".as_slice()));
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
@@ -683,11 +775,15 @@ mod tests {
     #[test]
     fn parse_legacy_no_colon_header_falls_back_to_modern() {
         // gopass parity: a no-colon line in the header block is malformed →
-        // gopass falls back to ParseAKV(in) → password = the magic line.
+        // gopass falls back to ParseAKV(in) → password = the magic line. The
+        // modern split then treats `Password: p` as an attribute.
         let secret =
             Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\nthis has no colon\nmore body").unwrap();
         assert_eq!(secret.password(), "GOPASS-SECRET-1.0");
-        assert_eq!(secret.body(), "Password: p\nthis has no colon\nmore body");
+        // Modern fallback preserves key case (only parse_legacy lowercases MIME
+        // headers), so the attribute is key "Password", matched case-insensitively.
+        assert_eq!(secret.get_ci("password"), Some(b"p".as_slice()));
+        assert_eq!(secret.body(), "this has no colon\nmore body");
     }
 
     #[test]
@@ -705,7 +801,8 @@ mod tests {
         // must bypass the legacy branch.
         let secret = Secret::parse(b"hunter2\nusername: alice").unwrap();
         assert_eq!(secret.password(), "hunter2");
-        assert_eq!(secret.body(), "username: alice");
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
@@ -713,20 +810,38 @@ mod tests {
         // gpm inherits gopass's footgun: a secret whose first line IS the magic
         // literal is treated as legacy (gopass uses the identical discriminator),
         // even if a user meant it as a modern password. With no `Password:`
-        // header the password slot is empty and the rest renders as the body.
+        // header the password slot is empty and the rest becomes attributes.
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\nusername: alice").unwrap();
         assert_eq!(secret.password(), "");
-        assert_eq!(secret.body(), "username: alice");
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "");
     }
 
     #[test]
-    fn parse_legacy_first_password_empty_then_non_empty_all_rendered() {
+    fn parse_legacy_first_password_empty_then_non_empty_all_kept() {
         // gopass parity: the FIRST `Password:` header decides. Its value is
-        // empty, so nothing is extracted and EVERY `Password:` header stays in
-        // the rendered body (gopass's `hdr.Del` is gated on `sv != ""`).
+        // empty, so nothing is extracted and EVERY `Password:` header stays as a
+        // structured attribute (gopass's `hdr.Del` is gated on `sv != ""`).
         let secret = Secret::parse(b"GOPASS-SECRET-1.0\nPassword:\nPassword: second\n").unwrap();
         assert_eq!(secret.password(), "");
-        assert_eq!(secret.body(), "password: \npassword: second");
+        let pw_values: Vec<&[u8]> = secret
+            .attributes()
+            .iter()
+            .filter(|a| a.key() == b"password")
+            .map(Attribute::value)
+            .collect();
+        assert_eq!(pw_values, vec![b"".as_slice(), b"second".as_slice()]);
+    }
+
+    #[test]
+    fn parse_legacy_post_header_kv_line_becomes_attribute() {
+        // R069 phase-2b parity: a `Key: Value` line in the post-header body is
+        // promoted to an attribute (gopass `Body()` drops it from free text).
+        let secret =
+            Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\n\nfree\nnote: in body").unwrap();
+        assert_eq!(secret.password(), "p");
+        assert_eq!(secret.get("note"), Some(b"in body".as_slice()));
+        assert_eq!(secret.body(), "free");
     }
 
     // ---- bytes-native (R069 phase 1) ----
@@ -746,6 +861,7 @@ mod tests {
         let twice = Secret::parse(&bytes).unwrap();
         assert_eq!(twice.password_bytes(), once.password_bytes());
         assert_eq!(twice.body_bytes(), once.body_bytes());
+        assert_eq!(twice.attributes(), once.attributes());
         // And to_bytes is stable (idempotent on the already-normalized form).
         assert_eq!(twice.to_bytes().as_slice(), bytes.as_slice());
     }
@@ -795,7 +911,7 @@ mod tests {
         assert!(!secret.password_is_utf8());
     }
 
-    // ---- attribute region (R069 phase 2a) ----
+    // ---- attribute region (R069 phase 2a → 2b source of truth) ----
 
     #[test]
     fn attributes_parsed_from_body() {
@@ -803,10 +919,9 @@ mod tests {
         // `get` is exact-case (gopass `Get` parity).
         assert_eq!(secret.get("user"), Some(b"alice".as_slice()));
         assert_eq!(secret.attribute_str("url"), Some("https://example.com"));
-        // A free-text line (no ": ") is not an attribute.
+        // A free-text line (no ": ") is not an attribute — it is the body.
         assert_eq!(secret.get("notes"), None);
-        // body() still carries the attribute lines (phase-2a compat shim).
-        assert!(secret.body().contains("user: alice"));
+        assert_eq!(secret.body(), "notes");
     }
 
     #[test]
@@ -863,5 +978,103 @@ mod tests {
         let secret = Secret::parse(b"pw\nk: \xff\xfe").unwrap();
         assert_eq!(secret.get("k"), Some(b"\xff\xfe".as_slice()));
         assert_eq!(secret.attribute_str("k"), None);
+        // And is_utf8() flags it so the edit-block holds.
+        assert!(!secret.is_utf8());
+    }
+
+    #[test]
+    fn non_utf8_attribute_key_edit_blocked() {
+        // A non-UTF-8 attribute KEY must trip is_utf8() too (not just values),
+        // or it would be lossy-serialized to the frontend and saved back corrupt.
+        let secret = Secret::parse(b"pw\n\xff\xfe: value").unwrap();
+        assert!(secret.attributes().iter().any(|a| a.key() == b"\xff\xfe"));
+        assert!(!secret.is_utf8());
+    }
+
+    // ---- from_parts assembler (R069 phase 2b write path) ----
+
+    #[test]
+    fn from_parts_assembles_all_layouts() {
+        // password-only.
+        let s = Secret::from_parts(b"pw".to_vec(), vec![], vec![]).unwrap();
+        assert_eq!(s.to_bytes().as_slice(), b"pw");
+        // + attributes.
+        let s = Secret::from_parts(
+            b"pw".to_vec(),
+            vec![
+                Attribute::new(b"user".to_vec(), b"alice".to_vec()),
+                Attribute::new(b"url".to_vec(), b"example.com".to_vec()),
+            ],
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(
+            s.to_bytes().as_slice(),
+            b"pw\nuser: alice\nurl: example.com"
+        );
+        // + body.
+        let s = Secret::from_parts(b"pw".to_vec(), vec![], b"notes".to_vec()).unwrap();
+        assert_eq!(s.to_bytes().as_slice(), b"pw\nnotes");
+        // + both.
+        let s = Secret::from_parts(
+            b"pw".to_vec(),
+            vec![Attribute::new(b"user".to_vec(), b"alice".to_vec())],
+            b"notes".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(s.to_bytes().as_slice(), b"pw\nuser: alice\nnotes");
+        // empty password + content (attachment-style).
+        let s = Secret::from_parts(
+            vec![],
+            vec![Attribute::new(
+                b"Content-Transfer-Encoding".to_vec(),
+                b"Base64".to_vec(),
+            )],
+            b"QUJD".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            s.to_bytes().as_slice(),
+            b"\nContent-Transfer-Encoding: Base64\nQUJD"
+        );
+    }
+
+    #[test]
+    fn from_parts_rejects_invalid_keys_and_values() {
+        // key with the ": " separator.
+        let err = Secret::from_parts(
+            b"pw".to_vec(),
+            vec![Attribute::new(b"user: x".to_vec(), b"v".to_vec())],
+            vec![],
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "SECRET_INVALID");
+        // key with a newline.
+        let err = Secret::from_parts(
+            b"pw".to_vec(),
+            vec![Attribute::new(b"bad\nkey".to_vec(), b"v".to_vec())],
+            vec![],
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "SECRET_INVALID");
+        // value with a newline.
+        let err = Secret::from_parts(
+            b"pw".to_vec(),
+            vec![Attribute::new(b"k".to_vec(), b"bad\nvalue".to_vec())],
+            vec![],
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "SECRET_INVALID");
+        // password with a newline breaks the first-line invariant.
+        let err = Secret::from_parts(b"bad\npw".to_vec(), vec![], vec![]).unwrap_err();
+        assert_eq!(err.code, "SECRET_INVALID");
+        // a key with a lone colon (no space) is fine — it is not the separator.
+        let s = Secret::from_parts(
+            b"pw".to_vec(),
+            vec![Attribute::new(b"a:b".to_vec(), b"v".to_vec())],
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(s.to_bytes().as_slice(), b"pw\na:b: v");
     }
 }
