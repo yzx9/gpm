@@ -1,0 +1,18 @@
+[package]
+name = "codegen"
+description = "Emits checked-in TypeScript mirrors of the Rust IPC enums"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rustpass = { path = "../rustpass" }
+tauri-plugin-keystore = { path = "../tauri-plugin-keystore", features = [
+  "ts-codegen",
+] }
+gpm_lib = { package = "gpm", path = "../../app/src-tauri" }
+ts-rs = { workspace = true }
+
+[lints]
+workspace = true
