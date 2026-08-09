@@ -70,11 +70,36 @@ pub(crate) enum EditBlockReason {
     NonUtf8,
 }
 
+/// One `Key: Value` attribute (gopass AKV) crossing IPC for named-field display
+/// and structured edit. Both halves are decrypted content, so both are
+/// [`Zeroizing`]; the [`fmt::Debug`] impl redacts them — never derive it, or a
+/// stray log line leaks the pair. Lossy `String` (non-UTF-8 secrets are
+/// edit-blocked upstream, so this is display-only). Mirrors [`rustpass::Attribute`].
+#[derive(Clone, Serialize)]
+pub(crate) struct AttributeView {
+    pub(crate) key: Zeroizing<String>,
+    pub(crate) value: Zeroizing<String>,
+}
+
+impl fmt::Debug for AttributeView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AttributeView")
+            .field("key", &"[REDACTED]")
+            .field("value", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// Returned by `show_password` — contains secrets, strict Vue lifecycle required.
 #[derive(Clone, Serialize)]
 pub(crate) struct SensitiveContent {
     pub(crate) password: Zeroizing<String>,
     pub(crate) notes: Zeroizing<String>,
+    /// The parsed `Key: Value` attribute region (gopass AKV) for named-field
+    /// display + structured edit. Empty for attachments (their structural keys
+    /// aren't user metadata, and the base64 body must not surface here). Lossy
+    /// `String` — non-UTF-8 secrets are edit-blocked upstream.
+    pub(crate) attributes: Vec<AttributeView>,
     /// A free byproduct of this decrypt: whether the entry's body carries a
     /// TOTP seed, so the UI can show/hide the 2FA affordance without a second
     /// read. Not itself secret.
@@ -100,6 +125,10 @@ impl fmt::Debug for SensitiveContent {
         f.debug_struct("SensitiveContent")
             .field("password", &"[REDACTED]")
             .field("notes", &"[REDACTED]")
+            .field(
+                "attributes",
+                &format!("{} [REDACTED]", self.attributes.len()),
+            )
             .field("has_totp", &self.has_totp)
             .field("attachment", &self.attachment)
             .field("edit_blocked", &self.edit_blocked)
@@ -275,6 +304,24 @@ pub(crate) async fn copy_password(
     })
 }
 
+/// Map a secret's attribute region to IPC views (lossy `String` — non-UTF-8
+/// secrets are edit-blocked upstream, so this is display-only). Empty for
+/// attachments: their `Content-Transfer-Encoding`/`Content-Disposition` lines
+/// are structural, not user metadata, and the base64 body must not surface here.
+pub(crate) fn attr_view(secret: &rustpass::Secret) -> Vec<AttributeView> {
+    if secret.is_attachment() {
+        return Vec::new();
+    }
+    secret
+        .attributes()
+        .iter()
+        .map(|a| AttributeView {
+            key: Zeroizing::new(String::from_utf8_lossy(a.key()).into_owned()),
+            value: Zeroizing::new(String::from_utf8_lossy(a.value()).into_owned()),
+        })
+        .collect()
+}
+
 /// Decrypt-and-show core, runtime-generic so the in-crate tests can drive it
 /// against the mock runtime. Reads the entry, then — under Immediate — resets
 /// the timer and soft-wipes the identity on BOTH paths (a failed read must not
@@ -297,14 +344,15 @@ pub(crate) async fn show_password_core<R: Runtime>(
     let attachment = rustpass::metadata(&secret);
     Ok(SensitiveContent {
         password: Zeroizing::new(secret.password().to_string()),
-        // For an attachment the body is the attribute lines + a base64 wall;
-        // clear it so the blob never reaches the WebView — the metadata +
-        // Export carry the entry instead.
+        // `body()` is free-text notes only (gopass `Body()` parity — attribute
+        // lines live in `attributes`). For an attachment even that is a base64
+        // wall, so clear it; the metadata + Export carry the entry instead.
         notes: if attachment.is_some() {
             Zeroizing::new(String::new())
         } else {
             Zeroizing::new(body.to_string())
         },
+        attributes: attr_view(&secret),
         has_totp: rustpass::totp::has_totp(&secret),
         // A non-UTF-8 secret can't be safely edited as text (the lossy view
         // would be re-encrypted on save, corrupting it) — flag it so the UI
@@ -677,6 +725,7 @@ mod tests {
         let content = SensitiveContent {
             password: Zeroizing::new("hunter2".to_string()),
             notes: Zeroizing::new("username: alice".to_string()),
+            attributes: vec![],
             has_totp: true,
             attachment: None,
             edit_blocked: None,
@@ -684,7 +733,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&content).expect("serialize"),
-            r#"{"password":"hunter2","notes":"username: alice","has_totp":true,"attachment":null,"edit_blocked":null,"version":null}"#
+            r#"{"password":"hunter2","notes":"username: alice","attributes":[],"has_totp":true,"attachment":null,"edit_blocked":null,"version":null}"#
         );
         assert!(!format!("{content:?}").contains("hunter2"));
     }

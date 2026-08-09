@@ -20,7 +20,7 @@ use zeroize::Zeroizing;
 use crate::AppState;
 use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 use crate::page::clamp_limit;
-use crate::read::CopyResult;
+use crate::read::{AttributeView, CopyResult, attr_view};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -50,6 +50,10 @@ pub(crate) enum RevisionView {
     Decrypted {
         password: Zeroizing<String>,
         notes: Zeroizing<String>,
+        /// The parsed `Key: Value` attribute region (gopass AKV) — same shape and
+        /// semantics as [`crate::read::SensitiveContent::attributes`] (empty for
+        /// attachments) so this feeds the same reveal path.
+        attributes: Vec<AttributeView>,
         has_totp: bool,
         /// `Some` when this revision is a binary attachment — the UI then shows
         /// the attachment notice instead of the (empty) reveal block, since a
@@ -75,6 +79,7 @@ impl fmt::Debug for RevisionView {
                 .field("kind", &"decrypted")
                 .field("password", &"[REDACTED]")
                 .field("notes", &"[REDACTED]")
+                .field("attributes", &"[REDACTED]")
                 .field("attachment", attachment)
                 .finish(),
             Self::Undecryptable => write!(f, "RevisionView::Undecryptable"),
@@ -100,6 +105,7 @@ fn revision_view(content: RevisionContent) -> RevisionView {
                 } else {
                     Zeroizing::new(body.to_string())
                 },
+                attributes: attr_view(&secret),
                 has_totp: rustpass::totp::has_totp(&secret),
                 attachment,
             }

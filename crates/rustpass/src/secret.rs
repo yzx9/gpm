@@ -49,8 +49,10 @@ pub struct Attribute {
 }
 
 impl Attribute {
-    /// Construct a new attribute from byte parts (used by `from_parts`).
-    pub(crate) fn new(key: Vec<u8>, value: Vec<u8>) -> Self {
+    /// Construct a new attribute from byte parts (the edit/create assembler
+    /// builds attributes this way before handing them to [`Secret::from_parts`]).
+    #[must_use]
+    pub fn new(key: Vec<u8>, value: Vec<u8>) -> Self {
         Self {
             key: Zeroizing::new(key),
             value: Zeroizing::new(value),
