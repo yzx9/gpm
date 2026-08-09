@@ -6,7 +6,9 @@ import {
   backgroundSync,
   consumeSyncAttention,
   getAppConfig,
+  subscribeAppResume,
   type SyncOutcome,
+  type UnlistenFn,
 } from "@/api";
 import { ref, watch, type Ref } from "vue";
 import type { Router } from "vue-router";
@@ -27,16 +29,18 @@ import type { AppLockStore } from "./useAppLockState";
  * Runs ONLY when AutoSync is on (AutoSync off ⇒ no automatic sync of any kind).
  * Needs no identity and no WebView — sync is pure git on ciphertext, and the git
  * credentials in `repo.json` are unsealed by the auth-free master key, so it runs
- * even before the age identity is unlocked. The one hard gate is the AppLock
- * biometric launch-gate: while `appLocked` is true, `repo.json` is unreadable, so
- * it skips.
+ * even before the age identity is unlocked. It skips while `appLocked` is true —
+ * not because `repo.json` is unreadable under App Lock (the auth-free master is
+ * always loaded, R074/D — the headless worker proves it syncs under lock), but as
+ * a UX deferral: syncing behind the locked overlay is wasted, so it runs the
+ * instant the gate unlocks (the `appLocked` watch) and the list is fresh on show.
  *
  * Constructed once in `App.vue` setup (deps passed in, like `createLockActivity`)
  * — single consumer, so no provide/inject.
  */
 
-/** Minimum gap between foreground syncs — kills refocus spam, OEM `visibilitychange`
- *  churn, and a redundant resume right after a manual pull. */
+/** Minimum gap between foreground syncs — kills refocus spam, resume churn, and
+ *  a redundant resume right after a manual pull. */
 const FOREGROUND_DEBOUNCE_MS = 60_000;
 
 /** The reactive foreground-sync state consumed by the app shell (the badge). */
@@ -45,9 +49,9 @@ export interface ForegroundSyncStore {
    *  Set passively by a foreground sync; cleared on `engage()` (badge tap) or when a
    *  later foreground sync reconciles cleanly. Drives the persistent status badge. */
   readonly syncAttention: Readonly<Ref<SyncOutcome | null>>;
-  /** Arm the resume listener + fire the cold-start sync (via the `appReady` watch).
-   *  Idempotent. Call once from `App.vue` `onMounted`. */
-  init: () => void;
+  /** Arm the resume listener + fire the cold-start sync (via the `appReady`
+   *  watch). Idempotent. Call once from `App.vue` `onMounted` (fire-and-forget). */
+  init: () => Promise<void>;
   /** Badge-tap action: clear the attention + take the user to the entry list (where
    *  a pull-to-refresh engages the existing resolve flow). */
   engage: () => void;
@@ -75,6 +79,11 @@ export function createForegroundSyncStore(
   /// sync retries on the next resume instead of being throttled.
   let lastForegroundSyncAt = 0;
   let initialized = false;
+  /// Unlisten handle for the authoritative resume signal (`subscribeAppResume`),
+  /// torn down in `dispose()`. `disposed` closes the async-registration race: a
+  /// late-resolving handle is released instead of leaking onto a disposed store.
+  let resumeUnlisten: UnlistenFn | null = null;
+  let disposed = false;
 
   /**
    * Run one best-effort foreground sync if every gate passes. Gates:
@@ -91,9 +100,9 @@ export function createForegroundSyncStore(
     if (Date.now() - lastForegroundSyncAt < FOREGROUND_DEBOUNCE_MS) return;
 
     // Claim the single-flight slot BEFORE the first await: two triggers that both
-    // reach the getAppConfig() IPC (e.g. back-to-back OEM `visibilitychange`) must
-    // not both pass the guard above and double-invoke. The outer try/finally
-    // releases the slot on every exit path (autosync-off, config error, sync error).
+    // reach the getAppConfig() IPC (e.g. back-to-back resumes) must not both pass
+    // the guard above and double-invoke. The outer try/finally releases the slot
+    // on every exit path (autosync-off, config error, sync error).
     syncInFlight = true;
     let outcome: SyncOutcome | null = null;
     try {
@@ -149,16 +158,20 @@ export function createForegroundSyncStore(
 
   /** Resume handler: sync on return to the foreground, but only when the app-lock
    *  gate is OFF — when it's on, R058 relocks and the unlock watch owns the sync. */
-  function onVisibilityChange() {
-    if (document.visibilityState !== "visible") return;
+  function onAppResume() {
     if (appLock.appLockEnabled.value) return;
     void maybeSync();
   }
 
-  function init() {
+  async function init() {
     if (initialized) return;
     initialized = true;
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    const resumeHandle = await subscribeAppResume(onAppResume);
+    if (disposed) {
+      resumeHandle(); // disposed during the round-trip — release right away
+    } else {
+      resumeUnlisten = resumeHandle;
+    }
     // If the background sync left an attention marker, run a foreground
     // sync now — it re-evaluates the store and surfaces the live badge if the
     // divergence persists. `consumeSyncAttention` is take-once (reads + removes
@@ -182,7 +195,9 @@ export function createForegroundSyncStore(
   }
 
   function dispose() {
-    document.removeEventListener("visibilitychange", onVisibilityChange);
+    disposed = true;
+    resumeUnlisten?.();
+    resumeUnlisten = null;
   }
 
   return { syncAttention, init, engage, dispose };

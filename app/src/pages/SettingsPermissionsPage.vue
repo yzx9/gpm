@@ -10,7 +10,9 @@ import {
   isBiometricUnlockEnabled,
   openClipboardNotificationSettings,
   openSecuritySettings,
+  subscribeAppResume,
   type BiometricState,
+  type UnlistenFn,
 } from "@/api";
 import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
@@ -59,6 +61,13 @@ const identityType = ref("");
 // earlier result so stale state can't overwrite fresh state. Mirrors the
 // AppState generation-tag pattern (lib.rs lock_generation / clipboard_clear).
 let probeGen = 0;
+// Unlisten handle for the authoritative resume signal (`subscribeAppResume`),
+// released in `onUnmounted`. `disposed` closes the async-registration race: if
+// the page unmounts during the `subscribeAppResume` round-trip (rapid nav), the
+// late-resolving handle is released immediately instead of leaking on a stale
+// closure.
+let resumeUnlisten: UnlistenFn | null = null;
+let disposed = false;
 
 async function probe() {
   const gen = ++probeGen;
@@ -84,24 +93,29 @@ async function probe() {
     auth.status === "fulfilled" ? (auth.value?.identity_type ?? "") : "";
 }
 
-// Resume refresh: `visibilitychange` is the reliable Android app-resume signal
-// (it fires when the user returns from the system-settings screen the deep-link
-// opened). `window` focus is a belt-and-suspenders second signal (the codebase
-// already double-covers this OEM edge in useAppLockState); and navigating away
-// from the page and back re-mounts it, re-running onMounted. Named handler so
-// removeEventListener removes the SAME reference (no anonymous-arrow leak).
+// Resume refresh: the backend emits the authoritative `app-resumed` signal from
+// `RunEvent::Resumed` (Android `Activity.onResume`) when the user returns from
+// the system-settings screen the deep-link opened — more reliable than the
+// `visibilitychange` DOM event on OEM WebViews (R029). Navigating away from the
+// page and back re-mounts it (re-running onMounted), so this only needs to cover
+// the stay-mounted resume case.
 const onResume = () => {
   void probe();
 };
 
-onMounted(() => {
+onMounted(async () => {
   void probe();
-  document.addEventListener("visibilitychange", onResume);
-  window.addEventListener("focus", onResume);
+  const handle = await subscribeAppResume(onResume);
+  if (disposed) {
+    handle(); // unmounted during the round-trip — release right away
+    return;
+  }
+  resumeUnlisten = handle;
 });
 onUnmounted(() => {
-  document.removeEventListener("visibilitychange", onResume);
-  window.removeEventListener("focus", onResume);
+  disposed = true;
+  resumeUnlisten?.();
+  resumeUnlisten = null;
 });
 
 // The deep-link returns whether a handler activity was found; `false` or a throw

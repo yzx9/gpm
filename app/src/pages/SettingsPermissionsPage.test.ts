@@ -10,6 +10,7 @@ import {
   type Overrides,
 } from "@/test/settingsTestUtils";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   flushPromises,
   type DOMWrapper,
@@ -32,6 +33,17 @@ vi.mock("vue-router", () => ({
     fullPath: "/",
   }),
 }));
+
+/** Resolve the `subscribeAppResume` handler captured on the mocked `listen` (the
+ *  authoritative `app-resumed` signal, R029) and fire it, simulating an Android
+ *  `Activity.onResume`. */
+function fireResume() {
+  const call = vi.mocked(listen).mock.calls.find((c) => c[0] === "app-resumed");
+  // Fail loudly if the resume listener never registered — without this the
+  // negative tests below pass vacuously (no handler to fire).
+  expect(call).toBeDefined();
+  (call?.[1] as () => void)?.();
+}
 
 describe("SettingsPermissionsPage", () => {
   const overrides: Overrides = {};
@@ -168,7 +180,7 @@ describe("SettingsPermissionsPage", () => {
     expect(row.findComponent(BaseSpinner).exists()).toBe(false);
   });
 
-  it("visibilitychange re-runs the probe (return-from-settings refresh)", async () => {
+  it("app-resumed re-runs the probe (return-from-settings refresh)", async () => {
     when("are_clipboard_notifications_enabled", false);
     when("is_biometric_available", "available");
     const { wrapper } = mountPage();
@@ -176,14 +188,10 @@ describe("SettingsPermissionsPage", () => {
     expect(invoke).toHaveBeenCalledWith("are_clipboard_notifications_enabled");
     vi.mocked(invoke).mockClear();
     // The user returns from the system settings screen.
-    Object.defineProperty(document, "hidden", {
-      value: false,
-      configurable: true,
-    });
-    document.dispatchEvent(new Event("visibilitychange"));
+    fireResume();
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("are_clipboard_notifications_enabled");
-    wrapper.unmount(); // also exercises the named-handler removeEventListener path
+    wrapper.unmount(); // also exercises the resume-unlisten teardown path
   });
 
   it("biometric no_enrollment + open_security_settings opened=false → danger toast", async () => {
@@ -241,7 +249,7 @@ describe("SettingsPermissionsPage", () => {
     const { wrapper } = mountPage();
     await flushPromises();
     // Trigger a newer probe before the first resolves.
-    document.dispatchEvent(new Event("visibilitychange"));
+    fireResume();
     await flushPromises();
     // Now resolve the STALE first probe with the opposite value.
     resolveFirst(false);
@@ -252,33 +260,37 @@ describe("SettingsPermissionsPage", () => {
     expect(row.text()).toContain("Enabled");
   });
 
-  it("unmount detaches the same resume handlers it attached (no anonymous-arrow leak)", async () => {
+  it("unmount unregisters the resume listener (no leak)", async () => {
     when("are_clipboard_notifications_enabled", false);
     when("is_biometric_available", "available");
-    const docAdd = vi.spyOn(document, "addEventListener");
-    const docRemove = vi.spyOn(document, "removeEventListener");
-    const winAdd = vi.spyOn(window, "addEventListener");
-    const winRemove = vi.spyOn(window, "removeEventListener");
     const { wrapper } = mountPage();
     await flushPromises();
+    // The resume listener is the subscribeAppResume handle; capture its unlisten
+    // (the value `listen` resolved to) and assert unmount invokes it.
+    const resumeIdx = vi
+      .mocked(listen)
+      .mock.calls.findIndex((c) => c[0] === "app-resumed");
+    const unlisten = await vi.mocked(listen).mock.results[resumeIdx].value;
+    expect(unlisten).not.toHaveBeenCalled();
     wrapper.unmount();
-    // The handler ref removed on unmount must be the same ref added on mount —
-    // an anonymous-arrow refactor (a fresh ref each add) would silently leak on
-    // every navigation, and removeEventListener would no-op. Asserted via ref
-    // identity rather than dispatching, so it's immune to listeners leaked by
-    // other tests in the suite that mount without unmounting.
-    const visAdded = docAdd.mock.calls.find(
-      (c) => c[0] === "visibilitychange",
-    )?.[1];
-    const visRemoved = docRemove.mock.calls.find(
-      (c) => c[0] === "visibilitychange",
-    )?.[1];
-    expect(visRemoved).toBe(visAdded);
-    const focusAdded = winAdd.mock.calls.find((c) => c[0] === "focus")?.[1];
-    const focusRemoved = winRemove.mock.calls.find(
-      (c) => c[0] === "focus",
-    )?.[1];
-    expect(focusRemoved).toBe(focusAdded);
+    // The handle stored on mount is invoked on unmount — no leaked listener.
+    expect(unlisten).toHaveBeenCalled();
+  });
+
+  it("releases the resume handle if the page unmounts during the IPC round-trip", async () => {
+    when("are_clipboard_notifications_enabled", false);
+    when("is_biometric_available", "available");
+    const { wrapper } = mountPage();
+    // Unmount BEFORE flushing the subscribeAppResume round-trip — the disposed
+    // guard must release the late-resolving handle instead of leaking it on a
+    // stale (already-unmounted) closure.
+    wrapper.unmount();
+    await flushPromises();
+    const resumeIdx = vi
+      .mocked(listen)
+      .mock.calls.findIndex((c) => c[0] === "app-resumed");
+    const unlisten = await vi.mocked(listen).mock.results[resumeIdx].value;
+    expect(unlisten).toHaveBeenCalled();
   });
 
   it("biometric available + enabled → Enabled status, Manage link to the biometric card", async () => {

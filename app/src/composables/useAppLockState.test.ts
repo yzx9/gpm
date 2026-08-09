@@ -7,13 +7,15 @@ import { listen } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppLockStore, type AppLockStore } from "./useAppLockState";
 
-/** Force jsdom's visibilityState and fire the event the composable listens to. */
-function setVisibility(state: "visible" | "hidden") {
-  Object.defineProperty(document, "visibilityState", {
-    configurable: true,
-    value: state,
-  });
-  document.dispatchEvent(new Event("visibilitychange"));
+/** Resolve the `subscribeAppResume` handler captured on the mocked `listen` (the
+ *  authoritative `app-resumed` signal, R029) and fire it, simulating an Android
+ *  `Activity.onResume`. */
+function fireResume() {
+  const call = vi.mocked(listen).mock.calls.find((c) => c[0] === "app-resumed");
+  // Fail loudly if the resume listener never registered — without this the
+  // negative tests below pass vacuously (no handler to fire).
+  expect(call).toBeDefined();
+  (call?.[1] as () => void)?.();
 }
 
 describe("useAppLockState", () => {
@@ -23,15 +25,11 @@ describe("useAppLockState", () => {
     vi.clearAllMocks();
     // Fresh per test — replaces the old module-singleton __resetAppLockStateForTests.
     s = createAppLockStore();
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      value: "visible",
-    });
   });
 
   afterEach(() => {
-    // Drop this instance's `visibilitychange` listener so it doesn't leak onto
-    // the next test's instance (each test creates a fresh store).
+    // Drop this instance's listeners so they don't leak onto the next test's
+    // instance (each test creates a fresh store).
     s.dispose();
   });
 
@@ -62,14 +60,15 @@ describe("useAppLockState", () => {
     expect(s.appReady.value).toBe(true);
   });
 
-  it("init() registers a single app-lock-state listener and is idempotent", async () => {
+  it("init() registers the app-lock-state + app-resume listeners once each", async () => {
     vi.mocked(invoke).mockResolvedValue({ enabled: false, locked: false });
 
     await s.init();
     await s.init();
 
-    expect(listen).toHaveBeenCalledTimes(1);
+    expect(listen).toHaveBeenCalledTimes(2);
     expect(listen).toHaveBeenCalledWith("app-lock-state", expect.any(Function));
+    expect(listen).toHaveBeenCalledWith("app-resumed", expect.any(Function));
   });
 
   it("the app-lock-state handler mirrors the backend payload", async () => {
@@ -108,7 +107,7 @@ describe("useAppLockState", () => {
     expect(s.shouldAutoPrompt.value).toBe(false);
   });
 
-  it("resume (visibilitychange→visible) re-locks when enabled+unlocked", async () => {
+  it("resume (app-resumed) re-locks when enabled+unlocked", async () => {
     vi.mocked(invoke).mockImplementation((cmd) => {
       if (cmd === "get_app_lock_state")
         return Promise.resolve({ enabled: true, locked: false });
@@ -119,7 +118,7 @@ describe("useAppLockState", () => {
     expect(s.appLocked.value).toBe(false);
 
     vi.mocked(invoke).mockClear();
-    setVisibility("visible");
+    fireResume();
 
     expect(invoke).toHaveBeenCalledWith("app_lock");
   });
@@ -129,7 +128,7 @@ describe("useAppLockState", () => {
     await s.init();
 
     vi.mocked(invoke).mockClear();
-    setVisibility("visible");
+    fireResume();
 
     expect(invoke).not.toHaveBeenCalledWith("app_lock");
   });
@@ -139,7 +138,7 @@ describe("useAppLockState", () => {
     await s.init();
 
     vi.mocked(invoke).mockClear();
-    setVisibility("visible");
+    fireResume();
 
     expect(invoke).not.toHaveBeenCalledWith("app_lock");
   });
@@ -154,21 +153,7 @@ describe("useAppLockState", () => {
 
     s.setUnlockInFlight(true);
     vi.mocked(invoke).mockClear();
-    setVisibility("visible");
-
-    expect(invoke).not.toHaveBeenCalledWith("app_lock");
-  });
-
-  it("resume ignores the hidden half of visibilitychange", async () => {
-    vi.mocked(invoke).mockImplementation((cmd) => {
-      if (cmd === "get_app_lock_state")
-        return Promise.resolve({ enabled: true, locked: false });
-      return Promise.resolve();
-    });
-    await s.init();
-
-    vi.mocked(invoke).mockClear();
-    setVisibility("hidden");
+    fireResume();
 
     expect(invoke).not.toHaveBeenCalledWith("app_lock");
   });
@@ -186,7 +171,7 @@ describe("useAppLockState", () => {
     // A resume within the debounce window must NOT re-lock (the prompt's own
     // dismiss could otherwise re-trigger the gate in a loop).
     vi.mocked(invoke).mockClear();
-    setVisibility("visible");
+    fireResume();
     expect(invoke).not.toHaveBeenCalledWith("app_lock");
   });
 });

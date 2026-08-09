@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
 import type { Router } from "vue-router";
@@ -31,13 +32,15 @@ function fakeRouter(): Router {
   return { push: vi.fn().mockResolvedValue(undefined) } as unknown as Router;
 }
 
-/** Force jsdom's visibilityState and fire the event the composable listens to. */
-function setVisibility(state: "visible" | "hidden") {
-  Object.defineProperty(document, "visibilityState", {
-    configurable: true,
-    value: state,
-  });
-  document.dispatchEvent(new Event("visibilitychange"));
+/** Resolve the `subscribeAppResume` handler captured on the mocked `listen` (the
+ *  authoritative `app-resumed` signal, R029) and fire it, simulating an Android
+ *  `Activity.onResume`. */
+function fireResume() {
+  const call = vi.mocked(listen).mock.calls.find((c) => c[0] === "app-resumed");
+  // Fail loudly if the resume listener never registered — without this the
+  // negative tests below pass vacuously (no handler to fire).
+  expect(call).toBeDefined();
+  (call?.[1] as () => void)?.();
 }
 
 /** A fast-forwarded outcome (changed) — the "silent refresh" path. */
@@ -83,10 +86,6 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 describe("useForegroundSync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      value: "visible",
-    });
   });
 
   afterEach(() => {
@@ -181,7 +180,7 @@ describe("useForegroundSync", () => {
     expect(fg.syncAttention.value).toBeNull();
   });
 
-  it("resume (visibilitychange) syncs when the app-lock gate is off", async () => {
+  it("resume (app-resumed) syncs when the app-lock gate is off", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     mockInvoke({ autosync: true, fg: FF_CHANGED });
@@ -200,8 +199,7 @@ describe("useForegroundSync", () => {
     // Fast-forward past the 60s throttle, then a resume must sync again — this
     // asserts the resume path fires, not just the cold-start path.
     vi.setSystemTime(new Date("2026-01-01T00:01:30Z"));
-    setVisibility("hidden");
-    setVisibility("visible");
+    fireResume();
     await vi.runAllTimersAsync();
     const resumeCount = vi
       .mocked(invoke)
@@ -228,8 +226,7 @@ describe("useForegroundSync", () => {
 
     // A resume 10s later is throttled.
     vi.setSystemTime(new Date("2026-01-01T00:00:10Z"));
-    setVisibility("hidden");
-    setVisibility("visible");
+    fireResume();
     await vi.runAllTimersAsync();
 
     const secondCount = vi
@@ -297,8 +294,7 @@ describe("useForegroundSync", () => {
     ).toBe(1); // cold-start ran
     // Past the throttle, a resume must be blocked by the appLockEnabled guard.
     vi.setSystemTime(new Date("2026-01-01T00:02:00Z"));
-    setVisibility("hidden");
-    setVisibility("visible");
+    fireResume();
     await vi.runAllTimersAsync();
     expect(
       vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync")
@@ -335,7 +331,7 @@ describe("useForegroundSync", () => {
     expect(fg.syncAttention.value).toBeNull(); // silent
     // lastForegroundSyncAt not updated on failure ⇒ a near-immediate resume retries.
     vi.setSystemTime(new Date("2026-01-01T00:00:00.100Z"));
-    setVisibility("visible");
+    fireResume();
     await vi.runAllTimersAsync();
     expect(
       vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync")
@@ -362,7 +358,7 @@ describe("useForegroundSync", () => {
     await vi.runAllTimersAsync();
     expect(fg.syncAttention.value).toEqual(DIVERGED);
     vi.setSystemTime(new Date("2026-01-01T00:02:00Z"));
-    setVisibility("visible");
+    fireResume();
     await vi.runAllTimersAsync();
     expect(fg.syncAttention.value).toBeNull(); // clean FF cleared it
     fg.dispose();

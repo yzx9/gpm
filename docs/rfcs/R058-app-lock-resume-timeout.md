@@ -40,4 +40,4 @@ The regression lands on the threat model's named attacker — "brief physical ac
 
 ## Depends on / Supersedes
 
-Depends on R057 (in-app idle timeout) for the mask overlay and reason field. Reverses, as an opt-in, the "every resume re-challenge" policy that R029 (authoritative re-lock signal) hardened; R029's goal of making the foreground signal authoritative stays valid and complementary — only the re-challenge policy is relaxed, and only for users who opt in.
+Depends on R057 (in-app idle timeout) for the mask overlay and reason field. Reverses, as an opt-in, the "every resume re-challenge" policy that the authoritative foreground-resume signal (sourced from Android's `Activity.onResume` via `RunEvent::Resumed`) hardened; that signal's goal of being authoritative stays valid and complementary — only the re-challenge policy is relaxed, and only for users who opt in.

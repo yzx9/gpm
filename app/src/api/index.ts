@@ -15,6 +15,7 @@
  * {@link ./common}.
  */
 
+export * from "./appLifecycle";
 export * from "./appLock";
 export * from "./auth";
 export * from "./authenticity";

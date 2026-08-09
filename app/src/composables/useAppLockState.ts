@@ -6,6 +6,7 @@ import {
   appLock,
   getAppLockState,
   subscribeAppLockState,
+  subscribeAppResume,
   type AppLockReason,
   type AppLockState,
   type UnlistenFn,
@@ -28,11 +29,12 @@ import {
  * `appLocked` is true the app-lock overlay is shown and the identity
  * `UnlockModal` is suppressed, so the two never race to show competing prompts.
  *
- * Resume re-lock: the WebView fires `visibilitychange` when the Android activity
- * is backgrounded and resumed, so we re-challenge on every return to the
- * foreground (RFC 22's "every resume"). A loop guard (`unlockInFlight`) skips
- * the re-lock while a biometric prompt is already up, so the prompt's own
- * show/dismiss cannot re-trigger the gate.
+ * Resume re-lock: the backend emits the authoritative `app-resumed` signal from
+ * `tauri::RunEvent::Resumed` (Android `Activity.onResume`, per tao) when the
+ * activity resumes, so we re-challenge on every return to the foreground (RFC
+ * 22's "every resume"). A loop guard (`unlockInFlight`) skips the re-lock while
+ * a biometric prompt is already up, so the prompt's own show/dismiss cannot
+ * re-trigger the gate.
  *
  * Provided app-wide via `APP_LOCK_KEY` (see `main.ts`): one instance, one event
  * listener. Tests construct their own via `createAppLockStore()`.
@@ -54,8 +56,8 @@ export interface AppLockStore {
   /** Mark a biometric app-unlock in flight (loop guard for the resume re-lock). */
   setUnlockInFlight: (inFlight: boolean) => void;
   /** Tear down: drop the resume listener + Tauri subscription. A no-op for the
-   *  production instance (one app lifetime); tests call it so the global
-   *  `visibilitychange` listener doesn't leak across per-case instances. */
+   *  production instance (one app lifetime); tests call it so this instance's
+   *  listeners don't leak across per-case instances. */
   dispose: () => void;
 }
 
@@ -99,14 +101,19 @@ export function createAppLockStore(
   let unlockInFlight = false;
   /// Timestamp (ms) of the last locked→unlocked transition. The resume re-lock is
   /// debounced for a short window after an unlock so the BiometricPrompt's own
-  /// show/dismiss — which on some OEM Android builds fires a `visibilitychange` —
-  /// can't immediately re-lock the app in a loop (RFC 22 loop guard). Standard
-  /// Android doesn't fire the event for the in-activity prompt, so this is
-  /// defense against the OEM edge case.
+  /// show/dismiss — which can drive an `Activity.onResume` (and thus an
+  /// `app-resumed`) on some OEM builds — can't immediately re-lock the app in a
+  /// loop (RFC 22 loop guard). Standard Android keeps the in-activity prompt off
+  /// the host activity's lifecycle, so this is defense against the OEM edge case.
   let lastUnlockAt = 0;
 
   let initialized = el;
   let unlisten: UnlistenFn | null = null;
+  /// Unlisten handle for the authoritative resume signal (`subscribeAppResume`),
+  /// torn down in `dispose()`. `disposed` closes the async-registration race: a
+  /// late-resolving handle is released instead of leaking onto a disposed store.
+  let resumeUnlisten: UnlistenFn | null = null;
+  let disposed = false;
 
   /**
    * Reflect the backend's gate state, arm the single `app-lock-state` listener,
@@ -128,9 +135,14 @@ export function createAppLockStore(
     }
     appReady.value = true;
 
-    // Re-lock on resume. `visibilitychange→visible` fires when the Android
-    // activity returns to the foreground (the WebView becomes visible again).
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    // Re-lock on resume. The backend emits `app-resumed` from
+    // `RunEvent::Resumed` when the Android activity returns to the foreground.
+    const resumeHandle = await subscribeAppResume(onAppResume);
+    if (disposed) {
+      resumeHandle(); // disposed during the round-trip — release right away
+    } else {
+      resumeUnlisten = resumeHandle;
+    }
   }
 
   /** Backend gate-state event → the refs. */
@@ -155,8 +167,7 @@ export function createAppLockStore(
    * off, while a biometric prompt is in flight, or within the post-unlock debounce
    * window (so the prompt's own dismiss can't re-lock in a loop).
    */
-  function onVisibilityChange() {
-    if (document.visibilityState !== "visible") return;
+  function onAppResume() {
     if (!appLockEnabled.value || appLocked.value || unlockInFlight) return;
     if (Date.now() - lastUnlockAt < APP_UNLOCK_DEBOUNCE_MS) return;
     void appLock();
@@ -169,9 +180,11 @@ export function createAppLockStore(
 
   /** Remove the resume listener and the Tauri subscription (idempotent). */
   function dispose() {
+    disposed = true;
     unlisten?.();
     unlisten = null;
-    document.removeEventListener("visibilitychange", onVisibilityChange);
+    resumeUnlisten?.();
+    resumeUnlisten = null;
   }
 
   return {

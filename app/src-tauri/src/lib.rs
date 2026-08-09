@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use rustpass::{LockMode, Store};
-use tauri::{App, AppHandle, Manager, Runtime, WebviewWindowBuilder, Wry};
+use tauri::{App, AppHandle, Emitter, Manager, Runtime, WebviewWindowBuilder, Wry};
 use tauri_plugin_keystore::{Keystore, KeystoreExt};
 use tokio::task::JoinHandle;
 
@@ -702,18 +702,45 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(log_run_event);
+        .run(on_run_event);
+}
+
+/// The global event emitted to the frontend when the app returns to the
+/// foreground. Sourced from [`tauri::RunEvent::Resumed`] — which tao documents
+/// as "Android: triggered by `onResume` of the Activity," i.e. the platform-
+/// guaranteed foreground transition, below the `WebView` (whose `visibilitychange`
+/// is OEM-unreliable). The frontend's resume triggers — the app-lock re-lock,
+/// the foreground sync, and the permissions re-probe — listen for this instead
+/// of the DOM event (R029). MUST match the `"app-resumed"` literal the frontend
+/// listens for in `app/src/api/appLifecycle.ts`.
+const APP_RESUME_EVENT: &str = "app-resumed";
+
+/// The frontend-facing event for a run event, if any. Only [`RunEvent::Resumed`]
+/// is bridged to the `WebView` (the authoritative foreground signal); every other
+/// run event stays Rust-side. Pure so it is host-testable without a Tauri
+/// runtime — the emit itself is a trivial `app.emit` in [`on_run_event`].
+fn frontend_resume_event(event: &tauri::RunEvent) -> Option<&'static str> {
+    match event {
+        tauri::RunEvent::Resumed => Some(APP_RESUME_EVENT),
+        _ => None,
+    }
 }
 
 /// Event-loop observer: logs app lifecycle transitions so a diagnostic trace
 /// records when the app started, returned to the foreground, lost/regained
 /// window focus (backgrounding, biometric prompts, system dialogs), and exited.
-/// Pure observation — never blocks or mutates state. `Focused(false)` on Android
-/// also fires for in-activity system windows (biometric prompt, permission
-/// dialog), so read it as "lost window focus," not strictly "backgrounded"; the
-/// `Resumed` event is the reliable foreground signal.
+/// Also bridges the authoritative foreground signal to the frontend: on
+/// [`tauri::RunEvent::Resumed`] it emits [`APP_RESUME_EVENT`], which the resume
+/// triggers listen for instead of the OEM-unreliable `visibilitychange` (R029).
+///
+/// `Focused(false)` on Android also fires for in-activity system windows
+/// (biometric prompt, permission dialog), so read it as "lost window focus," not
+/// strictly "backgrounded"; the `Resumed` event is the reliable foreground signal.
 #[allow(clippy::needless_pass_by_value)] // signature dictated by `App::run`'s callback contract
-fn log_run_event<R: Runtime>(_app: &AppHandle<R>, event: tauri::RunEvent) {
+fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: tauri::RunEvent) {
+    if let Some(name) = frontend_resume_event(&event) {
+        let _ = app.emit(name, ());
+    }
     match event {
         tauri::RunEvent::Resumed => log::info!("app: resumed (foreground)"),
         tauri::RunEvent::ExitRequested { code, .. } => {
@@ -728,6 +755,29 @@ fn log_run_event<R: Runtime>(_app: &AppHandle<R>, event: tauri::RunEvent) {
             if focused { "gained" } else { "lost" }
         ),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod resume_event_tests {
+    use super::{frontend_resume_event, APP_RESUME_EVENT};
+
+    /// `Resumed` is the one run event bridged to the frontend. Pins both the
+    /// variant AND the event name so a Rust↔TS drift fails here, not as a silent
+    /// "resume never re-locks" at runtime.
+    #[test]
+    fn resumed_bridges_to_app_resume_event() {
+        assert_eq!(
+            frontend_resume_event(&tauri::RunEvent::Resumed),
+            Some(APP_RESUME_EVENT)
+        );
+        assert_eq!(APP_RESUME_EVENT, "app-resumed");
+    }
+
+    /// Non-resume run events stay Rust-side (no spurious frontend resume).
+    #[test]
+    fn non_resumed_events_are_not_bridged() {
+        assert_eq!(frontend_resume_event(&tauri::RunEvent::Exit), None);
     }
 }
 
