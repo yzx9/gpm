@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import type { SecretParts } from "@/api";
 import {
   useEntryConflict,
   type EntryConflictPayload,
@@ -28,6 +29,13 @@ const PAYLOAD: EntryConflictPayload = {
   current_oid: "curr-bbb",
   remote_tip: "tip-ccc",
   op: "edit",
+};
+
+/** Sample structured parts used as the captured edit payload across tests. */
+const PARTS: SecretParts = {
+  password: "my-pw",
+  attributes: [],
+  body: "my-body",
 };
 
 const PULL_RESULT = {
@@ -78,14 +86,14 @@ describe("useEntryConflict", () => {
   it("keep_mine edit re-sends the captured pendingBody as content via resolve_entry_conflict (runWithAuth path)", async () => {
     vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
     const { handle, onResolved } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
 
     await handle.resolveConflict("keep_mine");
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
-      content: "my-body",
+      parts: PARTS,
       op: "edit",
       choice: "keep_mine",
       expectedRemoteOid: PAYLOAD.remote_tip,
@@ -99,14 +107,14 @@ describe("useEntryConflict", () => {
     // body), and re-sends the captured pendingBody as content.
     vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
     const { handle, onResolved } = mountConflict();
-    handle.openConflict({ ...PAYLOAD, op: "create" }, "my-new-body");
+    handle.openConflict({ ...PAYLOAD, op: "create" }, PARTS);
     await flushPromises();
 
     await handle.resolveConflict("keep_mine");
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
-      content: "my-new-body",
+      parts: PARTS,
       op: "create",
       choice: "keep_mine",
       expectedRemoteOid: PAYLOAD.remote_tip,
@@ -118,14 +126,14 @@ describe("useEntryConflict", () => {
   it("keep_theirs passes content:null (no runWithAuth gating)", async () => {
     vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
     const { handle } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
 
     await handle.resolveConflict("keep_theirs");
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
-      content: null,
+      parts: null,
       op: "edit",
       choice: "keep_theirs",
       expectedRemoteOid: PAYLOAD.remote_tip,
@@ -139,7 +147,7 @@ describe("useEntryConflict", () => {
       message: "fast-forward failed",
     });
     const { handle, onPullFfFailed } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
     // toEqual (deep) — Vue reactively proxies the stored payload.
     expect(handle.conflict.value).toEqual(PAYLOAD);
@@ -157,7 +165,7 @@ describe("useEntryConflict", () => {
       message: "Disk full",
     });
     const { handle } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
 
     await handle.resolveConflict("keep_mine");
@@ -170,7 +178,7 @@ describe("useEntryConflict", () => {
   it("cancelConflict invokes discard_divergence and clears the conflict", async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
     const { handle } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
 
     handle.cancelConflict();
@@ -189,7 +197,7 @@ describe("useEntryConflict", () => {
     // content:null — if pendingBody had survived, it would send "my-body".
     vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
     const { lock, handle } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
 
     // Hard lock fires onLock → clears conflict + pendingBody and flips
@@ -214,7 +222,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
-      content: null,
+      parts: null,
       op: "edit",
       choice: "keep_mine",
       expectedRemoteOid: PAYLOAD.remote_tip,
@@ -233,7 +241,7 @@ describe("useEntryConflict", () => {
       authenticity: { ...PULL_RESULT.authenticity, blocked: true },
     });
     const { handle, onResolved, onAuthenticityBlocked } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
 
     await handle.resolveConflict("keep_mine");
@@ -253,7 +261,7 @@ describe("useEntryConflict", () => {
     // the unmount window onLock does not fire on.
     vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
     const { wrapper, lock, handle } = mountConflict();
-    handle.openConflict(PAYLOAD, "my-body");
+    handle.openConflict(PAYLOAD, PARTS);
     await flushPromises();
 
     // Unmount fires onBeforeUnmount → nulls pendingBody (the unmount half).
@@ -271,7 +279,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
-      content: null,
+      parts: null,
       op: "edit",
       choice: "keep_mine",
       expectedRemoteOid: PAYLOAD.remote_tip,

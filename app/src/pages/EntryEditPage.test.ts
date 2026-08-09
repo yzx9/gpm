@@ -56,7 +56,7 @@ describe("EntryEditPage", () => {
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("edit_secret", {
       name: "servers/prod",
-      content: "newpass\nnote line",
+      parts: { password: "newpass", attributes: [], body: "note line" },
     });
     expect(mockReplace).toHaveBeenCalledWith({
       name: "entry",
@@ -152,7 +152,7 @@ describe("EntryEditPage", () => {
 
     expect(invoke).toHaveBeenCalledWith("edit_secret", {
       name: "servers/prod",
-      content: "newpass\nnote line",
+      parts: { password: "newpass", attributes: [], body: "note line" },
       baseOid: "oid-cafe",
     });
   });

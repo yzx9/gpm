@@ -9,6 +9,7 @@ import {
   type EntryConflictChoice,
   type EntryConflictOp,
   type PullResult,
+  type SecretParts,
 } from "@/api";
 import { onBeforeUnmount, ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -61,11 +62,11 @@ export function useEntryConflict(opts: {
   conflict: Ref<EntryConflictPayload | null>;
   resolving: Ref<boolean>;
   conflictError: Ref<string>;
-  /** Surface a conflict (caller strips the outcome `kind` tag first). `editBody`
-   *  is the edited plaintext to re-send on keep-mine edit (null for delete). */
+  /** Surface a conflict (caller strips the outcome `kind` tag first). `parts` is
+   *  the edited secret parts to re-send on keep-mine edit (null for delete). */
   openConflict: (
     payload: EntryConflictPayload,
-    editBody: string | null,
+    parts: SecretParts | null,
   ) => void;
   resolveConflict: (choice: EntryConflictChoice) => Promise<void>;
   cancelConflict: () => void;
@@ -76,34 +77,34 @@ export function useEntryConflict(opts: {
   const conflict = ref<EntryConflictPayload | null>(null);
   const resolving = ref(false);
   const conflictError = ref("");
-  /** The edited body captured on open, re-sent on a keep-mine edit resolve. */
-  let pendingBody: string | null = null;
+  /** The edited parts captured on open, re-sent on a keep-mine edit resolve. */
+  let pendingParts: SecretParts | null = null;
 
   // A hard lock during a pending resolve dismisses the modal (mirrors useDivergence).
   // Also drop the captured plaintext — the page wipes its own refs, but this closure
   // holds a second copy that must not survive the lock or a route-away unmount
   // (secret hygiene). `onLock` covers the hard-lock event; the unmount hook
   // below covers a navigation away while the modal is open, where the modal's own
-  // `cancelConflict` (which also nulls `pendingBody`) never fires.
+  // `cancelConflict` (which also nulls `pendingParts`) never fires.
   onLock(() => {
     conflict.value = null;
     conflictError.value = "";
-    pendingBody = null;
+    pendingParts = null;
   });
   // `onLock` fires only on a hard-lock event — `useLockState.onLock` uses
   // `onScopeDispose` to unregister the listener, not to invoke it — so it does NOT
   // cover a page unmount. Null the captured plaintext on unmount too, mirroring the
   // page's own `useWipeOnLeave` (the unmount window of the lock fix).
   onBeforeUnmount(() => {
-    pendingBody = null;
+    pendingParts = null;
   });
 
   function openConflict(
     payload: EntryConflictPayload,
-    editBody: string | null,
+    parts: SecretParts | null,
   ) {
     conflict.value = payload;
-    pendingBody = editBody;
+    pendingParts = parts;
     conflictError.value = "";
   }
 
@@ -113,18 +114,18 @@ export function useEntryConflict(opts: {
     if (!conflict.value) return;
     conflict.value = null;
     conflictError.value = "";
-    pendingBody = null;
+    pendingParts = null;
     void discardDivergence().catch(() => {});
   }
 
   async function resolveConflict(choice: EntryConflictChoice) {
     if (!conflict.value) return;
     const { name, remote_tip, op } = conflict.value;
-    // Only a keep-mine edit/create re-sends plaintext; delete + keep-theirs
-    // carry none.
-    const content =
+    // Only a keep-mine edit/create re-sends the edited parts; delete +
+    // keep-theirs carry none.
+    const parts =
       (op === "edit" || op === "create") && choice === "keep_mine"
-        ? pendingBody
+        ? pendingParts
         : null;
     resolving.value = true;
     conflictError.value = "";
@@ -134,11 +135,11 @@ export function useEntryConflict(opts: {
           ? // keep-mine edit/create re-encrypts → identity-gated (the deferred
             // cache is still warm for edit; create prompts if it expired).
             await runWithAuth(() =>
-              resolveEntryConflict(name, content, remote_tip, op, choice),
+              resolveEntryConflict(name, parts, remote_tip, op, choice),
             )
-          : await resolveEntryConflict(name, content, remote_tip, op, choice);
+          : await resolveEntryConflict(name, parts, remote_tip, op, choice);
       conflict.value = null;
-      pendingBody = null;
+      pendingParts = null;
       // Enforce may refuse the resolve's re-fetch (an unverified remote commit).
       // The block is correct (nothing committed, HEAD unchanged) — don't toast
       // "saved"; route to the page's blocked handler instead of onResolved's

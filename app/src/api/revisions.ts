@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { ClipboardNotifyText } from "@/i18n/native";
 import type { CommitSigInfo } from "./common";
-import type { AttachmentMeta, CopyResult } from "./secrets";
+import type { AttachmentMeta, AttributeView, CopyResult } from "./secrets";
 
 /**
  * Secret revision-history IPC — mirrors `src-tauri/src/revisions.rs` (R027).
@@ -30,6 +30,8 @@ export interface RevisionPage {
 export interface RevisionDecrypted {
   password: string;
   notes: string;
+  /** The parsed `Key: Value` attribute region (gopass AKV); empty for attachments. */
+  attributes: AttributeView[];
   has_totp: boolean;
   /** When set, this revision is a binary attachment (notes is empty); the UI
    *  shows the attachment notice instead of the reveal block. */

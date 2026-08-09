@@ -175,6 +175,7 @@ describe("RevisionsPage", () => {
         kind: "decrypted",
         password: "old-pw",
         notes: "old-notes",
+        attributes: [],
         has_totp: false,
         attachment: null,
       });
@@ -203,6 +204,7 @@ describe("RevisionsPage", () => {
         kind: "decrypted",
         password: "",
         notes: "",
+        attributes: [],
         has_totp: false,
         attachment: { filename: "photo.png", size: 1234 },
       });

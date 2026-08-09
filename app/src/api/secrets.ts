@@ -63,10 +63,31 @@ export interface AttachmentMeta {
  *  holds non-UTF-8 bytes a text editor can't round-trip without corrupting). */
 export type EditBlockReason = "nonUtf8";
 
-/** Decrypted secret content (password first line, notes the rest). */
+/** One `Key: Value` attribute (gopass AKV) — mirrors `rustpass::Attribute` on the
+ *  wire. Both halves are decrypted content. */
+export interface AttributeView {
+  key: string;
+  value: string;
+}
+
+/** Structured edit/resolve input (R069 2b): the password, attribute region, and
+ *  free-text body as separate parts. Rust reassembles the on-disk plaintext via
+ *  `Secret::from_parts` → `to_bytes`, so the frontend sends parts (not a
+ *  pre-joined string). */
+export interface SecretParts {
+  password: string;
+  attributes: AttributeView[];
+  body: string;
+}
+
+/** Decrypted secret content (password first line, attributes the `Key: Value`
+ *  region, notes the free-text rest). */
 export interface SensitiveContent {
   password: string;
   notes: string;
+  /** The parsed `Key: Value` attribute region (gopass AKV) for named-field
+   *  display + structured edit. Empty for attachments. */
+  attributes: AttributeView[];
   /** Free byproduct of the decrypt: whether the entry's body carries a TOTP
    *  seed, so the UI can show/hide the 2FA button without a second read. */
   has_totp: boolean;
@@ -314,12 +335,12 @@ export async function createSecret(
  *  stale edit surfaces `entry_conflict` instead of silently clobbering. */
 export async function editSecret(
   name: string,
-  content: string,
+  parts: SecretParts,
   baseOid?: string | null,
 ): Promise<WriteOutcome> {
   return invoke<WriteOutcome>("edit_secret", {
     name,
-    content,
+    parts,
     ...(baseOid != null && { baseOid }),
   });
 }
@@ -340,18 +361,18 @@ export async function deleteSecret(
 
 /** Resolve a per-entry edit/delete conflict (R026 `entry_conflict`) per `choice`
  *  against the reviewed remote tip. `keep_mine` (edit) is identity-gated
- *  backend-side (re-encrypts the caller's `content`); `keep_mine` (delete) and
+ *  backend-side (re-encrypts the caller's `parts`); `keep_mine` (delete) and
  *  `keep_theirs` need no identity. Returns the post-resolve result. */
 export async function resolveEntryConflict(
   name: string,
-  content: string | null,
+  parts: SecretParts | null,
   expectedRemoteOid: string,
   op: EntryConflictOp,
   choice: EntryConflictChoice,
 ): Promise<PullResult> {
   return invoke<PullResult>("resolve_entry_conflict", {
     name,
-    content,
+    parts,
     expectedRemoteOid,
     op,
     choice,

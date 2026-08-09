@@ -7,9 +7,11 @@ import {
   editSecret,
   showPassword as showPasswordCmd,
   type AppError,
+  type AttributeView,
   type DivergenceChoice,
   type EntryConflictChoice,
   type PullResult,
+  type SecretParts,
 } from "@/api";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import EntryConflictModal from "@/components/EntryConflictModal.vue";
@@ -61,8 +63,16 @@ const BACK_FALLBACK: RouteLocationRaw = {
 
 const editPassword = ref("");
 const editNotes = ref("");
-// The reassembled body captured at load, for the no-op-save dirty-check.
-const loadedBody = ref("");
+// The secret's attributes, edited as structured rows (R069 2b). Round-tripped
+// unchanged until the row UI lands; the editor never mirrors `to_bytes` in TS —
+// Rust reassembles the on-disk plaintext from these parts.
+const editAttributes = ref<AttributeView[]>([]);
+// The structured snapshot captured at load, for the no-op-save dirty-check.
+const loadedParts = ref<SecretParts>({
+  password: "",
+  attributes: [],
+  body: "",
+});
 // R026: the blob oid captured at load (the base version) — sent back on save so
 // a stale edit surfaces entry_conflict instead of silently clobbering a teammate.
 const baseOid = ref<string | null>(null);
@@ -142,30 +152,55 @@ const {
 
 onMounted(loadBody);
 
-/** Reassemble the edit body to match `Secret::parse`: first line is the password,
- *  the rest is notes. NO trim — `Secret::parse` doesn't trim the password, so
- *  trimming would silently change a secret with whitespace. Lossless inverse. */
-function reassemble(pw: string, body: string): string {
-  return body ? `${pw}\n${body}` : pw;
+/** The structured parts the editor currently holds — what `onSave` sends and the
+ *  dirty-check compares against `loadedParts`. */
+const currentParts = computed<SecretParts>(() => ({
+  password: editPassword.value,
+  attributes: editAttributes.value,
+  body: editNotes.value,
+}));
+
+/** Deep snapshot of the current parts (independent of the live refs) — the
+ *  dirty-check baseline captured at load. */
+function snapshotParts(): SecretParts {
+  return {
+    password: editPassword.value,
+    attributes: editAttributes.value.map((a) => ({
+      key: a.key,
+      value: a.value,
+    })),
+    body: editNotes.value,
+  };
 }
 
-const editBody = computed(() =>
-  reassemble(editPassword.value, editNotes.value),
-);
+/** Structural equality of two parts snapshots (deep on the attribute array). */
+function partsEqual(a: SecretParts, b: SecretParts): boolean {
+  if (a.password !== b.password || a.body !== b.body) return false;
+  if (a.attributes.length !== b.attributes.length) return false;
+  return a.attributes.every(
+    (attr, i) =>
+      attr.key === b.attributes[i].key && attr.value === b.attributes[i].value,
+  );
+}
 
 /** Save is enabled only when the body has non-whitespace content and actually
  *  changed. age ciphertext is non-deterministic, so an unchanged Save would
  *  still make a spurious commit (block it); and an all-whitespace body would be
  *  rejected by `Secret::parse` on the next read, bricking the secret (block it).
  *  The trim is on the GATE only — the saved body stays untrimmed (lossless). */
-const canSave = computed(
-  () =>
-    !saving.value &&
-    !isAttachment.value &&
-    !isNonUtf8.value &&
-    editBody.value.trim() !== "" &&
-    editBody.value !== loadedBody.value,
-);
+const canSave = computed(() => {
+  if (saving.value || isAttachment.value || isNonUtf8.value) return false;
+  const p = currentParts.value;
+  // age ciphertext is non-deterministic, so an unchanged Save would still make a
+  // spurious commit (block it); an effectively-empty secret would be rejected by
+  // `Secret::parse` on the next read, bricking it (block it). The trim is on the
+  // GATE only — the saved parts stay untrimmed (lossless).
+  const hasContent =
+    p.password.trim() !== "" ||
+    p.body.trim() !== "" ||
+    p.attributes.some((a) => a.key.trim() !== "" || a.value.trim() !== "");
+  return hasContent && !partsEqual(p, loadedParts.value);
+});
 
 async function loadBody() {
   loading.value = true;
@@ -201,7 +236,11 @@ async function loadBody() {
     }
     editPassword.value = claimed.password ?? "";
     editNotes.value = claimed.notes ?? "";
-    loadedBody.value = reassemble(editPassword.value, editNotes.value);
+    editAttributes.value = (claimed.attributes ?? []).map((a) => ({
+      key: a.key,
+      value: a.value,
+    }));
+    loadedParts.value = snapshotParts();
     baseOid.value = claimed.version ?? null;
   } catch (e) {
     if (isAuthCancelled(e)) return;
@@ -217,7 +256,8 @@ async function loadBody() {
 function exitEdit() {
   editPassword.value = "";
   editNotes.value = "";
-  loadedBody.value = "";
+  editAttributes.value = [];
+  loadedParts.value = { password: "", attributes: [], body: "" };
   baseOid.value = null;
 }
 
@@ -232,7 +272,8 @@ async function onSave() {
   error.value = "";
   decryptError.value = false;
   try {
-    const outcome = await editSecret(entryName, editBody.value, baseOid.value);
+    const parts = snapshotParts();
+    const outcome = await editSecret(entryName, parts, baseOid.value);
     if (outcome.kind === "written") {
       toast.success(t("entry.saved", { commit: outcome.commit }));
       // Back to the read view (the opener) — it remounts and shows fresh content.
@@ -242,7 +283,7 @@ async function onSave() {
       // edit and let the user pick. Stay on the form; the plaintext is preserved.
       const { kind: _kind, ...payload } = outcome;
       void _kind;
-      openConflict(payload, editBody.value);
+      openConflict(payload, parts);
     } else if (outcome.kind === "needs_divergence_resolve") {
       // The edit's push lost a race — surface the divergence. The local edit was
       // committed; adopt discards it, keep pushes it. Stay on the edit form.

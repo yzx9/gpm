@@ -46,10 +46,12 @@ use std::time::Duration;
 
 use rustpass::template::{self, CreatePreset};
 use rustpass::{
-    DivergenceChoice, EntryConflictChoice, Error, ErrorCode, ExpectedEntry, ExpectedKind,
-    SyncOutcome, SyncResult, WriteOutcome, WriteResult,
+    Attribute, DivergenceChoice, EntryConflictChoice, Error, ErrorCode, ExpectedEntry,
+    ExpectedKind, Secret, SyncOutcome, SyncResult, WriteOutcome, WriteResult,
 };
+use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
+use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
@@ -257,18 +259,51 @@ pub(crate) async fn delete_secret(
     outcome
 }
 
-/// Edit a secret at an explicit path from its raw content (first line is the
-/// password). The existing entry is overwritten in place — no `.pass-template`
-/// is re-applied (templates shape new secrets, not mutations). If the entry
-/// doesn't exist, [`ErrorCode::EntryNotFound`] is returned (edit can't create a
-/// stray entry).
+/// Structured edit/resolve input — the password, attribute region, and free-text
+/// body as separate parts (R069 2b). Rust reassembles the on-disk plaintext via
+/// [`Secret::from_parts`] → [`Secret::to_bytes`] (the single source), so the
+/// frontend sends parts instead of a pre-joined string. All three fields are
+/// decrypted content, so they are [`Zeroizing`]; the attribute elements reuse
+/// the read-side [`crate::read::AttributeView`].
+#[derive(Deserialize)]
+pub(crate) struct SecretParts {
+    password: Zeroizing<String>,
+    attributes: Vec<crate::read::AttributeView>,
+    body: Zeroizing<String>,
+}
+
+/// Assemble structured edit/resolve parts into the on-disk plaintext via the
+/// single-source `Secret::from_parts` → `to_bytes` assembler (R069 2b). Validates
+/// the parts — a key with `": "`/newline or a value/password with a newline
+/// surfaces as [`ErrorCode::SecretInvalid`] before any git or crypto work.
+fn assemble_bytes(parts: SecretParts) -> Result<Zeroizing<Vec<u8>>, Error> {
+    let attrs = parts
+        .attributes
+        .into_iter()
+        .map(|a| Attribute::new(a.key.as_bytes().to_vec(), a.value.as_bytes().to_vec()))
+        .collect::<Vec<_>>();
+    Secret::from_parts(
+        parts.password.as_bytes().to_vec(),
+        attrs,
+        parts.body.as_bytes().to_vec(),
+    )
+    .map(|s| s.to_bytes())
+}
+
+/// Edit a secret at an explicit path from its structured parts (password,
+/// attribute region, free-text body). Rust reassembles the on-disk plaintext
+/// via [`assemble_bytes`], so the frontend sends parts rather than a pre-joined
+/// string. The existing entry is overwritten in place — no `.pass-template` is
+/// re-applied (templates shape new secrets, not mutations). If the entry doesn't
+/// exist, [`ErrorCode::EntryNotFound`] is returned (edit can't create a stray
+/// entry).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn edit_secret(
     state: State<'_, AppState>,
     app: AppHandle,
     name: String,
-    content: String,
+    parts: SecretParts,
     base_oid: Option<String>,
 ) -> Result<WriteOutcome, Error> {
     log::info!("edit: {name}");
@@ -278,10 +313,10 @@ pub(crate) async fn edit_secret(
         kind: ExpectedKind::Edit,
     });
     let store = state.store.clone();
-    let body = content.into_bytes();
+    let body = assemble_bytes(parts)?;
     do_save(&state, &app, expected, move || {
         let store = store.clone();
-        async move { store.update(&name, &body).await }
+        async move { store.update(&name, body.as_slice()).await }
     })
     .await
     .inspect_err(|e| log::warn!("edit failed: {e}"))
@@ -471,21 +506,21 @@ pub(crate) async fn resolve_entry_conflict(
     state: State<'_, AppState>,
     app: AppHandle,
     name: String,
-    content: Option<String>,
+    parts: Option<SecretParts>,
     expected_remote_oid: String,
     op: ExpectedKind,
     choice: EntryConflictChoice,
 ) -> Result<SyncResult, Error> {
     log::info!("entry-resolve: {name} {op:?} {choice:?}");
     let store = state.store.clone();
-    let content_bytes = content.map(String::into_bytes);
+    let content_bytes = parts.map(assemble_bytes).transpose()?;
     let result =
         crate::git::run_cancellable(&state, app.clone(), move |cancel, _tx, slot| async move {
             store
                 .resolve_entry_conflict(
                     &slot,
                     &name,
-                    content_bytes.as_deref(),
+                    content_bytes.as_ref().map(|b| b.as_slice()),
                     &expected_remote_oid,
                     op,
                     choice,

@@ -11,6 +11,7 @@ import {
   type DivergenceChoice,
   type EntryConflictChoice,
   type PullResult,
+  type SecretParts,
 } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -49,6 +50,21 @@ const customContent = ref("");
 const submitting = ref(false);
 const error = ref("");
 const { cancelling, cancelSave } = useCancellableSave();
+
+/** Split raw custom-create content into structured parts for a keep-mine conflict
+ *  resolve: first line is the password, the rest is the body, no attributes.
+ *  `Secret::from_parts` → `to_bytes` reassembles byte-identically (any trailing
+ *  newline normalizes on the next read). */
+function contentToParts(content: string): SecretParts {
+  const nl = content.indexOf("\n");
+  return nl === -1
+    ? { password: content, attributes: [], body: "" }
+    : {
+        password: content.slice(0, nl),
+        attributes: [],
+        body: content.slice(nl + 1),
+      };
+}
 
 // Template hint / live preview (location-based, gopass).
 const hasTemplate = ref(false);
@@ -152,7 +168,7 @@ async function onSave() {
       // R026: a teammate created the same name — refuse and let the user pick.
       const { kind: _kind, ...payload } = outcome;
       void _kind;
-      openConflict(payload, customContent.value);
+      openConflict(payload, contentToParts(customContent.value));
     } else if (outcome.kind === "needs_divergence_resolve") {
       const { kind: _kind, ...preview } = outcome;
       void _kind;

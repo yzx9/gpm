@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use rustpass::{AttachmentMeta, Entry, Error, ErrorCode, RankedPage};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_clipboard_notify::NotifyText;
 use tauri_plugin_file_save::{FileSaveError, FileSaveExt};
@@ -75,7 +75,7 @@ pub(crate) enum EditBlockReason {
 /// [`Zeroizing`]; the [`fmt::Debug`] impl redacts them — never derive it, or a
 /// stray log line leaks the pair. Lossy `String` (non-UTF-8 secrets are
 /// edit-blocked upstream, so this is display-only). Mirrors [`rustpass::Attribute`].
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct AttributeView {
     pub(crate) key: Zeroizing<String>,
     pub(crate) value: Zeroizing<String>,
