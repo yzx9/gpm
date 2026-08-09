@@ -146,3 +146,7 @@ per-repository locks, caches, and keys are essentially free from the existing de
   isolation, multi-identity is role-level within one repository.
 - The repository export/import RFC (`R078`) becomes a third "add vault" source under this
   design.
+- Exporting **every vault in one backup artifact** is a future capability this design unlocks
+  (multi-repository is what makes "all vaults" a meaningful set to back up at once); the
+  single-repository case ships first via `R078`, and the multi-repository export envelope is
+  scoped in a separate export-format RFC.
