@@ -33,6 +33,7 @@ import {
 } from "@/composables";
 import { currentLocale, loadBundle } from "@/i18n";
 import { navBack } from "@/utils/nav";
+import { Eye, EyeOff, Trash2 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
@@ -183,13 +184,49 @@ function partsEqual(a: SecretParts, b: SecretParts): boolean {
   );
 }
 
+/** A key whose value is secret-bearing — masked in the editor (mirrors
+ *  EntryAttributes' display heuristic). */
+function isSensitiveKey(key: string): boolean {
+  return /password|secret|pin|token|passphrase|api[_-]?key|access[_-]?key|bearer|credential/i.test(
+    key,
+  );
+}
+
+/** Per-row reveal state for sensitive attribute values (masked by default). */
+const revealedAttr = ref<Record<number, boolean>>({});
+
+/** Append a blank attribute row. */
+function addAttribute() {
+  editAttributes.value.push({ key: "", value: "" });
+}
+
+/** Remove the attribute row at `index`. */
+function removeAttribute(index: number) {
+  editAttributes.value.splice(index, 1);
+}
+
+/** Any attribute key carrying the gopass `": "` separator or a newline would
+ *  re-parse to a different structure — block Save (the Rust assembler also
+ *  rejects it via SecretInvalid). */
+const hasInvalidKey = computed(() =>
+  editAttributes.value.some(
+    (a) => a.key.includes(": ") || a.key.includes("\n"),
+  ),
+);
+
 /** Save is enabled only when the body has non-whitespace content and actually
  *  changed. age ciphertext is non-deterministic, so an unchanged Save would
  *  still make a spurious commit (block it); and an all-whitespace body would be
  *  rejected by `Secret::parse` on the next read, bricking the secret (block it).
  *  The trim is on the GATE only — the saved body stays untrimmed (lossless). */
 const canSave = computed(() => {
-  if (saving.value || isAttachment.value || isNonUtf8.value) return false;
+  if (
+    saving.value ||
+    isAttachment.value ||
+    isNonUtf8.value ||
+    hasInvalidKey.value
+  )
+    return false;
   const p = currentParts.value;
   // age ciphertext is non-deterministic, so an unchanged Save would still make a
   // spurious commit (block it); an effectively-empty secret would be rejected by
@@ -357,6 +394,81 @@ function goBack() {
           autocomplete="off"
           spellcheck="false"
         />
+      </div>
+      <div class="flex flex-col gap-2">
+        <div
+          v-for="(attr, index) in editAttributes"
+          :key="index"
+          class="flex flex-col gap-1"
+        >
+          <div class="flex items-center gap-2">
+            <BaseInput
+              v-model="attr.key"
+              class="flex-1"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              :placeholder="t('entry.attrKeyAria')"
+              :aria-label="t('entry.attrKeyAria')"
+            />
+            <BaseButton
+              variant="link"
+              tone="muted"
+              type="button"
+              :aria-label="t('entry.removeAttrAria')"
+              @click="removeAttribute(index)"
+            >
+              <BaseIcon :icon="Trash2" />
+            </BaseButton>
+          </div>
+          <div class="flex items-center gap-2">
+            <BaseInput
+              v-model="attr.value"
+              class="flex-1 font-mono"
+              :type="
+                isSensitiveKey(attr.key) && !revealedAttr[index]
+                  ? 'password'
+                  : 'text'
+              "
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              :placeholder="t('entry.attrValueAria')"
+              :aria-label="t('entry.attrValueAria')"
+            />
+            <BaseButton
+              v-if="isSensitiveKey(attr.key)"
+              variant="link"
+              tone="muted"
+              type="button"
+              :aria-label="
+                revealedAttr[index]
+                  ? t('entry.hideValueAria')
+                  : t('entry.showValueAria')
+              "
+              @click="revealedAttr[index] = !revealedAttr[index]"
+            >
+              <BaseIcon :icon="revealedAttr[index] ? EyeOff : Eye" />
+            </BaseButton>
+          </div>
+          <p
+            v-if="attr.key.includes(': ') || attr.key.includes('\n')"
+            class="text-xs text-danger"
+          >
+            {{ t("entry.attrKeyInvalid") }}
+          </p>
+        </div>
+        <BaseButton
+          variant="link"
+          tone="muted"
+          type="button"
+          class="self-start"
+          @click="addAttribute"
+        >
+          + {{ t("entry.addAttribute") }}
+        </BaseButton>
       </div>
       <div class="flex flex-col gap-1">
         <label for="e-notes" class="text-sm font-medium">{{

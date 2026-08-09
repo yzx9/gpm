@@ -187,4 +187,58 @@ describe("EntryEditPage", () => {
     expect(w.text()).toContain("This secret changed elsewhere");
     expect(w.text()).toContain("servers/prod");
   });
+
+  it("round-trips an edited attribute value in the saved parts", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "show_password")
+        return Promise.resolve({
+          password: "s3cret",
+          notes: "",
+          attributes: [{ key: "user", value: "alice" }],
+        });
+      if (cmd === "edit_secret")
+        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(EntryEditPage).wrapper;
+    await flushPromises();
+
+    // Form inputs in order: password, attribute key, attribute value.
+    await w.findAll("input")[2].setValue("alice-new");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("edit_secret", {
+      name: "servers/prod",
+      parts: {
+        password: "s3cret",
+        attributes: [{ key: "user", value: "alice-new" }],
+        body: "",
+      },
+    });
+  });
+
+  it("an attribute key with ': ' disables Save (Rust SecretInvalid parity)", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "show_password")
+        return Promise.resolve({
+          password: "s3cret",
+          notes: "",
+          attributes: [{ key: "bad: key", value: "v" }],
+        });
+      if (cmd === "edit_secret")
+        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(EntryEditPage).wrapper;
+    await flushPromises();
+
+    // hasInvalidKey ⇒ Save stays disabled and no write is attempted.
+    expect(
+      w.find('button[type="submit"]').attributes("disabled"),
+    ).toBeDefined();
+    await w.find("form").trigger("submit");
+    await flushPromises();
+    expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
+  });
 });
