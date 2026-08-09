@@ -14,6 +14,9 @@
 
 mod common;
 
+use std::path::Path;
+use std::process::Command;
+
 use common::*;
 use rustpass::crypto;
 use rustpass::secret::Secret;
@@ -293,6 +296,25 @@ fn git_cli_present() -> bool {
     ok
 }
 
+/// A `git` command isolated from the developer's user-level global config
+/// (issue #42). HOME points at `home` and the XDG/GIT_CONFIG paths are cleared
+/// and system config skipped, so the bundle round-trip's `git bundle verify` /
+/// `git clone` / `git tag --list` never pick up the developer's global settings
+/// (e.g. a `core.hooksPath` `post-checkout` hook would otherwise fire on clone).
+/// These sites are read-only, so no `.gitconfig` identity seed is needed — an
+/// empty redirected HOME already means "no global config".
+fn git(home: &Path) -> Command {
+    let mut c = Command::new("git");
+    c.env("HOME", home);
+    c.env_remove("XDG_CONFIG_HOME");
+    c.env("GIT_CONFIG_NOSYSTEM", "1");
+    c.env_remove("GIT_CONFIG_GLOBAL");
+    c.env_remove("GIT_CONFIG_SYSTEM");
+    c.env("GIT_TERMINAL_PROMPT", "0");
+    c.env("LC_ALL", "C");
+    c
+}
+
 /// R078: the hand-rolled v2 bundle round-trips through real `git` — `git bundle
 /// verify` accepts it and `git clone` restores full history plus an annotated
 /// tag (the `insert_object(tag)` path the unit test can't exercise).
@@ -346,7 +368,7 @@ async fn create_bundle_clones_back_full_history_and_tag() {
     storage.create_bundle(&bundle_path).await.unwrap();
 
     // `git bundle verify` must accept the hand-rolled bundle.
-    let verify = std::process::Command::new("git")
+    let verify = git(dir.path())
         .args(["bundle", "verify", bundle_path.to_str().unwrap()])
         .output()
         .expect("git bundle verify");
@@ -358,7 +380,7 @@ async fn create_bundle_clones_back_full_history_and_tag() {
 
     // `git clone` restores both commits + blobs.
     let dest = tempfile::tempdir().unwrap();
-    let clone_out = std::process::Command::new("git")
+    let clone_out = git(dir.path())
         .args([
             "clone",
             bundle_path.to_str().unwrap(),
@@ -381,7 +403,7 @@ async fn create_bundle_clones_back_full_history_and_tag() {
     );
 
     // The annotated tag dereferenced through the bundle.
-    let tags = std::process::Command::new("git")
+    let tags = git(dir.path())
         .args(["tag", "--list"])
         .current_dir(dest.path())
         .output()

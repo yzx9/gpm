@@ -32,9 +32,13 @@
 //!
 //! gopass is driven fully non-interactively and isolated into a temp dir (its
 //! own `GNUPGHOME` keyring, `GOPASS_HOMEDIR`, mock pinentry) so the developer's
-//! real gopass/gpg state is never touched. `HOME` is intentionally NOT overridden
-//! — same isolation posture as the age interop suite — so git commits during
-//! `gopass init`/`insert` reuse the developer's git identity.
+//! real gopass/gpg state is never touched. `HOME` is redirected to that temp dir
+//! and `install_mock_pinentry` seeds a throwaway `.gitconfig` there, so git
+//! commits during `gopass init`/`insert` (gopass commits via go-git, which reads
+//! `$HOME/.gitconfig` — not `GIT_CONFIG_GLOBAL`) use the isolated identity
+//! `gpm-interop`, never the developer's. The `git()` / `gopass()` builders also
+//! clear `XDG_CONFIG_HOME` and the `GIT_CONFIG_*` env vars and skip system
+//! config, so only the seeded temp config applies (issue #42).
 //!
 //! Skips gracefully when `gopass`/`gpg` are not on PATH. Needs `gpg-agent` (an
 //! `AF_UNIX` socket the build sandbox blocks), so run with the sandbox disabled:
@@ -114,6 +118,18 @@ done
             format!("pinentry-program {}\n", mock.display()),
         )
         .unwrap();
+
+        // Issue #42: seed a throwaway git identity at `<home>/.gitconfig` so the
+        // gopass go-git commits and the raw `git` CLI calls (both redirected to
+        // HOME=<home> by `git()` / `gopass()` below) read THIS, not the
+        // developer's user-level global config. Without it, the dev's
+        // user.name/email, commit.gpgsign, core.hooksPath and core.excludesfile
+        // leak into test commits.
+        std::fs::write(
+            home.join(".gitconfig"),
+            "[user]\n\tname = gpm-interop\n\temail = interop@gpm\n",
+        )
+        .unwrap();
     }
 
     /// A `TempDir` carrying an isolated GPG keyring (`<home>/gnupg`) whose
@@ -177,6 +193,16 @@ done
     /// leads PATH.
     fn gopass(home: &Path, args: &[&str]) -> Command {
         let mut c = Command::new("gopass");
+        // Issue #42: redirect HOME to the temp dir and clear the XDG/GIT_CONFIG
+        // paths so gopass's go-git commits (and its `git push`/`pull`/`sync`
+        // shell-outs) read the throwaway `.gitconfig` `install_mock_pinentry`
+        // seeded, never the developer's user-level global config. go-git ignores
+        // `GIT_CONFIG_GLOBAL`, so HOME must point at the seeded file.
+        c.env("HOME", home);
+        c.env_remove("XDG_CONFIG_HOME");
+        c.env("GIT_CONFIG_NOSYSTEM", "1");
+        c.env_remove("GIT_CONFIG_GLOBAL");
+        c.env_remove("GIT_CONFIG_SYSTEM");
         c.env("GOPASS_CONFIG", home.join("config.yml"));
         c.env("GOPASS_HOMEDIR", home);
         c.env("GNUPGHOME", home.join("gnupg"));
@@ -189,6 +215,26 @@ done
         // hang the test binary; gopass shells out to git for push/pull/sync.
         c.env("GIT_TERMINAL_PROMPT", "0");
         c.args(args);
+        c
+    }
+
+    /// A `git` command isolated from the developer's user-level global config
+    /// (issue #42). HOME points at `home` (so git reads the throwaway
+    /// `.gitconfig` `install_mock_pinentry` seeded, not `~/.gitconfig`);
+    /// `XDG_CONFIG_HOME` and the `GIT_CONFIG_*` env vars are cleared and system
+    /// config skipped, so only the seeded temp config applies. `GIT_TERMINAL_PROMPT=0`
+    /// refuses interactive prompts; `LC_ALL=C` keeps git's English output (the
+    /// `commit_worktree` "nothing to commit" check matches English literals).
+    /// Callers keep their existing `.arg("-C").arg(store)…` chaining.
+    fn git(home: &Path) -> Command {
+        let mut c = Command::new("git");
+        c.env("HOME", home);
+        c.env_remove("XDG_CONFIG_HOME");
+        c.env("GIT_CONFIG_NOSYSTEM", "1");
+        c.env_remove("GIT_CONFIG_GLOBAL");
+        c.env_remove("GIT_CONFIG_SYSTEM");
+        c.env("GIT_TERMINAL_PROMPT", "0");
+        c.env("LC_ALL", "C");
         c
     }
 
@@ -314,14 +360,16 @@ done
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
-    /// Commit `store`'s worktree with an explicit (gpgsign-off) identity — gpm
-    /// clones HEAD, not the worktree, so a gopass write must be committed before
-    /// a clone. gopass itself commits on `init`/`insert`, though, so a clean tree
-    /// is expected and tolerated (git writes "nothing to commit" to **stdout**,
-    /// hence the combined-output check). Mirrors the age interop suite's
-    /// `commit_worktree`/`commit_worktree` split, unified.
-    fn commit_worktree(store: &Path) {
-        let add = Command::new("git")
+    /// Commit `store`'s worktree — gpm clones HEAD, not the worktree, so a gopass
+    /// write must be committed before a clone. gopass itself commits on
+    /// `init`/`insert`, so a clean tree is expected and tolerated (git writes
+    /// "nothing to commit" to **stdout**, hence the combined-output check). The
+    /// author identity comes from the seeded `<home>/.gitconfig` (issue #42), not
+    /// a per-command `-c user.*` — so a regressed HOME redirect fails loudly with
+    /// "Author identity unknown" instead of silently leaking. `commit.gpgsign=false`
+    /// is still forced per-command as defense against signing.
+    fn commit_worktree(home: &Path, store: &Path) {
+        let add = git(home)
             .arg("-C")
             .arg(store)
             .args(["add", "-A"])
@@ -332,21 +380,12 @@ done
             "git add failed: {}",
             String::from_utf8_lossy(&add.stderr)
         );
-        let commit = Command::new("git")
+        let commit = git(home)
             .arg("-C")
             .arg(store)
-            // LC_ALL=C keeps git's "nothing to commit" English (the check below
-            // matches English literals); GIT_TERMINAL_PROMPT=0 refuses any
-            // interactive prompt instead of hanging the test binary.
-            .env("LC_ALL", "C")
-            .env("GIT_TERMINAL_PROMPT", "0")
             .args([
                 "-c",
                 "commit.gpgsign=false",
-                "-c",
-                "user.name=gpm-interop",
-                "-c",
-                "user.email=interop@gpm",
                 "commit",
                 "-m",
                 "gpm gpg interop test",
@@ -405,7 +444,7 @@ done
             String::from_utf8_lossy(&init.stderr)
         );
 
-        commit_worktree(&store_dir);
+        commit_worktree(home.path(), &store_dir);
 
         let recipient_token = std::fs::read_to_string(store_dir.join(".gpg-id"))
             .unwrap()
@@ -472,13 +511,13 @@ done
             "gopass init --crypto gpg failed: {}",
             String::from_utf8_lossy(&init.stderr)
         );
-        commit_worktree(&store_dir);
+        commit_worktree(home.path(), &store_dir);
 
         let bare_dir = tempfile::tempdir().unwrap();
         let bare_path = bare_dir.path().to_path_buf();
         let bare_str = bare_path.to_str().unwrap();
 
-        let init_bare = Command::new("git")
+        let init_bare = git(home.path())
             .args(["init", "--bare", bare_str])
             .output()
             .unwrap();
@@ -488,7 +527,7 @@ done
             String::from_utf8_lossy(&init_bare.stderr)
         );
 
-        let remote = Command::new("git")
+        let remote = git(home.path())
             .arg("-C")
             .arg(store_str)
             .args(["remote", "add", "origin", bare_str])
@@ -501,7 +540,7 @@ done
         );
 
         // Detect gopass's branch (do NOT assume main/master).
-        let branch_out = Command::new("git")
+        let branch_out = git(home.path())
             .arg("-C")
             .arg(store_str)
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -512,7 +551,7 @@ done
             .trim()
             .to_owned();
 
-        let push = Command::new("git")
+        let push = git(home.path())
             .arg("-C")
             .arg(store_str)
             .args(["push", "-u", "origin", &branch])
@@ -525,7 +564,7 @@ done
         );
 
         // Re-point bare HEAD at gopass's branch so gpm's clone lands on it.
-        let sym = Command::new("git")
+        let sym = git(home.path())
             .arg("-C")
             .arg(bare_str)
             .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
@@ -634,7 +673,26 @@ done
         for (name, plaintext) in cases {
             gopass_insert(home.path(), name, plaintext);
         }
-        commit_worktree(&store_dir);
+        // issue #42 sentinel: HEAD is gopass's last go-git commit. gopass reads
+        // `user.email` from HOME/.gitconfig (so it must be the seeded value, not
+        // the dev's) but hardcodes `user.name` to the OS username regardless of
+        // config — so only the email is a reliable canary for the HOME redirect
+        // + .gitconfig seed. Place it BEFORE commit_worktree (which may add a
+        // CLI commit or no-op and muddy HEAD). A regressed HOME redirect surfaces
+        // here as the dev's real email — or an earlier "Author identity unknown".
+        let author = git(home.path())
+            .arg("-C")
+            .arg(&store_dir)
+            .args(["log", "-1", "--format=%ae"])
+            .output()
+            .expect("git log author email");
+        let email = String::from_utf8_lossy(&author.stdout);
+        assert_eq!(
+            email.trim(),
+            "interop@gpm",
+            "issue #42 regression: commit email leaked dev global config: {email}"
+        );
+        commit_worktree(home.path(), &store_dir);
 
         // gpm clones the gopass store directly (local file transport, no auth).
         let config_dir = tempfile::tempdir().unwrap();
@@ -748,7 +806,7 @@ done
             }
             std::fs::copy(&src, &dst).unwrap();
         }
-        commit_worktree(&store_dir);
+        commit_worktree(home.path(), &store_dir);
 
         for (name, plaintext) in cases {
             let gopass_out = gopass_show(home.path(), name);
@@ -785,7 +843,7 @@ done
         // gopass writes a secret encrypted to the passphrase key.
         let plaintext = "s3cret\nuser: alice\nnote: passphrase key";
         gopass_insert(home.path(), "test/secret", plaintext);
-        commit_worktree(&store_dir);
+        commit_worktree(home.path(), &store_dir);
 
         let config_dir = tempfile::tempdir().unwrap();
         let store = Store::new(config_dir.path().to_path_buf(), None);
@@ -831,7 +889,7 @@ done
 
         let plaintext = "ecc-pw\nuser: bob\nnote: elliptic-curve key";
         gopass_insert(home.path(), "test/secret", plaintext);
-        commit_worktree(&store_dir);
+        commit_worktree(home.path(), &store_dir);
 
         let config_dir = tempfile::tempdir().unwrap();
         let store = Store::new(config_dir.path().to_path_buf(), None);
@@ -1133,7 +1191,7 @@ done
         let _ = std::fs::remove_file(&old_pubkey);
         std::fs::write(store_dir.join(".gpg-id"), format!("{gpm_token}\n")).unwrap();
         std::fs::write(store_dir.join(format!(".public-keys/{gpm_token}")), pubkey).unwrap();
-        commit_worktree(&store_dir);
+        commit_worktree(home.path(), &store_dir);
 
         // gopass must resolve the gpm-written recipient to encrypt. Today it
         // can't (case-sensitive fingerprint-suffix match), so the insert fails;
