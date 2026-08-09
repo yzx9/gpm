@@ -680,7 +680,8 @@ mod tests {
     //! - **Crypto** (RFC 0036 spike): rpgp↔gpg encrypt/decrypt interop (RSA-2048
     //!   fixture + rpgp-generated Curve25519), passphrase-keygen round-trips,
     //!   and the multi-recipient keyring shape. No `gpg` binary is needed except
-    //!   the `#[ignore]` reverse-interop tests (they spawn `gpg` + `gpg-agent`).
+    //!   the reverse-interop tests, which spawn `gpg` + `gpg-agent` and skip when
+    //!   `gpg` is absent (see `gpg_present`).
 
     use std::io::Write as _;
     use std::process::{Command, Stdio};
@@ -1064,16 +1065,31 @@ mod tests {
         assert!(parse_armored_secret_key(malformed).is_err());
     }
 
-    /// Reverse interop: rpgp encrypts to the gpg fixture's public key and system
-    /// `gpg --decrypt` reads it with the matching secret key + passphrase. Proves
+    /// Is the standalone `gpg` CLI on PATH? The reverse-interop tests below spawn
+    /// `gpg` (+ `gpg-agent`) as the independent oracle for rpgp-produced
+    /// ciphertext. The flake's `gnupg` supplies it in every dev/CI shell; outside
+    /// that shell the tests skip — same convention as `gopass_present()` in
+    /// `tests/gopass_interop_gpg.rs`.
+    fn gpg_present() -> bool {
+        Command::new("gpg")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    /// Reverse interop: rpgp encrypts to the gpg fixture's public key and `gpg
+    /// --decrypt` reads it with the matching secret key + passphrase. Proves
     /// rpgp's ciphertext output is desktop-gopass-readable.
     ///
-    /// `#[ignore]`: spawns `gpg`, which needs `gpg-agent` (an `AF_UNIX` socket the
-    /// sandbox blocks). Run with sandbox disabled:
-    ///   `cargo test -p rustpass crypto::openpgp::tests::rpgp_encrypts_gpg_decrypts -- --ignored`
+    /// Spawns `gpg`, which needs `gpg-agent` (an `AF_UNIX` socket). A
+    /// socket-restricted sandbox makes the decrypt fail — run outside such a
+    /// sandbox (the flake shell and CI are fine). Skips when `gpg` is absent.
     #[test]
-    #[ignore = "needs system gpg + sandbox disabled (gpg-agent socket)"]
     fn rpgp_encrypts_gpg_decrypts() {
+        if !gpg_present() {
+            eprintln!("skipping gpg interop test: `gpg` not on PATH");
+            return;
+        }
         let (pk, _headers) = SignedPublicKey::from_armor_single(FIXTURE_PUBLIC)
             .expect("parse gpg armored public key");
         let ciphertext =
@@ -1121,15 +1137,19 @@ mod tests {
     }
 
     /// Reverse interop, keygen variant: rpgp generates a passphrase-protected key
-    /// (iterated+salted V4 S2K — the gpg/gopass default), and system `gpg
-    /// --decrypt` reads a message encrypted to it. Proves gpm-produced keys are
+    /// (iterated+salted V4 S2K — the gpg/gopass default), and `gpg --decrypt`
+    /// reads a message encrypted to it. Proves gpm-produced keys are
     /// desktop-gopass-readable.
     ///
-    /// Same `#[ignore]` sandbox constraint as `rpgp_encrypts_gpg_decrypts`.
+    /// Same `gpg` spawn + `gpg-agent` socket caveat as
+    /// `rpgp_encrypts_gpg_decrypts`; skips when `gpg` is absent.
     #[test]
-    #[ignore = "needs system gpg + sandbox disabled (gpg-agent socket)"]
     fn rpgp_passphrase_key_gpg_decrypts() {
         const DATA: &[u8] = b"rpgp-keygen-gpg-decrypt interop";
+        if !gpg_present() {
+            eprintln!("skipping gpg interop test: `gpg` not on PATH");
+            return;
+        }
         let passphrase = SPIKE_PASSPHRASE;
         let (sk, pk) = generate_keypair(SPIKE_UID, Some(passphrase)).expect("keygen");
         let ciphertext = encrypt_to_recipients(DATA, &[&pk]).expect("encrypt");
