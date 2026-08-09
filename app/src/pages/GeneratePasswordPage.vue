@@ -15,6 +15,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
+import BaseSelect from "@/components/base/BaseSelect.vue";
 import { useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { Copy, Dices } from "@lucide/vue";
@@ -26,6 +27,16 @@ const { toast } = useToast();
 
 // ── Generator options ─────────────────────────────────────────────────────
 const mode = ref<GenerateMode>("random");
+
+const modeOptions = computed<{ label: string; value: GenerateMode }[]>(() => [
+  { label: t("generate.genRandom"), value: "random" },
+  { label: t("generate.genMemorable"), value: "memorable" },
+  { label: t("generate.genPassphrase"), value: "xkcd" },
+]);
+
+function onModeChange(next: GenerateMode) {
+  mode.value = next;
+}
 const length = ref(24);
 const count = ref(10);
 
@@ -148,22 +159,14 @@ useWipeOnLeave(() => {
     }}</BaseAlert>
 
     <form class="controls" @submit.prevent="onGenerate">
-      <div class="flex flex-col gap-1">
-        <label for="g-mode" class="text-sm font-medium">{{
-          t("generate.style")
-        }}</label>
-        <select
-          id="g-mode"
-          v-model="mode"
-          class="gen-select"
-          :disabled="generating"
-          :aria-label="t('generate.passwordStyleAria')"
-        >
-          <option value="random">{{ t("generate.genRandom") }}</option>
-          <option value="memorable">{{ t("generate.genMemorable") }}</option>
-          <option value="xkcd">{{ t("generate.genPassphrase") }}</option>
-        </select>
-      </div>
+      <BaseSelect
+        name="generate-style"
+        :legend="t('generate.style')"
+        :model-value="mode"
+        :options="modeOptions"
+        :disabled="generating"
+        @change="onModeChange"
+      />
 
       <div v-if="showLength" class="flex flex-col gap-1">
         <label for="g-length" class="text-sm font-medium">
@@ -223,16 +226,6 @@ useWipeOnLeave(() => {
   flex-direction: column;
   gap: 1rem;
   margin-bottom: 1.5rem;
-}
-
-.gen-select {
-  padding: 0 0.5rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: inherit;
-  font-size: var(--text-sm);
-  min-height: 48px;
 }
 
 .result-list {

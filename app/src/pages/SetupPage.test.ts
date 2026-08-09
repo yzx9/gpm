@@ -5,8 +5,10 @@
 import {
   BACK_HANDLER_KEY,
   createBackHandlerRegistry,
+  createScrollLockController,
   createSecureScreen,
   createToast,
+  SCROLL_LOCK_KEY,
   SECURE_SCREEN_KEY,
   TOAST_KEY,
 } from "@/composables";
@@ -63,6 +65,7 @@ describe("SetupPage", () => {
           [TOAST_KEY]: createToast(),
           [SECURE_SCREEN_KEY]: createSecureScreen({ available: false }),
           [BACK_HANDLER_KEY]: createBackHandlerRegistry(),
+          [SCROLL_LOCK_KEY]: createScrollLockController(),
         },
       },
     });
@@ -1056,8 +1059,9 @@ describe("SetupPage", () => {
       // Should be on step 2
       expect(wrapper.find('textarea[id="identity"]').exists()).toBe(true);
 
-      // Click back
-      const backBtn = wrapper.find("button[type='button']");
+      // Click back — the IdentitySetupForm back button carries
+      // aria-label="Back" (matching the other pages' back buttons).
+      const backBtn = wrapper.find('button[aria-label="Back"]');
       await backBtn.trigger("click");
       await flushPromises();
 
@@ -1082,7 +1086,7 @@ describe("SetupPage", () => {
       // Back to step 1. CloneFlow itself stays mounted (only its v-if child
       // swaps), so the hoisted `pat` must survive — useWipeOnLeave must NOT fire
       // on an internal step change.
-      await wrapper.find("button[type='button']").trigger("click");
+      await wrapper.find('button[aria-label="Back"]').trigger("click");
       await flushPromises();
       expect(
         (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,
@@ -1106,9 +1110,21 @@ describe("SetupPage", () => {
 
       // Clone→Create unmounts CloneFlow (useWipeOnLeave fires the wipe); back to
       // Clone remounts it fresh, so the wiped `pat` is gone.
-      await wrapper.find("#setup-mode").setValue("create");
+      await wrapper
+        .find('button[aria-labelledby="setup-mode-legend"]')
+        .trigger("click");
       await flushPromises();
-      await wrapper.find("#setup-mode").setValue("clone");
+      await wrapper
+        .findAll('input[type="radio"][name="setup-mode"]')[1]!
+        .trigger("change"); // create
+      await flushPromises();
+      await wrapper
+        .find('button[aria-labelledby="setup-mode-legend"]')
+        .trigger("click");
+      await flushPromises();
+      await wrapper
+        .findAll('input[type="radio"][name="setup-mode"]')[0]!
+        .trigger("change"); // clone
       await flushPromises();
       expect(
         (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,

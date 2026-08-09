@@ -4,12 +4,13 @@
 
 <script setup lang="ts">
 import BaseIcon from "@/components/base/BaseIcon.vue";
+import BaseSelect from "@/components/base/BaseSelect.vue";
 import CloneFlow from "@/components/setup/CloneFlow.vue";
 import CreateFlow from "@/components/setup/CreateFlow.vue";
 import CreateGpgFlow from "@/components/setup/CreateGpgFlow.vue";
 import { useSecureClaim } from "@/composables";
 import { LockKeyhole } from "@lucide/vue";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -19,9 +20,25 @@ const { t } = useI18n();
 // Mode switch. Defaults to "clone" so CloneFlow mounts immediately on
 // first render — this preserves the existing SetupPage test contract, which
 // mounts SetupPage and expects the clone flow to be live without any click.
-// Rendered as a <select> (not buttons) so it does not pollute
-// `findAll("button[type='button'])` — see the back-button ordering test.
 const mode = ref<"clone" | "create" | "createGpg">("clone");
+
+// Typed so BaseSelect's T resolves to the mode union (not `string`): the
+// @change handler then takes the union directly, with no `as` cast that could
+// silently admit a drifted option value.
+const modeOptions = computed<
+  {
+    label: string;
+    value: "clone" | "create" | "createGpg";
+  }[]
+>(() => [
+  { label: t("setup.mode.clone"), value: "clone" },
+  { label: t("setup.mode.create"), value: "create" },
+  { label: t("setup.mode.createGpg"), value: "createGpg" },
+]);
+
+function onModeChange(next: "clone" | "create" | "createGpg") {
+  mode.value = next;
+}
 
 // R031: setup collects git credentials + an identity (CloneFlow/CreateFlow
 // children), so hold a screen-capture claim for the route's lifetime. FLAG_SECURE
@@ -54,21 +71,14 @@ function onDone() {
         {{ t("setup.tagline") }}
       </p>
 
-      <!-- Mode switch (a <select>, not buttons — see script comment). -->
-      <div class="flex flex-col gap-1 mb-6">
-        <label for="setup-mode" class="text-sm font-medium">{{
-          t("setup.mode.label")
-        }}</label>
-        <select
-          id="setup-mode"
-          v-model="mode"
-          class="input-base"
-          autocomplete="off"
-        >
-          <option value="clone">{{ t("setup.mode.clone") }}</option>
-          <option value="create">{{ t("setup.mode.create") }}</option>
-          <option value="createGpg">{{ t("setup.mode.createGpg") }}</option>
-        </select>
+      <div class="mb-6">
+        <BaseSelect
+          name="setup-mode"
+          :legend="t('setup.mode.label')"
+          :model-value="mode"
+          :options="modeOptions"
+          @change="onModeChange"
+        />
       </div>
 
       <CloneFlow v-if="mode === 'clone'" @done="onDone" />
@@ -77,22 +87,3 @@ function onDone() {
     </div>
   </main>
 </template>
-
-<style scoped>
-.input-base {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-family: inherit;
-  background: transparent;
-  color: inherit;
-  min-height: 48px;
-}
-
-.input-base:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-ring);
-}
-</style>

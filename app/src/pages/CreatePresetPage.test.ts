@@ -48,6 +48,35 @@ const preset = (): CreatePreset => ({
   ],
 });
 
+const passwordPreset = (): CreatePreset => ({
+  id: "website-login",
+  label: "Website Login",
+  prefix: "websites",
+  name_from: ["name"],
+  fields: [
+    {
+      key: "name",
+      label: "Name",
+      required: true,
+      type: "string",
+      charset: null,
+      min: null,
+      max: null,
+      strict: false,
+    },
+    {
+      key: "password",
+      label: "Password",
+      required: true,
+      type: "password",
+      charset: null,
+      min: null,
+      max: null,
+      strict: false,
+    },
+  ],
+});
+
 describe("CreatePresetPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -92,5 +121,36 @@ describe("CreatePresetPage", () => {
     await w.find('button[aria-label="Back"]').trigger("click");
     await flushPromises();
     expect(mockReplace).toHaveBeenCalledWith({ name: "create" });
+  });
+
+  it("the per-field style picker changes the generator mode", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "list_create_presets")
+        return Promise.resolve([passwordPreset()]);
+      if (cmd === "generate_password") return Promise.resolve("generated-pw");
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(CreatePresetPage).wrapper;
+    await flushPromises();
+
+    // A password field (charset == null) renders the BaseSelect style picker.
+    expect(w.find('button[aria-label="Password style"]').exists()).toBe(true);
+
+    // Open the sheet and pick xkcd (Passphrase, the 3rd option).
+    await w.find('button[aria-label="Password style"]').trigger("click");
+    await flushPromises();
+    await w
+      .findAll('input[type="radio"][name="gen-mode-password"]')[2]!
+      .trigger("change");
+    await flushPromises();
+
+    // Generate for the password field — the picked mode reaches the backend.
+    await w.find('button[aria-label="Generate password"]').trigger("click");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith(
+      "generate_password",
+      expect.objectContaining({ mode: "xkcd" }),
+    );
   });
 });

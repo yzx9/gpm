@@ -70,7 +70,15 @@ describe("GeneratePasswordPage", () => {
     const { wrapper } = await mountPage({
       generate_password_batch: () => ["x"],
     });
-    await wrapper.find('select[aria-label="Password style"]').setValue("xkcd");
+    // Open the BaseSelect sheet and pick xkcd (the 3rd option).
+    await wrapper
+      .find('button[aria-labelledby="generate-style-legend"]')
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll('input[type="radio"][name="generate-style"]')[2]!
+      .trigger("change");
+    await flushPromises();
     await wrapper.find("form").trigger("submit");
     await flushPromises();
 
@@ -112,7 +120,14 @@ describe("GeneratePasswordPage", () => {
     const { wrapper } = await mountPage({
       generate_password_batch: () => ["x"],
     });
-    await wrapper.find('select[aria-label="Password style"]').setValue("xkcd");
+    // Open the BaseSelect sheet and pick xkcd (the 3rd option).
+    await wrapper
+      .find('button[aria-labelledby="generate-style-legend"]')
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll('input[type="radio"][name="generate-style"]')[2]!
+      .trigger("change");
     await flushPromises();
 
     expect(wrapper.find("#g-length").exists()).toBe(false);

@@ -1,7 +1,6 @@
 {
   "title": "生成密码",
   "style": "样式",
-  "passwordStyleAria": "密码样式",
   "genRandom": "随机",
   "genMemorable": "易记",
   "genPassphrase": "短语",

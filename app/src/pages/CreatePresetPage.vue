@@ -19,6 +19,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
+import BaseSelect from "@/components/base/BaseSelect.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
@@ -54,6 +55,18 @@ const presetsLoading = ref(true);
 const fields = ref<Record<string, string>>({});
 const revealed = ref<Record<string, boolean>>({});
 const genMode = ref<GenerateMode>("random");
+
+const genModeOptions = computed<{ label: string; value: GenerateMode }[]>(
+  () => [
+    { label: t("create.genRandom"), value: "random" },
+    { label: t("create.genMemorable"), value: "memorable" },
+    { label: t("create.genPassphrase"), value: "xkcd" },
+  ],
+);
+
+function onGenModeChange(next: GenerateMode) {
+  genMode.value = next;
+}
 const generating = ref(false);
 // Bumped on every generate and on lock; an in-flight generate whose token no
 // longer matches is stale and must not write its result into state.
@@ -237,17 +250,19 @@ useWipeOnLeave(wipeFields);
               autocapitalize="off"
               spellcheck="false"
             />
-            <select
+            <div
               v-if="f.type === 'password' && f.charset == null"
-              v-model="genMode"
-              class="gen-select"
-              :disabled="generating"
-              :aria-label="t('create.passwordStyleAria')"
+              class="gen-mode-picker"
             >
-              <option value="random">{{ t("create.genRandom") }}</option>
-              <option value="memorable">{{ t("create.genMemorable") }}</option>
-              <option value="xkcd">{{ t("create.genPassphrase") }}</option>
-            </select>
+              <BaseSelect
+                :name="`gen-mode-${f.key}`"
+                :aria-label="t('create.passwordStyleAria')"
+                :model-value="genMode"
+                :options="genModeOptions"
+                :disabled="generating"
+                @change="onGenModeChange"
+              />
+            </div>
             <BaseButton
               v-if="f.type === 'password'"
               variant="secondary"
@@ -314,14 +329,10 @@ useWipeOnLeave(wipeFields);
   align-items: stretch;
 }
 
-.gen-select {
-  padding: 0 0.5rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: inherit;
-  font-size: var(--text-sm);
-  min-height: 48px;
+.gen-mode-picker {
+  /* Fixed width so the picker doesn't grow/shrink as the selected label changes. */
+  flex: 0 0 auto;
+  width: 8.5rem;
 }
 
 .loading {

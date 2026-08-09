@@ -475,10 +475,12 @@ onUnmounted(clearPendingFile);
 
 <template>
   <form class="flex flex-col gap-4" @submit.prevent="onCompleteSetup">
-    <!-- Back button — MUST be the first button[type='button'] in this form
-         (the back-navigation test relies on this ordering). BaseButton renders
-         <button type="button"> by default, preserving that. -->
-    <BaseButton variant="ghost" class="self-start" @click="goBack">
+    <BaseButton
+      variant="ghost"
+      class="self-start"
+      :aria-label="t('common.back')"
+      @click="goBack"
+    >
       <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
     </BaseButton>
 

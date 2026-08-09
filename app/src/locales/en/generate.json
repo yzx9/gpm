@@ -1,7 +1,6 @@
 {
   "title": "Generate password",
   "style": "Style",
-  "passwordStyleAria": "Password style",
   "genRandom": "Random",
   "genMemorable": "Memorable",
   "genPassphrase": "Passphrase",
