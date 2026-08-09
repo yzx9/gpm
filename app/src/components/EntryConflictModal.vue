@@ -25,11 +25,20 @@ import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
 import BaseSpinner from "./base/BaseSpinner.vue";
+import EntryAttributes from "./EntryAttributes.vue";
 
 const { t } = useI18n();
 const { runWithAuth } = useLockState();
-const { password, notes, revealed, clearsInSecs, reveal, clear, withClaim } =
-  useSecretReveal();
+const {
+  attributes,
+  password,
+  notes,
+  revealed,
+  clearsInSecs,
+  reveal,
+  clear,
+  withClaim,
+} = useSecretReveal();
 
 const props = withDefaults(
   defineProps<{
@@ -262,6 +271,7 @@ watch(
         <code>{{ password }}</code>
       </div>
       <p v-if="notes" class="ec-notes text-muted">{{ notes }}</p>
+      <EntryAttributes :attributes="attributes ?? []" />
       <p v-if="clearsInSecs > 0" class="text-xs text-muted ec-clears">
         {{ t("common.entryConflict.autoClearsIn", { secs: clearsInSecs }) }}
       </p>

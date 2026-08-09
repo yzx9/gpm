@@ -5,6 +5,8 @@
   "showingAria": "Password is showing",
   "showLabel": "Show Password",
   "showingLabel": "Showing...",
+  "showValueAria": "Show value",
+  "hideValueAria": "Hide value",
   "editAria": "Edit {name}",
   "editLabel": "✎ Edit",
   "revisionsAria": "Revision history for {name}",

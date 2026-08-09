@@ -21,6 +21,7 @@ import {
   type PullResult,
 } from "@/api";
 import DivergenceModal from "@/components/DivergenceModal.vue";
+import EntryAttributes from "@/components/EntryAttributes.vue";
 import EntryConflictModal from "@/components/EntryConflictModal.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -63,8 +64,16 @@ const entryName = entryPath.replace(/\.age$/, "");
 // auto-clear, wipe on unmount, wipe on browser back. `copyPassword` calls
 // `clear()` itself. `withClaim` raises FLAG_SECURE before the decrypted secret
 // arrives and brands it so `reveal()` can type-check (R031).
-const { password, notes, revealed, clearsInSecs, reveal, clear, withClaim } =
-  useSecretReveal();
+const {
+  attributes,
+  password,
+  notes,
+  revealed,
+  clearsInSecs,
+  reveal,
+  clear,
+  withClaim,
+} = useSecretReveal();
 const { viewClearSecs } = useSecuritySettings();
 // Invalidation token (R031): a decrypt resolving after we left (Back/lock) must
 // not write the secret into a leaving/dead component. Bumped on every leave.
@@ -621,6 +630,8 @@ function handleKeydown(e: KeyboardEvent) {
           class="text-sm p-2 bg-input rounded-sm whitespace-pre-wrap break-all font-[inherit] select-text max-h-50 overflow-y-auto"
         >{{ notes }}</pre>
       </div>
+
+      <EntryAttributes :attributes="attributes ?? []" class="mb-4" />
 
       <p class="text-center text-xs text-muted mt-3">
         {{

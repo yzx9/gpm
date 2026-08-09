@@ -5,6 +5,8 @@
   "showingAria": "密码已显示",
   "showLabel": "显示密码",
   "showingLabel": "显示中……",
+  "showValueAria": "显示内容",
+  "hideValueAria": "隐藏内容",
   "editAria": "编辑 {name}",
   "editLabel": "✎ 编辑",
   "revisionsAria": "{name} 的修订历史",

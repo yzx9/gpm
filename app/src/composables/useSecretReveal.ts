@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import type { SensitiveContent } from "@/api";
+import type { AttributeView, SensitiveContent } from "@/api";
 import { ref, watch } from "vue";
 import { type Claimed, useSecureClaim } from "./useSecureClaim";
 import { useSecuritySettings } from "./useSecuritySettings";
@@ -34,6 +34,7 @@ export function useSecretReveal() {
 
   const password = ref<string | null>(null);
   const notes = ref<string | null>(null);
+  const attributes = ref<AttributeView[] | null>(null);
   const revealed = ref(false);
   /** Seconds remaining until the auto-clear fires. Drives the live "auto-clears
    *  in Ns" countdown; `0` while nothing is revealed or when Never is set. */
@@ -50,6 +51,7 @@ export function useSecretReveal() {
   function clear() {
     password.value = null;
     notes.value = null;
+    attributes.value = null;
     revealed.value = false;
     clearsInSecs.value = 0;
     if (autoHideTimer) {
@@ -103,10 +105,13 @@ export function useSecretReveal() {
    *  `Claimed` type is the compile-time guarantee the caller acquired
    *  FLAG_SECURE first. */
   function reveal(
-    content: Claimed<Pick<SensitiveContent, "password" | "notes">>,
+    content: Claimed<
+      Pick<SensitiveContent, "attributes" | "notes" | "password">
+    >,
   ) {
     password.value = content.password;
     notes.value = content.notes;
+    attributes.value = content.attributes;
     revealed.value = true;
     armAutoClear();
   }
@@ -126,5 +131,14 @@ export function useSecretReveal() {
     }
   });
 
-  return { password, notes, revealed, clearsInSecs, reveal, clear, withClaim };
+  return {
+    attributes,
+    password,
+    notes,
+    revealed,
+    clearsInSecs,
+    reveal,
+    clear,
+    withClaim,
+  };
 }

@@ -55,6 +55,7 @@ describe("useSecretReveal", () => {
     const claimed = await r.withClaim(async () => ({
       password: "s3cret",
       notes: "n",
+      attributes: [],
     }));
     expect(claimed).not.toBeNull();
     // Flag is up…
@@ -77,6 +78,7 @@ describe("useSecretReveal", () => {
     const claimed = await r.withClaim(async () => ({
       password: "s3cret",
       notes: "",
+      attributes: [],
     }));
     expect(claimed).not.toBeNull();
     r.reveal(claimed!);

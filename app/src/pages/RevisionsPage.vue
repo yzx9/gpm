@@ -12,6 +12,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
+import EntryAttributes from "@/components/EntryAttributes.vue";
 import {
   isAuthCancelled,
   useLockState,
@@ -43,8 +44,16 @@ const { t } = useI18n();
 const { formatRelativeTime } = useRelativeTime();
 const { toast } = useToast();
 const { runWithAuth } = useLockState();
-const { password, notes, revealed, clearsInSecs, reveal, clear, withClaim } =
-  useSecretReveal();
+const {
+  attributes,
+  password,
+  notes,
+  revealed,
+  clearsInSecs,
+  reveal,
+  clear,
+  withClaim,
+} = useSecretReveal();
 
 // The entry this page is the history of: the route's catch-all param is the
 // (URL-encoded) `.age` path, decoded like EntryDetailPage.
@@ -427,6 +436,7 @@ onBeforeUnmount(() => {
         >
           {{ notes }}
         </div>
+        <EntryAttributes :attributes="attributes ?? []" class="mt-1" />
         <div v-if="clearsInSecs > 0" class="text-xs text-muted mt-1">
           {{ t("revisions.clearsIn", { secs: clearsInSecs }) }}
         </div>
