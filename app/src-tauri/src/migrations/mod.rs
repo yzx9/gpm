@@ -33,6 +33,7 @@ pub(crate) mod m0005_split_app_json;
 pub(crate) mod m0006_gate_idle_timeout;
 pub(crate) mod m0007_vault_key;
 pub(crate) mod m0008_collapse_pref_into_sealed;
+pub(crate) mod m0009_multi_repo_register;
 
 /// Outcome of a single migration step.
 ///
@@ -55,6 +56,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (6, "0006_gate_idle_timeout"),
     (7, "0007_vault_key"),
     (8, "0008_collapse_pref_into_sealed"),
+    (9, "0009_multi_repo_register"),
 ];
 
 /// The `app.json`/`pref.json` schema version once every registered migration has
@@ -129,6 +131,7 @@ async fn apply_migration(state: &AppState, version: u32) -> Result<MigrationOutc
         6 => m0006_gate_idle_timeout::apply(state, version).await,
         7 => m0007_vault_key::apply(state, version).await,
         8 => m0008_collapse_pref_into_sealed::apply(state, version).await,
+        9 => m0009_multi_repo_register::apply(state, version).await,
         // Unreachable in practice — `version` comes from iterating `MIGRATIONS`,
         // whose every entry has a match arm above. Return an `Err` (not a panic)
         // so a future mismatch (a registry row without a dispatch arm) surfaces

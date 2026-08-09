@@ -18,6 +18,12 @@
 //! (`config_dir/repositories/<id>/`) lands with the `m0009` migration; until
 //! then the facade is rooted at `config_dir` (the historical single-repo layout).
 
+// R080 multi-repository is introduced incrementally: the `RepoEntry` one-shots
+// and the wider `RepoRegistry` API land now and are consumed by the threading
+// (Tasks 3–4), state-store removal (Task 5), relocate (Task 6), and worker
+// fan-out (Task 7) steps. Allow unused items until those wire up.
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU8};
@@ -53,6 +59,23 @@ impl RepoId {
     #[must_use]
     pub(crate) fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Generate a fresh opaque id: 16 random bytes from the OS CSPRNG,
+    /// hex-encoded (32 chars, URL-segment-safe for future `/:repoId` routing).
+    /// Used when a repository is first adopted into the registry (the `m0009`
+    /// register migration, and the setup/add-repository path).
+    #[allow(clippy::indexing_slicing)] // a 16-entry table indexed by a nibble (0–15)
+    pub(crate) fn generate() -> Result<Self, rustpass::Error> {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut buf = [0u8; 16];
+        rustpass::rng::fill_random(&mut buf)?;
+        let mut id = String::with_capacity(32);
+        for byte in buf {
+            id.push(HEX[usize::from(byte >> 4)] as char);
+            id.push(HEX[usize::from(byte & 0x0f)] as char);
+        }
+        Ok(Self(id))
     }
 }
 
@@ -145,8 +168,23 @@ impl RepoRegistry {
     /// Build the index from an ordered id list, constructing one facade per id
     /// via `facade_for(id)`. `last_active` is taken as-is (it should already name
     /// one of `ids`, else [`active_facade`](Self::active_facade) falls back to the
-    /// first). Used at startup to materialize the registry from `AppConfig`.
+    /// first). Used by tests; startup uses [`empty`](Self::empty) +
+    /// [`populate`](Self::populate) (the registry is filled after migrations run,
+    /// once `AppState` already exists).
     pub(crate) fn from_ids<I, F>(ids: I, last_active: Option<RepoId>, facade_for: F) -> Self
+    where
+        I: IntoIterator<Item = RepoId>,
+        F: Fn(&RepoId) -> Arc<Store>,
+    {
+        let registry = Self::empty();
+        registry.populate(ids, last_active, facade_for);
+        registry
+    }
+
+    /// (Re)populate an existing registry (e.g. the one on `AppState`, which starts
+    /// empty and is filled after the migration chain assigns/persists the id
+    /// list). Replaces all entries. `facade_for(id)` constructs one facade per id.
+    pub(crate) fn populate<I, F>(&self, ids: I, last_active: Option<RepoId>, facade_for: F)
     where
         I: IntoIterator<Item = RepoId>,
         F: Fn(&RepoId) -> Arc<Store>,
@@ -158,11 +196,12 @@ impl RepoRegistry {
             by_id.insert(id.clone(), Arc::clone(&entry));
             entries.push(entry);
         }
-        Self {
-            entries: RwLock::new(entries),
-            by_id: RwLock::new(by_id),
-            last_active: RwLock::new(last_active),
-        }
+        *self.entries.write().expect("registry entries poisoned") = entries;
+        *self.by_id.write().expect("registry by_id poisoned") = by_id;
+        *self
+            .last_active
+            .write()
+            .expect("registry last_active poisoned") = last_active;
     }
 
     /// Look up a repository's facade by id (`None` if unknown — callers surface a

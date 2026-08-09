@@ -35,6 +35,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
     app_config.set_store(Arc::clone(&store));
     AppState {
         store,
+        registry: crate::registry::RepoRegistry::empty(),
         app_config: Arc::new(app_config),
         app_handle: None,
         lock_timer: crate::identity::IdleTimer::new(),
@@ -1219,4 +1220,44 @@ async fn m0008_corrupt_sealed_propagates_err() {
         dir.path().join("pref.json").exists(),
         "pref.json survives a tampered-slot read"
     );
+}
+
+// --- m0009: multi-repository register (R080) ---------------------------------
+
+/// A schema-8 install with a valid `repo.json` is adopted into the registry:
+/// after the chain, `app.json` carries a non-empty `repositories`, `last_active`
+/// points at it, and schema is 9. No files move (register half only).
+#[tokio::test]
+async fn m0009_registers_existing_single_repo_into_registry() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    // Seed a valid repo.json (plaintext; master_key=None ⇒ passthrough) so
+    // `Store::config()` resolves Ok, plus a schema-8 merged app.json.
+    std::fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":8}"#).unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    let reloaded = reload_at(dir.path(), &store).await;
+    assert_eq!(reloaded.schema_version, 9);
+    assert_eq!(reloaded.repositories.len(), 1);
+    assert_eq!(reloaded.last_active, reloaded.repositories.first().cloned());
+}
+
+/// A schema-8 install with NO `repo.json` (fresh / never-completed setup) leaves
+/// the registry empty but still bumps schema (so register doesn't retry forever).
+#[tokio::test]
+async fn m0009_leaves_registry_empty_when_no_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":8}"#).unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    let reloaded = reload_at(dir.path(), &store).await;
+    assert_eq!(reloaded.schema_version, 9);
+    assert!(reloaded.repositories.is_empty());
+    assert!(reloaded.last_active.is_none());
 }

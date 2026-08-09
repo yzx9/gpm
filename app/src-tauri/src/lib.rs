@@ -59,6 +59,14 @@ mod tests;
 /// Application state shared across all Tauri commands.
 pub(crate) struct AppState {
     pub(crate) store: Arc<Store>,
+    /// Multi-repository registry (R080): the ordered index of per-repository
+    /// `Store` facades, keyed by [`registry::RepoId`]. Populated from
+    /// `AppConfig.repositories` after the migration chain runs (so m0009's
+    /// registered id is reflected). Repo operations resolve a facade via
+    /// `state.registry.facade(&repo_id)`; `state.store` remains the device-level
+    /// facade (rooted at `config_dir`, owns `app.json`) during the threading
+    /// transition.
+    pub(crate) registry: registry::RepoRegistry,
     /// Identity auto-lock idle timer — cancel-and-respawn with a generation-tagged
     /// self-disarm (see [`identity::IdleTimer`]). Drives the `Idle` auto-lock mode.
     pub(crate) lock_timer: identity::IdleTimer,
@@ -333,6 +341,9 @@ fn init_state(
 
     let app_state = AppState {
         store,
+        // Empty until the migration chain runs (m0009 registers the existing
+        // repo's id); populated just below, after `run_app_migrations`.
+        registry: registry::RepoRegistry::empty(),
         app_config: Arc::new(app_config),
         // `Some` so m0007 (vault-key relocate) can reach the Keystore. Concrete
         // `Wry` (not generic `<R>`) because `app.handle()` is `AppHandle<R>` and
@@ -392,6 +403,24 @@ fn init_state(
     app_state
         .store
         .set_autosync(app_state.app_config.get_behavior().autosync);
+    // Populate the multi-repository registry from the (now-migrated) `AppConfig`:
+    // m0009 has registered the existing repo's id into `repositories`/`last_active`.
+    // Until the relocate migration lands, the facade root is still `config_dir`
+    // (the single repo's historical location), so every entry shares the device
+    // store. One repo ⇒ behavior identical to today.
+    {
+        let device_store = Arc::clone(&app_state.store);
+        let cfg = app_state.app_config.get();
+        let ids = cfg
+            .repositories
+            .iter()
+            .map(|s| registry::RepoId::from(s.clone()))
+            .collect::<Vec<_>>();
+        let last_active = cfg.last_active.map(registry::RepoId::from);
+        app_state
+            .registry
+            .populate(ids, last_active, move |_id| Arc::clone(&device_store));
+    }
     app_state
 }
 
