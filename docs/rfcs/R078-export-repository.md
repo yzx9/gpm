@@ -1,4 +1,4 @@
-# Export & import a repository via Git bundle
+# Export a repository via Git bundle
 
 **Priority:** P2
 **Status:** Draft
@@ -6,8 +6,10 @@
 
 ## What
 
-Let a user export an entire repository to a portable **Git bundle**, and re-import a bundle
-as a new repository. A bundle _is_ the repository — its full history of encrypted secrets —
+Let a user export an entire repository to a portable **Git bundle**. (The symmetric
+counterpart — re-importing a bundle as a new repository — is analyzed and **deferred to
+R087**; it earns its place only once a non-git backend exists.) A bundle _is_ the
+repository — its full history of encrypted secrets —
 in a single portable file that can be handed to another device, kept as a backup, or opened
 in desktop gopass. Creating a bundle (and cloning from one) is a Git operation that **never
 decrypts**, so export and import do not require the vault to be unlocked, and the bundle's
@@ -108,5 +110,7 @@ CC: ~2–3 sessions)
 - Builds on `005-git-storage` (a repository is a git repo; the clone + identity-setup flow).
 - Complements `009-multi-repository` — import becomes a third "add vault" source, and export
   is the safe-egress path that makes removing a local-only vault acceptable. **Independent
-  of it** — export/import can ship before multi-repository.
+  of it** — export can ship before multi-repository (import is deferred — R087).
+- Import — the symmetric restore — is **deferred to R087**, gated on a non-git backend
+  (`R046`); on git-only it is redundant with clone/sync, so v1 ships export alone.
 - Reuses the existing save / pick file surface (attachment export).
