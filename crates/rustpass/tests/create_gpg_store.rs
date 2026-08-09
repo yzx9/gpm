@@ -65,6 +65,16 @@ mod tests {
     #[tokio::test]
     async fn create_gpg_store_local_only_seeds_gopass_layout_and_round_trips() {
         let recipient = fixture_recipient();
+        // #41: the token must be UPPERCASE — gpg/gopass write uppercase and match
+        // fingerprints case-sensitively, so the `.gpg-id` value AND the
+        // `.public-keys/<token>` filename must be uppercase to round-trip through
+        // gopass. Pinned authoritatively against the fixture's `gpg --with-colons`
+        // fpr (not self-referential against `identity_recipient`'s own output).
+        assert_eq!(
+            recipient, "0x8C78A415A6EDA09F",
+            "recipient token must be uppercase"
+        );
+
         let config_dir = tempfile::tempdir().expect("failed to create config dir");
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
@@ -97,6 +107,24 @@ mod tests {
         assert_eq!(
             pubkey, FIXTURE_PUBLIC,
             ".public-keys/<token> holds the armored pubkey verbatim"
+        );
+        // The on-disk filename is the uppercase token, checked independently of
+        // the `recipient` variable used to build the read path above (#41).
+        let mut pubkeys: Vec<String> =
+            std::fs::read_dir(config_dir.path().join("repo").join(".public-keys"))
+                .expect(".public-keys dir exists")
+                .map(|e| {
+                    e.expect("dir entry")
+                        .file_name()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+        pubkeys.sort();
+        assert_eq!(
+            pubkeys,
+            vec!["0x8C78A415A6EDA09F".to_string()],
+            ".public-keys filename is the uppercase recipient token",
         );
 
         // .gitattributes carries gopass's diff-driver mapping.

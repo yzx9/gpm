@@ -316,6 +316,7 @@ mod tests {
     use super::*;
     use crate::crypto::openpgp::{
         armor_public_key, armor_secret_key, generate_keypair, primary_fingerprint,
+        secret_key_fingerprint,
     };
     use crate::recipient::KeyType;
     use crate::storage::{GitStorage, RepoFiles};
@@ -445,6 +446,30 @@ mod tests {
             "gopass Key.ID() is 0x + 16 hex, got {}",
             me.recipient
         );
+    }
+
+    /// #41: the token derived from a real gpg-produced key must be UPPERCASE,
+    /// matching gopass's `.gpg-id` token byte-for-byte (`0x` + last 16 of the
+    /// primary fingerprint). gopass matches fingerprints case-sensitively, so a
+    /// lowercase token (rpgp's `Fingerprint: Display`) wouldn't round-trip through
+    /// gopass. Pinned against the fixture's authoritative `gpg --with-colons` fpr;
+    /// host-only (no gpg/gpg-agent). RED before the fix, GREEN after.
+    #[test]
+    fn identity_recipient_matches_real_gpg_key_uppercase() {
+        let armor = std::str::from_utf8(FIXTURE_SECRET).expect("fixture armor is utf-8");
+        // Full primary fingerprint = gpg's uppercase fpr field.
+        assert_eq!(
+            secret_key_fingerprint(FIXTURE_SECRET).expect("derive fingerprint"),
+            "45953F0FF50CD57C869CCB848C78A415A6EDA09F",
+            "fingerprint must be uppercase hex matching gpg --with-colons",
+        );
+        // Recipient token = 0x + last 16 hex, uppercase.
+        let recipient = GpgBackend
+            .identity_recipient(armor, None)
+            .expect("derive recipient");
+        // gopass Key.ID() convention: lowercase `0x` prefix + UPPERCASE hex
+        // digits — the digits are what gopass matches case-sensitively.
+        assert_eq!(recipient, "0x8C78A415A6EDA09F");
     }
 
     /// .gpg-id parser keeps both id forms verbatim, skips comments/blanks.
