@@ -175,15 +175,19 @@ onMounted(() => {
     <!--
       Stack-style slide between pages. No `mode="out-in"`: push/pop animate the
       departing and arriving pages simultaneously (iOS NavigationController
-      feel). `:key="route.fullPath"` makes Vue treat each route as a distinct
-      element so the transition fires on every nav. `transitionName` is "" only
-      on the initial paint and on replace navigations — screen-capture
-      protection is component-level (R031), so there is no secure↔capturable
-      boundary to freeze the slide on (see useNavDirection).
+      feel). `:key="route.path"` (NOT fullPath) makes Vue treat each *page* as a
+      distinct element so the transition fires on every real nav — but a
+      query-only change does NOT remount: the Settings→Identity deep-link clears
+      its `?focus=` query after arriving, and keying on fullPath would tear that
+      page down mid-highlight (the flash lives on the arriving instance).
+      `transitionName` is "" only on the initial paint and on replace
+      navigations — screen-capture protection is component-level (R031), so
+      there is no secure↔capturable boundary to freeze the slide on (see
+      useNavDirection).
     -->
     <router-view v-slot="{ Component, route }">
       <Transition :name="transitionName">
-        <component :is="Component" :key="route.fullPath" />
+        <component :is="Component" :key="route.path" />
       </Transition>
     </router-view>
     <!--

@@ -78,6 +78,16 @@ const highlightKey = ref<"biometric" | "passphrase" | null>(null);
 // Handle to the highlight-clear timer so it can be cancelled if the page is
 // left mid-flash (otherwise it would fire on an unmounted component).
 let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+// Cleared in onUnmounted so the async deep-link wait can bail if the user
+// navigates away before the slide settles (it must not scroll/flash a page
+// that's already leaving).
+let alive = true;
+// Resolves when the page's slide-in transition ends. Armed in onMounted BEFORE
+// loadConfig so the transitionend listener is in place when the slide fires it —
+// otherwise loadConfig (keystore + at-rest decrypt on Android) can outlast the
+// slide and the event is missed. Defaults to a resolved promise so a non-deep-link
+// visit (applyFocus returns early) never awaits anything.
+let slideSettle: Promise<void> = Promise.resolve();
 // Root element ref — the deep-link card lookup is scoped to it (not document)
 // so it resolves whether or not the page is attached to the document.
 const rootEl = ref<HTMLElement | null>(null);
@@ -87,6 +97,10 @@ const HIGHLIGHT_MS = 1700;
 // The deep-link target card renders after loadConfig commits; poll a few ticks
 // for it. Bounded so we never wait forever on a card that won't exist (SSH).
 const FOCUS_MAX_TICKS = 5;
+// Headroom added to the slide's CSS duration for the fallback timer, so the real
+// transitionend always wins. The duration itself is read from computed style —
+// never hardcoded here — so it can't drift from style.css.
+const SETTLE_SLACK_MS = 100;
 
 const loading = ref(false);
 const error = ref("");
@@ -664,6 +678,64 @@ async function onGateIdleToggle(enabled: boolean) {
 // Deep-link focus: arriving with ?focus=biometric|passphrase scrolls that card
 // into view and flashes it, then drops the query so a refresh/back can't
 // re-trigger. Runs after loadConfig so the (config-gated) cards exist.
+//
+// Everything below (query clear, scroll, highlight) is deferred until the
+// slide-forward page transition settles: the arriving page carries an active
+// transform during that 0.25s slide, so scrolling then races it (a visible
+// flicker), and the query-clearing replace would interrupt it. See
+// waitForPageSettled().
+
+// The slide's actual duration, read from the element's computed style so it can
+// never drift from style.css (`.slide-*-enter-active: transition: transform
+// 0.25s`). Returns 0 when no transition is running (initial paint, replace nav).
+function transitionDurationMs(el: Element): number {
+  const raw = getComputedStyle(el).transitionDuration.trim();
+  if (!raw) return 0;
+  // "0.25s", or a comma-list for several transitions — take the longest as a
+  // safe ceiling for the fallback timer.
+  return Math.max(...raw.split(",").map((s) => parseFloat(s) || 0)) * 1000;
+}
+
+// Reduced-motion clamps the slide to ~0ms (style.css), so there is nothing to
+// settle — and these users are the most sensitive to a needless post-slide stall.
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+// A Promise that resolves when the page's slide-in transition ends — driven by
+// the real `transitionend` event, NOT a hardcoded duration. The deep-link
+// scroll/highlight must land AFTER the slide; this is the gate that holds them
+// back. MUST be armed at mount (before loadConfig) so the listener is in place
+// when the slide fires; the fallback (sized from the CSS duration + slack) only
+// fires if the event never comes (no transition ran, element detached).
+function waitForPageSettled(): Promise<void> {
+  if (prefersReducedMotion()) return Promise.resolve();
+  const el = rootEl.value;
+  if (!el) return Promise.resolve();
+  const fallbackMs = transitionDurationMs(el) + SETTLE_SLACK_MS;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      el.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(fallback);
+      resolve();
+    };
+    const onEnd = (e: TransitionEvent) => {
+      // Only the slide's transform transition (on the page root) signals
+      // settle; ignore bubbled transitions from descendants.
+      if (e.target === el && e.propertyName === "transform") done();
+    };
+    el.addEventListener("transitionend", onEnd);
+    const fallback = window.setTimeout(done, fallbackMs);
+  });
+}
+
 async function applyFocus() {
   const focus = route.query.focus;
   if (typeof focus !== "string") return;
@@ -678,13 +750,25 @@ async function applyFocus() {
     await nextTick();
     el = (rootEl.value?.querySelector(`#${id}`) as HTMLElement | null) ?? null;
   }
+  // Hold off until the slide finishes — slideSettle was armed at mount (before
+  // loadConfig) so its transitionend listener caught the real end of the
+  // transition. Bail if the user navigated away during the wait.
+  await slideSettle;
+  if (!alive) return;
   // Drop the query so a refresh/back can't re-trigger the flash — but only when
   // still on this page, so navigating away mid-load can't clobber the new page's
   // query. Runs whether or not the card was found.
   if (route.name === "settingsIdentity") {
     await router.replace({ query: {} });
   }
-  if (!el) return; // card not present → graceful no-op
+  // Re-check after the settle wait + replace: a navigation away during them
+  // resolves the awaiter (the <Transition>'s enter-cancelled) before
+  // onUnmounted runs — that hook queues after enter-cancelled, so `alive` can
+  // still be true here even though currentRoute already points elsewhere. Gate
+  // on the route too (it updates synchronously when the nav resolves) so we
+  // never scroll/flash a page that's leaving; `alive` is the later backstop.
+  if (!alive || route.name !== "settingsIdentity") return;
+  if (!el) return; // card not present → graceful no-op (query already cleared)
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   highlightKey.value = focus;
   highlightTimer = window.setTimeout(() => {
@@ -694,10 +778,16 @@ async function applyFocus() {
 }
 
 onUnmounted(() => {
+  alive = false;
   if (highlightTimer) clearTimeout(highlightTimer);
 });
 
 onMounted(async () => {
+  // Arm the slide-settle listener BEFORE loadConfig. transitionend fires ~250ms
+  // after mount; attaching now (not after loadConfig) means we catch the real
+  // event even when loadConfig (keystore + at-rest decrypt on Android) outlasts
+  // the slide — no hardcoded duration needed, the wait resolves with the CSS.
+  slideSettle = waitForPageSettled();
   await loadConfig();
   try {
     await applyFocus();

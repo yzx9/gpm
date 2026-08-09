@@ -84,6 +84,17 @@ describe("SettingsIdentityPage", () => {
     return mountWithApp(SettingsIdentityPage).wrapper;
   }
 
+  // applyFocus waits for the page slide's `transitionend` before it scrolls, and
+  // jsdom runs no real transition — so dispatch it to release that wait.
+  function settleSlide(wrapper: ReturnType<typeof mountPage>) {
+    (wrapper.element as HTMLElement).dispatchEvent(
+      new TransitionEvent("transitionend", {
+        propertyName: "transform",
+        bubbles: true,
+      }),
+    );
+  }
+
   // Find a BaseSegmentedControl / BaseSelect by its `name` prop.
   function findControl(
     wrapper: ReturnType<typeof mountPage>,
@@ -113,7 +124,12 @@ describe("SettingsIdentityPage", () => {
       });
       const wrapper = mountPage();
       try {
-        await flushPromises(); // settle onMounted: loadConfig → applyFocus
+        await flushPromises(); // settle onMounted: loadConfig → applyFocus polls, then parks on the slide-settle wait
+        // Pinned: the scroll/highlight must NOT fire until the slide settles —
+        // deleting waitForPageSettled() (the fix) would call it eagerly here.
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        settleSlide(wrapper); // release the wait (no real transition in jsdom)
+        await flushPromises(); // query clear + scroll + highlight apply
         const card = wrapper.find("#biometric-card");
         expect(card.exists()).toBe(true);
         expect(scrollIntoView).toHaveBeenCalledWith({
@@ -151,6 +167,9 @@ describe("SettingsIdentityPage", () => {
       const wrapper = mountPage();
       try {
         await flushPromises();
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        settleSlide(wrapper);
+        await flushPromises();
         const card = wrapper.find("#passphrase-card");
         expect(card.exists()).toBe(true);
         expect(scrollIntoView).toHaveBeenCalledWith({
@@ -159,6 +178,44 @@ describe("SettingsIdentityPage", () => {
         });
         expect(card.classes()).toContain("card-highlight");
         expect(mockReplace).toHaveBeenCalledWith({ query: {} });
+      } finally {
+        wrapper.unmount();
+        proto.scrollIntoView = orig;
+        mockRoute.query = {};
+        mockRoute.name = "";
+      }
+    });
+
+    it("does not scroll or highlight if the route moved off before the slide settled", async () => {
+      // F3 pin: a back-nav during the slide cancels the enter, which resolves
+      // the whenSettled awaiter BEFORE onUnmounted runs — so `alive` is still
+      // true when applyFocus resumes, but currentRoute already points elsewhere.
+      // The scroll/highlight must bail on the route, not just on `alive`.
+      const proto = Element.prototype as { scrollIntoView?: unknown };
+      const orig = proto.scrollIntoView;
+      const scrollIntoView = vi.fn();
+      proto.scrollIntoView = scrollIntoView;
+      mockRoute.query = { focus: "biometric" };
+      mockRoute.name = "settingsIdentity";
+      when("get_auth_state", {
+        configured: true,
+        encrypted: true,
+        unlocked: false,
+        identity_type: "x25519",
+      });
+      const { wrapper, navDirection } = mountWithApp(SettingsIdentityPage);
+      try {
+        await flushPromises(); // onMounted → loadConfig → applyFocus parks on whenSettled
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        // The back-nav has already moved the route off this page (synchronously)
+        // by the time the cancelled-enter awaiter is released.
+        mockRoute.name = "permissions";
+        navDirection.releaseEnter();
+        await flushPromises();
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        expect(wrapper.find("#biometric-card").classes()).not.toContain(
+          "card-highlight",
+        );
       } finally {
         wrapper.unmount();
         proto.scrollIntoView = orig;

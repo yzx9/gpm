@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The **diagnostics** and **repository** export files (Settings → Logs → Export diagnostics, and Settings → Repository → Export) are now **`.tar.gz`** archives instead of `.zip`. Same contents, new container — open them with `tar -xzf` on desktop.
 
+### Fixed
+
+- In **Settings → Permissions & data**, tapping **Manage in Lock & Identity** under **Biometric unlock** once again lands cleanly on the right card in **Lock & Identity** — the scroll no longer flickers, and the card you land on highlights again (the highlight had stopped showing).
+
 ## [v0.18.1] - 2026-08-10
 
 ### Changed
