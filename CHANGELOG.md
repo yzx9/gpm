@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.18.0] - 2026-08-09
+
 ### Added
 
 - gpm now shows a secret's **`Key: Value` fields** (like `user:`, `url:`, `note:`) as **named, copyable fields** instead of one text blob, and lets you **edit them as structured rows** — add, remove, and fill each field separately. A field whose name looks secret (`password`, `pin`, `token`, …) is masked by default with a show/hide toggle. This matches how gopass models these fields; the on-disk format is unchanged and existing secrets get the cleaner view automatically.
@@ -468,7 +470,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.17.2...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.18.0...HEAD
+[v0.18.0]: https://github.com/yzx9/gpm/compare/v0.17.2...v0.18.0
 [v0.17.2]: https://github.com/yzx9/gpm/compare/v0.17.1...v0.17.2
 [v0.17.1]: https://github.com/yzx9/gpm/compare/v0.17.0...v0.17.1
 [v0.17.0]: https://github.com/yzx9/gpm/compare/v0.16.1...v0.17.0
