@@ -274,3 +274,120 @@ async fn full_workflow_clone_list_decrypt() {
         "notes attribute must carry the root-account value"
     );
 }
+
+// -----------------------------------------------------------------------
+// bundle export tests (R078)
+// -----------------------------------------------------------------------
+
+/// `git` CLI present? Skips locally when absent, but panics in CI — a
+/// round-trip test that silently no-ops in CI is worthless.
+fn git_cli_present() -> bool {
+    let ok = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !ok && std::env::var("CI").is_ok() {
+        panic!("`git` CLI required for the bundle round-trip test in CI but not found");
+    }
+    ok
+}
+
+/// R078: the hand-rolled v2 bundle round-trips through real `git` — `git bundle
+/// verify` accepts it and `git clone` restores full history plus an annotated
+/// tag (the `insert_object(tag)` path the unit test can't exercise).
+#[tokio::test]
+async fn create_bundle_clones_back_full_history_and_tag() {
+    if !git_cli_present() {
+        eprintln!("skipping bundle round-trip: `git` CLI not on PATH");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+    // commit 1: a.age
+    std::fs::write(dir.path().join("a.age"), b"cipher-a").unwrap();
+    let tree1 = {
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.age")).unwrap();
+        index.write().unwrap();
+        repo.find_tree(index.write_tree().unwrap()).unwrap()
+    };
+    let c1 = repo
+        .commit(Some("HEAD"), &sig, &sig, "first", &tree1, &[])
+        .unwrap();
+    drop(tree1);
+
+    // commit 2: b.age (child of c1)
+    std::fs::write(dir.path().join("b.age"), b"cipher-b").unwrap();
+    let tree2 = {
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("b.age")).unwrap();
+        index.write().unwrap();
+        repo.find_tree(index.write_tree().unwrap()).unwrap()
+    };
+    let head_commit = repo.find_commit(c1).unwrap();
+    let _c2 = repo
+        .commit(Some("HEAD"), &sig, &sig, "second", &tree2, &[&head_commit])
+        .unwrap();
+    drop(tree2);
+    drop(head_commit);
+
+    // Annotated tag on the first commit — exercises the insert_object(tag) path.
+    let target = repo.find_object(c1, None).unwrap();
+    repo.tag("v1", &target, &sig, "release v1", false).unwrap();
+    drop(target);
+    drop(repo);
+
+    let storage = GitStorage::new(dir.path());
+    let bundle_path = dir.path().join("repo.bundle");
+    storage.create_bundle(&bundle_path).await.unwrap();
+
+    // `git bundle verify` must accept the hand-rolled bundle.
+    let verify = std::process::Command::new("git")
+        .args(["bundle", "verify", bundle_path.to_str().unwrap()])
+        .output()
+        .expect("git bundle verify");
+    assert!(
+        verify.status.success(),
+        "git bundle verify failed: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+
+    // `git clone` restores both commits + blobs.
+    let dest = tempfile::tempdir().unwrap();
+    let clone_out = std::process::Command::new("git")
+        .args([
+            "clone",
+            bundle_path.to_str().unwrap(),
+            dest.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("git clone");
+    assert!(
+        clone_out.status.success(),
+        "git clone failed: {}",
+        String::from_utf8_lossy(&clone_out.stderr)
+    );
+    assert_eq!(
+        std::fs::read(dest.path().join("a.age")).unwrap(),
+        b"cipher-a"
+    );
+    assert_eq!(
+        std::fs::read(dest.path().join("b.age")).unwrap(),
+        b"cipher-b"
+    );
+
+    // The annotated tag dereferenced through the bundle.
+    let tags = std::process::Command::new("git")
+        .args(["tag", "--list"])
+        .current_dir(dest.path())
+        .output()
+        .expect("git tag");
+    assert!(
+        String::from_utf8_lossy(&tags.stdout).contains("v1"),
+        "annotated tag must restore"
+    );
+}

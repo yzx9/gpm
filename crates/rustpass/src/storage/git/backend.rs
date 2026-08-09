@@ -11,6 +11,7 @@
 //! `repo.json`), carried by [`StorageCtx`].
 
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
@@ -490,6 +491,91 @@ impl StorageBackend for GitStorage {
         })
         .await?
     }
+
+    async fn create_bundle(&self, out_path: &Path) -> Result<(), Error> {
+        let root = self.root.clone();
+        let out_path = out_path.to_path_buf();
+        spawn_blocking(move || {
+            let repo = git2::Repository::discover(&root)
+                .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
+            // An unborn/empty repo has nothing to bundle — fail clearly rather
+            // than emit a header-only file no consumer can clone.
+            let head_oid = repo
+                .head()
+                .map_err(|_| Error::new(ErrorCode::NoRepo, "No commits to bundle"))?
+                .target()
+                .ok_or_else(|| {
+                    Error::new(ErrorCode::NoRepo, "Unborn HEAD — no commits to bundle")
+                })?;
+            let mut pb = repo
+                .packbuilder()
+                .map_err(|e| Error::new(ErrorCode::StoreError, format!("packbuilder: {e}")))?;
+
+            // Bundle refs/heads/* + refs/tags/* + HEAD only. Exclude
+            // refs/remotes/* (noise in the consumer's clone) and refs/stash
+            // (would leak working-tree-only blobs).
+            let mut refs: Vec<(String, git2::Oid)> = vec![("HEAD".to_string(), head_oid)];
+            for r in repo
+                .references()
+                .map_err(|e| Error::new(ErrorCode::StoreError, format!("references: {e}")))?
+            {
+                let r =
+                    r.map_err(|e| Error::new(ErrorCode::StoreError, format!("reference: {e}")))?;
+                if let Some(name) = r.name()
+                    && (name.starts_with("refs/heads/") || name.starts_with("refs/tags/"))
+                    && let Some(oid) = r.target()
+                {
+                    refs.push((name.to_string(), oid));
+                    // insert_walk peels an annotated tag to its commit but does NOT
+                    // pack the tag object itself — pack it so the consumer's
+                    // refs/tags/* resolves.
+                    if matches!(
+                        repo.find_object(oid, None).ok().and_then(|o| o.kind()),
+                        Some(git2::ObjectType::Tag)
+                    ) {
+                        pb.insert_object(oid, None).map_err(|e| {
+                            Error::new(ErrorCode::StoreError, format!("insert_object: {e}"))
+                        })?;
+                    }
+                }
+            }
+
+            // Full history: a revwalk from every bundled ref. insert_walk pulls
+            // the commits plus all referenced trees/blobs (NOT just the tips —
+            // insert_commit alone would miss ancestors).
+            let mut rw = repo
+                .revwalk()
+                .map_err(|e| Error::new(ErrorCode::StoreError, format!("revwalk: {e}")))?;
+            for (_, oid) in &refs {
+                rw.push(*oid)
+                    .map_err(|e| Error::new(ErrorCode::StoreError, format!("revwalk push: {e}")))?;
+            }
+            pb.insert_walk(&mut rw)
+                .map_err(|e| Error::new(ErrorCode::StoreError, format!("insert_walk: {e}")))?;
+
+            // Assemble a v2 bundle: a hand-written header, then STREAM the
+            // packfile chunk-by-chunk (memory-bounded — one chunk at a time,
+            // never the whole pack in RAM). The blank line ends the header.
+            let mut f = std::fs::File::create(&out_path)
+                .map_err(|e| Error::new(ErrorCode::IoError, format!("create bundle file: {e}")))?;
+            writeln!(f, "# v2 git bundle")
+                .map_err(|e| Error::new(ErrorCode::IoError, format!("write bundle header: {e}")))?;
+            for (name, oid) in &refs {
+                writeln!(f, "{oid} {name}").map_err(|e| {
+                    Error::new(ErrorCode::IoError, format!("write bundle ref line: {e}"))
+                })?;
+            }
+            writeln!(f).map_err(|e| {
+                Error::new(ErrorCode::IoError, format!("write bundle header end: {e}"))
+            })?;
+            // foreach streams packfile chunks; returning false on a write error
+            // aborts the pack (surfaced as a git error → StoreError).
+            pb.foreach(|chunk| f.write_all(chunk).is_ok())
+                .map_err(|e| Error::new(ErrorCode::StoreError, format!("packfile foreach: {e}")))?;
+            Ok(())
+        })
+        .await?
+    }
 }
 
 /// Resolve HEAD to its commit tree — the shared prelude of [`GitStorage::entry_oid`]
@@ -790,5 +876,76 @@ mod tests {
             err.code, "ENTRY_NOT_FOUND",
             "subtree at <name>.age → EntryNotFound (fail-closed blob-kind guard)"
         );
+    }
+
+    /// R078: `create_bundle` writes a v2 Git bundle whose header lists the
+    /// bundled refs and whose body is a packfile (starts with `PACK`). The
+    /// `PACK`-prefix check also resolves the libgit2 `foreach` doc
+    /// contradiction at runtime — `foreach` streams packfile chunks, not
+    /// per-object data. (The `git clone` restore round-trip is in the
+    /// integration tests.)
+    #[tokio::test]
+    async fn create_bundle_writes_v2_bundle_with_packfile() {
+        use crate::storage::git::test_support::test_signature;
+        let dir = tempfile::tempdir().unwrap();
+        // Seed a committed file so HEAD has real history to bundle.
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("entry.age"), b"ciphertext").unwrap();
+        let sig = test_signature();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("entry.age")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[])
+            .unwrap();
+        let head_name = repo.head().unwrap().name().unwrap().to_string();
+        drop(tree);
+        drop(index);
+        drop(repo);
+
+        let storage = GitStorage::new(dir.path());
+        let bundle_path = dir.path().join("repo.bundle");
+        storage.create_bundle(&bundle_path).await.unwrap();
+
+        let bytes = std::fs::read(&bundle_path).unwrap();
+        // Header is ASCII; the packfile body is binary, so slice to the
+        // header/body separator (blank line) before any UTF-8 decode.
+        let sep = bytes
+            .windows(2)
+            .position(|w| w == b"\n\n")
+            .expect("blank line separates header from packfile");
+        let header = std::str::from_utf8(bytes.get(..sep).expect("sep within bounds")).unwrap();
+        assert!(
+            header.starts_with("# v2 git bundle\n"),
+            "bundle must start with the v2 header: {header:?}"
+        );
+        assert!(
+            header.contains(&format!("{head_oid} {head_name}")),
+            "bundle header must list {head_oid} {head_name}: {header:?}"
+        );
+        let pack_start = sep + 2;
+        assert!(
+            bytes
+                .get(pack_start..)
+                .is_some_and(|s| s.starts_with(b"PACK")),
+            "packfile must follow the header and starts with PACK"
+        );
+    }
+
+    /// R078: an unborn repo (no commits) has nothing to bundle — `create_bundle`
+    /// returns `NoRepo` rather than emitting a header-only file.
+    #[tokio::test]
+    async fn create_bundle_unborn_repo_returns_no_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        drop(repo);
+        let storage = GitStorage::new(dir.path());
+        let err = storage
+            .create_bundle(&dir.path().join("repo.bundle"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "NO_REPO");
     }
 }

@@ -38,6 +38,7 @@ mod logging;
 mod migrations;
 mod page;
 mod read;
+mod repo_export;
 mod revisions;
 mod setup;
 mod verbose;
@@ -562,6 +563,8 @@ pub fn run() {
             // Best-effort: clear any attachment stage stranded by a hard-killed
             // prior export (StageGuard's Drop runs on panic/cancel, not SIGKILL).
             tauri::async_runtime::block_on(read::sweep_attachment_stage(app.handle()));
+            // Likewise clear any stranded repository-export stages.
+            tauri::async_runtime::block_on(repo_export::sweep_repo_export_stage(app.handle()));
             #[cfg(target_os = "android")]
             {
                 let handle = app.handle().clone();
@@ -663,6 +666,8 @@ pub fn run() {
             logging::write_log,
             // diagnostics export bundle (full log + redacted config + device info).
             diagnostics_export::export_diagnostics,
+            // repository export archive (R078): full-history git bundle + manifest + README.
+            repo_export::export_repository,
             // biometric
             biometric::is_biometric_available,
             biometric::open_security_settings,

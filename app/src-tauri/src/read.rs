@@ -625,11 +625,11 @@ fn map_save_result(result: Result<(), FileSaveError>) -> Result<(), Error> {
 /// Wipes the staged decoded attachment on drop (best-effort, sync so it works
 /// under panic). Constructed before the stage write so a failure between write
 /// and save still cleans up.
-struct StageGuard<'a> {
+pub(crate) struct StageGuard<'a> {
     path: &'a Path,
 }
 impl<'a> StageGuard<'a> {
-    fn new(path: &'a Path) -> Self {
+    pub(crate) fn new(path: &'a Path) -> Self {
         let _ = std::fs::remove_file(path); // best-effort wipe of a stranded prior stage
         Self { path }
     }

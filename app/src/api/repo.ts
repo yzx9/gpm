@@ -117,3 +117,22 @@ export async function subscribeSyncOutcome(
 ): Promise<UnlistenFn> {
   return listen<SyncOutcome>("sync-outcome", (e) => cb(e.payload));
 }
+
+/** One README file in the export archive (zip-entry name + localized body). */
+export interface RepoReadmeEntry {
+  name: string;
+  body: string;
+}
+
+/** Export the active repository as a self-describing `gpm-export.zip` archive
+ *  (R078): a full-history git bundle + a manifest + one README per supported
+ *  locale. `readmes` is one entry per locale — the frontend owns the locale set
+ *  (driven by `SUPPORTED_LOCALES`), so adding a locale needs no backend change.
+ *  Passed as a JSON string because the Android IPC bridge deserializes nested
+ *  structs unreliably (a single string param is safe there). Runs under App Lock
+ *  — no unlock needed; a dismissed save dialog surfaces as `CANCELLED`. */
+export async function exportRepository(
+  readmes: RepoReadmeEntry[],
+): Promise<void> {
+  await invoke("export_repository", { readmes: JSON.stringify(readmes) });
+}

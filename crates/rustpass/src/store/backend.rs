@@ -287,6 +287,23 @@ impl Store {
     pub(super) async fn current_head_hash(&self) -> Result<String, Error> {
         self.storage()?.current_head().await
     }
+
+    /// Write a full-history Git bundle of the active repository to `out_path`
+    /// — the export payload (R078). Packing objects never decrypts, so this
+    /// runs under App Lock like [`list`](StorageBackend::list). Takes the
+    /// cross-process [`repo_lock`](Self::repo_lock) so a separate-process
+    /// `SyncWorker` pull can't advance refs mid-export; it is a read-only op,
+    /// so no in-process `write_mu` is taken.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::BackendNotAvailable`] before the storage backend resolves;
+    /// [`ErrorCode::RepoBusy`] on cross-process lock contention; otherwise the
+    /// storage backend's bundle error.
+    pub async fn create_bundle(&self, out_path: &Path) -> Result<(), Error> {
+        let _repo_lock = self.repo_lock()?;
+        self.storage()?.create_bundle(out_path).await
+    }
 }
 
 #[cfg(test)]

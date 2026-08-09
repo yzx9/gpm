@@ -31,7 +31,13 @@
   },
   "repo": {
     "title": "仓库",
-    "backend": "后端"
+    "backend": "后端",
+    "exportLabel": "导出仓库",
+    "exportConfirm": "将此仓库导出为一个可携带的加密压缩包？bundle 携带与你的 git 远程相同的元数据（条目名、历史）。无需解锁。",
+    "exported": "仓库已导出",
+    "exportFailed": "仓库导出失败",
+    "exportAria": "将仓库导出为可携带的压缩包",
+    "exportReadme": "# gpm 仓库导出\n\n此压缩包内的 repo.bundle 文件是一个 Git bundle，包含你的密码库完整加密历史——gpm 与 gopass 将密钥以加密文件存放在普通 git 仓库中，因此这个 bundle 就是加密后的仓库。\n\n密钥保持加密：打开此 bundle 不会解密任何内容。你需要一个被原始收件人列表收录的身份（age 密钥，或匹配的 GPG 密钥）才能读取任何密钥。\n\n在电脑上恢复：解压此压缩包并运行 `git clone repo.bundle my-vault`，然后在 gopass 或 gpm 中打开 my-vault 并提供一个匹配的身份。"
   },
   "gitAuth": {
     "title": "Git 认证",

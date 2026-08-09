@@ -21,6 +21,7 @@
 //! name them without a `storage → git` dependency.
 
 use std::fmt;
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, mpsc};
 
@@ -622,6 +623,26 @@ pub trait StorageBackend: Send + Sync {
         Err(Error::new(
             ErrorCode::StoreError,
             "Connection testing is not supported by this storage backend.",
+        ))
+    }
+
+    /// Write a full-history Git bundle (`refs/heads/*`, `refs/tags/*`, and
+    /// `HEAD`) to `out_path` — a portable file that *is* the encrypted
+    /// repository (packing objects never decrypts). Export-only (R078); the
+    /// symmetric restore is deferred to R087.
+    ///
+    /// A bundle is git-specific, so a non-git/`ext:` backend opts out with
+    /// [`ErrorCode::StoreError`] by default — the same shape as [`verify_auth`].
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::StoreError`] on backends that can't produce a bundle (the
+    /// default); [`ErrorCode::NoRepo`] if no repo exists at the root or HEAD is
+    /// unborn (nothing to bundle); otherwise a git/IO error.
+    async fn create_bundle(&self, _out_path: &Path) -> Result<(), Error> {
+        Err(Error::new(
+            ErrorCode::StoreError,
+            "bundle export is not supported by this storage backend",
         ))
     }
 

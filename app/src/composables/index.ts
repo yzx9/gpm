@@ -18,6 +18,7 @@ export * from "./useNavDirection";
 export * from "./useOverlayBackHandler";
 export * from "./usePullToRefresh";
 export * from "./useRelativeTime";
+export * from "./useRepoExport";
 export * from "./useScrollLock";
 export * from "./useSecretReveal";
 export * from "./useSecureClaim";

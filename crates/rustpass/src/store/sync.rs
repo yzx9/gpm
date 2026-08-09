@@ -485,10 +485,12 @@ impl Store {
     /// returns [`ErrorCode::RepoBusy`] so a best-effort sync caller can skip
     /// rather than race another `Store` instance / process on the git index.
     /// The lock auto-releases on drop and on process death (no stale-lockfile).
-    /// Callers already hold `write_mu` (this is called right after acquiring
-    /// it), so the only contention is cross-instance — a background Worker vs
-    /// the foreground app during cold-start overlap.
-    fn repo_lock(&self) -> Result<RepoLock, Error> {
+    /// Mutating callers hold `write_mu` first (called right after acquiring it);
+    /// read-only callers such as [`create_bundle`](Self::create_bundle) take
+    /// this directly — the lock's contract is cross-process exclusion either
+    /// way, and the only contention is cross-instance (a background Worker vs
+    /// the foreground app during cold-start overlap).
+    pub(super) fn repo_lock(&self) -> Result<RepoLock, Error> {
         RepoLock::try_acquire(self.config.config_dir())
     }
 

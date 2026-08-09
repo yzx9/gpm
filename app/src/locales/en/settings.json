@@ -31,7 +31,13 @@
   },
   "repo": {
     "title": "Repository",
-    "backend": "Backend"
+    "backend": "Backend",
+    "exportLabel": "Export repository",
+    "exportConfirm": "Export this repository as a portable, encrypted archive? The bundle carries the same metadata (entry names, history) your git remote already exposes. No unlock is needed.",
+    "exported": "Repository exported",
+    "exportFailed": "Repository export failed",
+    "exportAria": "Export repository as a portable archive",
+    "exportReadme": "# gpm repository export\n\nThe repo.bundle file inside this archive is a Git bundle carrying your vault's full, encrypted history — gpm and gopass store secrets as encrypted files inside a normal git repo, so the bundle IS the encrypted repository.\n\nSecrets stay encrypted: opening this bundle never decrypts anything. You need an identity (an age key, or the matching GPG key) listed among the original recipients to read any secret.\n\nTo restore on a computer: extract this archive and run `git clone repo.bundle my-vault`, then open my-vault in gopass or gpm and supply a matching identity."
   },
   "gitAuth": {
     "title": "Git Authentication",

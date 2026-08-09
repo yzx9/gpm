@@ -30,8 +30,8 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import { useDialog, useToast, Z } from "@/composables";
-import { FileUp, History, KeyRound, Plus } from "@lucide/vue";
+import { useDialog, useRepoExport, useToast, Z } from "@/composables";
+import { Download, FileUp, History, KeyRound, Plus } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
@@ -40,6 +40,7 @@ const router = useRouter();
 const { toast } = useToast();
 const { dialog } = useDialog();
 const { t } = useI18n();
+const { exporting, runExport } = useRepoExport();
 
 const config = ref<RepoConfig | null>(null);
 const loading = ref(false);
@@ -348,6 +349,16 @@ onMounted(() => {
             {{ t("settings.repo.backend") }}:
             {{ config.crypto === "gpg" ? "GPG" : "age" }}
           </div>
+          <BaseButton
+            variant="action"
+            class="mt-3 self-start"
+            :loading="exporting"
+            :aria-label="t('settings.repo.exportAria')"
+            @click="() => runExport()"
+          >
+            <BaseIcon :icon="Download" :size="16" />
+            {{ t("settings.repo.exportLabel") }}
+          </BaseButton>
         </BaseCard>
 
         <!-- Commit identity -->
