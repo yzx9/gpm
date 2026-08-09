@@ -24,10 +24,6 @@ use zeroize::Zeroizing;
 use crate::Secret;
 use crate::error::{Error, ErrorCode};
 
-/// The AKV attribute separator gopass uses to split headers from body. The
-/// base64 alphabet (`A-Za-z0-9+/=`) never contains it, so the attribute/payload
-/// split is unambiguous for any real attachment.
-const KV_SEP: &[u8] = b": ";
 /// The attribute key carrying the suggested filename.
 const CD_KEY: &str = "Content-Disposition";
 
@@ -147,24 +143,14 @@ pub fn metadata(secret: &Secret) -> Option<AttachmentMeta> {
 
 // ---- payload split (one source of truth) ----
 
-/// The base64 payload of an attachment body, mirroring gopass `Body()`: every
-/// line containing the `": "` attribute separator is dropped; remaining
-/// non-empty lines are the payload, with all ASCII whitespace stripped so
-/// wrapped (76-char) base64 — which gopass's `StdEncoding` tolerates — decodes
-/// too. The caller has already confirmed this is an attachment via
-/// [`Secret::is_attachment`].
+/// The base64 payload of an attachment body, with all ASCII whitespace stripped
+/// so wrapped (76-char) base64 — which gopass's `StdEncoding` tolerates —
+/// decodes too. Post R069 phase 2b the body is pure base64 (the
+/// `Content-Transfer-Encoding`/`Content-Disposition` lines live in `attributes`,
+/// not the body), so there are no attribute lines to filter out. The caller has
+/// already confirmed this is an attachment via [`Secret::is_attachment`].
 fn attachment_payload(body: &[u8]) -> Vec<u8> {
-    let mut payload = Vec::new();
-    for line in body.split(|&b| b == b'\n') {
-        // Drop attribute lines (those carrying the `": "` separator) and blanks;
-        // the rest is the base64 payload.
-        let is_attr = line.windows(2).any(|w| w == KV_SEP);
-        let is_blank = line.iter().all(|&b| b.is_ascii_whitespace());
-        if is_attr || is_blank {
-            continue;
-        }
-        payload.extend_from_slice(line);
-    }
+    let mut payload = body.to_vec();
     payload.retain(|b| !b.is_ascii_whitespace());
     payload
 }
