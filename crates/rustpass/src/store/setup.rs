@@ -284,7 +284,7 @@ impl Store {
         let bootstrap = async {
             self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
             self.resolve_and_set_crypto(Some("gpg"))?;
-            self.storage()?.init_repo(&repo_dir).await?;
+            self.storage()?.init_repo().await?;
 
             // gopass's `fixConfig`: record the diff-driver config that the
             // committed `.gitattributes` (`*.gpg diff=gpg`) references. This is
@@ -293,20 +293,19 @@ impl Store {
             // checkout (which never runs `git diff`). gpm sets it for
             // gopass-faithfulness with the `.gitattributes` it pairs with.
             self.storage()?
-                .set_config(&repo_dir, "diff.gpg.binary", "true")
+                .set_config("diff.gpg.binary", "true")
                 .await?;
             self.storage()?
-                .set_config(&repo_dir, "diff.gpg.textconv", "gpg --no-tty --decrypt")
+                .set_config("diff.gpg.textconv", "gpg --no-tty --decrypt")
                 .await?;
 
             // Commit 1 (no parent): `.gitattributes` (gopass's
             // "Configure git repository for gpg file diff.").
             self.storage()?
-                .write_file_atomic(&repo_dir, ".gitattributes", b"*.gpg diff=gpg\n")
+                .write_file_atomic(".gitattributes", b"*.gpg diff=gpg\n")
                 .await?;
             self.storage()?
                 .commit_initial(
-                    &repo_dir,
                     &[".gitattributes".to_string()],
                     "Configure git repository for gpg file diff.",
                 )
@@ -318,11 +317,11 @@ impl Store {
             // `.public-keys/` subdir implicitly.
             let id_bytes = serialize_recipients(std::slice::from_ref(&recipient_token));
             self.storage()?
-                .write_file_atomic(&repo_dir, GPG_RECIPIENTS_FILE, &id_bytes)
+                .write_file_atomic(GPG_RECIPIENTS_FILE, &id_bytes)
                 .await?;
             let pubkey_rel = format!("{GPG_PUBLIC_KEYS_DIR}/{recipient_token}");
             self.storage()?
-                .write_file_atomic(&repo_dir, &pubkey_rel, pubkey_armor.as_bytes())
+                .write_file_atomic(&pubkey_rel, pubkey_armor.as_bytes())
                 .await?;
 
             // Commit 2 (with parent): `.gpg-id` + `.public-keys/<token>` (gopass's
@@ -333,7 +332,6 @@ impl Store {
             // would orphan commit 1.
             let default_policy = AuthenticityConfig::default();
             let ctx = StorageCtx {
-                repo_path: &repo_dir,
                 auth,
                 policy: &default_policy,
                 commit_name: None,
@@ -349,7 +347,7 @@ impl Store {
                 .await?;
 
             if has_url {
-                self.storage()?.remote_add(&repo_dir, "origin", url).await?;
+                self.storage()?.remote_add("origin", url).await?;
             }
 
             let local_path = repo_dir.to_string_lossy().to_string();

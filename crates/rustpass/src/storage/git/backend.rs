@@ -238,11 +238,11 @@ impl StorageBackend for GitStorage {
         spawn_blocking(move || commit::remote_add(&root, &name, &url)).await?
     }
 
-    async fn set_config(&self, repo_path: &Path, key: &str, value: &str) -> Result<(), Error> {
-        let repo_path = repo_path.to_path_buf();
+    async fn set_config(&self, key: &str, value: &str) -> Result<(), Error> {
+        let root = self.root.clone();
         let key = key.to_string();
         let value = value.to_string();
-        spawn_blocking(move || commit::set_config(&repo_path, &key, &value)).await?
+        spawn_blocking(move || commit::set_config(&root, &key, &value)).await?
     }
 
     async fn commit(

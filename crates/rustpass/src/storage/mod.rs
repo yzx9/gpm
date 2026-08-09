@@ -472,7 +472,7 @@ pub trait StorageBackend: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the repo can't be opened or the config can't be set.
-    async fn set_config(&self, repo_path: &Path, key: &str, value: &str) -> Result<(), Error>;
+    async fn set_config(&self, key: &str, value: &str) -> Result<(), Error>;
 
     /// Stage `paths` and commit on HEAD. `kind` selects `git add` vs `git rm`;
     /// the commit identity comes from `ctx`. Returns the new HEAD short hash.
