@@ -253,6 +253,13 @@ let
         # Cross-tool store interop: drive the real `gopass` binary (age backend)
         # so the gopass-interop tests verify gpm reads a store gopass produced.
         gopass
+
+        # Cross-tool crypto interop (rpgp→gpg): the reverse-interop tests
+        # decrypt rpgp-produced ciphertext with the bare `gpg` CLI — the
+        # independent oracle proving gpm's output is desktop-gopass-readable.
+        # gpg 2.x auto-spawns gpg-agent from this same package; no manual daemon,
+        # no separate pinentry (loopback mode).
+        gnupg
       ]
       ++ lib.optionals pkgs.stdenv.isLinux (
         [
