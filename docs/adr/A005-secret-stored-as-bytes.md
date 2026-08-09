@@ -58,7 +58,7 @@ weird secret, and a read failure must never block access to the store).
   are text (mid-2020–v1.13) and non-UTF-8 among them is an edge of an edge;
   modern secrets — the realistic non-UTF-8 case — are byte-faithful. A
   byte-oriented `parse_legacy` would close this; deferred.
-- **Phase 2 builds on this.** The attribute-region work (R069) adds
+- **Phase 2 builds on this.** The attribute-region work (R069, now shipped) adds
   `Attribute { key, value: Zeroizing<Vec<u8>> }`, the `SecretBody` attachment
   variant, and `get` / `get_ci` — all bytes-native from the start, because the
   storage type is already bytes.
@@ -81,5 +81,5 @@ weird secret, and a read failure must never block access to the store).
   (the other Secret-model scoping decision).
 - `crates/rustpass/src/secret.rs` — the bytes-native `Secret`, `to_bytes`,
   `is_utf8`, and the `non_utf8_*` tests pinning the round-trip.
-- RFC `docs/rfcs/R069-secret-attribute-region.md` — phase 2 builds the
-  attribute region on this bytes foundation.
+- The attribute region (phase 2, shipped) is built on this bytes-native
+  foundation.
