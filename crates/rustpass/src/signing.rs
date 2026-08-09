@@ -128,6 +128,22 @@ impl CommitSigStatus {
         }
     }
 
+    /// Normalize a GPG fingerprint/key-id in `signer_fp` to uppercase (the #41
+    /// canonical form). SSH `SHA256:…` fingerprints are not pure hex and are left
+    /// unchanged. No-op for variants without a `signer_fp`. Used by the
+    /// config-load back-compat pass for [`IgnoredIssue`]s persisted before the
+    /// uppercase fix, so a re-derived uppercase status still matches a dismissed
+    /// lowercase one via [`is_ignored`].
+    pub(crate) fn normalize_gpg_signer_fp(&mut self) {
+        let (Self::Verified { signer_fp: fp }
+        | Self::UntrustedKey { signer_fp: fp }
+        | Self::UnverifiedSignature { signer_fp: fp }) = self
+        else {
+            return;
+        };
+        *fp = openpgp::normalize_gpg_fp_hex(fp);
+    }
+
     /// Is this a verification problem the user might want to act on?
     /// `Verified` is the only non-issue.
     #[must_use]
@@ -259,6 +275,28 @@ impl AuthenticityConfig {
     #[must_use]
     pub fn has_any_trusted_key(&self) -> bool {
         !self.trusted_keys.is_empty() || !self.trusted_gpg_keys.is_empty()
+    }
+
+    /// Back-compat for #41: GPG fingerprints/key-ids persisted before the
+    /// uppercase fix are lowercase. Normalize stored GPG identity strings —
+    /// trusted-key fingerprints and dismissed-issue signer fingerprints — to
+    /// uppercase so they match the now-uppercase values derived at verify/add
+    /// time (fixes a dedup miss on re-add, and a dismissed GPG issue
+    /// re-surfacing after upgrade). SSH `SHA256:…` fingerprints are left
+    /// untouched. Called after deserializing `repo.json` in `load_repo_config`.
+    pub(crate) fn normalize_gpg_identifiers(&mut self) {
+        // TODO(#41, 1.0.0): remove this back-compat shim. It uppercases GPG
+        // fingerprints/key-ids that were persisted lowercase before the #41 fix
+        // (GPG trust shipped in v0.17.0, opt-in only — tiny exposure). Safe to
+        // drop once affected repo.json files have been re-saved uppercase (any
+        // authenticity change rewrites the file); keeping it longer risks masking
+        // a future regression that persists lowercase GPG hex.
+        for k in &mut self.trusted_gpg_keys {
+            k.fingerprint = openpgp::normalize_gpg_fp_hex(&k.fingerprint);
+        }
+        for i in &mut self.ignored {
+            i.status.normalize_gpg_signer_fp();
+        }
     }
 }
 
@@ -1441,6 +1479,94 @@ mod tests {
         );
         assert_eq!(CommitSigStatus::Unsigned.signer_fp(), None);
         assert_eq!(CommitSigStatus::BadSignature.signer_fp(), None);
+    }
+
+    /// #41 back-compat: `normalize_gpg_identifiers` uppercases persisted lowercase
+    /// GPG identity strings (trusted-key fingerprint + dismissed
+    /// `UnverifiedSignature` signer) and leaves SSH `SHA256:…` (`UntrustedKey`)
+    /// untouched — so a pre-fix config matches the now-uppercase values derived
+    /// at verify/add time.
+    #[test]
+    fn normalize_gpg_identifiers_uppercases_gpg_leaves_ssh() {
+        let mut ac = AuthenticityConfig {
+            trusted_gpg_keys: vec![TrustedGpgKey {
+                armored_public_key: "-----BEGIN PGP PUBLIC KEY BLOCK-----\n".to_string(),
+                fingerprint: "45953f0ff50cd57c869ccb848c78a415a6eda09f".to_string(),
+                label: "old".to_string(),
+                added_at_commit: "deadbeef".to_string(),
+            }],
+            ignored: vec![
+                IgnoredIssue {
+                    commit: "c1".to_string(),
+                    status: CommitSigStatus::UnverifiedSignature {
+                        signer_fp: "c327da94b0d9a8212572fe3672c6667da16ec0d2".to_string(),
+                    },
+                    ignored_at_commit: "deadbeef".to_string(),
+                },
+                IgnoredIssue {
+                    commit: "c2".to_string(),
+                    status: CommitSigStatus::UntrustedKey {
+                        signer_fp: "SHA256:abc+/DEF0=".to_string(),
+                    },
+                    ignored_at_commit: "deadbeef".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+        ac.normalize_gpg_identifiers();
+        let gpg_key = ac.trusted_gpg_keys.first().expect("one trusted GPG key");
+        assert_eq!(
+            gpg_key.fingerprint, "45953F0FF50CD57C869CCB848C78A415A6EDA09F",
+            "lowercase GPG trusted-key fingerprint normalized to uppercase",
+        );
+        let gpg_issue = ac.ignored.first().expect("GPG ignored issue");
+        match &gpg_issue.status {
+            CommitSigStatus::UnverifiedSignature { signer_fp } => assert_eq!(
+                signer_fp, "C327DA94B0D9A8212572FE3672C6667DA16EC0D2",
+                "lowercase GPG issuer `signer_fp` normalized",
+            ),
+            other => panic!("expected UnverifiedSignature, got {other:?}"),
+        }
+        // SSH fingerprint is NOT pure hex → must be untouched.
+        let ssh_issue = ac.ignored.get(1).expect("SSH ignored issue");
+        match &ssh_issue.status {
+            CommitSigStatus::UntrustedKey { signer_fp } => assert_eq!(
+                signer_fp, "SHA256:abc+/DEF0=",
+                "SSH SHA256 fingerprint must not be normalized",
+            ),
+            other => panic!("expected UntrustedKey, got {other:?}"),
+        }
+    }
+
+    /// #41 F2: after `normalize_gpg_identifiers`, a GPG issue dismissed before the
+    /// uppercase fix (lowercase `signer_fp` persisted) matches a freshly-derived
+    /// uppercase status via `is_ignored` again. Pre-normalize it does not.
+    #[test]
+    fn normalize_restores_is_ignored_match_for_lowercase_gpg_issuer() {
+        const FP_LOWER: &str = "c327da94b0d9a8212572fe3672c6667da16ec0d2";
+        const FP_UPPER: &str = "C327DA94B0D9A8212572FE3672C6667DA16EC0D2";
+        let mut ac = AuthenticityConfig {
+            ignored: vec![IgnoredIssue {
+                commit: "commit-1".to_string(),
+                status: CommitSigStatus::UnverifiedSignature {
+                    signer_fp: FP_LOWER.to_string(),
+                },
+                ignored_at_commit: "deadbeef".to_string(),
+            }],
+            ..Default::default()
+        };
+        let derived = CommitSigStatus::UnverifiedSignature {
+            signer_fp: FP_UPPER.to_string(),
+        };
+        assert!(
+            !is_ignored("commit-1", &derived, &ac.ignored),
+            "pre-normalize: case mismatch breaks the dismissed-issue match (F2)"
+        );
+        ac.normalize_gpg_identifiers();
+        assert!(
+            is_ignored("commit-1", &derived, &ac.ignored),
+            "post-normalize: dismissed GPG issue is recognized again"
+        );
     }
 
     #[test]

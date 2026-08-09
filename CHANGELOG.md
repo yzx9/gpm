@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The dropdowns on the **Setup** screen (clone / create / create-GPG), the **password generator**, and the **create-from-template** password fields now open the app's own themed option sheet — the same picker used throughout Settings — instead of the device's built-in dropdown. They're consistent with the rest of the app and a touch easier to use on a phone.
 
+### Fixed
+
+- A **GPG/OpenPGP store created by gpm** now opens and decrypts cleanly under desktop gopass and other gopass clients. gpm was writing the store's recipient marker in lowercase where gopass expects uppercase, so a store you created on your phone wouldn't be recognized when cloned to desktop gopass. Opening an existing gopass-created store was already unaffected; this fixes the stores gpm itself creates. On upgrade, any GPG signing keys you already trusted are also re-normalized to the correct case, so they keep matching and any previously-dismissed unverified-signer warnings stay dismissed.
+
 ## [v0.18.0] - 2026-08-09
 
 ### Added

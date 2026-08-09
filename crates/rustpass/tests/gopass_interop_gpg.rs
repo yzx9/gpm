@@ -713,11 +713,11 @@ done
         store.unlock("").await.expect("unlock the plain GPG key");
 
         // Recipient-token CASE agreement is pinned separately by
-        // `gpm_recipient_token_case_matches_gopass` — it currently FAILS (rpgp
-        // lowercases the fingerprint; gopass/gpg write uppercase). It does not
-        // block this test: gpm reads gopass's verbatim uppercase token from
-        // `.gpg-id`/`.public-keys/` rather than re-deriving it, so the drift
-        // only bites gpm-side token generation, not reading a gopass store.
+        // `gpm_recipient_token_case_matches_gopass` (gpm now uppercases the hex
+        // it derives, matching gopass/gpg). It never blocked this test: gpm reads
+        // gopass's verbatim uppercase token from `.gpg-id`/`.public-keys/` rather
+        // than re-deriving it, so reading a gopass store is unaffected — the case
+        // only mattered for gpm-side token generation.
 
         // Structural compat: gpm lists exactly the entries gopass wrote.
         let entries: Vec<String> = store
@@ -1127,23 +1127,18 @@ done
         assert_eq!(dec_b.stdout, plaintext);
     }
 
-    /// **Recipient-token case (gopass compatibility) — KNOWN DRIFT, EXPECTED TO
-    /// FAIL.** The id gpm derives from a key (`identity_recipient`,
-    /// `0x` + last 16 hex of the primary fingerprint) should byte-match the
-    /// token gopass writes into `.gpg-id` and uses as the `.public-keys/<token>`
-    /// filename. gopass/gpg emit UPPERCASE hex (straight from `gpg
-    /// --with-colons`'s fpr field, and gopass's `Key.ID()` = `0x` + that);
-    /// rpgp's `Fingerprint` Display is **lowercase**, so gpm currently derives
-    /// a lowercase token. This test pins that incompatibility.
-    ///
-    /// Scope today is narrow: gpm reads gopass's verbatim uppercase token from
-    /// `.gpg-id`/`.public-keys/` rather than re-deriving it, so opening an
-    /// existing store still works (the two interop tests above pass). The drift
-    /// bites any gpm-side token GENERATION — creating a GPG store, adding a
-    /// recipient, the `.public-keys/` filename gpm would write, and the
-    /// recipient shown in the setup preview UI (`gpg_identity_preview`).
+    /// **Recipient-token case (gopass compatibility, #41).** The id gpm derives
+    /// from a key (`identity_recipient`, `0x` + last 16 hex of the primary
+    /// fingerprint) must byte-match the token gopass writes into `.gpg-id` and
+    /// uses as the `.public-keys/<token>` filename. gopass/gpg emit UPPERCASE hex
+    /// (`gpg --with-colons`'s fpr field, and gopass's `Key.ID()` = `0x` + that);
+    /// rpgp's `Fingerprint` Display is lowercase, so gpm canonicalizes to
+    /// uppercase in `fingerprint_hex` — this pins that agreement end-to-end
+    /// against the real gopass binary. (Reading an existing store already worked:
+    /// gpm uses gopass's verbatim token rather than re-deriving it; the fix
+    /// matters for gpm-side token GENERATION — creating a store, the
+    /// `.public-keys/` filename, the setup preview recipient.)
     #[tokio::test]
-    #[ignore = "see https://github.com/yzx9/gpm/issues/41 — gpm derives lowercase recipient hex (rpgp Fingerprint Display) vs gopass/gpg uppercase"]
     async fn gpm_recipient_token_case_matches_gopass() {
         if !gopass_present() {
             eprintln!("skipping gpg interop test: `gopass`/`gpg` not on PATH");
@@ -1155,22 +1150,18 @@ done
             .expect("derive recipient from exported key");
         assert_eq!(
             derived, recipient_token,
-            "gpm-derived recipient token must match gopass's .gpg-id token; \
-             gopass/gpg use UPPERCASE hex, gpm currently derives lowercase (rpgp Fingerprint Display)"
+            "gpm-derived recipient token must match gopass's .gpg-id token (both uppercase)"
         );
     }
 
-    /// **Recipient-token case, GENERATION side (#41) — KNOWN DRIFT, EXPECTED TO
-    /// FAIL.** The mirror of [`gpm_recipient_token_case_matches_gopass`] (the
-    /// read side: gpm deriving a token from gopass's key). This pins the WRITE
-    /// side: a store whose `.gpg-id` / `.public-keys/<token>` carry gpm's
-    /// `identity_recipient` output (lowercase today) cannot be resolved by the
-    /// real gopass — `FindKey` matches by fingerprint suffix, case-sensitive,
-    /// against the uppercase hex gpg emits. So a store gpm creates, or a
-    /// recipient gpm adds, is unreadable by gopass until #41 is fixed (gpm
-    /// uppercasing the hex), at which point this turns green.
+    /// **Recipient-token case, GENERATION side (#41).** The mirror of
+    /// [`gpm_recipient_token_case_matches_gopass`] (the read side). This pins the
+    /// WRITE side: a store whose `.gpg-id` / `.public-keys/<token>` carry gpm's
+    /// `identity_recipient` output must be resolved by the real gopass —
+    /// `FindKey` matches by fingerprint suffix, case-sensitive, against the
+    /// uppercase hex gpg emits, so gpm must emit uppercase too. A store gpm
+    /// creates (or a recipient gpm adds) is readable by gopass once #41 is fixed.
     #[tokio::test]
-    #[ignore = "see https://github.com/yzx9/gpm/issues/41 — generation side: a store built from gpm's lowercase token is unreadable by gopass"]
     async fn gopass_resolves_store_built_from_gpm_recipient_token() {
         if !gopass_present() {
             eprintln!("skipping gpg interop test: `gopass`/`gpg` not on PATH");
@@ -1178,7 +1169,7 @@ done
         }
         // Provision a gopass GPG store — gopass writes the CORRECT uppercase token.
         let (home, store_dir, identity, gopass_token) = provision_gopass_gpg_store();
-        // gpm-derived token for the SAME key (#41: lowercase today).
+        // gpm-derived token for the SAME key — uppercase after #41.
         let gpm_token = GpgBackend
             .identity_recipient(&identity, None)
             .expect("derive token from the exported key");
@@ -1193,9 +1184,9 @@ done
         std::fs::write(store_dir.join(format!(".public-keys/{gpm_token}")), pubkey).unwrap();
         commit_worktree(home.path(), &store_dir);
 
-        // gopass must resolve the gpm-written recipient to encrypt. Today it
-        // can't (case-sensitive fingerprint-suffix match), so the insert fails;
-        // after #41 (gpm uppercase) gpm_token == gopass_token and this succeeds.
+        // gopass must resolve the gpm-written recipient to encrypt — its
+        // case-sensitive fingerprint-suffix match succeeds because gpm emits
+        // uppercase (#41), so gpm_token == gopass_token.
         let mut cmd = gopass(home.path(), &["insert", "-f", "gen/x"]);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1208,7 +1199,7 @@ done
         let out = child.wait_with_output().expect("wait gopass insert");
         assert!(
             out.status.success(),
-            "gopass must resolve a gpm-generated recipient token after #41; stderr: {}",
+            "gopass must resolve a gpm-generated recipient token; stderr: {}",
             String::from_utf8_lossy(&out.stderr)
         );
     }

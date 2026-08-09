@@ -91,11 +91,38 @@ pub(crate) fn parse_armored_public_key(armored: &str) -> Result<SignedPublicKey,
     Ok(key)
 }
 
-/// The primary key's fingerprint as canonical hex (rpgp's `Display`), e.g.
-/// `7ABCD...`. This is the stable identity stored in `TrustedGpgKey::fingerprint`.
+/// Canonical UPPERCASE hex of an `OpenPGP` fingerprint — the form gpg/gopass use.
+/// rpgp's `Fingerprint: Display` emits lowercase, but gopass's `.gpg-id` tokens,
+/// `.public-keys/<token>` filenames, and `gpg --with-colons` fpr field are all
+/// uppercase, and gopass matches by case-sensitive fingerprint suffix (issue
+/// #41). Funneling every display/derivation through here keeps gpm symmetric with
+/// gopass, so a store gpm creates round-trips through gopass verbatim.
+fn fingerprint_hex(fp: &Fingerprint) -> String {
+    format!("{fp}").to_ascii_uppercase()
+}
+
+/// Uppercase `s` iff it is pure ASCII hex — i.e. a GPG fingerprint/key-id. The
+/// back-compat counterpart to [`fingerprint_hex`]: GPG identity strings a user
+/// persisted before the uppercase fix (#41, shipped in v0.17.0) are lowercase,
+/// so on config load they are normalized back to the gpg/gopass canonical form.
+/// SSH fingerprints (`SHA256:…`, or legacy colon-separated hex) are NOT pure hex
+/// and pass through unchanged, so this is safe to apply to any `signer_fp`
+/// without knowing whether it is SSH or GPG.
+#[must_use]
+pub(crate) fn normalize_gpg_fp_hex(s: &str) -> String {
+    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        s.to_ascii_uppercase()
+    } else {
+        s.to_string()
+    }
+}
+
+/// The primary key's fingerprint as canonical UPPERCASE hex (gpg/gopass form),
+/// e.g. `7ABCD...`. This is the stable identity stored in
+/// `TrustedGpgKey::fingerprint`.
 #[must_use]
 pub(crate) fn primary_fingerprint(key: &SignedPublicKey) -> String {
-    format!("{}", key.fingerprint())
+    fingerprint_hex(&key.fingerprint())
 }
 
 /// The full primary fingerprint of the public half of an armored secret key
@@ -232,20 +259,24 @@ pub(crate) fn verify_detached(
         return GpgOutcome::Unknown;
     }
 
-    // Issuer known but untrusted — prefer the fingerprint, fall back to the
-    // 8-byte key-id rendered as stable uppercase hex (matching GnuPG's long
-    // key-id display). `KeyId: AsRef<[u8]>` gives the raw bytes; hex-encoding
-    // them is stable across rpgp versions, unlike `Debug`.
-    let issuer = issuer_fps.first().map(|fp| format!("{fp}")).or_else(|| {
-        issuer_kids.first().map(|kid| {
-            let mut hex = String::with_capacity(kid.as_ref().len() * 2);
-            for b in kid.as_ref() {
-                // Writing to a String never fails.
-                let _ = write!(hex, "{b:02X}");
-            }
-            hex
-        })
-    });
+    // Issuer known but untrusted — prefer the fingerprint (uppercase via
+    // `fingerprint_hex`, matching gpg/gopass), fall back to the 8-byte key-id
+    // rendered as stable uppercase hex (matching GnuPG's long key-id display).
+    // `KeyId: AsRef<[u8]>` gives the raw bytes; hex-encoding them is stable
+    // across rpgp versions, unlike `Debug`.
+    let issuer = issuer_fps
+        .first()
+        .map(|fp| fingerprint_hex(fp))
+        .or_else(|| {
+            issuer_kids.first().map(|kid| {
+                let mut hex = String::with_capacity(kid.as_ref().len() * 2);
+                for b in kid.as_ref() {
+                    // Writing to a String never fails.
+                    let _ = write!(hex, "{b:02X}");
+                }
+                hex
+            })
+        });
     match issuer {
         Some(fp) => GpgOutcome::Unverified { issuer_fp: fp },
         None => GpgOutcome::Unknown,
@@ -687,6 +718,47 @@ mod tests {
         // TrustedGpgKey; it must be non-empty hex.
         let fp = primary_fingerprint(&key);
         assert!(!fp.is_empty(), "primary fingerprint must be non-empty");
+    }
+
+    /// #41: `primary_fingerprint` must emit UPPERCASE hex. rpgp's `Fingerprint:
+    /// Display` is lowercase, but gpg/gopass write uppercase and match
+    /// fingerprints case-sensitively — so a store gpm creates must carry an
+    /// uppercase token to round-trip. Pinned against a real gpg-produced key's
+    /// authoritative `--with-colons` fpr field. Host-only (no gpg/gpg-agent); RED
+    /// before the `fingerprint_hex` canonicalization, GREEN after.
+    #[test]
+    fn real_gnupg_pubkey_fingerprint_is_uppercase() {
+        let key = parse_armored_public_key(std::str::from_utf8(FIXTURE_PUBLIC).expect("utf8"))
+            .expect("fixture pubkey parses");
+        assert_eq!(
+            primary_fingerprint(&key),
+            "45953F0FF50CD57C869CCB848C78A415A6EDA09F",
+            "primary fingerprint must be uppercase hex matching gpg --with-colons",
+        );
+    }
+
+    /// `normalize_gpg_fp_hex` uppercases pure-hex (GPG) strings and leaves SSH
+    /// `SHA256:…`, colon-hex, and non-hex untouched — the #41 back-compat pass.
+    #[test]
+    fn normalize_gpg_fp_hex_uppercases_only_pure_hex() {
+        // GPG fingerprint + key-id (lowercase → uppercase).
+        assert_eq!(
+            normalize_gpg_fp_hex("45953f0ff50cd57c869ccb848c78a415a6eda09f"),
+            "45953F0FF50CD57C869CCB848C78A415A6EDA09F",
+        );
+        assert_eq!(normalize_gpg_fp_hex("8c78a415a6eda09f"), "8C78A415A6EDA09F");
+        // Idempotent on already-uppercase.
+        assert_eq!(
+            normalize_gpg_fp_hex("45953F0FF50CD57C869CCB848C78A415A6EDA09F"),
+            "45953F0FF50CD57C869CCB848C78A415A6EDA09F",
+        );
+        // SSH fingerprints are NOT pure hex → untouched (case-significant base64).
+        assert_eq!(
+            normalize_gpg_fp_hex("SHA256:abc+/DEF0="),
+            "SHA256:abc+/DEF0="
+        );
+        assert_eq!(normalize_gpg_fp_hex("ab:cd:ef:01"), "ab:cd:ef:01"); // legacy colon-hex
+        assert_eq!(normalize_gpg_fp_hex(""), "");
     }
 
     /// A real `gpg --detach-sign --armor` signature — made by the signing

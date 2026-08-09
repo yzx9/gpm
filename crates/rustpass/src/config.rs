@@ -674,7 +674,13 @@ impl Config {
     ///
     /// See [`load_repo_config_as`](Self::load_repo_config_as).
     pub async fn load_repo_config(&self) -> Result<RepoConfig, Error> {
-        self.load_repo_config_as().await
+        let mut cfg: RepoConfig = self.load_repo_config_as().await?;
+        // #41 back-compat: normalize any lowercase GPG identity strings a user
+        // persisted before the uppercase fix (trusted-key fingerprints + dismissed
+        // GPG-issuer signer fingerprints). SSH fingerprints are left untouched.
+        // TODO(#41, 1.0.0): remove once affected configs are re-saved uppercase.
+        cfg.authenticity.normalize_gpg_identifiers();
+        Ok(cfg)
     }
 
     /// Check if setup is complete (both identity and repo config exist).
