@@ -105,6 +105,14 @@ export interface AppConfig {
    *  Info. Apply via {@link setVerbose}; check liveness via
    *  {@link isVerboseActive}. See RFC 0055. */
   verbose_until?: number;
+  /** Multi-repository registry (R080): the ordered list of repository ids.
+   *  Absent/empty ⇒ the single-repository world (pre-multi-repo, or pre-m0009).
+   *  Drives the vault switcher list and `useActiveRepo`. */
+  repositories?: string[];
+  /** The last-active repository id (the vault the user was "in"); absent before
+   *  any repository is set up. `useActiveRepo` resolves to this, falling back to
+   *  `repositories[0]`. */
+  last_active?: string;
 }
 
 /**

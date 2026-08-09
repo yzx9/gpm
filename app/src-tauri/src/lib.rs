@@ -41,6 +41,7 @@ mod logging;
 mod migrations;
 mod page;
 mod read;
+mod registry;
 mod repo_export;
 mod revisions;
 mod setup;

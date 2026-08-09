@@ -308,6 +308,16 @@ pub(crate) struct AppConfig {
     /// Periodic background-sync cadence. `Off` (default) omitted.
     #[serde(default, skip_serializing_if = "BackgroundSyncCadence::is_off")]
     pub(crate) background_sync: BackgroundSyncCadence,
+    /// Multi-repository registry (R080): the ordered list of repository ids.
+    /// Absent/empty ⇒ the pre-multi-repo single-repo world; the `m0009`
+    /// migration populates it for existing installs. Omitted while empty so an
+    /// un-migrated `app.json` round-trips byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) repositories: Vec<String>,
+    /// The last-active repository id (the vault the user was "in"). Mirrored by
+    /// `RepoRegistry::last_active`. `None` only before any repository is set up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_active: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -332,6 +342,8 @@ impl Default for AppConfig {
             schema_version: crate::migrations::APP_CONFIG_SCHEMA_VERSION,
             verbose_until: None,
             background_sync: BackgroundSyncCadence::default(),
+            repositories: Vec::new(),
+            last_active: None,
         }
     }
 }
@@ -363,6 +375,10 @@ impl AppConfig {
             schema_version: pref.schema_version,
             verbose_until: pref.verbose_until,
             background_sync: pref.background_sync,
+            // Legacy lift (pre-multi-repo): no registry in the pref/behavior
+            // halves. `m0009` (or a fresh setup) populates it for live configs.
+            repositories: Vec::new(),
+            last_active: None,
         }
     }
 }
