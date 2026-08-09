@@ -6,15 +6,17 @@
 
 ## What
 
-Let a user export an entire repository to a portable **Git bundle**. (The symmetric
-counterpart — re-importing a bundle as a new repository — is analyzed and **deferred to
-R087**; it earns its place only once a non-git backend exists.) A bundle _is_ the
-repository — its full history of encrypted secrets —
-in a single portable file that can be handed to another device, kept as a backup, or opened
-in desktop gopass. Creating a bundle (and cloning from one) is a Git operation that **never
-decrypts**, so export and import do not require the vault to be unlocked, and the bundle's
-secrets stay encrypted. The bundle exposes the same metadata (entry paths, structure, commit
-messages) that the git remote already exposes — no new leak surface.
+Let a user export an entire repository as a portable, self-describing **archive** whose
+payload is a full-history **Git bundle** — the bundle _is_ the repository, its encrypted
+history made portable. The archive is the minimal instance of the whole-application export
+format (`R088`): a manifest (declaring what the file is, with a version) plus the bundle plus
+a human README, in one file that can be handed to another device, kept as a backup, or opened
+in desktop gopass. (The symmetric counterpart — re-importing as a new repository — is analyzed
+and **deferred to R087**; it earns its place only once a non-git backend exists.) Bundling is
+a Git operation that **never decrypts**, so export does not require the vault to be unlocked
+and the bundle's secrets stay encrypted. The bundle exposes the same metadata (entry paths,
+structure, commit messages) that the git remote already exposes; the manifest and README add
+only non-secret description — no new leak surface.
 
 Serves the repository-lifecycle concerns of `docs/specs/005-git-storage` (a repository is a
 git repo; the clone + identity-setup flow), and the multi-repository work in
@@ -54,19 +56,21 @@ original recipients and the importing user must supply an identity that matches 
 
 **Leak surface equals the remote's.** The bundle's secrets are encrypted; what is visible is
 metadata — entry paths, directory structure, commit messages — exactly what anyone with read
-access to the git remote can already see. A raw bundle therefore adds **no exposure beyond
-what the remote model already assumes**. This is why v1 ships the bundle raw (unwrapped):
-wrapping the whole bundle in an additional passphrase introduces a _new_ secret that can be
-lost independently of the age identity — a "forgot passphrase, lost the backup" footgun that
-is especially bad for a survival copy. A raw bundle's recoverability depends only on the age
-identity the user already manages. A passphrase-wrapped variant remains a possible future
-enhancement for transmission through untrusted channels, with that trade-off called out
-rather than made the default.
+access to the git remote can already see. The `R088` envelope (manifest + README) adds only
+non-secret description, so the default export adds **no exposure beyond what the remote model
+already assumes**. Recoverability of a default (unencrypted) export depends only on the age
+identity the user already manages — the envelope carries no new secret that can be lost.
+Hiding the metadata is the job of the _optional_ export-encryption layer (`R089`), which wraps
+the whole archive to a recipient; it is opt-in, not the default, so a survival copy's
+recoverability is never gated on an extra passphrase or recipient key the user might lose.
 
-**Where the bundle goes.** On Android the user picks a destination through the system
-save-file picker; on desktop through the standard save dialog. Import picks a source file the
-same way. This is the same surface already used for attachment export, so no new platform
-plumbing is needed.
+**Where the export goes.** On Android the user picks a destination through the system
+save-file picker; on desktop through the standard save dialog — the same surface already used
+for attachment export, so no new platform plumbing. The saved file is the `R088` archive (e.g.
+`gpm-export.zip`). To restore on desktop, a user extracts the archive and `git clone`s the
+bundle inside (the README explains how); gpm's own restore (`R087`, deferred) reads the
+archive and its manifest directly. Packaging several files behind one save mirrors the
+diagnostics-export archive.
 
 **Per-vault, and independent of multi-repository.** Export acts on one repository — the
 active one. It does **not** depend on the multi-repository feature and can ship before it:
@@ -89,8 +93,10 @@ same clone + identity-setup flow with the bundle as the source.
   for v1 — writing decrypted secrets to disk conflicts with the principle that decrypted
   content never rests on disk outside an operation, and it is a large security surface. Out
   of scope.
-- **Always passphrase-wrap the bundle.** Rejected as the default — see the footgun argument
-  above; the recoverability of a survival copy should hinge only on the existing identity.
+- **Always encrypt the export.** Rejected as the default — see the footgun argument above;
+  recoverability of a survival copy should hinge only on the existing age identity. Encryption
+  to a recipient (`R089`) is opt-in — for transmission through untrusted channels or
+  partner-transfer — not the default shape.
 - **Snapshot (HEAD only) instead of full history.** Rejected — it discards revisions and
   audit history, which is a core reason a repository (vs. a flat export) is worth keeping.
   Full history is the faithful "repository" export.
@@ -114,3 +120,7 @@ CC: ~2–3 sessions)
 - Import — the symmetric restore — is **deferred to R087**, gated on a non-git backend
   (`R046`); on git-only it is redundant with clone/sync, so v1 ships export alone.
 - Reuses the existing save / pick file surface (attachment export).
+- Conforms to the whole-application export format (`R088`); this single-repository export is
+  R088's minimal v1 producer (no settings, one repository, no secrets).
+- The optional export-encryption layer (`R089`) wraps the archive to a recipient; it is opt-in
+  and governs the (future) per-repository `secrets` slot.
