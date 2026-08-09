@@ -169,15 +169,28 @@ impl<R: Runtime> ClipboardNotify<R> {
     /// Reports `false` on plugin error so the frontend degrades to no
     /// notification rather than crashing the copy path.
     pub async fn are_enabled(&self) -> bool {
+        // Kotlin resolves via the shared `resolveGranted` helper, so the response
+        // key is `granted` (same as `request_permission`) — NOT `enabled`. A
+        // field-name drift here makes serde fail, and under a silent
+        // `unwrap_or(false)` the probe read OFF regardless of the true OS state.
+        // Log the invoke error so a future drift is loud, not invisible.
         #[derive(Deserialize)]
         struct Resp {
-            enabled: bool,
+            granted: bool,
         }
-        self.0
+        match self.0
             .run_mobile_plugin_async::<Resp>("areNotificationsEnabled", ())
             .await
-            .map(|r| r.enabled)
-            .unwrap_or(false)
+        {
+            Ok(r) => {
+                log::debug!("clipboard-notify: areNotificationsEnabled = {}", r.granted);
+                r.granted
+            }
+            Err(e) => {
+                log::warn!("clipboard-notify: areNotificationsEnabled invoke failed: {e:?}");
+                false
+            }
+        }
     }
 
     /// Request `POST_NOTIFICATIONS` at runtime (Android 13+). Returns the
@@ -188,11 +201,22 @@ impl<R: Runtime> ClipboardNotify<R> {
         struct Resp {
             granted: bool,
         }
-        self.0
+        match self.0
             .run_mobile_plugin_async::<Resp>("requestNotificationsPermission", ())
             .await
-            .map(|r| r.granted)
-            .unwrap_or(false)
+        {
+            Ok(r) => {
+                log::debug!(
+                    "clipboard-notify: requestNotificationsPermission granted = {}",
+                    r.granted
+                );
+                r.granted
+            }
+            Err(e) => {
+                log::warn!("clipboard-notify: requestNotificationsPermission invoke failed: {e:?}");
+                false
+            }
+        }
     }
 
     /// Open the system's per-app notification-settings screen — the recovery
@@ -205,17 +229,19 @@ impl<R: Runtime> ClipboardNotify<R> {
         struct Resp {
             opened: bool,
         }
-        self.0
+        match self.0
             .run_mobile_plugin_async::<Resp>("openAppNotificationSettings", ())
             .await
-            .map(|r| r.opened)
-            .unwrap_or_else(|e| {
+        {
+            Ok(r) => r.opened,
+            Err(e) => {
                 // `opened: false` from the Kotlin catch (no handler activity) is
                 // expected; a plugin-invoke failure here is not, so log it before
                 // collapsing to false — otherwise the recovery tap fails silently.
                 log::warn!("open_notification_settings: plugin invoke failed: {e:?}");
                 false
-            })
+            }
+        }
     }
 
     /// Post (or update, by fixed ID) the sticky clipboard-clear notification
@@ -234,7 +260,8 @@ impl<R: Runtime> ClipboardNotify<R> {
             #[serde(rename = "channelDescription")]
             channel_description: String,
         }
-        let _ = self
+        log::info!("clipboard-notify: posting notification (auto-clear {secs}s)");
+        if let Err(e) = self
             .0
             .run_mobile_plugin_async::<()>(
                 "postClipboardNotification",
@@ -246,7 +273,10 @@ impl<R: Runtime> ClipboardNotify<R> {
                     channel_description: text.channel_description.clone(),
                 },
             )
-            .await;
+            .await
+        {
+            log::warn!("clipboard-notify: postClipboardNotification invoke failed: {e:?}");
+        }
     }
 
     /// Dismiss the sticky notification. Best-effort.
@@ -270,8 +300,7 @@ impl<R: Runtime> ClipboardNotify<R> {
         self.0
             .run_mobile_plugin_async::<Resp>("consumeManualClearFlag", ())
             .await
-            .map(|r| r.cleared)
-            .unwrap_or(false)
+            .is_ok_and(|r| r.cleared)
     }
 }
 

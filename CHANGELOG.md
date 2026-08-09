@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The **Permissions & data** page no longer reports **Notifications** as off when they're actually on. The status check was reading the wrong field from the native layer, so it always showed off — even though the clipboard-clear notification still appeared after copying a password. The status now reflects the real system state.
+
 ### Changed
 
 - The dropdowns on the **Setup** screen (clone / create / create-GPG), the **password generator**, and the **create-from-template** password fields now open the app's own themed option sheet — the same picker used throughout Settings — instead of the device's built-in dropdown. They're consistent with the rest of the app and a touch easier to use on a phone.

@@ -108,7 +108,9 @@ pub(crate) async fn copy_generated_password(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn are_clipboard_notifications_enabled(app: AppHandle) -> Result<bool, Error> {
-    Ok(app.clipboard_notify().are_enabled().await)
+    let enabled = app.clipboard_notify().are_enabled().await;
+    log::debug!("are_clipboard_notifications_enabled = {enabled}");
+    Ok(enabled)
 }
 
 /// Request `POST_NOTIFICATIONS` at runtime (Android 13+). Shows the system

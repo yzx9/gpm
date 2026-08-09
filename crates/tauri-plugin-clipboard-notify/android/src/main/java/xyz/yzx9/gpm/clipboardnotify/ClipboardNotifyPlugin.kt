@@ -35,6 +35,7 @@ import android.Manifest
 import android.os.Build
 import android.os.Build.VERSION.SDK_INT
 import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import app.tauri.annotation.Command
@@ -51,6 +52,7 @@ internal const val CHANNEL_ID = "clipboard-clear"
 internal const val PREFS_NAME = "gpm.clipboard.notify"
 internal const val KEY_MANUALLY_CLEARED = "manually_cleared"
 internal const val ALIAS_POST_NOTIFICATIONS = "postNotifications"
+internal const val TAG = "gpm_clipboard_notify"
 
 /** Reset the manual-clear flag. Called by `postClipboardNotification` BEFORE
  *  showing the notification (post always precedes any tap, so the receiver's
@@ -159,7 +161,9 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
     /** Whether the app may post notifications. Cheap, non-prompting. */
     @Command
     fun areNotificationsEnabled(invoke: Invoke) {
-        resolveGranted(invoke, NotificationManagerCompat.from(activity).areNotificationsEnabled())
+        val enabled = NotificationManagerCompat.from(activity).areNotificationsEnabled()
+        Log.d(TAG, "areNotificationsEnabled = $enabled")
+        resolveGranted(invoke, enabled)
     }
 
     /**
@@ -172,14 +176,13 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun requestNotificationsPermission(invoke: Invoke) {
-        if (!shouldRequestNotificationPermission(
-                SDK_INT,
-                NotificationManagerCompat.from(activity).areNotificationsEnabled(),
-            )
-        ) {
+        val already = NotificationManagerCompat.from(activity).areNotificationsEnabled()
+        if (!shouldRequestNotificationPermission(SDK_INT, already)) {
+            Log.d(TAG, "requestNotificationsPermission: skip (sdk=$SDK_INT, enabled=$already)")
             resolveGranted(invoke, true)
             return
         }
+        Log.d(TAG, "requestNotificationsPermission: prompting (sdk=$SDK_INT)")
         requestPermissionForAlias(ALIAS_POST_NOTIFICATIONS, invoke, "permissionsCallback")
     }
 
@@ -235,8 +238,10 @@ class ClipboardNotifyPlugin(private val activity: Activity) : Plugin(activity) {
                 .build()
         try {
             NotificationManagerCompat.from(activity).notify(NOTIFICATION_ID, notif)
-        } catch (_: SecurityException) {
-            // Notification permission revoked between check and post — degrade silently.
+        } catch (e: SecurityException) {
+            // Notification permission revoked between check and post — degrade silently,
+            // but log so a real revoke (vs. a never-granted state) is diagnosable.
+            Log.w(TAG, "postClipboardNotification: notify() denied (permission revoked?)", e)
         }
         // No-arg resolve() sends "null" → Rust `()`. resolve(JSObject()) sends
         // "{}", which fails the `()` deserialize (invalid type: map, expected unit).
