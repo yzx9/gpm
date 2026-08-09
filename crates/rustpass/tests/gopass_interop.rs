@@ -34,14 +34,16 @@
 mod common;
 
 mod tests {
-    use super::common::{encrypt_to_recipients, expect_fast_forwarded, generate_test_keypair};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
 
-    use rustpass::{GitAuth, store::Store};
+    use rustpass::store::Store;
+    use rustpass::{GitAuth, Secret};
     use tempfile::TempDir;
+
+    use super::common::{encrypt_to_recipients, expect_fast_forwarded, generate_test_keypair};
 
     /// Passphrase the mock pinentry hands back to gopass, and that gopass uses to
     /// protect the throwaway identity it generates. Its value is irrelevant; it
@@ -267,6 +269,39 @@ done
         }
     }
 
+    /// The structured `Key: Value` attribute pairs a plaintext carries, the way
+    /// gpm's `Secret::parse` (gopass AKV) models them: the password is line 0;
+    /// every later line containing the `": "` separator is one attribute — key
+    /// before the first `": "`, value after. Pairs `expected_password_body` so
+    /// the interop tests pin BOTH halves of the R069 body/attribute split, not
+    /// just the free-text body.
+    fn expected_attributes(plaintext: &str) -> Vec<(&str, &str)> {
+        plaintext
+            .split('\n')
+            .skip(1)
+            .filter_map(|l| l.split_once(": "))
+            .collect()
+    }
+
+    /// Assert the decrypted secret's attribute region matches the plaintext's
+    /// `Key: Value` pairs — count, then each key/value (gopass `Body()`/AKV
+    /// parity).
+    fn assert_attributes(secret: &Secret, plaintext: &str, name: &str) {
+        let want = expected_attributes(plaintext);
+        assert_eq!(
+            secret.attributes().len(),
+            want.len(),
+            "{name}: attribute count mismatch"
+        );
+        for (k, v) in want {
+            assert_eq!(
+                secret.attribute_str(k),
+                Some(v),
+                "{name}: attribute {k:?} mismatch"
+            );
+        }
+    }
+
     /// **Forward interop (gopass → gpm):** a store created and populated by the
     /// real `gopass` binary is cloned and decrypted by gpm. Exercises the full
     /// read stack against gopass-produced output, across secret shapes that
@@ -344,6 +379,7 @@ done
             let (pw, body) = expected_password_body(plaintext);
             assert_eq!(secret.password(), pw, "password mismatch for {name}");
             assert_eq!(secret.body(), body.as_str(), "body mismatch for {name}");
+            assert_attributes(&secret, plaintext, name);
         }
     }
 
@@ -661,6 +697,7 @@ done
         let (want_pw, want_body) = expected_password_body(gopass_plaintext);
         assert_eq!(secret.password(), want_pw);
         assert_eq!(secret.body(), want_body.as_str());
+        assert_attributes(&secret, gopass_plaintext, gopass_entry);
 
         // ── Direction 2: gpm writes + pushes → gopass pulls ───────────────────
         // Invariant: gpm's HEAD == bare tip (just pulled) and nothing pushed in
