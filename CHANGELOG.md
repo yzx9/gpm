@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On **cold start**, the first screen now appears right away instead of flashing blank for a split second before the page loads in.
 - A **GPG/OpenPGP store created by gpm** now opens and decrypts cleanly under desktop gopass and other gopass clients. gpm was writing the store's recipient marker in lowercase where gopass expects uppercase, so a store you created on your phone wouldn't be recognized when cloned to desktop gopass. Opening an existing gopass-created store was already unaffected; this fixes the stores gpm itself creates. On upgrade, any GPG signing keys you already trusted are also re-normalized to the correct case, so they keep matching and any previously-dismissed unverified-signer warnings stay dismissed.
 
 ## [v0.18.0] - 2026-08-09

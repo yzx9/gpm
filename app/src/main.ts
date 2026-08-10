@@ -258,6 +258,13 @@ void (async () => {
   // resolves: a fast tap would otherwise send untranslated/key strings to the
   // native BiometricPrompt. Like `common`, a failed load never blocks mount.
   await loadBundle(boot, "native").catch(() => {});
+  // Mount only after the initial route has resolved. Route components are lazy,
+  // so mounting sooner leaves <router-view> empty until the first page's chunk
+  // loads — a blank first frame. This also makes the matched component part of
+  // the first render rather than an "enter after mount", so no transition fires
+  // on the initial paint (useNavDirection's START_LOCATION guard is now a
+  // backstop).
+  await router.isReady();
   app.mount("#app");
   // Safety net: the Rust setup closure already baked the resolved locale into
   // the WebView's pre-paint init script (see locale_init_script in
