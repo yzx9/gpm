@@ -760,7 +760,7 @@ fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: tauri::RunEvent) {
 
 #[cfg(test)]
 mod resume_event_tests {
-    use super::{frontend_resume_event, APP_RESUME_EVENT};
+    use super::{APP_RESUME_EVENT, frontend_resume_event};
 
     /// `Resumed` is the one run event bridged to the frontend. Pins both the
     /// variant AND the event name so a Rust↔TS drift fails here, not as a silent

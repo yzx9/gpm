@@ -178,7 +178,8 @@ impl<R: Runtime> ClipboardNotify<R> {
         struct Resp {
             granted: bool,
         }
-        match self.0
+        match self
+            .0
             .run_mobile_plugin_async::<Resp>("areNotificationsEnabled", ())
             .await
         {
@@ -201,7 +202,8 @@ impl<R: Runtime> ClipboardNotify<R> {
         struct Resp {
             granted: bool,
         }
-        match self.0
+        match self
+            .0
             .run_mobile_plugin_async::<Resp>("requestNotificationsPermission", ())
             .await
         {
@@ -229,7 +231,8 @@ impl<R: Runtime> ClipboardNotify<R> {
         struct Resp {
             opened: bool,
         }
-        match self.0
+        match self
+            .0
             .run_mobile_plugin_async::<Resp>("openAppNotificationSettings", ())
             .await
         {
