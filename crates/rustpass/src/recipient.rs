@@ -406,7 +406,6 @@ pub fn validate_identity(identity: &str) -> Result<IdentityInfo, Error> {
 mod tests {
     use age::secrecy::ExposeSecret;
     use age::x25519::Identity;
-    use bech32::ToBase32;
 
     use super::*;
 
@@ -512,12 +511,11 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
     /// Build a valid `age1yubikey1...` recipient encoding (bech32, `age1yubikey`
     /// HRP). Dummy payload — only the HRP/plugin name matters for classification.
     fn yubikey_recipient_line() -> String {
-        bech32::encode(
-            "age1yubikey",
-            [0u8; 32].to_base32(),
-            bech32::Variant::Bech32,
-        )
-        .expect("bech32 encode")
+        // HRP `age1yubikey` contains the bech32 separator `1`, so parse it
+        // unchecked (age itself does the same for `age1tagpq`). `<Bech32>` not
+        // `<Bech32m>` — age plugin recipients are Bech32-encoded.
+        let hrp = bech32::Hrp::parse_unchecked("age1yubikey");
+        bech32::encode::<bech32::Bech32>(hrp, &[0u8; 32]).expect("bech32 encode")
     }
 
     #[test]
@@ -556,8 +554,11 @@ age1pq1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
         assert!(is_plugin_recipient(&yubikey_recipient_line()));
         // A second, non-yubikey plugin name must also classify as plugin — the
         // bech32 HRP check is not yubikey-specific.
-        let github = bech32::encode("age1github", [0u8; 32].to_base32(), bech32::Variant::Bech32)
-            .expect("bech32 encode");
+        let github = bech32::encode::<bech32::Bech32>(
+            bech32::Hrp::parse_unchecked("age1github"),
+            &[0u8; 32],
+        )
+        .expect("bech32 encode");
         assert!(
             is_plugin_recipient(&github),
             "a non-yubikey plugin recipient must classify as plugin"

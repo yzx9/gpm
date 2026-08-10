@@ -36,7 +36,7 @@ log = "0.4"
 # `plugin` enables the age plugin protocol (age-plugin-yubikey etc.). The library
 # spawns `age-plugin-<name>` as a subprocess, so plugin encrypt/decrypt only works
 # where that binary exists (desktop); Android lacks the binary and fails cleanly.
-age = { version = "0.11", features = ["armor", "ssh", "plugin"] }
+age = { version = "0.12", features = ["armor", "ssh", "plugin"] }
 # async-fn-in-trait under `dyn` dispatch. rust-lang/rust#133119 (`async_fn_in_dyn_trait`)
 # is still unstable, so the crypto/storage backend traits desugar through this macro
 # until native support lands. Drop it (and the macro annotations) once that ships.
@@ -79,7 +79,8 @@ getrandom = { version = "0.4", features = ["std"] }
 # Base64 for the master key crossing the Rust ↔ Android-plugin IPC boundary.
 base64 = "0.23"
 # Bech32 for tests that construct valid age plugin recipient/identity encodings.
-bech32 = { version = "0.9", default-features = false }
+# Keep in lockstep with `age`'s bech32 so test helpers share the library's API.
+bech32 = "0.11"
 # TOTP (RFC 6238) generation for entries that store a 2FA seed (gopass `pkg/otp`
 # analogue). `otpauth` parses otpauth:// URIs; `zeroize` wipes the seed on drop.
 # `qr` is deliberately off — unused, and it would pull `qrcode` + `image` and

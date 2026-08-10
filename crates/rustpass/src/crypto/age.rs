@@ -100,7 +100,9 @@ pub fn decrypt_bytes(
     let trimmed = identity_str.trim();
 
     // Intercept post-quantum identities before the underlying age parser
-    // produces an opaque error — the Rust age crate (0.11.x) has no PQ support.
+    // produces an opaque error. age has no native X-Wing (mlkem768x25519)
+    // decrypt yet (R008 Blocked); its `tagpq` recipient is encryption-only and
+    // a different PQ construction (ML-KEM-768+P-256, not X25519).
     if trimmed.starts_with("AGE-SECRET-KEY-PQ-1") {
         return Err(Error::new(
             ErrorCode::PostQuantumNotSupported,
@@ -108,67 +110,68 @@ pub fn decrypt_bytes(
         ));
     }
 
-    let identities: Vec<Box<dyn age::Identity>> = if trimmed.starts_with("AGE-SECRET-KEY-") {
-        // x25519 path
-        let identity_file = IdentityFile::from_buffer(identity_bytes).map_err(|_| {
-            Error::new(
-                ErrorCode::InvalidIdentity,
-                "Identity is not valid AGE-SECRET-KEY-... format",
-            )
-        })?;
-        identity_file.into_identities().map_err(|_| {
-            Error::new(
-                ErrorCode::InvalidIdentity,
-                "Identity file contains no valid identities",
-            )
-        })?
-    } else if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
-        || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
-    {
-        // SSH path
-        let buf = BufReader::new(trimmed.as_bytes());
-        let ssh_identity =
-            ssh::Identity::from_buffer(buf, passphrase.map(String::from)).map_err(|e| {
+    let identities: Vec<Box<dyn age::Identity + Send + Sync>> =
+        if trimmed.starts_with("AGE-SECRET-KEY-") {
+            // x25519 path
+            let identity_file = IdentityFile::from_buffer(identity_bytes).map_err(|_| {
                 Error::new(
                     ErrorCode::InvalidIdentity,
-                    format!("Cannot parse SSH private key: {e}"),
+                    "Identity is not valid AGE-SECRET-KEY-... format",
                 )
             })?;
-
-        match ssh_identity {
-            ssh::Identity::Unencrypted(_) => vec![Box::new(ssh_identity)],
-            ssh::Identity::Encrypted(enc) => {
-                // age's Identity trait returns None for Encrypted variants.
-                // We must decrypt the SSH key ourselves, then use the UnencryptedKey.
-                let Some(pw) = passphrase else {
-                    return Err(Error::new(
-                        ErrorCode::IdentityEncrypted,
-                        "Encrypted SSH key requires a passphrase",
-                    ));
-                };
-                let passphrase_str: SecretString = pw.to_string().into();
-                let decrypted_key = enc.decrypt(passphrase_str).map_err(|e| {
+            identity_file.into_identities().map_err(|_| {
+                Error::new(
+                    ErrorCode::InvalidIdentity,
+                    "Identity file contains no valid identities",
+                )
+            })?
+        } else if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+            || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
+        {
+            // SSH path
+            let buf = BufReader::new(trimmed.as_bytes());
+            let ssh_identity = ssh::Identity::from_buffer(buf, passphrase.map(String::from))
+                .map_err(|e| {
                     Error::new(
-                        ErrorCode::DecryptFailed,
-                        format!("Failed to decrypt SSH key: {e}"),
+                        ErrorCode::InvalidIdentity,
+                        format!("Cannot parse SSH private key: {e}"),
                     )
                 })?;
-                let unencrypted = ssh::Identity::Unencrypted(decrypted_key);
-                vec![Box::new(unencrypted)]
+
+            match ssh_identity {
+                ssh::Identity::Unencrypted(_) => vec![Box::new(ssh_identity)],
+                ssh::Identity::Encrypted(enc) => {
+                    // age's Identity trait returns None for Encrypted variants.
+                    // We must decrypt the SSH key ourselves, then use the UnencryptedKey.
+                    let Some(pw) = passphrase else {
+                        return Err(Error::new(
+                            ErrorCode::IdentityEncrypted,
+                            "Encrypted SSH key requires a passphrase",
+                        ));
+                    };
+                    let passphrase_str: SecretString = pw.to_string().into();
+                    let decrypted_key = enc.decrypt(passphrase_str).map_err(|e| {
+                        Error::new(
+                            ErrorCode::DecryptFailed,
+                            format!("Failed to decrypt SSH key: {e}"),
+                        )
+                    })?;
+                    let unencrypted = ssh::Identity::Unencrypted(decrypted_key);
+                    vec![Box::new(unencrypted)]
+                }
+                ssh::Identity::Unsupported(u) => {
+                    return Err(Error::new(
+                        ErrorCode::InvalidIdentity,
+                        format!("Unsupported SSH key type: {u:?}"),
+                    ));
+                }
             }
-            ssh::Identity::Unsupported(u) => {
-                return Err(Error::new(
-                    ErrorCode::InvalidIdentity,
-                    format!("Unsupported SSH key type: {u:?}"),
-                ));
-            }
-        }
-    } else {
-        return Err(Error::new(
-            ErrorCode::InvalidIdentity,
-            "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
-        ));
-    };
+        } else {
+            return Err(Error::new(
+                ErrorCode::InvalidIdentity,
+                "Identity must be an age secret key (AGE-SECRET-KEY-...) or SSH private key",
+            ));
+        };
 
     if identities.is_empty() {
         return Err(Error::new(
@@ -187,7 +190,11 @@ pub fn decrypt_bytes(
 
     // Perform decryption
     let mut output = Vec::new();
-    match decryptor.decrypt(identities.iter().map(AsRef::as_ref)) {
+    match decryptor.decrypt(
+        identities
+            .iter()
+            .map(|i| -> &dyn age::Identity { i.as_ref() }),
+    ) {
         Ok(mut reader) => {
             if reader.read_to_end(&mut output).is_err() {
                 return Err(Error::new(
@@ -270,11 +277,12 @@ pub fn encrypt_to_recipients(plaintext: &[u8], recipients: &[String]) -> Result<
     }
 
     // For each plugin, locate its binary (PATH lookup) and build the wrapper.
-    // `MissingPlugin` surfaces here, before any file key is wrapped.
+    // `RecipientPluginV1::new` resolves the binary here — before any file key
+    // is wrapped — returning `ResolveError::MissingPlugin` if it's absent.
     for (plugin_name, group) in plugin_groups {
         let wrapper =
             age::plugin::RecipientPluginV1::new(&plugin_name, &group, &[], age::NoCallbacks)
-                .map_err(map_encrypt_error)?;
+                .map_err(map_resolve_error)?;
         parsed.push(Box::new(wrapper));
     }
 
@@ -306,38 +314,51 @@ pub fn encrypt_to_recipients(plaintext: &[u8], recipients: &[String]) -> Result<
     Ok(ciphertext)
 }
 
+/// Build the platform-tailored [`ErrorCode::PluginUnavailable`] error for a
+/// missing `age-plugin-<name>` binary. Shared by the construction-time
+/// [`age::plugin::ResolveError`] path and the encryption-time
+/// [`age::EncryptError`] path so the wording stays identical across both.
+fn plugin_unavailable(binary_name: &str) -> Error {
+    // The message is tailored per build target so it never tells a user to do
+    // something impossible on their platform. `cfg!` is evaluated at compile
+    // time, so each build gets the string for its target.
+    let message = if cfg!(target_os = "android") {
+        format!(
+            "Encryption needs the age plugin '{binary_name}', which can't run on \
+             Android — age plugins are external binaries this device cannot launch. \
+             A store that uses this recipient can't be written from this device."
+        )
+    } else {
+        format!(
+            "age plugin '{binary_name}' was not found in PATH. Install it and try \
+             again (for age-plugin-yubikey: `cargo install age-plugin-yubikey` or \
+             your package manager). Plugin encryption only works where the binary \
+             is installed."
+        )
+    };
+    Error::new(ErrorCode::PluginUnavailable, message)
+}
+
 /// Map an age [`EncryptError`] to a safe [`Error`].
 ///
-/// The plugin-specific cases are surfaced explicitly: a missing binary is
-/// [`ErrorCode::PluginUnavailable`] with platform-appropriate guidance (install
-/// it on desktop; on Android, where the binary cannot run at all, say so
-/// plainly instead of suggesting an impossible install), and any other
+/// The plugin-specific cases are surfaced explicitly: a `PluginResolve` error
+/// (currently unreachable — gpm pre-resolves at construction) routes to
+/// [`ErrorCode::PluginUnavailable`] with platform-appropriate guidance (via
+/// [`map_resolve_error`]), and any other
 /// plugin-reported error is a fixed string (NOT the plugin's `CMD_ERROR` body,
 /// which is plugin-controlled text and must not reach the `WebView`). Everything
 /// else (age-internal I/O, incompatible recipients) collapses to `DecryptFailed`
 /// with the age message — those carry no plugin-controlled or secret content.
 fn map_encrypt_error(err: age::EncryptError) -> Error {
     match err {
-        age::EncryptError::MissingPlugin { binary_name } => {
-            // The message is tailored per build target so it never tells a user
-            // to do something impossible on their platform. `cfg!` is evaluated
-            // at compile time, so each build gets the string for its target.
-            let message = if cfg!(target_os = "android") {
-                format!(
-                    "Encryption needs the age plugin '{binary_name}', which can't run on \
-                     Android — age plugins are external binaries this device cannot launch. \
-                     A store that uses this recipient can't be written from this device."
-                )
-            } else {
-                format!(
-                    "age plugin '{binary_name}' was not found in PATH. Install it and try \
-                     again (for age-plugin-yubikey: `cargo install age-plugin-yubikey` or \
-                     your package manager). Plugin encryption only works where the binary \
-                     is installed."
-                )
-            };
-            Error::new(ErrorCode::PluginUnavailable, message)
-        }
+        // The missing-binary case is handled at construction as
+        // `ResolveError::MissingPlugin` (see `map_resolve_error`), so this arm
+        // is currently unreachable — gpm pre-resolves at
+        // `RecipientPluginV1::new` above, and `with_recipients` never
+        // re-resolves. Kept so a future change that passes raw plugin recipients
+        // still gets the platform-tailored message instead of the generic
+        // `DecryptFailed` wildcard below.
+        age::EncryptError::PluginResolve(resolve) => map_resolve_error(resolve),
         // A plugin that ran but reported an error: the error body comes from the
         // `age-plugin-<name>` subprocess's `CMD_ERROR` stanza, so it is
         // plugin-controlled text. Surface a fixed message rather than echoing it,
@@ -349,6 +370,26 @@ fn map_encrypt_error(err: age::EncryptError) -> Error {
         other => Error::new(
             ErrorCode::DecryptFailed,
             format!("Encryption failed: {other}"),
+        ),
+    }
+}
+
+/// Map an age [`age::plugin::ResolveError`] — returned by
+/// `RecipientPluginV1::new` when the `age-plugin-<name>` binary can't be
+/// resolved — to a safe [`Error`].
+fn map_resolve_error(err: age::plugin::ResolveError) -> Error {
+    match err {
+        age::plugin::ResolveError::MissingPlugin { binary_name } => {
+            plugin_unavailable(&binary_name)
+        }
+        age::plugin::ResolveError::InvalidPluginName { name } => Error::new(
+            ErrorCode::InvalidIdentity,
+            format!("Invalid age plugin name: {name}"),
+        ),
+        // `ResolveError` is `#[non_exhaustive]` — a wildcard arm is mandatory.
+        other => Error::new(
+            ErrorCode::DecryptFailed,
+            format!("age plugin resolution failed: {other}"),
         ),
     }
 }
@@ -492,7 +533,11 @@ pub fn decrypt_identity(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>, E
 
     let mut output = Vec::new();
     let identities: Vec<Box<dyn age::Identity>> = vec![Box::new(scrypt_identity)];
-    match decryptor.decrypt(identities.iter().map(AsRef::as_ref)) {
+    match decryptor.decrypt(
+        identities
+            .iter()
+            .map(|i| -> &dyn age::Identity { i.as_ref() }),
+    ) {
         Ok(mut reader) => {
             if reader.read_to_end(&mut output).is_err() {
                 return Err(Error::new(
@@ -578,8 +623,6 @@ mod tests {
     use std::io::Write;
     use std::path::PathBuf;
     use std::str::FromStr;
-
-    use bech32::ToBase32;
 
     use super::*;
 
@@ -784,12 +827,12 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
     /// `age1yubikey` HRP). The data is dummy bytes — `Recipient::from_str` only
     /// validates the HRP/plugin name, not the payload.
     fn yubikey_recipient() -> String {
-        bech32::encode(
-            "age1yubikey",
-            [0u8; 32].to_base32(),
-            bech32::Variant::Bech32,
-        )
-        .expect("bech32 encode of a yubikey recipient")
+        // The HRP `age1yubikey` contains the bech32 separator `1`, so parse it
+        // unchecked (age itself does the same for `age1tagpq` etc.). `<Bech32>`
+        // not `<Bech32m>` — age plugin recipients are Bech32-encoded.
+        let hrp = bech32::Hrp::parse_unchecked("age1yubikey");
+        bech32::encode::<bech32::Bech32>(hrp, &[0u8; 32])
+            .expect("bech32 encode of a yubikey recipient")
     }
 
     #[test]
@@ -820,6 +863,14 @@ fGNu+wyKxPnSU3svsuvrOdwwDKvfqCNyYK878qKAAaBqbGT1NJ8=
         assert_eq!(
             err.code, "PLUGIN_UNAVAILABLE",
             "missing age-plugin-yubikey binary must surface as PLUGIN_UNAVAILABLE, got: {err}"
+        );
+        // The extracted `plugin_unavailable` helper must still interpolate the
+        // missing binary name into the message — guards the helper extraction
+        // and the `ResolveError::MissingPlugin` mapping.
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("age-plugin-yubikey"),
+            "PluginUnavailable message must name the missing binary, got: {msg}"
         );
     }
 

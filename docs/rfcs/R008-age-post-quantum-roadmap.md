@@ -32,7 +32,10 @@ Full, native support for decrypting age files encrypted to post-quantum recipien
 
 ## Blockers
 
-- **Primary: upstream Rust age (rage) has not implemented native `mlkem768x25519`.** Published `age 0.11.3` has no PQ; `main` only has the hardware `tagpq` variant (`age1tagpq1` / `mlkem768p256tag`, aimed at YubiKey/TPM). The native X-Wing that gopass uses is not implemented at all — open issues [#621](https://github.com/str4d/rage/issues/621) (tracking) and [#598](https://github.com/str4d/rage/issues/598) (community draft). The cleanest path — consume rage's native PQ type directly — is therefore **not available yet**.
+- **Primary: upstream Rust age (rage) has not implemented native `mlkem768x25519`.** As of gpm's `age 0.12.1` bump (2026-08-10), rage has shipped the hardware-oriented `tagpq` recipient (`age1tagpq1` / `mlkem768p256tag` = ML-KEM-768 + **P-256**, encryption-only — a _different_ PQ construction from X-Wing, and out of scope for a mobile read-only client per the "Out of scope" section below). The native X-Wing (`mlkem768x25519` = ML-KEM-768 + X25519) that gopass uses is still not implemented at all — open issues [#621](https://github.com/str4d/rage/issues/621) (tracking) and [#598](https://github.com/str4d/rage/issues/598) (community draft), both OPEN. The cleanest path — consume rage's native PQ type directly — is therefore **not available yet**.
+
+> **Reassessment (2026-08-10, on the age 0.12.1 bump).** The blocker premise was refreshed: `tagpq` is no longer `main`-only — it shipped in 0.12.1 — but that does not change this RFC's status, because R008 targets X-Wing (`mlkem768x25519`), not `tagpq`. Status remains **Blocked** on native X-Wing (rage #621 / #598 still open). Side note (not a blocker): the 0.12 bump does **not** add gpm recognition for `age1tag1` / `age1tagpq1` recipients — they currently fall through to an ungraceful error path; classifying them with a dedicated "not supported" status is deferred future work, deliberately not bundled into the version bump.
+
 - **Secondary: test infrastructure.** The C2SP CCTV post-quantum test vectors must be in place first as the hard correctness gate for any approach.
 
 ## Two routes
