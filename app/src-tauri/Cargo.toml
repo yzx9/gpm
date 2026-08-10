@@ -30,7 +30,7 @@ tauri-plugin-notification = "2"
 # Pure-Rust deflate (miniz_oxide): the default features pull C -sys crates
 # (bzip2/lzma/zstd/xz) that break the Android NDK cross-build. Used only by the
 # diagnostics-export bundle assembler.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 rustpass = { path = "../../crates/rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }
