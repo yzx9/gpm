@@ -50,12 +50,11 @@ describe("gen-licenses scanNpm", () => {
   });
 
   it("walks a dev-seeded package's own runtime dependencies", () => {
-    // vite is seeded as a root devDep; its runtime deps (rollup, esbuild) must
-    // be pulled in by the `pj.dependencies` recursion — the core of the change,
-    // not just the seed.
+    // vite is seeded as a root devDep; its runtime deps must be pulled in by the
+    // `pj.dependencies` recursion — the core of the change, not just the seed.
     const names = pkgs.map((p) => p.name);
-    expect(names).toContain("rollup");
-    expect(names).toContain("esbuild");
+    expect(names).toContain("rolldown");
+    expect(names).toContain("postcss");
   });
 
   it("dedupes by name@version (never lists the same name@version twice)", () => {
