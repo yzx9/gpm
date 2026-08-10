@@ -34,6 +34,22 @@ inherent cost of rendering on screen. Mitigations: auto-clear timer; cleanup on
 navigation (`popstate`), unmount (`onBeforeUnmount`), and manual dismiss; never logged
 or persisted.
 
+## Entry-view decrypted-content cache
+
+To keep the detail view usable under Immediate auto-lock (one unlock opens copy → show
+→ copy-2FA, instead of re-prompting per action), the backend caches the **one in-view
+entry's** decrypted `Secret` for the `view_clear_secs` window. This is the same plaintext
+that `show_password` already exposes, held in backend memory (not the WebView) for the
+view window — not the identity, which is still wiped per-op.
+
+Lifecycle: single-entry (switching entries evicts); size-thresholded (large
+secrets/attachments re-decrypt rather than cache); oid-rechecked on every hit (a sync
+that changed the entry invalidates it); wiped on the view-clear timer, leave/switch, and
+every identity/app-lock path. Parity with the revealed-plaintext-survives-soft-wipe
+property: the plaintext lingers only for the view window, then is gone. Same threat
+surface as `show_password` — defense-in-depth against the accidental-log/diagnostics
+vector, not a memory-attacker control.
+
 ## Screen capture protection (Android)
 
 `WindowManager.FLAG_SECURE` is set on secret-bearing pages (setup, create, generate,

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The **diagnostics** and **repository** export files (Settings → Logs → Export diagnostics, and Settings → Repository → Export) are now **`.tar.gz`** archives instead of `.zip`. Same contents, new container — open them with `tar -xzf` on desktop.
+- Opening a secret now asks for your passphrase (or fingerprint) **once** to unlock the whole detail view — Copy, Show, and Copy 2FA no longer each re-prompt under Immediate auto-lock. A cold start shows a single **Unlock** action instead of a pile of buttons that would each lead to a prompt; tapping it opens the entry for the view window. (The decrypted content — not the identity — is held in memory only for that view window and is cleared on leave, lock, or the view-clear timer.)
 
 ### Fixed
 
