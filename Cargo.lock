@@ -1839,12 +1839,33 @@ dependencies = [
 
 [[package]]
 name = "foreign-types"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3684708dacd3b83f4bbe6506d4ccb08bed3c16f521d34366f131b9ecd1884431"
+dependencies = [
+ "foreign-types-macros 0.1.1",
+ "foreign-types-shared 0.2.0",
+]
+
+[[package]]
+name = "foreign-types"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d737d9aa519fb7b749cbc3b962edcf310a8dd1f4b67c91c4f83975dbdd17d965"
 dependencies = [
- "foreign-types-macros",
+ "foreign-types-macros 0.2.3",
  "foreign-types-shared 0.3.1",
+]
+
+[[package]]
+name = "foreign-types-macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "405b19947fc6a4a2c40bb4b47a220d7feba220c888aa160f4ad5c1c673f9062e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1863,6 +1884,12 @@ name = "foreign-types-shared"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
+
+[[package]]
+name = "foreign-types-shared"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c61f9b85573bf0f203eed3633f5018abce85250886a62ca073e0eee022ed564d"
 
 [[package]]
 name = "foreign-types-shared"
@@ -3931,7 +3958,7 @@ dependencies = [
  "aes-gcm",
  "aes-kw",
  "argon2",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bitfields",
  "block-padding",
  "blowfish",
@@ -4681,7 +4708,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bech32",
- "foreign-types 0.3.2",
+ "foreign-types 0.4.0",
  "fs2",
  "getrandom 0.4.3",
  "git2",
@@ -5355,6 +5382,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
 dependencies = [
  "proc-macro2",
+ "quote",
  "unicode-ident",
 ]
 
