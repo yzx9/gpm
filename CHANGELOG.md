@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - In **Settings → Permissions & data**, tapping **Manage in Lock & Identity** under **Biometric unlock** once again lands cleanly on the right card in **Lock & Identity** — the scroll no longer flickers, and the card you land on highlights again (the highlight had stopped showing).
 
+### Security
+
+- **App Lock** now refuses _any_ change to your secrets — creating, editing, deleting, or syncing — while the app is locked, not just the on-screen actions. The lock screen already covered the visible controls; this adds a matching safeguard so no change can be published behind the lock until you unlock.
+
 ## [v0.18.1] - 2026-08-10
 
 ### Changed

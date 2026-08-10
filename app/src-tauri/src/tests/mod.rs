@@ -20,6 +20,7 @@ mod clipboard_clear;
 mod gate_idle;
 mod git_commands;
 mod lock_state;
+mod locked_writes;
 mod migrations;
 mod read_commands;
 mod seal_migrate;

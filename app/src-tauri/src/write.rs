@@ -62,6 +62,32 @@ use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 /// save/Sync behind a headless, non-user-initiated op.
 const BACKGROUND_SYNC_DEADLINE_SECS: u64 = 30;
 
+/// Defense-in-depth: refuse a credential-using WRITE while the app is locked.
+///
+/// The frontend `AppLockOverlay` already blocks the UI from issuing these while
+/// locked; this stops a stray (or XSS-driven) `invoke` from contacting the
+/// remote. App Lock wipes only the vault key (the identity gate) — the auth-free
+/// master key stays resident, so `repo.json` (the git credential) is still
+/// decryptable while locked. Without this gate a locked app could publish:
+/// `create`/`delete` need no identity (create encrypts to recipients via the
+/// auth-free master; delete is pure path removal) and `push` is a pure git op.
+/// Read ops (pull/fetch/clone/verify) are intentionally NOT gated — headless
+/// sync is pull-only by design.
+///
+/// NOTE: `background_sync` returns `Ok(None)` on lock (a best-effort, headless,
+/// silent skip); these user-initiated commands return `Err(AppLocked)` (loud,
+/// honest feedback). The two contracts are intentionally different — do NOT
+/// "normalize" one to match the other.
+fn require_unlocked(state: &State<'_, AppState>) -> Result<(), Error> {
+    if state.app_locked.load(Ordering::SeqCst) {
+        return Err(Error::new(
+            ErrorCode::AppLocked,
+            "App is locked — unlock to perform this action.",
+        ));
+    }
+    Ok(())
+}
+
 /// Run a local-only write under the autosync orchestrator, with the pull phase
 /// cancellable via the global cancel slot (mirrors `pull_repo`). Returns the
 /// orchestrator's [`WriteOutcome`] directly; the caller adds the auto-lock side
@@ -162,13 +188,14 @@ pub(crate) async fn preview_create(
 /// password). A matching `.pass-template` is applied automatically.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn create_secret(
+pub(crate) async fn create_secret<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     name: String,
     content: String,
 ) -> Result<WriteOutcome, Error> {
     log::info!("create: {name}");
+    require_unlocked(&state)?;
     let expected = ExpectedEntry {
         name: name.clone(),
         base_oid: String::new(),
@@ -189,12 +216,13 @@ pub(crate) async fn create_secret(
 /// PIN → `pin/…`).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn create_from_preset_secret(
+pub(crate) async fn create_from_preset_secret<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     preset_id: String,
     fields: HashMap<String, String>,
 ) -> Result<WriteOutcome, Error> {
+    require_unlocked(&state)?;
     let preset = template::find_preset(&preset_id).ok_or_else(|| {
         Error::new(
             ErrorCode::InvalidEntryName,
@@ -231,13 +259,14 @@ pub(crate) async fn create_from_preset_secret(
 /// delete's push lost a race (the frontend routes that to the shared modal).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn delete_secret(
+pub(crate) async fn delete_secret<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     name: String,
     base_oid: Option<String>,
 ) -> Result<WriteOutcome, Error> {
     log::info!("delete: {name}");
+    require_unlocked(&state)?;
     let expected = base_oid.map(|base_oid| ExpectedEntry {
         name: name.clone(),
         base_oid,
@@ -299,14 +328,15 @@ fn assemble_bytes(parts: SecretParts) -> Result<Zeroizing<Vec<u8>>, Error> {
 /// entry).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn edit_secret(
+pub(crate) async fn edit_secret<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     name: String,
     parts: SecretParts,
     base_oid: Option<String>,
 ) -> Result<WriteOutcome, Error> {
     log::info!("edit: {name}");
+    require_unlocked(&state)?;
     let expected = base_oid.map(|base_oid| ExpectedEntry {
         name: name.clone(),
         base_oid,
@@ -349,11 +379,12 @@ pub(crate) async fn pull_repo(
 /// A missing `origin` is a no-op at both phases (local-only store).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn sync_repo(
+pub(crate) async fn sync_repo<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
 ) -> Result<SyncOutcome, Error> {
     log::info!("sync: start");
+    require_unlocked(&state)?;
     let store = state.store.clone();
     crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
         store.sync_repo(&slot, Some(cancel), Some(tx)).await
@@ -453,6 +484,7 @@ pub(crate) async fn background_sync<R: Runtime>(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
     log::info!("push: start");
+    require_unlocked(&state)?;
     state
         .store
         .push()
@@ -468,13 +500,14 @@ pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
 /// path skipped runs here).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn resolve_sync_divergence(
+pub(crate) async fn resolve_sync_divergence<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     expected_remote_oid: String,
     choice: DivergenceChoice,
 ) -> Result<SyncResult, Error> {
     log::info!("resolve: {expected_remote_oid} {choice:?}");
+    require_unlocked(&state)?;
     let store = state.store.clone();
     let expected = expected_remote_oid;
     let result =
@@ -502,9 +535,9 @@ pub(crate) async fn resolve_sync_divergence(
 /// [`discard_divergence`].
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn resolve_entry_conflict(
+pub(crate) async fn resolve_entry_conflict<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     name: String,
     parts: Option<SecretParts>,
     expected_remote_oid: String,
@@ -512,6 +545,7 @@ pub(crate) async fn resolve_entry_conflict(
     choice: EntryConflictChoice,
 ) -> Result<SyncResult, Error> {
     log::info!("entry-resolve: {name} {op:?} {choice:?}");
+    require_unlocked(&state)?;
     let store = state.store.clone();
     let content_bytes = parts.map(assemble_bytes).transpose()?;
     let result =
@@ -547,9 +581,9 @@ pub(crate) async fn resolve_entry_conflict(
 /// call this.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn discard_divergence(
+pub(crate) async fn discard_divergence<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
 ) -> Result<(), Error> {
     log::info!("discard-divergence");
     maybe_soft_wipe(&state, &app).await;
