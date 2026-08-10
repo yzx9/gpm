@@ -285,7 +285,10 @@ impl RepoRegistry {
     /// Number of registered repositories.
     #[must_use]
     pub(crate) fn len(&self) -> usize {
-        self.entries.read().expect("registry entries poisoned").len()
+        self.entries
+            .read()
+            .expect("registry entries poisoned")
+            .len()
     }
 
     /// Whether no repository is configured.

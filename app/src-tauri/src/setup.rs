@@ -391,6 +391,7 @@ pub(crate) async fn complete_setup(
         .save_identity(&identity, passphrase.as_deref())
         .await
         .inspect_err(|e| log::warn!("setup: complete failed: {e}"))?;
+    register_first_repo(&state).await?;
     // Setup may leave an encrypted identity locked (the passphrase isn't cached);
     // emit the real state so the frontend shows the unlock overlay if needed.
     emit_lock_state(&app, &state.store, false, LockEventReason::Setup).await;
@@ -674,6 +675,7 @@ pub(crate) async fn complete_setup_from_file(
         .save_identity(&pending.identity, passphrase.as_deref())
         .await
         .inspect_err(|e| log::warn!("setup: complete-from-file failed: {e}"))?;
+    register_first_repo(&state).await?;
     // See [`complete_setup`]: emit the real post-setup lock state.
     emit_lock_state(&app, &state.store, false, LockEventReason::Setup).await;
     Ok(())
@@ -709,7 +711,7 @@ pub(crate) async fn setup(
 ) -> Result<(), Error> {
     log::info!("setup: start");
     let store = state.store.clone();
-    crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
+    let result = crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
         // Setup-time op (single in-flight, no `write_mu`): arm up-front so the
         // configure (clone + first push) is cancellable.
         let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
@@ -729,13 +731,44 @@ pub(crate) async fn setup(
             )
             .await
     })
-    .await
-    .inspect_err(|e| log::warn!("setup: start failed: {e}"))
+    .await;
+    // Adopt the configured device store into the registry (fresh installs skip
+    // m0009, so without this the registry stays empty).
+    if result.is_ok() {
+        register_first_repo(&state).await?;
+    }
+    result.inspect_err(|e| log::warn!("setup: start failed: {e}"))
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Adopt the device store into the multi-repo registry on first-run setup:
+/// mint a `RepoId`, persist `repositories`/`last_active`, and populate the live
+/// registry with `state.store` as the entry facade. Fresh installs skip the
+/// m0009 migration (schema starts at 9), so without this the registry stays
+/// empty and the active-repo resolver throws on `EntryListPage`. Reuses the
+/// device store as the facade (same as startup `populate`) — no identity-model
+/// work. Called from every setup finalize path.
+pub(crate) async fn register_first_repo(state: &AppState) -> Result<(), Error> {
+    // Idempotent: if a repository is already registered, do nothing. Without
+    // this guard a second finalize pass would mint a FRESH id, overwrite
+    // `app.json` via `set_first_repository`, and populate the live registry
+    // with the new id — diverging the registry from persistence. (The
+    // startup-reconciliation caller already gates on `is_empty`; the setup
+    // finalize paths do not, so this is the load-bearing guard.)
+    if !state.registry.is_empty() {
+        return Ok(());
+    }
+    let id = crate::registry::RepoId::generate()?;
+    state.app_config.set_first_repository(&id).await?;
+    let device_store = state.store.clone();
+    state
+        .registry
+        .populate(vec![id.clone()], Some(id), move |_| device_store.clone());
+    Ok(())
+}
 
 /// Map an [`IdentityType`](rustpass::identity::IdentityType) to a stable string
 /// for IPC, matching the `key_type` values returned by [`validate_identity`].

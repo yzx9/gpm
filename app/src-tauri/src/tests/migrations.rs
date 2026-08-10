@@ -1261,3 +1261,47 @@ async fn m0009_leaves_registry_empty_when_no_repo() {
     assert!(reloaded.repositories.is_empty());
     assert!(reloaded.last_active.is_none());
 }
+
+/// A present-but-corrupt `repo.json` is NOT silently dropped: `Store::config()`
+/// errors with something other than `NO_REPO`, so the migration propagates `Err`,
+/// the engine halts, and `schema_version` stays at 8 (retry on next launch)
+/// rather than bumping past the recovery point with an empty registry.
+#[tokio::test]
+async fn m0009_propagates_error_for_corrupt_repo_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    // A present-but-unparseable repo.json — distinct from absent (NO_REPO).
+    std::fs::write(dir.path().join("repo.json"), b"{ not valid json").unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":8}"#).unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    let reloaded = reload_at(dir.path(), &store).await;
+    assert_eq!(reloaded.schema_version, 8); // halted, NOT bumped past recovery
+    assert!(reloaded.repositories.is_empty());
+    assert!(reloaded.last_active.is_none());
+}
+
+/// Re-running the chain after a successful register is a schema-gated no-op: the
+/// minted id is preserved (not regenerated) and `last_active` still points at it.
+#[tokio::test]
+async fn m0009_is_idempotent_preserves_minted_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    std::fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
+    std::fs::write(dir.path().join("app.json"), r#"{"schema_version":8}"#).unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+    let after_first = reload_at(dir.path(), &store).await;
+    assert_eq!(after_first.schema_version, 9);
+    let id = after_first.repositories.first().cloned().unwrap();
+
+    // Second pass: schema is 9, so m0009 is skipped — the id must not change.
+    run_app_migrations(&state).await;
+    let after_second = reload_at(dir.path(), &store).await;
+    assert_eq!(after_second.schema_version, 9);
+    assert_eq!(after_second.repositories, vec![id.clone()]);
+    assert_eq!(after_second.last_active, Some(id));
+}

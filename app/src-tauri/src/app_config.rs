@@ -1523,6 +1523,29 @@ impl AppConfigStore {
         self.update(|c| c.biometric_app_lock = enabled).await
     }
 
+    /// Register the first repository into the (sealed) registry fields
+    /// (`repositories = [id]`, `last_active = id`). The setup path uses this on a
+    /// fresh install; the m0009 migration covers the upgrade path instead.
+    pub(crate) async fn set_first_repository(
+        &self,
+        id: &crate::registry::RepoId,
+    ) -> Result<AppConfig, Error> {
+        // Idempotent: preserve an already-registered repo rather than overwrite
+        // it. The load-bearing guard lives in `register_first_repo` (which
+        // checks the live registry to avoid minting a divergent id); this
+        // defends the persistence side independently.
+        let cfg = self.get();
+        if !cfg.repositories.is_empty() {
+            return Ok(cfg);
+        }
+        let id_str = id.to_string();
+        self.update(|c| {
+            c.repositories = vec![id_str.clone()];
+            c.last_active = Some(id_str);
+        })
+        .await
+    }
+
     /// Set the app-launch-gate in-app idle timeout (sealed). `After(n)` is
     /// clamped to the preset range first. The Tauri `set_gate_idle` command
     /// applies the new value to the live backend timer (R057); this store method

@@ -32,8 +32,12 @@
 //! - A valid existing repository (`Store::config()` unseals `repo.json` ⇒ `Ok`)
 //!   gets a freshly generated id. `repo.json` is master-sealed (auth-free key,
 //!   loaded at `.setup()` per R074/D), so this reads it even under App Lock.
-//! - A fresh / never-set-up install (no valid `repo.json`) leaves the registry
-//!   empty; first-run setup registers the repo directly (no migration needed).
+//! - A fresh / never-set-up install (`Store::config()` ⇒ `NO_REPO`) leaves the
+//!   registry empty; first-run setup registers the repo directly (no migration
+//!   needed).
+//! - A corrupt `repo.json` (any error other than `NO_REPO`) ⇒ `Err`: the engine
+//!   halts and retries on the next run rather than silently dropping the user's
+//!   repo from the registry.
 //! - The sealed merged `app.json` write (temp + rename, atomic) is the commit.
 //!
 //! **No app-lock defer**: like `m0008`, only the auth-free master key is touched.
@@ -67,17 +71,26 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
 
     // Adopt the legacy single repository into the registry iff one exists at
     // config_dir AND the registry is not already populated. `Store::config()`
-    // unseals repo.json (master-sealed) — Ok ⇒ a valid repo is present.
-    if cfg.repositories.is_empty() && state.store.config().await.is_ok() {
-        let id = RepoId::generate()?;
-        let id_str = id.to_string();
-        cfg.repositories = vec![id_str.clone()];
-        cfg.last_active = Some(id_str);
+    // unseals repo.json (master-sealed): Ok ⇒ a valid repo is present (adopt it);
+    // `NO_REPO` ⇒ none (fresh / never-completed setup — registry stays empty,
+    // first-run setup registers later); any other error ⇒ a corrupt repo.json —
+    // propagate so the engine halts + retries instead of silently dropping the
+    // user's repo and bumping the schema past the recovery point.
+    if cfg.repositories.is_empty() {
+        match state.store.config().await {
+            Ok(_) => {
+                let id = RepoId::generate()?;
+                let id_str = id.to_string();
+                cfg.repositories = vec![id_str.clone()];
+                cfg.last_active = Some(id_str);
+            }
+            Err(e) if e.code == "NO_REPO" => {}
+            Err(e) => return Err(e),
+        }
     }
-    // (else: no repo ⇒ registry stays empty; first-run setup registers later.)
 
     cfg.schema_version = version;
-    let json = serde_json::to_string(&cfg)?;
+    let json = serde_json::to_string_pretty(&cfg)?;
     state.store.save_app_config(json.as_bytes()).await?;
     Ok(MigrationOutcome::Done)
 }
