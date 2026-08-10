@@ -7,7 +7,7 @@ scope: git
 
 # 005 — Git Storage & Sync
 
-> Status: Partial · Last verified: 2026-08-02
+> Status: Partial · Last verified: 2026-08-10
 > Core shipped; several forward-looking reliability items not yet done.
 
 ## 1. Introduction
@@ -62,8 +62,9 @@ recoverable on collision."
 
 ### Adaptive
 
-- Plugin keys can run on desktop but not Android (cross-ref 003); background sync needs
-  Android platform support (future).
+- Plugin keys can run on desktop but not Android (cross-ref 003); background sync runs on
+  Android's deferred scheduler (WorkManager, periodic + network-constrained) — desktop has
+  no equivalent, so it is Android-only.
 
 ### Security
 
@@ -72,16 +73,14 @@ See <./security.md>.
 ### Reliability
 
 - **Known holes (this feature's forward focus):** a save built on a stale read can
-  silently overwrite a newer remote version; a push in progress can't be cancelled;
-  there is no background sync.
+  silently overwrite a newer remote version; a push in progress can't be cancelled.
 - Conflicts are recoverable; no data is lost; a missing or undecryptable key degrades
   back to re-setup.
 
 ## 5. Open Questions & Key Decisions
 
 - How to detect, before writing, that "this save is based on a stale read" (to avoid
-  silently overwriting the remote); making a push in progress cancellable; the cadence
-  of background sync.
+  silently overwriting the remote); making a push in progress cancellable.
 - Conflict split is settled: experience in 002, mechanism in 005.
 
 ## 6. Roadmap
@@ -89,6 +88,6 @@ See <./security.md>.
 - **Shipped:** repo setup, auto-sync + conflict, manual sync, SSH/HTTPS, signature
   verification (SSH+GPG), trusted keys, global history pagination, per-entry
   revision history (list + view + copy, path-bound, graceful undecryptable),
-  recipients root index.
-- **Next / Future:** stale-read protection, cancellable push, background sync,
-  repo reconfiguration, provenance tracking.
+  recipients root index, periodic background sync (pull-only, Android).
+- **Next / Future:** stale-read protection, cancellable push, repo reconfiguration,
+  provenance tracking.

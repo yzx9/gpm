@@ -77,7 +77,22 @@ abandoning the modal never strands the key. (Cache lifecycle details in `007/sec
 
 ## Secret revision history
 
-Viewing a past version of a secret (the shipped secret-revisions feature, formerly R027) decrypts a blob from history with the current identity and reveals it under the same short-lived reveal / auto-clear / wipe-on-drop contract as the current password — no new auth surface. A past revision the current identity can't decrypt (recipient rotation, a teammate's revision in a shared store) is reported as an "undecryptable" state and **never** surfaced as ciphertext, mirroring how an unreadable remote secret is treated — so the threat model holds unchanged: ciphertext never crosses into the untrusted layer, only decrypted plaintext, and only on the decryptable outcome. The listing itself is pure metadata (commit hash, author, date, message, signature status) and is key-free.
+Viewing a past version of a secret (the shipped secret-revisions feature, formerly R027)
+decrypts a blob from history with the current identity and reveals it under the same
+short-lived reveal / auto-clear / wipe-on-drop contract as the current password — no new
+auth surface. A past revision the current identity can't decrypt (recipient rotation, a
+teammate's revision in a shared store) is reported as an "undecryptable" state and
+**never** surfaced as ciphertext, mirroring how an unreadable remote secret is treated —
+so the threat model holds unchanged: ciphertext never crosses into the untrusted layer,
+only decrypted plaintext, and only on the decryptable outcome. The listing itself is pure
+metadata (commit hash, author, date, message, signature status) and is key-free.
+
+## Background sync is pull-only.
+
+The heavy-autofill persona fills credentials from the autofill service and rarely creates
+secrets in-app, so a background push carries nothing of theirs and is dead weight;
+publishing local creates stays with the foreground path. Reassess if a write-heavy persona
+emerges.
 
 ## Cross-references
 
