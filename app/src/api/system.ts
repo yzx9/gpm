@@ -78,6 +78,20 @@ export interface AppConfig {
   /** Per-device autosync: on (absent ⇒ true) ⇒ every save pull-write-pushes;
    *  off ⇒ saves stay local until a manual Sync publishes. */
   autosync?: boolean;
+  /** Passive update-availability probe on cold start (RFC R090). Absent ⇒ true
+   *  (on); off ⇒ the probe is skipped and the update dots never light. */
+  update_check_enabled?: boolean;
+  /** Latest release tag seen by the cold-start probe (e.g. `"v0.19.0"`), or
+   *  absent until the first successful probe. Internal — the frontend reads it
+   *  via {@link getUpdateStatus}, not this field; it rides along in `app.json`
+   *  because the probe writes the same sealed file as the toggle. */
+  latest_release?: string;
+  /** When the cold-start probe last ran (Unix seconds). Absent until the first
+   *  probe. Internal — drives the ≤1/day throttle. */
+  release_probe_at?: number;
+  /** The release tag the user acknowledged by opening About (absent until then).
+   *  Scopes the Settings-entry dot; the About-page dot ignores it. Internal. */
+  seen_release?: string;
   /** Periodic background-sync cadence. Absent ⇒ `"off"`. */
   background_sync?: BackgroundSyncCadence;
   /** Persisted intent for the app-launch biometric gate. **Write-only** — the
@@ -242,6 +256,41 @@ export async function setBackgroundSync(
   cadence: BackgroundSyncCadence,
 ): Promise<AppConfig> {
   return invoke<AppConfig>("set_background_sync", { cadence });
+}
+
+/** Cached update-probe result (RFC R090). `available` lights the About-page dot
+ *  + the Update link; `unacknowledged` additionally lights the Settings-entry
+ *  dot (the About-page dot ignores the ack). Read from the plaintext cache — no
+ *  network. Mirrors the backend `UpdateStatus`. */
+export interface UpdateStatus {
+  /** A newer stable release exists than the built-in version. */
+  available: boolean;
+  /** A newer release exists that the user has not yet acknowledged by opening
+   *  About (lights the Settings-entry dot only). */
+  unacknowledged: boolean;
+  /** The latest release tag seen (e.g. `"v0.19.0"`), or `null` if never probed. */
+  latest_version: string | null;
+}
+
+/** Read the cached update-probe status (RFC R090). No network — the cold-start
+ *  probe writes the cache (≤1/day); this reads it. Returns a quiet
+ *  `{ available: false, ... }` when the check is off or unavailable
+ *  (fail-closed). */
+export async function getUpdateStatus(): Promise<UpdateStatus> {
+  return invoke<UpdateStatus>("get_update_status");
+}
+
+/** Acknowledge the current latest release — records that the user opened About
+ *  for this version, so the Settings-entry dot falls quiet. The About-page dot
+ *  ignores the ack (RFC R090). Fire-and-forget from the About page on mount. */
+export async function acknowledgeUpdate(): Promise<void> {
+  await invoke("acknowledge_update");
+}
+
+/** Toggle the passive update check on/off (sealed in `app.json`, like autosync).
+ *  Returns the updated config. */
+export async function setUpdateCheck(enabled: boolean): Promise<AppConfig> {
+  return invoke<AppConfig>("set_update_check", { enabled });
 }
 
 /** Take-once: whether a background sync left a divergence / authenticity-block

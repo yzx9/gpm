@@ -35,7 +35,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
     app_config.set_store(Arc::clone(&store));
     AppState {
         store,
-        app_config,
+        app_config: Arc::new(app_config),
         app_handle: None,
         lock_timer: crate::identity::IdleTimer::new(),
         pending_identity: Mutex::new(None),

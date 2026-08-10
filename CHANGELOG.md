@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - When **Re-lock when inactive** is on, a quick app switch — leaving gpm and returning within the selected period — no longer re-locks the app. That setting now measures total inactivity (time idle in gpm **or** time spent in another app) within one window, instead of re-locking the moment you switch away. Turn it off to keep re-locking on every return.
+- gpm now **checks for newer releases** on its own and points you to them. When an update is available, a small red dot appears next to **About** in Settings and beside the version on the About screen, with an **Update** link straight to the download page. It checks once a day on startup, sends no account or personal data, and you can turn it off from the About screen. (Android can't install updates itself, so the link opens GitHub Releases, where the APKs live.)
 
 ### Changed
 

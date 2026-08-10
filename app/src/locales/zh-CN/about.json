@@ -9,6 +9,8 @@
     "tagline": "一个 Android 优先、仅使用 age 加密的 gopass 密码客户端。",
     "version": "版本",
     "repoLink": "源代码",
+    "updateAvailable": "有可用更新",
+    "updateLink": "更新",
     "designGoalsTitle": "设计目标",
     "builtWithTitle": "构建于",
     "goals": {
@@ -18,6 +20,12 @@
       "gopassCompatible": "与 gopass 兼容的密码项、模板与预设格式",
       "securityFirst": "秘密永不进入 WebView；主密钥在每次操作后被立即擦除"
     }
+  },
+  "updateCheck": {
+    "title": "更新",
+    "legend": "检查更新",
+    "hint": "启动时检查是否有新版本（每天一次）。不会发送任何账号或个人数据。",
+    "setFailed": "无法保存更新检查设置。"
   },
   "ack": {
     "intro": "gpm 站在这些开源项目的肩膀上。",

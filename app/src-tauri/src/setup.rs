@@ -796,7 +796,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let state = AppState {
             store: Arc::new(Store::new(dir.path().to_path_buf(), None)),
-            app_config: AppConfigStore::new(dir.path()).await,
+            app_config: Arc::new(AppConfigStore::new(dir.path()).await),
             app_handle: None,
             lock_timer: IdleTimer::new(),
             pending_identity: Mutex::new(None),

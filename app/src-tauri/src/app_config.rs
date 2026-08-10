@@ -253,6 +253,33 @@ pub(crate) struct AppConfig {
         skip_serializing_if = "is_autosync_default"
     )]
     pub(crate) autosync: bool,
+    /// Whether the app passively probes for a newer release on cold start
+    /// (≤once/day, unauthenticated; surfaces only a red dot in Settings/About).
+    /// Default `true`; omitted while `true` so a fresh config stays byte-identical.
+    /// See RFC R090.
+    #[serde(
+        default = "default_update_check_true",
+        skip_serializing_if = "is_update_check_default"
+    )]
+    pub(crate) update_check_enabled: bool,
+    /// Latest release tag seen by the cold-start probe (e.g. `v0.19.0`), or
+    /// `None` until the first successful probe. Drives the update dot + the
+    /// Update link. Lives in the sealed `app.json` next to the toggle (not a
+    /// separate cache file): the store's `write_mu` already serializes config
+    /// writes, so the probe and an ack can't race (RFC R090). Omitted while
+    /// `None` so a pre-R090 config stays byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) latest_release: Option<String>,
+    /// When the cold-start release probe last ran (Unix seconds). Drives the
+    /// ≤1/day throttle; bumped on every probe outcome (success or failure) so a
+    /// failed probe still counts as "checked". Omitted while `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) release_probe_at: Option<u64>,
+    /// The release tag the user acknowledged by opening About for it (scopes the
+    /// Settings-entry dot; the About-page dot ignores the ack and stays lit
+    /// until the user actually updates). Omitted while `None`. See RFC R090.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) seen_release: Option<String>,
     /// Persisted intent for the app-launch biometric gate.
     /// **Write-only** — the Settings toggle and the runtime gate read the
     /// Keystore probe via `get_app_lock_state`, not this flag; it exists only
@@ -293,6 +320,10 @@ impl Default for AppConfig {
             view_clear_secs: None,
             clipboard_clear_secs: None,
             autosync: default_autosync_true(),
+            update_check_enabled: default_update_check_true(),
+            latest_release: None,
+            release_probe_at: None,
+            seen_release: None,
             biometric_app_lock: false,
             gate_idle: GateIdle::default(),
             // A brand-new config starts at the current target so it skips the
@@ -320,6 +351,13 @@ impl AppConfig {
             view_clear_secs: behavior.view_clear_secs,
             clipboard_clear_secs: behavior.clipboard_clear_secs,
             autosync: behavior.autosync,
+            update_check_enabled: behavior.update_check_enabled,
+            // R090 probe result + ack — new-world (schema 8) derived state, not
+            // part of either projection; defaulted here (old-world lifts never
+            // carried it) and reloaded wholesale by `reload_merged` in new-world.
+            latest_release: None,
+            release_probe_at: None,
+            seen_release: None,
             biometric_app_lock: behavior.biometric_app_lock,
             gate_idle: behavior.gate_idle,
             schema_version: pref.schema_version,
@@ -493,6 +531,13 @@ pub(crate) struct BehaviorConfig {
         skip_serializing_if = "is_autosync_default"
     )]
     pub(crate) autosync: bool,
+    /// Whether the app passively probes for a newer release on cold start
+    /// (RFC R090). Default `true`; omitted while `true`.
+    #[serde(
+        default = "default_update_check_true",
+        skip_serializing_if = "is_update_check_default"
+    )]
+    pub(crate) update_check_enabled: bool,
     /// Persisted intent for the app-launch biometric gate. **Write-only** —
     /// the Settings toggle and the runtime gate read the Keystore probe, not
     /// this flag. Skipped when `false`.
@@ -516,6 +561,7 @@ impl Default for BehaviorConfig {
             view_clear_secs: None,
             clipboard_clear_secs: None,
             autosync: default_autosync_true(),
+            update_check_enabled: default_update_check_true(),
             biometric_app_lock: false,
             gate_idle: GateIdle::default(),
             secure_screen_mode: None,
@@ -535,6 +581,9 @@ impl BehaviorConfig {
             view_clear_secs: cfg.view_clear_secs,
             clipboard_clear_secs: cfg.clipboard_clear_secs,
             autosync: cfg.autosync,
+            // update_check_enabled (RFC R090) is a new field — a legacy config
+            // never had it, so the lift defaults it on.
+            update_check_enabled: default_update_check_true(),
             biometric_app_lock: cfg.biometric_app_lock,
             // gate_idle is a new field — a legacy config never had it, so the
             // lift defaults it (m0006 later pins existing users to Off).
@@ -553,6 +602,7 @@ impl BehaviorConfig {
             view_clear_secs: cfg.view_clear_secs,
             clipboard_clear_secs: cfg.clipboard_clear_secs,
             autosync: cfg.autosync,
+            update_check_enabled: cfg.update_check_enabled,
             biometric_app_lock: cfg.biometric_app_lock,
             gate_idle: cfg.gate_idle,
             secure_screen_mode: cfg.secure_screen_mode,
@@ -650,6 +700,20 @@ pub(crate) fn default_autosync_true() -> bool {
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
 pub(crate) fn is_autosync_default(autosync: &bool) -> bool {
     *autosync
+}
+
+/// Serde default for `update_check_enabled` — `true` (the passive cold-start
+/// release probe is on unless the user opts out, RFC R090). Shared by
+/// [`AppConfig`] and [`BehaviorConfig`].
+pub(crate) fn default_update_check_true() -> bool {
+    true
+}
+
+/// `true` (the default) so `update_check_enabled` is omitted from the file while
+/// on — a user who never toggles it sees no change to the file's shape.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if needs `fn(&T)`
+pub(crate) fn is_update_check_default(update_check: &bool) -> bool {
+    *update_check
 }
 
 /// `false` (the default) so `biometric_app_lock` is omitted from the file when
@@ -1401,6 +1465,41 @@ impl AppConfigStore {
         self.update(|c| c.autosync = enabled).await
     }
 
+    /// Set the passive update-check on/off flag (sealed, RFC R090). When off,
+    /// the cold-start release probe is skipped and the update dots never light.
+    pub(crate) async fn set_update_check(&self, enabled: bool) -> Result<AppConfig, Error> {
+        self.update(|c| c.update_check_enabled = enabled).await
+    }
+
+    /// Record a cold-start release-probe outcome (RFC R090). `Some(tag)` ⇒ a
+    /// newer release was found (stores the tag); `None` ⇒ the probe failed /
+    /// timed out / returned nothing parseable (keeps the prior `latest_release`
+    /// so a transient failure can't un-light a known dot). Either way
+    /// `release_probe_at` is bumped so the ≤1/day throttle holds regardless of
+    /// outcome. Sealed RMW under `write_mu`, so this can't race an
+    /// [`Self::acknowledge_update`] or any other setter.
+    pub(crate) async fn record_update_probe(
+        &self,
+        latest_release: Option<String>,
+    ) -> Result<AppConfig, Error> {
+        self.update(|c| {
+            if let Some(tag) = latest_release {
+                c.latest_release = Some(tag);
+            }
+            c.release_probe_at = Some(now_unix());
+        })
+        .await
+    }
+
+    /// Mark the current latest release as seen by opening About (RFC R090) —
+    /// copies `latest_release` into `seen_release` so the Settings-entry dot
+    /// falls quiet for this version. The About-page dot ignores it. Sealed RMW
+    /// under `write_mu`; the command layer treats a failure as best-effort (a
+    /// missed ack just re-lights the dot next launch).
+    pub(crate) async fn acknowledge_update(&self) -> Result<AppConfig, Error> {
+        self.update(|c| c.seen_release = c.latest_release.clone()).await
+    }
+
     /// Set the persisted app-launch biometric-gate intent flag (sealed;
     /// write-only mirror of the Keystore-probed runtime state).
     pub(crate) async fn set_biometric_app_lock(&self, enabled: bool) -> Result<AppConfig, Error> {
@@ -1885,6 +1984,67 @@ mod tests {
         assert_eq!(reloaded.lock_mode, LockMode::Idle(300));
         assert!(!reloaded.autosync);
         assert_eq!(reloaded.theme_mode.as_deref(), Some("dark"));
+    }
+
+    /// R090: the probe-result fields are omitted from `app.json` while `None`
+    /// (all `Option` + `skip_serializing_if`), so a fresh / pre-R090 config
+    /// stays byte-identical — adding the fields is non-breaking, like `locale`.
+    #[tokio::test]
+    async fn update_check_fields_omitted_when_none() {
+        let json = serde_json::to_string(&AppConfig::default()).unwrap();
+        assert!(
+            !json.contains("latest_release"),
+            "latest_release must be absent while None; got: {json}"
+        );
+        assert!(
+            !json.contains("release_probe_at"),
+            "release_probe_at must be absent while None; got: {json}"
+        );
+        assert!(
+            !json.contains("seen_release"),
+            "seen_release must be absent while None; got: {json}"
+        );
+        // And `{}` round-trips to all-None (a pre-R090 config loads clean).
+        let empty: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(empty.latest_release.is_none());
+        assert!(empty.release_probe_at.is_none());
+        assert!(empty.seen_release.is_none());
+    }
+
+    /// R090: `record_update_probe` stores the tag on success and bumps the probe
+    /// time either way; a `None` outcome (failure/timeout) keeps the prior tag.
+    /// `acknowledge_update` copies latest → seen. All under `write_mu`, and the
+    /// result persists across a fresh store reload (pins the merged-file path).
+    #[tokio::test]
+    async fn record_probe_and_acknowledge_round_trip() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_with_desktop_store(dir.path()).await;
+        // Success: stores the tag + bumps the probe time.
+        store
+            .record_update_probe(Some("v0.19.0".to_string()))
+            .await
+            .unwrap();
+        let cfg = store.get();
+        assert_eq!(cfg.latest_release.as_deref(), Some("v0.19.0"));
+        assert!(cfg.release_probe_at.is_some());
+        assert!(cfg.seen_release.is_none()); // not acked yet
+        // Failure outcome: keeps the tag, still bumps the probe time.
+        let prev_probe_at = cfg.release_probe_at.unwrap();
+        store.record_update_probe(None).await.unwrap();
+        let cfg = store.get();
+        assert_eq!(
+            cfg.latest_release.as_deref(),
+            Some("v0.19.0"),
+            "a None outcome must not clobber the prior tag"
+        );
+        assert!(cfg.release_probe_at.unwrap() >= prev_probe_at);
+        // Ack: copies latest → seen.
+        store.acknowledge_update().await.unwrap();
+        assert_eq!(store.get().seen_release.as_deref(), Some("v0.19.0"));
+        // Re-read from disk to confirm persistence through the merged file.
+        let reloaded = store_with_desktop_store(dir.path()).await.get();
+        assert_eq!(reloaded.latest_release.as_deref(), Some("v0.19.0"));
+        assert_eq!(reloaded.seen_release.as_deref(), Some("v0.19.0"));
     }
 
     /// `reload_merged` soft-fails on an unparseable merged `app.json` (warn +

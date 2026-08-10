@@ -29,7 +29,7 @@ async fn keyed_state(dir: &Path) -> AppState {
     let store = Arc::new(Store::new(dir.to_path_buf(), Some(key)));
     AppState {
         store,
-        app_config: AppConfigStore::new(dir).await,
+        app_config: Arc::new(AppConfigStore::new(dir).await),
         app_handle: None,
         lock_timer: IdleTimer::new(),
         pending_identity: Mutex::new(None),

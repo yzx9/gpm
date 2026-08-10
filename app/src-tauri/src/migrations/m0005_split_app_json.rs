@@ -50,7 +50,7 @@ use rustpass::Error;
 use tokio::fs;
 
 use crate::AppState;
-use crate::app_config::{BehaviorConfig, GateIdle, PrefConfig};
+use crate::app_config::{BehaviorConfig, GateIdle, PrefConfig, default_update_check_true};
 use crate::migrations::MigrationOutcome;
 use crate::migrations::m0004_verbose_from_debug::AppConfigV4;
 
@@ -172,6 +172,8 @@ pub(crate) async fn apply(state: &AppState, version: u32) -> Result<MigrationOut
         // gate_idle is new (not in V4); default it, and m0006 pins existing
         // users to Off on the next step.
         gate_idle: GateIdle::default(),
+        // update_check_enabled (RFC R090) is new (not in V4); default it on.
+        update_check_enabled: default_update_check_true(),
     };
     if let Err(e) = state.app_config.save_behavior(&behavior).await {
         if e.code == "SEAL_KEY_UNAVAILABLE" {
@@ -233,6 +235,7 @@ mod tests {
             biometric_app_lock: v4.biometric_app_lock,
             secure_screen_mode: v4.secure_screen_mode,
             gate_idle: GateIdle::default(),
+            update_check_enabled: default_update_check_true(),
         };
         assert_eq!(b.secure_screen_mode, Some(SecureScreenMode::Always));
         assert_eq!(b.lock_mode, rustpass::LockMode::Idle(120));

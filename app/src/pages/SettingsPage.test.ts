@@ -6,6 +6,7 @@ import { mountWithApp } from "@/test/appTestUtils";
 import {
   baseDefaults,
   resetOverrides,
+  when,
   type Overrides,
 } from "@/test/settingsTestUtils";
 import { invoke } from "@tauri-apps/api/core";
@@ -109,5 +110,34 @@ describe("SettingsPage (hub)", () => {
 
     // navBack falls back to replace when there is no history to pop.
     expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
+  });
+
+  // RFC R090: a red dot on the About row signals an unacknowledged newer
+  // release. Decorative — the About page carries the labeled Update action.
+  it("shows an update dot on the About row when a release is unacknowledged", async () => {
+    when(overrides, "get_update_status", {
+      available: true,
+      unacknowledged: true,
+      latest_version: "v0.19.0",
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const aboutRow = wrapper.findAll(".hub-row")[6]!;
+    expect(aboutRow.find(".update-dot").exists()).toBe(true);
+  });
+
+  it("omits the About update dot when the release is already acknowledged", async () => {
+    when(overrides, "get_update_status", {
+      available: true,
+      unacknowledged: false,
+      latest_version: "v0.19.0",
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.findAll(".hub-row")[6]!.find(".update-dot").exists()).toBe(
+      false,
+    );
   });
 });

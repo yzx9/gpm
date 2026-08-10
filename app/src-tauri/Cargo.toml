@@ -38,6 +38,14 @@ serde_json = { workspace = true }
 zeroize = { workspace = true }
 tokio = { workspace = true, features = ["rt", "fs", "sync"] }
 base64 = { workspace = true }
+# Cold-start release probe (RFC R090): a no-follow HTTPS GET that reads the
+# GitHub release-redirect `Location`. `rustls` only — Android-NDK-compatible
+# (no native-tls/openssl), and no body/charset/http2 features needed for one
+# header read. Resolved transitively via `tauri` (without TLS), so only the
+# rustls provider is newly compiled.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# Stable-only version compare for the release probe (RFC R090).
+semver = "1"
 sys-locale = "0.3"
 log = "0.4"
 ts-rs = { workspace = true }

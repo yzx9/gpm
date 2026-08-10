@@ -43,6 +43,7 @@ mod read;
 mod repo_export;
 mod revisions;
 mod setup;
+mod update_check;
 mod verbose;
 mod write;
 
@@ -139,7 +140,9 @@ pub(crate) struct AppState {
     /// App-shell (non-repo) preferences — screen-capture toggle, locale, and the
     /// behavior prefs (lock mode, clear timers, autosync, app-lock flag) moved
     /// here from `RepoConfig`. Persists at `app.json`; survives `reset_config`.
-    pub(crate) app_config: AppConfigStore,
+    /// `Arc` so the fire-and-forget update-check probe can clone a handle into
+    /// its spawned task (mirrors `store: Arc<Store>`).
+    pub(crate) app_config: Arc<AppConfigStore>,
     /// The Tauri app handle, so a migration that needs the Android Keystore
     /// (m0007 vault-key relocate) can reach `keystore()` without a
     /// signature change to the whole migration engine. `Some` in the live app
@@ -318,7 +321,7 @@ fn init_state(
 
     let app_state = AppState {
         store,
-        app_config,
+        app_config: Arc::new(app_config),
         // `Some` so m0007 (vault-key relocate) can reach the Keystore. Concrete
         // `Wry` (not generic `<R>`) because `app.handle()` is `AppHandle<R>` and
         // AppState is non-generic — gpm only ever runs the default Wry runtime.
@@ -571,6 +574,12 @@ pub fn run() {
             // (enqueue/cancel the WorkManager periodic work).
             #[cfg(target_os = "android")]
             let cadence = state.app_config.background_sync();
+            // RFC R090: clone the config-store handle + read the toggle before
+            // `state` moves into manage; the probe is spawned fire-and-forget
+            // below and writes its result back through the store's
+            // `write_mu`-guarded RMW, so it can't race a concurrent ack/toggle.
+            let app_config = Arc::clone(&state.app_config);
+            let update_check_enabled = state.app_config.get().update_check_enabled;
             app.manage(state);
             // Best-effort: clear any attachment stage stranded by a hard-killed
             // prior export (StageGuard's Drop runs on panic/cancel, not SIGKILL).
@@ -581,6 +590,16 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::block_on(reschedule_background_sync(&handle, cadence));
+            }
+            // RFC R090: passively probe for a newer release (≤1/day, gated on
+            // the pref, fire-and-forget). The dots read `app.json`; a slow probe
+            // updates it for next time. Platform-agnostic — not Android-gated.
+            if update_check_enabled {
+                // Fire-and-forget: the handle is intentionally dropped (the task
+                // runs to completion on the runtime). `_`-prefixed so it reads as
+                // unused without `let _ =` (which clippy flags on a future).
+                let _update_check =
+                    tauri::async_runtime::spawn(update_check::run_once(app_config));
             }
             Ok(())
         })
@@ -670,6 +689,10 @@ pub fn run() {
             app_config::set_theme_mode,
             app_config::set_verbose,
             app_config::screen_secure_available,
+            // update check (RFC R090): passive release-availability detection.
+            update_check::get_update_status,
+            update_check::acknowledge_update,
+            update_check::set_update_check,
             // logging: in-app diagnostics viewer + the verbose (Debug) toggle.
             // The level is applied at startup via effective_log_filter in
             // init_state; `set_verbose` re-applies it within a session.

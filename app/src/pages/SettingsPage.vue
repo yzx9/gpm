@@ -3,6 +3,8 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
+import type { UpdateStatus } from "@/api";
+import { getUpdateStatus } from "@/api";
 import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
@@ -15,6 +17,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from "@lucide/vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -27,6 +30,21 @@ const { t } = useI18n();
 // detail, so a one-line summary here only added clutter. About's summary is
 // the installed version (a constant, no load).
 const version = pkg.version;
+
+// RFC R090: a red dot on the About entry signals an unacknowledged newer
+// release. Decorative — the About page carries the labeled Update action.
+const updateStatus = ref<UpdateStatus | null>(null);
+const showAboutDot = computed(
+  () => updateStatus.value?.unacknowledged ?? false,
+);
+
+onMounted(async () => {
+  try {
+    updateStatus.value = await getUpdateStatus();
+  } catch {
+    // Fail-closed: no dot.
+  }
+});
 </script>
 
 <template>
@@ -146,6 +164,7 @@ const version = pkg.version;
       >
         <BaseIcon :icon="Info" :size="20" class="text-muted" />
         <span class="hub-title">{{ t("settings.hub.about") }}</span>
+        <span v-if="showAboutDot" class="update-dot" aria-hidden="true" />
         <span class="hub-value">{{ version }}</span>
         <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
       </div>
@@ -192,5 +211,13 @@ const version = pkg.version;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 50%;
+}
+.update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  display: inline-block;
+  flex-shrink: 0;
 }
 </style>

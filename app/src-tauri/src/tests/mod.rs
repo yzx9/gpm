@@ -182,7 +182,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
     // it into the config dir's repo.
     let state = AppState {
         store,
-        app_config,
+        app_config: Arc::new(app_config),
         app_handle: None,
         lock_timer: IdleTimer::new(),
         pending_identity: Mutex::new(None),

@@ -41,6 +41,12 @@ export const httpsConfig = {
 export const baseDefaults: Record<string, unknown> = {
   get_config: httpsConfig,
   get_app_config: {},
+  // RFC R090: passive update check — quiet by default (no newer release).
+  get_update_status: {
+    available: false,
+    unacknowledged: false,
+    latest_version: null,
+  },
   // App-launch biometric gate reads Keystore truth (Path B), not the flag.
   get_app_lock_state: { enabled: false, locked: false },
   get_auth_state: {
