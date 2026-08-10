@@ -77,7 +77,7 @@ aes-gcm = "0.10"
 # OS RNG for the master key + per-seal GCM nonces.
 getrandom = { version = "0.4", features = ["std"] }
 # Base64 for the master key crossing the Rust ↔ Android-plugin IPC boundary.
-base64 = "0.22"
+base64 = "0.23"
 # Bech32 for tests that construct valid age plugin recipient/identity encodings.
 bech32 = { version = "0.9", default-features = false }
 # TOTP (RFC 6238) generation for entries that store a 2FA seed (gopass `pkg/otp`
