@@ -1,4 +1,4 @@
-# R085 — Entry-view decrypted-content cache
+# R086 — Entry-view decrypted-content cache
 
 **Priority:** P1
 **Status:** Draft

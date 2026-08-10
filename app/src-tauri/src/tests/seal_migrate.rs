@@ -41,6 +41,8 @@ async fn keyed_state(dir: &Path) -> AppState {
         app_locked: Arc::new(AtomicBool::new(false)),
         gate_idle_timer: IdleTimer::new(),
         last_activity_at: Mutex::new(std::time::Instant::now()),
+        cached_entry: Arc::new(Mutex::new(None)),
+        entry_cache_timer: IdleTimer::new(),
         identity_coupled: AtomicBool::new(false),
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),

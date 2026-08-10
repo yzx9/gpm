@@ -18,6 +18,7 @@ use tokio::fs;
 use zeroize::Zeroizing;
 
 use crate::AppState;
+use crate::entry_cache;
 use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 use crate::page::clamp_limit;
 
@@ -247,13 +248,29 @@ pub(crate) async fn copy_password(
     // Decrypt first so a FAILED read still counts as a secret access: under
     // Immediate we reset the timer + wipe on both paths (an errored op must not
     // leave the identity cached with no idle timer to eventually clear it).
-    let secret = state.store.get(&entry_path).await;
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
-    maybe_soft_wipe(&state, &app).await;
-    let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
-    let has_totp = rustpass::totp::has_totp(&secret);
-    let has_attachment = rustpass::has_attachment(&secret);
+    // Through the entry-view cache (R086): a HIT avoids the re-decrypt + second
+    // unlock prompt. `slide` is false — Copy keeps its plaintext footprint to the
+    // clipboard auto-clear window (D8). Project the byproducts + the password
+    // (None for attachments / non-UTF-8, which never reach the clipboard).
+    let (has_totp, has_attachment, password_non_utf8, password) =
+        with_secret(&state, &app, &entry_path, false, |secret, _| {
+            let has_attachment = rustpass::has_attachment(secret);
+            let password_non_utf8 = !secret.password_is_utf8();
+            let password = if has_attachment || password_non_utf8 {
+                None
+            } else {
+                Some(secret.password().to_string())
+            };
+            Ok::<_, Error>((
+                rustpass::totp::has_totp(secret),
+                has_attachment,
+                password_non_utf8,
+                password,
+            ))
+        })
+        .await
+        .inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
+
     if has_attachment {
         // An attachment has no password — don't clobber the clipboard with empty
         // for the auto-clear window. The UI offers Export instead.
@@ -271,7 +288,7 @@ pub(crate) async fn copy_password(
     // can't show it (lossy view) or edit it (edit-blocked) — the gopass CLI is
     // the only path. Skip the clipboard write and tell the UI, rather than
     // crowning an empty copy with a "Copied!" toast.
-    if !secret.password_is_utf8() {
+    if password_non_utf8 {
         return Ok(CopyResult {
             success: true,
             entry_name,
@@ -288,7 +305,7 @@ pub(crate) async fn copy_password(
     let cleared_after_secs = crate::clipboard::write_and_schedule_clear(
         &state,
         &app,
-        secret.password().to_string(),
+        password.expect("a UTF-8 non-attachment entry has a password"),
         notify_text.as_ref(),
     )
     .await
@@ -322,6 +339,165 @@ pub(crate) fn attr_view(secret: &rustpass::Secret) -> Vec<AttributeView> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Entry-view decrypted-content cache (R086)
+// ---------------------------------------------------------------------------
+
+/// Total decrypted size of a secret — password + body + every attribute key/
+/// value — for the cache's size threshold (D2): a secret at or above the
+/// threshold is served but NOT cached (re-decrypt per access), bounding the
+/// in-memory plaintext that lingers for the view window. Large attachments and
+/// giant text secrets route here.
+fn total_secret_size(secret: &rustpass::Secret) -> usize {
+    secret.password_bytes().len()
+        + secret.body_bytes().len()
+        + secret
+            .attributes()
+            .iter()
+            .map(|a| a.key().len() + a.value().len())
+            .sum::<usize>()
+}
+
+/// A decrypted secret at or above this many bytes is served but not cached
+/// (re-decrypt per access). Bounds the plaintext footprint; tunable. ~256 KiB —
+/// well above any normal secret, below a large attachment.
+const ENTRY_CACHE_MAX_BYTES: usize = 256 * 1024;
+
+/// Resolve the in-view entry's decrypted [`Secret`] through the entry-view cache
+/// (R086), projecting an owned `T` out via `project`.
+///
+/// - **HIT** (same entry cached + oid unchanged): `project` runs against the
+///   borrowed cached secret with NO decrypt and NO identity use. The identity
+///   idle/gate timers are bumped (activity); the cache timer is re-armed (the
+///   slide) only when `slide` (Show — D8). No Immediate soft-wipe (the identity
+///   was untouched).
+/// - **MISS**: decrypt via [`Store::get_with_oid`] (capturing the oid atomically),
+///   run the Immediate post-op tail (the identity was used), run `project`, and —
+///   if under [`ENTRY_CACHE_MAX_BYTES`] — move the secret into the cache, arm the
+///   view-clear timer, and emit `entry-cache-warmed`.
+///
+/// The oid is re-checked on every hit (D4): a background/manual sync that changed
+/// the entry invalidates the cache → evict + re-decrypt. `project` receives the
+/// atomic oid so [`show_password_core`] can fill `version` on both paths.
+///
+/// `IdentityEncrypted` (identity encrypted + not cached) propagates from the MISS
+/// decrypt so [`entry_probe`] can map it to "unknown" without prompting.
+async fn with_secret<R, T, F>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    entry_path: &str,
+    slide: bool,
+    project: F,
+) -> Result<T, Error>
+where
+    R: Runtime,
+    F: FnOnce(&rustpass::Secret, &str) -> Result<T, Error>,
+{
+    // Wrap so the closure is consumed in exactly one branch (HIT or MISS).
+    let mut project = Some(project);
+
+    // ---- HIT probe: is this same entry cached? (sync, under the lock) ----
+    let cached_oid: Option<String> = state
+        .cached_entry
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .filter(|c| c.entry_path.as_str() == entry_path)
+        .map(|c| c.oid.clone());
+
+    if let Some(oid) = cached_oid {
+        // D4 freshness: re-fetch the oid; a mismatch (a sync changed the entry, or
+        // it's gone) evicts and falls through to a re-decrypt.
+        let fresh = state
+            .store
+            .entry_oid(entry_path)
+            .await
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some(oid.as_str());
+        if fresh {
+            // Project under the lock (the secret is NOT cloned — it can't be). A
+            // racing wipe between the oid check and here yields None and falls
+            // through to MISS.
+            if let Some(result) = state
+                .cached_entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .filter(|c| c.oid == oid)
+                .map(|c| project.take().expect("project runs once")(&c.secret, &c.oid))
+            {
+                // Activity (no identity used → no Immediate soft-wipe). Slide the
+                // cache timer only on Show (D8).
+                reset_lock_timer(state, app);
+                reset_gate_idle_timer(state, app);
+                if slide {
+                    entry_cache::reset_entry_cache_timer(state, app);
+                }
+                return result;
+            }
+        } else {
+            // Stale → evict, then MISS (re-decrypt repopulates).
+            *state
+                .cached_entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    }
+
+    // ---- MISS: decrypt (capture oid atomically) + Immediate post-op tail. ----
+    let read = state.store.get_with_oid(entry_path).await;
+    // The identity was used (decrypt attempted): reset both idle timers and, under
+    // Immediate, soft-wipe — a failed read must not leave the identity cached.
+    reset_lock_timer(state, app);
+    reset_gate_idle_timer(state, app);
+    maybe_soft_wipe(state, app).await;
+    let (secret, oid) = read?;
+    let project = project.take().expect("project runs once");
+    let result = project(&secret, &oid);
+    // Size gate (D2): cache only if under the threshold; serve regardless.
+    if total_secret_size(&secret) <= ENTRY_CACHE_MAX_BYTES {
+        *state
+            .cached_entry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(entry_cache::EntryCache {
+            entry_path: Zeroizing::new(entry_path.to_string()),
+            oid,
+            secret,
+        });
+        entry_cache::reset_entry_cache_timer(state, app);
+        entry_cache::emit_entry_cache_state(app, true, entry_cache::EntryCacheReason::Warmed);
+    }
+    result
+}
+
+/// Wipe the entry-view cache (R086). Called by the frontend on leave/switch so
+/// the decrypted content of the just-left entry doesn't linger. Idempotent — a
+/// no-op emit-wise if nothing is cached. Single-entry cache, so the path is
+/// informational.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn wipe_entry_cache(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    entry_path: String,
+) -> Result<(), Error> {
+    // Only wipe if the cached entry IS the one the frontend is leaving — a stale
+    // leave-wipe from rapid A→B→C navigation (B's wipe landing after C's probe
+    // warmed the cache) must not evict the newly-warmed C.
+    let mine = state
+        .cached_entry
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|c| c.entry_path.as_str() == entry_path);
+    if mine {
+        entry_cache::soft_wipe_entry_cache(&state, &app, entry_cache::EntryCacheReason::Leave);
+    }
+    Ok(())
+}
+
 /// Decrypt-and-show core, runtime-generic so the in-crate tests can drive it
 /// against the mock runtime. Reads the entry, then — under Immediate — resets
 /// the timer and soft-wipes the identity on BOTH paths (a failed read must not
@@ -333,39 +509,39 @@ pub(crate) async fn show_password_core<R: Runtime>(
     entry_path: &str,
 ) -> Result<SensitiveContent, Error> {
     log::info!("show: {}", entry_path.trim_end_matches(".age"));
-    let read = state.store.get_with_oid(entry_path).await;
-    reset_lock_timer(state, app);
-    reset_gate_idle_timer(state, app);
-    maybe_soft_wipe(state, app).await;
-    let (secret, oid) = read.inspect_err(|e| {
-        log::warn!("show failed: {}: {e}", entry_path.trim_end_matches(".age"));
-    })?;
-    let body = secret.body();
-    let attachment = rustpass::metadata(&secret);
-    Ok(SensitiveContent {
-        password: Zeroizing::new(secret.password().to_string()),
-        // `body()` is free-text notes only (gopass `Body()` parity — attribute
-        // lines live in `attributes`). For an attachment even that is a base64
-        // wall, so clear it; the metadata + Export carry the entry instead.
-        notes: if attachment.is_some() {
-            Zeroizing::new(String::new())
-        } else {
-            Zeroizing::new(body.to_string())
-        },
-        attributes: attr_view(&secret),
-        has_totp: rustpass::totp::has_totp(&secret),
-        // A non-UTF-8 secret can't be safely edited as text (the lossy view
-        // would be re-encrypted on save, corrupting it) — flag it so the UI
-        // edit-blocks. Attachments are base64 (valid UTF-8), so they don't trip
-        // this; they stay blocked via `attachment`.
-        edit_blocked: if secret.is_utf8() {
-            None
-        } else {
-            Some(EditBlockReason::NonUtf8)
-        },
-        attachment,
-        version: Some(oid),
+    // Through the cache (R086), `slide` = true — Show is the view operation that
+    // resets the view-clear window (D8). The closure builds the SensitiveContent
+    // from the borrowed secret; the atomic oid fills `version` on both paths.
+    with_secret(state, app, entry_path, true, |secret, oid| {
+        let body = secret.body();
+        let attachment = rustpass::metadata(secret);
+        Ok(SensitiveContent {
+            password: Zeroizing::new(secret.password().to_string()),
+            // `body()` is free-text notes only (gopass `Body()` parity — attribute
+            // lines live in `attributes`). For an attachment even that is a base64
+            // wall, so clear it; the metadata + Export carry the entry instead.
+            notes: if attachment.is_some() {
+                Zeroizing::new(String::new())
+            } else {
+                Zeroizing::new(body.to_string())
+            },
+            attributes: attr_view(secret),
+            has_totp: rustpass::totp::has_totp(secret),
+            // A non-UTF-8 secret can't be safely edited as text (the lossy view
+            // would be re-encrypted on save, corrupting it) — flag it so the UI
+            // edit-blocks. Attachments are base64 (valid UTF-8), so they don't trip
+            // this; they stay blocked via `attachment`.
+            edit_blocked: if secret.is_utf8() {
+                None
+            } else {
+                Some(EditBlockReason::NonUtf8)
+            },
+            attachment,
+            version: Some(oid.to_string()),
+        })
     })
+    .await
+    .inspect_err(|e| log::warn!("show failed: {}: {e}", entry_path.trim_end_matches(".age")))
 }
 
 /// Secondary operation: decrypt and return password for display.
@@ -409,16 +585,15 @@ pub(crate) async fn copy_totp<R: Runtime>(
     let entry_name = entry_path.trim_end_matches(".age").to_string();
     log::info!("copy-totp: {entry_name}");
 
-    // Decrypt first so a FAILED read still counts as a secret access (Immediate).
-    let secret = state.store.get(&entry_path).await;
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
-    maybe_soft_wipe(&state, &app).await;
-    let secret = secret.inspect_err(|e| log::warn!("copy failed: {entry_name}: {e}"))?;
+    // Through the cache (R086), `slide` = false (Copy-class op — D8). Project the
+    // TOTP seed (None when the entry has none).
+    let otp = with_secret(&state, &app, &entry_path, false, |secret, _| {
+        rustpass::totp::extract(secret)
+    })
+    .await
+    .inspect_err(|e| log::warn!("copy-totp failed: extract: {entry_name}: {e}"))?;
 
-    let Some(otp) = rustpass::totp::extract(&secret)
-        .inspect_err(|e| log::warn!("copy-totp failed: extract: {entry_name}: {e}"))?
-    else {
+    let Some(otp) = otp else {
         // No TOTP seed: don't touch the clipboard. A prior copy's auto-clear
         // timer is left intact; `cleared_after_secs` is unused on this branch.
         return Ok(TotpCopyResult {
@@ -459,26 +634,37 @@ pub(crate) async fn entry_probe<R: Runtime>(
     app: AppHandle<R>,
     entry_path: String,
 ) -> Result<Option<EntryProbe>, Error> {
-    let secret = state.store.get(&entry_path).await;
-    // Encrypted + not cached ⇒ would need an unlock prompt. Signal "unknown"
-    // and never prompt.
-    let secret = match secret {
-        Err(e) if e.code == "IDENTITY_ENCRYPTED" => return Ok(None),
-        s => s,
-    };
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
-    maybe_soft_wipe(&state, &app).await;
-    let secret = secret.inspect_err(|e| log::warn!("entry-probe failed: {entry_path}: {e}"))?;
-    Ok(Some(EntryProbe {
-        has_totp: rustpass::totp::has_totp(&secret),
-        attachment: rustpass::metadata(&secret),
-        edit_blocked: if secret.is_utf8() {
-            None
-        } else {
-            Some(EditBlockReason::NonUtf8)
-        },
-    }))
+    // The probe must NEVER trigger an unlock prompt. A cold identity (encrypted +
+    // not cached) ⇒ "unknown" with NO timer/cache side effects — check that first
+    // (mirrors the original `IDENTITY_ENCRYPTED → Ok(None)` short-circuit).
+    if state.store.is_identity_encrypted().await && !state.store.is_unlocked() {
+        return Ok(None);
+    }
+    // Warm identity: through the cache (R086). This is the GATE's warm point —
+    // the first probe after an unlock decrypts once and warms the cache so the
+    // subsequent copy/show/etc. hit. `slide` is false (a probe is not the view
+    // op). A race (the identity wiped between the check above and the decrypt)
+    // surfaces as `IDENTITY_ENCRYPTED` from the MISS — map it to "unknown" too.
+    match with_secret(&state, &app, &entry_path, false, |secret, _| {
+        Ok(EntryProbe {
+            has_totp: rustpass::totp::has_totp(secret),
+            attachment: rustpass::metadata(secret),
+            edit_blocked: if secret.is_utf8() {
+                None
+            } else {
+                Some(EditBlockReason::NonUtf8)
+            },
+        })
+    })
+    .await
+    {
+        Ok(probe) => Ok(Some(probe)),
+        Err(e) if e.code == "IDENTITY_ENCRYPTED" => Ok(None),
+        Err(e) => {
+            log::warn!("entry-probe failed: {entry_path}: {e}");
+            Err(e)
+        }
+    }
 }
 
 /// Detect a binary attachment and export its decoded bytes to a user-chosen
@@ -512,18 +698,15 @@ pub(crate) async fn export_attachment_core<R: Runtime>(
     // identity cache for nothing.
     let _guard = crate::export_guard::FileSaveGuard::acquire()?;
 
-    // Decrypt first so a FAILED read still counts as a secret access: under
-    // Immediate we reset the timer + wipe on both paths (an errored op must not
-    // leave the identity cached with no idle timer to eventually clear it).
-    let secret = state.store.get(entry_path).await;
-    reset_lock_timer(state, app);
-    reset_gate_idle_timer(state, app);
-    maybe_soft_wipe(state, app).await;
-    let secret =
-        secret.inspect_err(|e| log::warn!("export-attachment failed: {entry_name}: {e}"))?;
-
-    // Detect + decode. Bytes never reach the WebView.
-    let Some(attachment) = rustpass::attachment::extract(&secret)? else {
+    // Through the cache (R086), `slide` = false (Export keeps its plaintext
+    // footprint minimal — D8). Project the decoded attachment (None when the
+    // entry holds no modern attachment). Bytes never reach the WebView.
+    let Some(attachment) = with_secret(state, app, entry_path, false, |secret, _| {
+        rustpass::attachment::extract(secret)
+    })
+    .await
+    .inspect_err(|e| log::warn!("export-attachment failed: {entry_name}: {e}"))?
+    else {
         return Ok(AttachmentExportResult {
             exported: false,
             entry_name,
@@ -758,6 +941,32 @@ mod tests {
             clipboard_clear_plan(u64::from(u32::MAX) + 1),
             (true, u32::MAX)
         );
+    }
+
+    // ---- entry-view cache size threshold (R086 D2) ----
+
+    #[test]
+    fn total_secret_size_sums_password_body_and_attributes() {
+        // password "pw" (2) + body "notes body" (10) + attr key "user" (4) +
+        // value "alice" (5).
+        let secret = rustpass::Secret::parse(b"pw\nuser: alice\nnotes body").unwrap();
+        assert_eq!(total_secret_size(&secret), 2 + 10 + 4 + 5);
+    }
+
+    #[test]
+    fn total_secret_size_threshold_admits_small_excludes_large() {
+        // A normal secret is well under the cache threshold (cacheable).
+        let small = rustpass::Secret::parse(b"hunter2\nuser: alice").unwrap();
+        assert!(total_secret_size(&small) <= ENTRY_CACHE_MAX_BYTES);
+        // A giant body (e.g. a base64 attachment wall) is over it → the cache
+        // serves-but-does-not-store (re-decrypt per access), bounding plaintext.
+        let giant = rustpass::Secret::from_parts(
+            b"pw".to_vec(),
+            vec![],
+            b"X".repeat(ENTRY_CACHE_MAX_BYTES + 1),
+        )
+        .unwrap();
+        assert!(total_secret_size(&giant) > ENTRY_CACHE_MAX_BYTES);
     }
 
     // ---- attachment-export pure helpers ----

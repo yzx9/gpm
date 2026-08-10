@@ -43,11 +43,12 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_keystore::{BiometricState, KeystoreError, KeystoreExt, PromptText};
 use zeroize::Zeroizing;
 
+use crate::entry_cache::EntryCacheReason;
 use crate::identity::LockEventReason;
 use crate::keystore::BiometricSlot;
 use crate::migrations::run_app_migrations;
 use crate::verbose::arm_verbose_timer;
-use crate::{AppState, GateIdle, identity, keystore};
+use crate::{AppState, GateIdle, entry_cache, identity, keystore};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types
@@ -654,6 +655,10 @@ pub(crate) fn apply_resume_relock<R: Runtime>(state: &State<'_, AppState>, app: 
     // Past the grace window, or `gate_idle = Off`: re-lock. Disarm the idle timer
     // first so it can't fire `Idle` after this `Return` emit (prompt determinism).
     identity::disarm_gate_idle(state);
+    // Wipe the entry-view cache with the app lock — a decrypted entry must not outlive
+    // the vault key being dropped. (Grace-window resumes return above, before this, so
+    // a resumed session keeps its cache.)
+    entry_cache::soft_wipe_entry_cache(state, app, EntryCacheReason::Lock);
     do_app_lock(
         &state.store,
         app,

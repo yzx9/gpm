@@ -10,6 +10,8 @@ use rustpass::LockMode;
 use tauri::Manager;
 
 use crate::AppState;
+use crate::entry_cache;
+use crate::entry_cache::EntryCacheReason;
 use crate::read;
 use crate::tests::{make_unlocked_state, mock_app};
 
@@ -104,4 +106,108 @@ async fn copy_totp_skips_clipboard_when_no_totp_seed() {
     assert!(!result.copied, "no TOTP seed ⇒ copied == false");
     assert_eq!(result.cleared_after_secs, 0);
     assert_eq!(result.entry_name, "foo");
+}
+
+/// R086: the entry-view cache. `show_password_core` warms the cache on the first
+/// decrypt; a second `show` of the SAME entry HITS the cache and returns the
+/// secret WITHOUT re-decrypting — so even under Immediate (where the first show
+/// soft-wiped the identity) the second show succeeds instead of failing with
+/// `IDENTITY_ENCRYPTED`. This is the core property: one unlock opens the view.
+#[tokio::test]
+async fn entry_cache_hit_serves_second_show_without_identity() {
+    let (state, _guard) = make_unlocked_state(&[("foo.age", b"hunter2\nbody line")]).await;
+    let app = mock_app(state);
+    let app_state = app.state::<AppState>();
+    *app_state.lock_mode.lock().unwrap() = LockMode::Immediate;
+
+    // First show: decrypt + Immediate soft-wipe + warm the cache.
+    let first = read::show_password_core(&app_state, app.handle(), "foo.age")
+        .await
+        .expect("first show");
+    assert_eq!(&*first.password, "hunter2");
+    assert!(
+        !app_state.store.is_unlocked(),
+        "Immediate soft-wiped the identity after the first show"
+    );
+    assert!(
+        app_state.cached_entry.lock().unwrap().is_some(),
+        "the cache warmed on the first decrypt"
+    );
+
+    // Second show: identity is wiped, but the cache HITS → no re-auth, no decrypt.
+    // (Without the cache this would reject with IDENTITY_ENCRYPTED.)
+    let second = read::show_password_core(&app_state, app.handle(), "foo.age")
+        .await
+        .expect("second show must hit the cache, not re-prompt");
+    assert_eq!(&*second.password, "hunter2");
+    // The hit reuses the cached oid for `version` (#11).
+    assert_eq!(second.version, first.version);
+    assert!(
+        !app_state.store.is_unlocked(),
+        "a cache hit touches no identity"
+    );
+}
+
+/// R086: the cache is single-entry — viewing a different entry evicts the prior
+/// one (a MISS repopulates). After showing `bar`, the cache holds `bar`, not `foo`.
+#[tokio::test]
+async fn entry_cache_evicts_on_entry_switch() {
+    let (state, _guard) =
+        make_unlocked_state(&[("foo.age", b"foo-pw\nbody"), ("bar.age", b"bar-pw\nbody")]).await;
+    let app = mock_app(state);
+    let app_state = app.state::<AppState>();
+    // Never keeps the identity cached across shows, so the second (different)
+    // entry can MISS the cache and re-decrypt — the single-entry eviction path.
+    *app_state.lock_mode.lock().unwrap() = LockMode::Never;
+
+    read::show_password_core(&app_state, app.handle(), "foo.age")
+        .await
+        .expect("show foo");
+    assert_eq!(
+        app_state
+            .cached_entry
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|c| c.entry_path.as_str().to_owned()),
+        Some("foo.age".to_string()),
+        "cache holds foo"
+    );
+
+    read::show_password_core(&app_state, app.handle(), "bar.age")
+        .await
+        .expect("show bar");
+    assert_eq!(
+        app_state
+            .cached_entry
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|c| c.entry_path.as_str().to_owned()),
+        Some("bar.age".to_string()),
+        "single-entry cache evicted foo for bar"
+    );
+}
+
+/// `soft_wipe_entry_cache` clears the cached entry (the wipe path the lock/leave
+/// handlers share). After a show warms it, the wipe empties it.
+#[tokio::test]
+async fn soft_wipe_entry_cache_clears_the_cache() {
+    let (state, _guard) = make_unlocked_state(&[("foo.age", b"hunter2")]).await;
+    let app = mock_app(state);
+    let app_state = app.state::<AppState>();
+
+    read::show_password_core(&app_state, app.handle(), "foo.age")
+        .await
+        .expect("show");
+    assert!(
+        app_state.cached_entry.lock().unwrap().is_some(),
+        "cache warmed"
+    );
+
+    entry_cache::soft_wipe_entry_cache(&app_state, app.handle(), EntryCacheReason::Leave);
+    assert!(
+        app_state.cached_entry.lock().unwrap().is_none(),
+        "soft_wipe_entry_cache emptied the cache"
+    );
 }

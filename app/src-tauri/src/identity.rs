@@ -38,8 +38,10 @@ use tauri_plugin_clipboard_notify::ClipboardNotifyExt;
 use tauri_plugin_keystore::KeystoreExt;
 use tokio::task::JoinHandle;
 
-use crate::AppState;
 use crate::app_config::GateIdle;
+use crate::applock::AppLockReason;
+use crate::entry_cache::EntryCacheReason;
+use crate::{AppState, applock, entry_cache};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -272,6 +274,9 @@ pub(crate) async fn do_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHa
     // self-disarms (shared with the soft-wipe / reset paths).
     disarm_lock(state);
     state.store.lock();
+    // A decrypted entry must not outlive the identity that decrypted it — wipe
+    // the entry-view cache on the identity hard-lock.
+    entry_cache::soft_wipe_entry_cache(state, app, EntryCacheReason::Lock);
     // Emit the current lock state — same path the auto-lock timer takes.
     emit_lock_state(app, &state.store, false, LockEventReason::Manual).await;
 }
@@ -600,13 +605,18 @@ pub(crate) fn arm_gate_idle<R: Runtime>(
     let app_handle = app.clone();
     let app_locked = state.app_locked.clone();
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
+    let cached_entry = Arc::clone(&state.cached_entry);
     state.gate_idle_timer.arm(secs, move || async move {
-        crate::applock::do_app_lock(
+        // Wipe the entry-view cache with the app lock (the gate-idle path reaches
+        // `do_app_lock` directly, which has no `AppState`, so wipe here from the
+        // captured `Arc`).
+        entry_cache::wipe_entry_cache_arc(&cached_entry, &app_handle, EntryCacheReason::Lock);
+        applock::do_app_lock(
             &store,
             &app_handle,
             &app_locked,
             enabled,
-            crate::applock::AppLockReason::Idle,
+            AppLockReason::Idle,
         );
     });
 }
@@ -689,10 +699,14 @@ pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app
 pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>, secs: u64) {
     let app_handle = app.clone();
     let store = state.store.clone();
+    let cached_entry = Arc::clone(&state.cached_entry);
     state.lock_timer.arm(secs, move || async move {
         log::info!("identity: locked (idle)");
         // Lock the real store (clears cached identity + passphrase)
         store.lock();
+        // Wipe the entry-view cache with the identity (this idle path does not
+        // go through `do_lock`, so wipe here).
+        entry_cache::wipe_entry_cache_arc(&cached_entry, &app_handle, EntryCacheReason::Lock);
         // Emit the current lock state so the frontend shows the unlock overlay
         // + clears revealed secrets (a hard lock, not a soft wipe).
         emit_lock_state(&app_handle, &store, false, LockEventReason::Idle).await;

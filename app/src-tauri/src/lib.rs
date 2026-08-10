@@ -30,6 +30,7 @@ mod biometric;
 mod clipboard;
 mod config;
 mod diagnostics_export;
+mod entry_cache;
 mod export_guard;
 mod generator;
 mod git;
@@ -106,6 +107,16 @@ pub(crate) struct AppState {
     /// and unlock all flow through one update. The resume re-lock path
     /// (`applock::app_lock`) reads it to decide the R058 grace window.
     pub(crate) last_activity_at: Mutex<Instant>,
+    /// Entry-view decrypted-content cache (R086): ONE in-view entry's decrypted
+    /// `Secret`, held owned so it outlives the per-op identity wipe. `Arc` so the
+    /// `'static` identity-idle / gate-idle timer fire tasks can wipe it on lock.
+    /// None when no entry is cached (cold, or after a wipe).
+    pub(crate) cached_entry: Arc<Mutex<Option<entry_cache::EntryCache>>>,
+    /// View-clear idle timer for the entry cache (R086) — a third
+    /// [`identity::IdleTimer`] that wipes the cached secret after `view_clear_secs`
+    /// (the same value the frontend reveal timer uses). Armed on miss-populate and
+    /// — Show only — on hit (the slide); disarmed on wipe / Never.
+    pub(crate) entry_cache_timer: identity::IdleTimer,
     /// Cached `RepoConfig.unlock_identity_with_app`: when true the identity
     /// session has no independent auto-lock — its lifecycle follows the gate
     /// (R057 coupling). Refreshed in `refresh_security_cache` BEFORE
@@ -341,6 +352,10 @@ fn init_state(
         // `now` so the grace window is never spuriously huge before the first
         // `reset_gate_idle_timer` (unlock/activity) lands.
         last_activity_at: Mutex::new(Instant::now()),
+        // R086: entry-view cache starts cold; populated on the first decrypt in
+        // view, wiped on leave/lock/timer.
+        cached_entry: Arc::new(Mutex::new(None)),
+        entry_cache_timer: identity::IdleTimer::new(),
         // Refreshed on the first unlock/set_* (the gate is off / no identity here).
         identity_coupled: AtomicBool::new(false),
         // Legacy-envelope migrate pending; only consumed on the App-Lock path
@@ -638,6 +653,8 @@ pub fn run() {
             read::entry_probe,
             read::export_attachment,
             read::entry_oid,
+            // entry-view cache (R086): frontend wipes on leave/switch.
+            read::wipe_entry_cache,
             clipboard::copy_generated_password,
             clipboard::are_clipboard_notifications_enabled,
             clipboard::request_clipboard_notifications_permission,

@@ -72,6 +72,14 @@ pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> 
     log::info!("config: reset");
     // Cancel timer
     state.lock_timer.disarm();
+    // Wipe the entry-view cache too — a decrypted entry must not outlive the
+    // identity/config that's being reset. (The detail page's leave-wipe usually
+    // clears it first; the backend owns the invariant.)
+    crate::entry_cache::soft_wipe_entry_cache(
+        &state,
+        &app,
+        crate::entry_cache::EntryCacheReason::Lock,
+    );
     state.store.reset().await?;
     // After a reset there is no identity, so the app is no longer locked — emit
     // the real state so any open unlock overlay closes.
