@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The **diagnostics** and **repository** export files (Settings → Logs → Export diagnostics, and Settings → Repository → Export) are now **`.tar.gz`** archives instead of `.zip`. Same contents, new container — open them with `tar -xzf` on desktop.
+
 ## [v0.18.1] - 2026-08-10
 
 ### Changed

@@ -11,7 +11,7 @@ import { useI18n } from "vue-i18n";
 
 /**
  * Repository-export flow (R078): confirm → build one README per locale → SAF
- * save the `gpm-export.zip` archive → toast feedback.
+ * save the `gpm-export.tar.gz` archive → toast feedback.
  *
  * Mirrors {@link useDiagnosticsExport}, with one extra step: the README body is
  * localized in the WebView for **every** supported locale (the Rust backend does

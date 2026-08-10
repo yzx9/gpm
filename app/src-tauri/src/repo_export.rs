@@ -4,7 +4,7 @@
 
 //! Repository export (R078): writes the active repository as a portable,
 //! self-describing archive — the minimal `v1` instance of the whole-application
-//! export format (R088). The archive is a zip containing:
+//! export format (R088). The archive is a gzip tarball containing:
 //!
 //! - `manifest.json` — `{ type: "gpm.export", version: 1, repositories: [one] }`
 //!   (the R088 schema; tolerant-reader, additive-forward-compatible),
@@ -23,20 +23,21 @@
 //! the envelope carries no new secret to lose. (Optional recipient-encryption is
 //! R089; symmetric restore is R087.)
 
-use std::io::Write;
 use std::path::Path;
 use std::time::SystemTime;
 
+use flate2::Compression;
+use flate2::write::GzEncoder;
 use rustpass::{Error, ErrorCode, RepoConfig};
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_file_save::FileSaveExt;
-use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 use crate::AppState;
+use crate::archive::{append_entry, finish_tar_gz};
 use crate::read::StageGuard;
 
 /// Suggested name for the saved archive (and the staged temp file).
-const ARCHIVE_FILENAME: &str = "gpm-export.zip";
+const ARCHIVE_FILENAME: &str = "gpm-export.tar.gz";
 /// The staged full-history Git bundle (assembled into the archive, then wiped).
 const BUNDLE_STAGE_FILENAME: &str = "gpm-repo.bundle";
 
@@ -111,18 +112,19 @@ fn build_manifest(cfg: Option<&RepoConfig>) -> String {
     serde_json::to_string_pretty(&m).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// A README file in the archive: its zip-entry name + localized body. The frontend
-/// builds one entry per supported locale (driven by its `SUPPORTED_LOCALES`), so
-/// adding a locale is a frontend-only change — the backend never names a locale.
+/// A README file in the archive: its tar-entry name + localized body. The
+/// frontend builds one entry per supported locale (driven by its
+/// `SUPPORTED_LOCALES`), so adding a locale is a frontend-only change — the
+/// backend never names a locale.
 #[derive(serde::Deserialize)]
 struct ReadmeEntry {
-    /// Zip-entry name, e.g. `README.md` or `README.zh-cn.md`.
+    /// Tar-entry name, e.g. `README.md` or `README.zh-cn.md`.
     name: String,
     /// The full locale-owned markdown (heading + prose).
     body: String,
 }
 
-/// A README zip-entry name must be `README.md` or `README.<x>.md` — no path
+/// A README tar-entry name must be `README.md` or `README.<x>.md` — no path
 /// separators, no `..` traversal, and distinct from `manifest.json` /
 /// `repo.bundle` (a collision would let a bad entry shadow the real payload in a
 /// naive extractor). Defense-in-depth: the frontend only sends these, but the IPC
@@ -137,56 +139,63 @@ fn is_readme_name(name: &str) -> bool {
     ext == "md" && (stem == "README" || stem.starts_with("README."))
 }
 
-/// Assemble the archive into `zip_path`: `manifest.json` + one README entry per
-/// supported locale + `repo.bundle`. The text entries are deflated; the bundle is
-/// stored (a git packfile is already deflate-compressed, so re-deflating burns CPU
-/// for ~no gain) and streamed in chunk-by-chunk via `io::copy`. File-backed (not
-/// the in-memory `Vec` the diagnostics exporter uses) so a large bundle never sits
-/// in RAM. Pure (no `State`/`AppHandle`) so the assembly is unit-testable.
-fn build_export_zip(
-    zip_path: &Path,
+/// Assemble the archive into `tar_path`: `manifest.json` + one README entry per
+/// supported locale + `repo.bundle`, all wrapped in one gzip stream. The git
+/// bundle is streamed in chunk-by-chunk through the tar builder (never held in
+/// RAM); gzip re-compresses the whole stream, so the already-compressed packfile
+/// gets gzipped too — negligible size change, a small CPU cost on an infrequent
+/// manual export. File-backed (not the in-memory `Vec` the diagnostics exporter
+/// uses) so a large bundle never sits in RAM. Pure (no `State`/`AppHandle`) so
+/// the assembly is unit-testable.
+fn build_export_tar(
+    tar_path: &Path,
     manifest: &str,
     readmes: &[ReadmeEntry],
     bundle_path: &Path,
 ) -> Result<(), Error> {
-    let file = std::fs::File::create(zip_path)
-        .map_err(|e| Error::new(ErrorCode::IoError, format!("create export zip: {e}")))?;
+    let file = std::fs::File::create(tar_path)
+        .map_err(|e| Error::new(ErrorCode::IoError, format!("create export tarball: {e}")))?;
     // The archive carries plaintext metadata (entry paths, commit messages) from
     // the bundle; 0600 keeps a stage stranded by a hard kill unreadable by others.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(zip_path, std::fs::Permissions::from_mode(0o600));
+        let _ = std::fs::set_permissions(tar_path, std::fs::Permissions::from_mode(0o600));
     }
-    let mut zw = ZipWriter::new(file);
-    let text = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-    let raw = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    // GzEncoder::new pins the gzip-header mtime to 0 (the default). The whole
+    // tar stream is gzip-deflated together (Compression::default() = level 6).
+    let encoder = GzEncoder::new(file, Compression::default());
+    let mut builder = tar::Builder::new(encoder);
 
-    zw.start_file("manifest.json", text)
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("zip start manifest: {e}")))?;
-    zw.write_all(manifest.as_bytes())
-        .map_err(|e| Error::new(ErrorCode::IoError, format!("zip write manifest: {e}")))?;
+    let manifest_bytes = manifest.as_bytes();
+    let mut mb = std::io::Cursor::new(manifest_bytes);
+    append_entry(
+        &mut builder,
+        "manifest.json",
+        &mut mb,
+        manifest_bytes.len() as u64,
+    )?;
     // One README per supported locale (README.md, README.zh-cn.md, …), passed in
     // by the frontend — the backend is locale-blind and writes each body verbatim.
     for r in readmes {
-        zw.start_file(&r.name, text)
-            .map_err(|e| Error::new(ErrorCode::StoreError, format!("zip start {}: {e}", r.name)))?;
-        zw.write_all(r.body.as_bytes())
-            .map_err(|e| Error::new(ErrorCode::IoError, format!("zip write {}: {e}", r.name)))?;
+        let body = r.body.as_bytes();
+        let mut b = std::io::Cursor::new(body);
+        append_entry(&mut builder, &r.name, &mut b, body.len() as u64)?;
     }
-    zw.start_file("repo.bundle", raw)
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("zip start bundle: {e}")))?;
+    // Stream the git bundle in (tar copies via its internal buffer — never in RAM).
     let mut bf = std::fs::File::open(bundle_path)
         .map_err(|e| Error::new(ErrorCode::IoError, format!("open staged bundle: {e}")))?;
-    // Stream the bundle into the entry (8 KB copy buffer) — never holds it in RAM.
-    std::io::copy(&mut bf, &mut zw)
-        .map_err(|e| Error::new(ErrorCode::IoError, format!("stream bundle into zip: {e}")))?;
-    zw.finish()
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("zip finish: {e}")))?;
+    let bundle_len = bf
+        .metadata()
+        .map_err(|e| Error::new(ErrorCode::IoError, format!("stat staged bundle: {e}")))?
+        .len();
+    append_entry(&mut builder, "repo.bundle", &mut bf, bundle_len)?;
+
+    let _file = finish_tar_gz(builder)?;
     Ok(())
 }
 
-/// Export the active repository as a `gpm-export.zip` archive to a user-chosen
+/// Export the active repository as a `gpm-export.tar.gz` archive to a user-chosen
 /// location via the system save dialog (`SAF` `ACTION_CREATE_DOCUMENT` on Android,
 /// a native dialog on desktop). The archive bytes never enter the `WebView`.
 /// Returns [`ErrorCode::Cancelled`] if the user dismisses the save dialog.
@@ -244,11 +253,11 @@ pub(crate) async fn export_repository_core<R: Runtime>(
         .app_cache_dir()
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("cache dir unavailable: {e}")))?;
     let bundle_path = cache_dir.join(BUNDLE_STAGE_FILENAME);
-    let zip_path = cache_dir.join(ARCHIVE_FILENAME);
+    let tar_path = cache_dir.join(ARCHIVE_FILENAME);
     // RAII-wipe both stages on every return path / panic (the bundle carries
     // plaintext metadata; diagnostics-style manual cleanup is not panic-safe).
     let _bundle_stage = StageGuard::new(&bundle_path);
-    let _zip_stage = StageGuard::new(&zip_path);
+    let _tar_stage = StageGuard::new(&tar_path);
 
     // 1. Build the bundle to its own stage (rustpass; repo_lock inside; under
     //    App Lock — create_bundle touches storage only, never the identity).
@@ -260,12 +269,12 @@ pub(crate) async fn export_repository_core<R: Runtime>(
     }
 
     // 2. Assemble the envelope: manifest + one README per locale + the bundle,
-    //    streamed into a File-backed zip on a blocking thread.
+    //    streamed into a File-backed gzip tarball on a blocking thread.
     let cfg = state.store.config().await.ok();
     let manifest = build_manifest(cfg.as_ref());
-    let zp = zip_path.clone();
+    let tp = tar_path.clone();
     let bp = bundle_path.clone();
-    tauri::async_runtime::spawn_blocking(move || build_export_zip(&zp, &manifest, &readmes, &bp))
+    tauri::async_runtime::spawn_blocking(move || build_export_tar(&tp, &manifest, &readmes, &bp))
         .await
         .map_err(|e| {
             Error::new(
@@ -275,16 +284,16 @@ pub(crate) async fn export_repository_core<R: Runtime>(
         })??;
 
     // 3. Free the bundle stage before the (slow) SAF copy so peak disk during the
-    //    save is the zip only (the bundle is already inside it).
+    //    save is the tarball only (the bundle is already inside it).
     let _ = tokio::fs::remove_file(&bundle_path).await;
 
-    // 4. Save the archive (plugin streams the staged zip to the destination).
+    // 4. Save the archive (plugin streams the staged tarball to the destination).
     let save_result = app
         .file_save()
         .save(
             ARCHIVE_FILENAME.to_string(),
-            zip_path.clone(),
-            "application/zip".to_string(),
+            tar_path.clone(),
+            "application/gzip".to_string(),
         )
         .await;
 
@@ -299,8 +308,8 @@ pub(crate) async fn export_repository_core<R: Runtime>(
 }
 
 /// Best-effort removal of stranded repo-export stages (`gpm-repo.bundle` +
-/// `gpm-export.zip`) from a prior run killed mid-export (`StageGuard`'s Drop runs
-/// on panic/cancel but not on SIGKILL). Called once at app startup.
+/// `gpm-export.tar.gz`) from a prior run killed mid-export (`StageGuard`'s Drop
+/// runs on panic/cancel but not on SIGKILL). Called once at app startup.
 pub(crate) async fn sweep_repo_export_stage<R: Runtime>(app: &AppHandle<R>) {
     let Ok(cache_dir) = app.path().app_cache_dir() else {
         return;
@@ -313,18 +322,22 @@ pub(crate) async fn sweep_repo_export_stage<R: Runtime>(app: &AppHandle<R>) {
 #[allow(clippy::indexing_slicing)] // manifest-structure assertions index a known schema
 mod tests {
     use super::*;
+    use flate2::read::GzDecoder;
     use std::io::Read;
 
     /// Read a single entry back out of the archive (for round-trip assertions).
-    fn read_entry(zip_path: &Path, name: &str) -> Vec<u8> {
-        let f = std::fs::File::open(zip_path).unwrap();
-        let mut za = zip::ZipArchive::new(f).expect("valid zip");
-        let mut e = za
-            .by_name(name)
-            .unwrap_or_else(|_| panic!("entry {name} missing"));
-        let mut buf = Vec::new();
-        e.read_to_end(&mut buf).unwrap();
-        buf
+    fn read_entry(tar_path: &Path, name: &str) -> Vec<u8> {
+        let f = std::fs::File::open(tar_path).unwrap();
+        let mut ar = tar::Archive::new(GzDecoder::new(f));
+        for entry in ar.entries().expect("valid gzip+tar") {
+            let mut e = entry.unwrap();
+            if e.path().unwrap().to_str().unwrap() == name {
+                let mut buf = Vec::new();
+                e.read_to_end(&mut buf).unwrap();
+                return buf;
+            }
+        }
+        panic!("entry {name} missing");
     }
 
     /// The manifest is the R088 v1 minimal instance: a fixed type marker,
@@ -367,7 +380,7 @@ mod tests {
     /// `is_readme_name` accepts `README.md` / `README.<x>.md` and rejects path
     /// traversal, non-markdown names, and collisions with `manifest.json` /
     /// `repo.bundle` — so an untrusted IPC payload can't shadow the payload or
-    /// plant a zip-slip entry.
+    /// plant a tar-slip entry.
     #[test]
     fn is_readme_name_accepts_readmes_rejects_paths_and_collisions() {
         assert!(is_readme_name("README.md"));
@@ -385,22 +398,23 @@ mod tests {
         assert!(!is_readme_name("README.txt"));
     }
 
-    /// `build_export_zip` assembles exactly `manifest.json` + `README.md` (en) +
+    /// `build_export_tar` assembles exactly `manifest.json` + `README.md` (en) +
     /// `README.zh-cn.md` (中文) + `repo.bundle` (in that order) and streams the
-    /// bundle in byte-for-byte (the `Stored`/`io::copy` path doesn't corrupt it).
-    /// A real bundle's git round-trip is proven in the rustpass integration test;
-    /// here a stand-in bundle suffices to pin the envelope structure.
+    /// bundle in byte-for-byte (the gzip/tar streaming path doesn't corrupt it).
+    /// The file is genuinely gzip-wrapped, not a raw tar. A real bundle's git
+    /// round-trip is proven in the rustpass integration test; here a stand-in
+    /// bundle suffices to pin the envelope structure.
     #[test]
-    fn build_export_zip_streams_bundle_into_archive() {
+    fn build_export_tar_streams_bundle_into_archive() {
         let dir = tempfile::tempdir().unwrap();
         let bundle_path = dir.path().join("repo.bundle");
         let bundle_bytes = b"# v2 git bundle\n0000 HEAD\n\nPACK\x00\x01\x02fake";
         std::fs::write(&bundle_path, bundle_bytes).unwrap();
 
-        let zip_path = dir.path().join("gpm-export.zip");
+        let tar_path = dir.path().join("gpm-export.tar.gz");
         let manifest = build_manifest(None);
-        build_export_zip(
-            &zip_path,
+        build_export_tar(
+            &tar_path,
             &manifest,
             &[
                 ReadmeEntry {
@@ -416,12 +430,27 @@ mod tests {
         )
         .unwrap();
 
+        // The staged tarball is born 0600 so a stage stranded by a hard kill
+        // (SIGKILL — StageGuard's Drop doesn't run) stays unreadable by others.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&tar_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "staged tarball must be 0600");
+        }
+
+        // The archive is genuinely gzip-wrapped, not a raw tar.
+        let mut magic = [0u8; 2];
+        let mut mf = std::fs::File::open(&tar_path).unwrap();
+        mf.read_exact(&mut magic).unwrap();
+        assert_eq!(magic, [0x1f, 0x8b], "gzip magic header");
+
         let names: Vec<String> = {
-            let f = std::fs::File::open(&zip_path).unwrap();
-            let mut za = zip::ZipArchive::new(f).expect("valid zip");
-            let n = za.len();
-            (0..n)
-                .filter_map(|i| za.by_index(i).ok().map(|e| e.name().to_string()))
+            let f = std::fs::File::open(&tar_path).unwrap();
+            let mut ar = tar::Archive::new(GzDecoder::new(f));
+            ar.entries()
+                .expect("valid gzip+tar")
+                .map(|e| e.unwrap().path().unwrap().to_str().unwrap().to_string())
                 .collect()
         };
         assert_eq!(
@@ -436,22 +465,39 @@ mod tests {
         );
 
         // The bundle entry is preserved byte-for-byte (streaming didn't corrupt it).
-        assert_eq!(read_entry(&zip_path, "repo.bundle"), bundle_bytes);
+        assert_eq!(read_entry(&tar_path, "repo.bundle"), bundle_bytes);
 
         // manifest.json parses as the R088 v1 schema and points at repo.bundle.
         let m: serde_json::Value =
-            serde_json::from_slice(&read_entry(&zip_path, "manifest.json")).unwrap();
+            serde_json::from_slice(&read_entry(&tar_path, "manifest.json")).unwrap();
         assert_eq!(m["type"], "gpm.export");
         assert_eq!(m["repositories"][0]["payload"], "repo.bundle");
 
         // One README per locale, each written verbatim from its body.
         assert_eq!(
-            String::from_utf8(read_entry(&zip_path, "README.md")).unwrap(),
+            String::from_utf8(read_entry(&tar_path, "README.md")).unwrap(),
             "English body."
         );
         assert_eq!(
-            String::from_utf8(read_entry(&zip_path, "README.zh-cn.md")).unwrap(),
+            String::from_utf8(read_entry(&tar_path, "README.zh-cn.md")).unwrap(),
             "中文正文。"
         );
+    }
+
+    /// A missing bundle path fails with `IO_ERROR` rather than panicking or
+    /// leaving a partial tarball behind.
+    #[test]
+    fn build_export_tar_errors_when_bundle_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("gpm-export.tar.gz");
+        let manifest = build_manifest(None);
+        let err = build_export_tar(
+            &tar_path,
+            &manifest,
+            &[],
+            &dir.path().join("nonexistent.bundle"),
+        )
+        .expect_err("missing bundle should error");
+        assert_eq!(err.code, "IO_ERROR");
     }
 }

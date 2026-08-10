@@ -4,7 +4,7 @@
 
 //! Diagnostics export bundle: assembles the full rotated log, the non-secret
 //! user settings, a redacted view of the repository configuration, a device-info
-//! summary, and a manifest into an in-memory zip, then saves it to a
+//! summary, and a manifest into an in-memory tarball (gzip), then saves it to a
 //! user-chosen location via the [`tauri_plugin_file_save`] plugin.
 //!
 //! Threat model (see SECURITY.md § Diagnostics logging): the on-device log is
@@ -14,8 +14,9 @@
 //! are plaintext-by-design, and the repo config is rendered through
 //! [`rustpass::RepoConfig::redacted`] which reduces credentials to `[REDACTED]`
 //! presence) plus the mandatory pre-export confirmation the frontend shows.
-//! The bundle bytes never enter the `WebView`: the zip is staged to a temp file
-//! and the file-save plugin streams that file to the destination the user picks.
+//! The bundle bytes never enter the `WebView`: the tarball is staged to a temp
+//! file and the file-save plugin streams that file to the destination the user
+//! picks.
 //!
 //! Graceful degrade: the export is not unlock-gated. When the app is locked, the
 //! redacted repo config is omitted (it carries git credentials) and the single
@@ -28,41 +29,43 @@
 
 use std::sync::atomic::Ordering;
 use std::time;
-use std::{io::Write, time::SystemTime};
+use std::time::SystemTime;
 
+use flate2::Compression;
+use flate2::write::GzEncoder;
 use rustpass::{Error, ErrorCode};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_device_info::DeviceInfoExt;
 use tauri_plugin_file_save::FileSaveExt;
-use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
+use crate::archive::{append_entry, finish_tar_gz};
 use crate::{AppState, logging};
 
 /// Suggested name for the saved bundle (and the staged temp file).
-const BUNDLE_FILENAME: &str = "gpm-diagnostics.zip";
+const BUNDLE_FILENAME: &str = "gpm-diagnostics.tar.gz";
 
-/// One entry in the bundle zip.
+/// One entry in the bundle tarball.
 struct BundleEntry {
     name: &'static str,
     bytes: Vec<u8>,
 }
 
-/// Build the bundle zip in memory from the given entries (Deflated). Pure (no
-/// `State`/`AppHandle`) so the assembly is unit-testable with constructed
-/// entries.
+/// Build the bundle tarball in memory from the given entries (gzip, level 6).
+/// Pure (no `State`/`AppHandle`) so the assembly is unit-testable with
+/// constructed entries.
 fn build_bundle(entries: &[BundleEntry]) -> Result<Vec<u8>, Error> {
-    let mut zw = ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    // `GzEncoder::new` pins the gzip-header mtime to 0 (the default), so
+    // build_bundle is byte-deterministic given fixed entries (a real export also
+    // varies by the manifest timestamp, which is an input here, not generated).
+    // Compression::default() = level 6.
+    let encoder = GzEncoder::new(std::io::Cursor::new(Vec::new()), Compression::default());
+    let mut builder = tar::Builder::new(encoder);
     for e in entries {
-        zw.start_file(e.name, opts)
-            .map_err(|e| Error::new(ErrorCode::StoreError, format!("zip start_file: {e}")))?;
-        zw.write_all(&e.bytes)
-            .map_err(|e| Error::new(ErrorCode::IoError, format!("zip write: {e}")))?;
+        let mut data = std::io::Cursor::new(&e.bytes[..]);
+        append_entry(&mut builder, e.name, &mut data, e.bytes.len() as u64)?;
     }
-    let cursor = zw
-        .finish()
-        .map_err(|e| Error::new(ErrorCode::StoreError, format!("zip finish: {e}")))?;
-    Ok(cursor.into_inner())
+    let buf = finish_tar_gz(builder)?;
+    Ok(buf.into_inner())
 }
 
 /// Build the human-readable `MANIFEST.txt`: app version, generation timestamp
@@ -95,18 +98,18 @@ fn build_manifest(app_locked: bool, repo_status: &str, entry_names: &[&str]) -> 
     )
 }
 
-/// Export a diagnostics bundle (zip) to a user-chosen location via the system
-/// save dialog (SAF `ACTION_CREATE_DOCUMENT` on Android, a native dialog on
-/// desktop). The bundle bytes never enter the `WebView`. Returns [`ErrorCode::Cancelled`]
-/// if the user dismisses the save dialog (the frontend treats that as a silent
-/// cancel, not an error toast).
+/// Export a diagnostics bundle (a gzip tarball) to a user-chosen location via
+/// the system save dialog (SAF `ACTION_CREATE_DOCUMENT` on Android, a native
+/// dialog on desktop). The bundle bytes never enter the `WebView`. Returns
+/// [`ErrorCode::Cancelled`] if the user dismisses the save dialog (the frontend
+/// treats that as a silent cancel, not an error toast).
 ///
 /// A single source failing never fails the whole export: the log, prefs, and
 /// device info degrade to empty/default, and a locked/unreadable repo config is
-/// omitted with a manifest note. Only the zip assembly or the final save can
+/// omitted with a manifest note. Only the tarball assembly or the final save can
 /// hard-fail the command.
 #[tauri::command]
-#[allow(clippy::too_many_lines)] // linear gather → zip → stage → save pipeline; clearest as one fn
+#[allow(clippy::too_many_lines)] // linear gather → tar → stage → save pipeline; clearest as one fn
 #[allow(clippy::needless_pass_by_value)] // Tauri IPC needs the owned State param shape (house style)
 pub(crate) async fn export_diagnostics(
     app: AppHandle,
@@ -177,7 +180,7 @@ pub(crate) async fn export_diagnostics(
         }
     };
 
-    // ── 2. Assemble the manifest + entries, then zip ─────────────────────────
+    // ── 2. Assemble the manifest + entries, then tar+gzip ────────────────────
 
     let mut names: Vec<&str> = vec![
         "MANIFEST.txt",
@@ -215,9 +218,9 @@ pub(crate) async fn export_diagnostics(
         });
     }
 
-    // Zip deflate is CPU work over a few MB (up to ~4 MB of verbose log); keep
-    // it off the async worker the way the codebase wraps git/scrypt.
-    let zip_bytes = tauri::async_runtime::spawn_blocking(move || build_bundle(&entries))
+    // gzip is CPU work over a few MB (up to ~4 MB of verbose log); keep it off
+    // the async worker the way the codebase wraps git/scrypt.
+    let tar_bytes = tauri::async_runtime::spawn_blocking(move || build_bundle(&entries))
         .await
         .map_err(|e| {
             Error::new(
@@ -237,7 +240,7 @@ pub(crate) async fn export_diagnostics(
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("cache dir unavailable: {e}")))?;
     let temp_path = cache_dir.join(BUNDLE_FILENAME);
     let _ = tokio::fs::remove_file(&temp_path).await; // best-effort wipe of any prior stage
-    tokio::fs::write(&temp_path, &zip_bytes)
+    tokio::fs::write(&temp_path, &tar_bytes)
         .await
         .map_err(|e| Error::new(ErrorCode::IoError, format!("failed to stage bundle: {e}")))?;
 
@@ -247,7 +250,7 @@ pub(crate) async fn export_diagnostics(
         .save(
             BUNDLE_FILENAME.to_string(),
             temp_path.clone(),
-            "application/zip".to_string(),
+            "application/gzip".to_string(),
         )
         .await;
     let _ = tokio::fs::remove_file(&temp_path).await;
@@ -265,15 +268,48 @@ pub(crate) async fn export_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::read::GzDecoder;
     use std::io::{self, Read};
 
-    /// Read a single entry back out of a zip (for round-trip assertions).
-    fn read_entry(zip_bytes: &[u8], name: &str) -> Vec<u8> {
-        let mut za = zip::ZipArchive::new(io::Cursor::new(zip_bytes)).expect("valid zip");
-        let mut f = za.by_name(name).expect("entry exists");
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).expect("read entry");
-        buf
+    /// Read a single entry back out of the tarball (for round-trip assertions).
+    fn read_entry(tar_gz: &[u8], name: &str) -> Vec<u8> {
+        let mut ar = tar::Archive::new(GzDecoder::new(io::Cursor::new(tar_gz)));
+        for entry in ar.entries().expect("valid gzip+tar") {
+            let mut e = entry.expect("entry");
+            if e.path().unwrap().to_str().unwrap() == name {
+                let mut buf = Vec::new();
+                e.read_to_end(&mut buf).expect("read entry");
+                return buf;
+            }
+        }
+        panic!("entry {name} missing");
+    }
+
+    #[test]
+    fn build_bundle_produces_gzip_magic_bytes() {
+        // The output is genuinely gzip-wrapped, not a raw tar: round-tripping
+        // with the same flate2+tar libs is mildly circular, so pin the magic.
+        let tar_gz = build_bundle(&[BundleEntry {
+            name: "MANIFEST.txt",
+            bytes: b"x".to_vec(),
+        }])
+        .expect("build");
+        let magic = tar_gz.get(..2).expect("non-empty gzip output");
+        assert_eq!(magic, &[0x1f, 0x8b], "gzip magic header");
+    }
+
+    #[test]
+    fn build_bundle_is_byte_deterministic() {
+        // Same entries -> same bytes: the gzip/tar headers carry no timestamp,
+        // so two builds of identical input are byte-identical. (A real export
+        // varies by the manifest `generated` timestamp, which is an input here.)
+        let entries = [BundleEntry {
+            name: "a.txt",
+            bytes: b"hello".to_vec(),
+        }];
+        let a = build_bundle(&entries).expect("build");
+        let b = build_bundle(&entries).expect("build");
+        assert_eq!(a, b, "identical inputs must produce byte-identical output");
     }
 
     #[test]
@@ -288,34 +324,38 @@ mod tests {
                 bytes: vec![0, 1, 2, 255],
             },
         ];
-        let zip = build_bundle(&entries).expect("build");
-        assert_eq!(read_entry(&zip, "a.txt"), b"hello");
-        assert_eq!(read_entry(&zip, "b.bin"), vec![0, 1, 2, 255]);
+        let tar_gz = build_bundle(&entries).expect("build");
+        assert_eq!(read_entry(&tar_gz, "a.txt"), b"hello");
+        assert_eq!(read_entry(&tar_gz, "b.bin"), vec![0, 1, 2, 255]);
     }
 
     #[test]
-    fn build_bundle_empty_entries_is_a_valid_empty_zip() {
-        let zip = build_bundle(&[]).expect("build");
-        let za = zip::ZipArchive::new(io::Cursor::new(zip)).expect("valid zip");
-        assert_eq!(za.len(), 0, "no entries");
+    fn build_bundle_empty_entries_is_a_valid_empty_tarball() {
+        let tar_gz = build_bundle(&[]).expect("build");
+        let mut ar = tar::Archive::new(GzDecoder::new(io::Cursor::new(tar_gz)));
+        assert_eq!(
+            ar.entries().expect("valid gzip+tar").count(),
+            0,
+            "no entries"
+        );
     }
 
     #[test]
     fn build_bundle_compresses_a_large_entry() {
         // Highly-repetitive input compresses far smaller than its raw size.
         let big: Vec<u8> = vec![b'g'; 100_000];
-        let zip = build_bundle(&[BundleEntry {
+        let tar_gz = build_bundle(&[BundleEntry {
             name: "gpm.log",
             bytes: big.clone(),
         }])
         .expect("build");
         assert!(
-            zip.len() < 10_000,
+            tar_gz.len() < 10_000,
             "deflate should shrink it: {} bytes",
-            zip.len()
+            tar_gz.len()
         );
         assert_eq!(
-            read_entry(&zip, "gpm.log"),
+            read_entry(&tar_gz, "gpm.log"),
             big,
             "round-trip decompresses exactly"
         );
@@ -335,12 +375,12 @@ mod tests {
             ..Default::default()
         };
         let repo_json = serde_json::to_string(&cfg.redacted()).expect("redacted serializes");
-        let zip = build_bundle(&[BundleEntry {
+        let tar_gz = build_bundle(&[BundleEntry {
             name: "repo_config.json",
             bytes: repo_json.into_bytes(),
         }])
         .expect("build");
-        let out = String::from_utf8(read_entry(&zip, "repo_config.json")).expect("utf8");
+        let out = String::from_utf8(read_entry(&tar_gz, "repo_config.json")).expect("utf8");
         assert!(out.contains("[REDACTED]"), "presence marker missing: {out}");
         assert!(
             !out.contains("ghp_LEAK_ME"),
@@ -350,8 +390,14 @@ mod tests {
             !out.contains("BEGIN OPENSSH PRIVATE KEY"),
             "ssh key leaked into bundle: {out}"
         );
-        assert!(!out.contains("ssh-secret"), "passphrase leaked: {out}");
-        assert!(!out.contains("alice"), "url userinfo leaked: {out}");
+        assert!(
+            !out.contains("ssh-secret"),
+            "passphrase leaked into bundle: {out}"
+        );
+        assert!(
+            !out.contains("alice"),
+            "url userinfo leaked into bundle: {out}"
+        );
     }
 
     #[test]

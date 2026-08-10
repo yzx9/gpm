@@ -27,10 +27,11 @@ tauri-plugin-device-info = { path = "../../crates/tauri-plugin-device-info" }
 tauri-plugin-file-save = { path = "../../crates/tauri-plugin-file-save" }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2"
-# Pure-Rust deflate (miniz_oxide): the default features pull C -sys crates
-# (bzip2/lzma/zstd/xz) that break the Android NDK cross-build. Used only by the
-# diagnostics-export bundle assembler.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+# Tarball stack for the diagnostics/repo export archive assemblers — both pure
+# Rust and configured at the workspace level; cross-build under the Android NDK
+# with no C and no cmake.
+tar.workspace = true
+flate2.workspace = true
 rustpass = { path = "../../crates/rustpass" }
 serde = { workspace = true }
 serde_json = { workspace = true }

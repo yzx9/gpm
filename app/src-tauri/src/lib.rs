@@ -23,6 +23,7 @@ use crate::setup::PendingIdentity;
 
 mod app_config;
 mod applock;
+mod archive;
 mod authenticity;
 mod biometric;
 mod clipboard;

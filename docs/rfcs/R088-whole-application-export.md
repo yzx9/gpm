@@ -30,7 +30,8 @@ bytes.
 
 ## Context
 
-**Envelope = one self-describing archive.** A whole-app export is a single archive (zip)
+**Envelope = one self-describing archive.** A whole-app export is a single archive (a gzip
+tarball today; a tolerant reader detects the container by magic bytes, not the extension)
 containing a manifest and the payload files. The manifest declares what the archive is and how
 to read it; the payload is the repositories (and, in future, the settings). Self-describing so a
 file found months later — by the user, by desktop `gopass`, or by gpm's own importer — is

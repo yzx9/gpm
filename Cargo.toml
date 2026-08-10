@@ -89,6 +89,14 @@ totp-rs = { version = "5", default-features = false, features = [
   "otpauth",
   "zeroize",
 ] }
+# Tarball stack for the diagnostics/repository export archive assemblers. Both
+# are pure Rust (`tar` pulls only filetime/libc/xattr-via-rustix; flate2's
+# `zlib-rs` backend is a pure-Rust zlib — flate2's fastest, some `unsafe` for
+# speed), so they cross-compile to the Android NDK like the deps above with no C
+# and no cmake. flate2's `default-features = false` drops the miniz_oxide
+# default in favor of zlib-rs.
+tar = "0.4"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 
 # --- Build profiles -----------------------------------------------------------
 # Tuned after measuring the Android debug artifact (`tauri android build --debug`):

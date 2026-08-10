@@ -118,13 +118,13 @@ export async function subscribeSyncOutcome(
   return listen<SyncOutcome>("sync-outcome", (e) => cb(e.payload));
 }
 
-/** One README file in the export archive (zip-entry name + localized body). */
+/** One README file in the export archive (tar-entry name + localized body). */
 export interface RepoReadmeEntry {
   name: string;
   body: string;
 }
 
-/** Export the active repository as a self-describing `gpm-export.zip` archive
+/** Export the active repository as a self-describing `gpm-export.tar.gz` archive
  *  (R078): a full-history git bundle + a manifest + one README per supported
  *  locale. `readmes` is one entry per locale — the frontend owns the locale set
  *  (driven by `SUPPORTED_LOCALES`), so adding a locale needs no backend change.

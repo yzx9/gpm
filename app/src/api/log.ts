@@ -25,7 +25,7 @@ export async function clearLog(): Promise<void> {
   await invoke("clear_log");
 }
 
-/** Export a diagnostics bundle (zip) to a user-chosen location via SAF. */
+/** Export a diagnostics bundle (a gzip tarball) to a user-chosen location via SAF. */
 export async function exportDiagnostics(): Promise<void> {
   await invoke("export_diagnostics");
 }

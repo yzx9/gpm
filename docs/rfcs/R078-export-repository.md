@@ -67,7 +67,7 @@ recoverability is never gated on an extra passphrase or recipient key the user m
 **Where the export goes.** On Android the user picks a destination through the system
 save-file picker; on desktop through the standard save dialog — the same surface already used
 for attachment export, so no new platform plumbing. The saved file is the `R088` archive (e.g.
-`gpm-export.zip`). To restore on desktop, a user extracts the archive and `git clone`s the
+`gpm-export.tar.gz`). To restore on desktop, a user extracts the archive and `git clone`s the
 bundle inside (the README explains how); gpm's own restore (`R087`, deferred) reads the
 archive and its manifest directly. Packaging several files behind one save mirrors the
 diagnostics-export archive.
