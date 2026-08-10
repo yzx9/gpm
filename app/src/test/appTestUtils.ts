@@ -8,6 +8,7 @@ import {
   type StackedRouterViewState,
 } from "@/components/StackedRouterView.vue";
 import {
+  ACTIVE_REPO_KEY,
   APP_LOCK_KEY,
   BACK_HANDLER_KEY,
   createAppLockStore,
@@ -28,6 +29,7 @@ import {
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
   TOAST_KEY,
+  type ActiveRepoStore,
 } from "@/composables";
 import { mount, type ComponentMountingOptions } from "@vue/test-utils";
 import { vi } from "vitest";
@@ -97,6 +99,13 @@ export function mountWithApp<C extends Component>(
   const scrollLock = createScrollLockController();
   const backHandler = createBackHandlerRegistry();
   const stackedRouterView = createTestStackedRouterView();
+  // R080: EntryListPage resolves the active repo via useActiveRepo(); tests use a
+  // fixed id (createActiveRepoStore() would call the un-mocked getAppConfig).
+  const activeRepo: ActiveRepoStore = {
+    async currentId() {
+      return "test-repo";
+    },
+  };
   // Page tests don't mount DialogHost, so drive `confirm` directly. Default to
   // "proceed" (the former global confirm()=true default in setup.ts); a test
   // that needs the cancel branch overrides it:
@@ -108,6 +117,7 @@ export function mountWithApp<C extends Component>(
       ...opts.mountOpts?.global,
       provide: {
         ...opts.mountOpts?.global?.provide,
+        [ACTIVE_REPO_KEY]: activeRepo,
         [LOCK_KEY]: lock,
         [APP_LOCK_KEY]: appLock,
         [DRAFTS_NOTICE_KEY]: draftsNotice,
@@ -124,6 +134,7 @@ export function mountWithApp<C extends Component>(
   });
   return {
     wrapper,
+    activeRepo,
     lock,
     appLock,
     draftsNotice,

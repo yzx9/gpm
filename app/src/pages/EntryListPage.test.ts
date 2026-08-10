@@ -112,6 +112,7 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("list_entries", {
+        repoId: "test-repo",
         offset: 0,
         limit: 50,
       });
@@ -416,6 +417,7 @@ describe("EntryListPage", () => {
       await wrapper.find('input[type="search"]').setValue("git");
       await flushPromises(); // watch schedules the debounce timer
       expect(invoke).not.toHaveBeenCalledWith("search_entries", {
+        repoId: "test-repo",
         query: "git",
         offset: 0,
         limit: 50,
@@ -425,6 +427,7 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("search_entries", {
+        repoId: "test-repo",
         query: "git",
         offset: 0,
         limit: 50,
@@ -511,11 +514,13 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(invoke).not.toHaveBeenCalledWith("search_entries", {
+        repoId: "test-repo",
         query: "g",
         offset: 0,
         limit: 50,
       });
       expect(invoke).toHaveBeenCalledWith("search_entries", {
+        repoId: "test-repo",
         query: "gi",
         offset: 0,
         limit: 50,
@@ -598,6 +603,7 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).toContain("e0"); // page 0 retained (appended, not replaced)
       expect(wrapper.text()).toContain("e50"); // page 1 appended
       expect(invoke).toHaveBeenCalledWith("list_entries", {
+        repoId: "test-repo",
         offset: 50,
         limit: 50,
       });
