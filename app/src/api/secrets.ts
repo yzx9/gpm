@@ -220,29 +220,40 @@ export async function searchEntries(
  *  `notify` supplies the localized notification text; when absent the
  *  native layer falls back to a generic safety string. */
 export async function copyPassword(
+  repoId: string,
   entryPath: string,
   notify?: ClipboardNotifyText,
 ): Promise<CopyResult> {
-  return invoke<CopyResult>("copy_password", { entryPath, notifyText: notify });
+  return invoke<CopyResult>("copy_password", {
+    repoId,
+    entryPath,
+    notifyText: notify,
+  });
 }
 
 /** Decrypt + compute the entry's TOTP code in Rust + copy it; the clipboard
  *  auto-clears after a timer. `copied` is `false` when the entry has no TOTP
  *  seed. Neither the seed nor the code reaches the WebView. */
 export async function copyTotp(
+  repoId: string,
   entryPath: string,
   notify?: ClipboardNotifyText,
 ): Promise<TotpCopyResult> {
-  return invoke<TotpCopyResult>("copy_totp", { entryPath, notifyText: notify });
+  return invoke<TotpCopyResult>("copy_totp", {
+    repoId,
+    entryPath,
+    notifyText: notify,
+  });
 }
 
 /** One-shot **cache-only** probe (never triggers an unlock): returns both the
  *  2FA-presence signal and attachment metadata from a single decrypt, or `null`
  *  when the identity is not currently cached. Never returns secret data. */
 export async function entryProbe(
+  repoId: string,
   entryPath: string,
 ): Promise<EntryProbe | null> {
-  return invoke<EntryProbe | null>("entry_probe", { entryPath });
+  return invoke<EntryProbe | null>("entry_probe", { repoId, entryPath });
 }
 
 /** Detect a binary attachment and export its decoded bytes to a user-chosen
@@ -250,23 +261,31 @@ export async function entryProbe(
  *  `CANCELLED` (dismissed picker), `REPO_BUSY` (another export in progress), or
  *  a real error. Decoded bytes never reach the WebView. */
 export async function exportAttachment(
+  repoId: string,
   entryPath: string,
 ): Promise<AttachmentExportResult> {
-  return invoke<AttachmentExportResult>("export_attachment", { entryPath });
+  return invoke<AttachmentExportResult>("export_attachment", {
+    repoId,
+    entryPath,
+  });
 }
 
 /** Decrypt + return the entry's content for in-app reveal. */
 export async function showPassword(
+  repoId: string,
   entryPath: string,
 ): Promise<SensitiveContent> {
-  return invoke<SensitiveContent>("show_password", { entryPath });
+  return invoke<SensitiveContent>("show_password", { repoId, entryPath });
 }
 
 /** Blob oid (base version) of `entry` at HEAD, or `null` if absent — the R026
  *  base-version capture for a base-version-aware delete (fetched on the detail
  *  page mount so a delete-without-reveal is still protected). Non-secret. */
-export async function entryOid(entryPath: string): Promise<string | null> {
-  return invoke<string | null>("entry_oid", { entryPath });
+export async function entryOid(
+  repoId: string,
+  entryPath: string,
+): Promise<string | null> {
+  return invoke<string | null>("entry_oid", { repoId, entryPath });
 }
 
 /** Why an entry-cache event fired — the cause of the transition. Mirrors the

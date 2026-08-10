@@ -31,6 +31,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import {
   isAuthCancelled,
+  useActiveRepo,
   useCancellableSave,
   useDialog,
   useDivergence,
@@ -57,6 +58,7 @@ const { runWithAuth, identityCached } = useLockState();
 // identity not cached either) ⇒ the Unlock gate; warm ⇒ the full button set, and
 // actions skip the per-op auth gate (the cache serves without re-prompting).
 const { entryCached } = useEntryCacheState();
+const activeRepo = useActiveRepo();
 const { toast } = useToast();
 const { dialog } = useDialog();
 
@@ -211,7 +213,8 @@ async function probeEntry() {
   }
   probing.value = true;
   try {
-    const probe = await entryProbeCmd(entryPath);
+    const repoId = await activeRepo.currentId();
+    const probe = await entryProbeCmd(repoId, entryPath);
     if (probe !== null) {
       showTotp.value = probe.has_totp;
       showAttachment.value = probe.attachment !== null;
@@ -248,7 +251,8 @@ function humanizeSize(bytes: number): string {
 // delete-without-reveal stays protected.
 async function probeVersion() {
   try {
-    baseOid.value = await entryOidCmd(entryPath);
+    const repoId = await activeRepo.currentId();
+    baseOid.value = await entryOidCmd(repoId, entryPath);
   } catch {
     // Probe failed (rare) — leave null (legacy unprotected delete path).
   }
@@ -327,12 +331,13 @@ async function showPassword() {
   decryptError.value = false;
   const myToken = ++revealToken;
   try {
+    const repoId = await activeRepo.currentId();
     // withClaim raises FLAG_SECURE before the secret arrives and brands it; if
     // we left mid-decrypt (token bumped), discard rather than render into a
     // leaving/dead component. A failed acquire returns null → abort with a toast
     // (the per-op replacement for the old route-guard abort).
     const claimed = await withClaim(() =>
-      runEntryAction(() => showPasswordCmd(entryPath)),
+      runEntryAction(() => showPasswordCmd(repoId, entryPath)),
     );
     if (myToken !== revealToken) return;
     if (!claimed) {
@@ -364,8 +369,9 @@ async function copyPassword() {
   decryptError.value = false;
   try {
     await ensureClipboardNotifyPermission();
+    const repoId = await activeRepo.currentId();
     const result = await runEntryAction(() =>
-      copyPasswordCmd(entryPath, clipboardNotifyText()),
+      copyPasswordCmd(repoId, entryPath, clipboardNotifyText()),
     );
     showTotp.value = result.has_totp;
     showAttachment.value = result.has_attachment;
@@ -406,8 +412,9 @@ async function copyTotp() {
   decryptError.value = false;
   try {
     await ensureClipboardNotifyPermission();
+    const repoId = await activeRepo.currentId();
     const result = await runEntryAction(() =>
-      copyTotpCmd(entryPath, clipboardNotifyText()),
+      copyTotpCmd(repoId, entryPath, clipboardNotifyText()),
     );
     // `copied` is false exactly when the entry has no TOTP seed — reuse it as
     // the presence signal so the button settles to the right state after a tap.
@@ -436,7 +443,10 @@ async function exportAttachment() {
   decryptError.value = false;
   loading.value = true;
   try {
-    const result = await runEntryAction(() => exportAttachmentCmd(entryPath));
+    const repoId = await activeRepo.currentId();
+    const result = await runEntryAction(() =>
+      exportAttachmentCmd(repoId, entryPath),
+    );
     if (!result.exported) {
       // The entry holds no attachment (the button was a fallback) — settle the
       // signal and tell the user; no file was written.

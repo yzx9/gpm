@@ -23,6 +23,7 @@ import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import {
   isAuthCancelled,
+  useActiveRepo,
   useCancellableSave,
   useDivergence,
   useEntryConflict,
@@ -46,6 +47,7 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const { runWithAuth } = useLockState();
+const activeRepo = useActiveRepo();
 const { toast } = useToast();
 
 const pathMatch = route.params.pathMatch;
@@ -270,11 +272,12 @@ async function loadBody() {
   decryptError.value = false;
   const myToken = ++loadToken;
   try {
+    const repoId = await activeRepo.currentId();
     // withClaim raises FLAG_SECURE before the decrypted body arrives; a late
     // load resolving after we left is discarded by the token; a failed acquire
     // returns null → abort (the per-op replacement for the old route-guard abort).
     const claimed = await withClaim(() =>
-      runWithAuth(() => showPasswordCmd(entryPath)),
+      runWithAuth(() => showPasswordCmd(repoId, entryPath)),
     );
     if (myToken !== loadToken) return;
     if (!claimed) {

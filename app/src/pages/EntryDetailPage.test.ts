@@ -64,6 +64,7 @@ describe("EntryDetailPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("show_password", {
+        repoId: "test-repo",
         entryPath: "servers/prod.age",
       });
     });
@@ -316,7 +317,10 @@ describe("EntryDetailPage", () => {
 
       expect(invoke).toHaveBeenCalledWith(
         "copy_password",
-        expect.objectContaining({ entryPath: "servers/prod.age" }),
+        expect.objectContaining({
+          repoId: "test-repo",
+          entryPath: "servers/prod.age",
+        }),
       );
       expect(
         toast.toasts.value.some((t) =>
@@ -461,7 +465,10 @@ describe("EntryDetailPage", () => {
 
       expect(invoke).toHaveBeenCalledWith(
         "copy_totp",
-        expect.objectContaining({ entryPath: "servers/prod.age" }),
+        expect.objectContaining({
+          repoId: "test-repo",
+          entryPath: "servers/prod.age",
+        }),
       );
       expect(
         toast.toasts.value.some((t) =>
@@ -484,7 +491,10 @@ describe("EntryDetailPage", () => {
 
       expect(invoke).toHaveBeenCalledWith(
         "copy_totp",
-        expect.objectContaining({ entryPath: "servers/prod.age" }),
+        expect.objectContaining({
+          repoId: "test-repo",
+          entryPath: "servers/prod.age",
+        }),
       );
       expect(
         toast.toasts.value.some((t) =>

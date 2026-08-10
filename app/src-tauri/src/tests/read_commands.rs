@@ -13,7 +13,7 @@ use crate::AppState;
 use crate::entry_cache;
 use crate::entry_cache::EntryCacheReason;
 use crate::read;
-use crate::tests::{make_unlocked_state, mock_app};
+use crate::tests::{make_unlocked_state, mock_app, test_repo_id};
 
 /// Under Immediate, `show_password_core` returns the secret AND soft-wipes the
 /// identity afterward — the decoded secret lives in the returned
@@ -31,7 +31,7 @@ async fn show_password_core_returns_secret_then_soft_wipes_under_immediate() {
 
     assert!(app_state.store.is_unlocked(), "precondition: unlocked");
 
-    let content = read::show_password_core(&app_state, app.handle(), "foo.age")
+    let content = read::show_password_core(&app_state, app.handle(), &app_state.store, "foo.age")
         .await
         .expect("show should succeed");
     // `password`/`notes` are `Zeroizing<String>` — deref to compare.
@@ -54,6 +54,7 @@ async fn entry_probe_returns_metadata_when_unlocked() {
     let probe = read::entry_probe(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "foo.age".into(),
     )
     .await
@@ -77,6 +78,7 @@ async fn entry_probe_never_prompts_when_identity_locked() {
     let probe = read::entry_probe(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "foo.age".into(),
     )
     .await
@@ -98,6 +100,7 @@ async fn copy_totp_skips_clipboard_when_no_totp_seed() {
     let result = read::copy_totp(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "foo.age".into(),
         None,
     )
@@ -121,7 +124,7 @@ async fn entry_cache_hit_serves_second_show_without_identity() {
     *app_state.lock_mode.lock().unwrap() = LockMode::Immediate;
 
     // First show: decrypt + Immediate soft-wipe + warm the cache.
-    let first = read::show_password_core(&app_state, app.handle(), "foo.age")
+    let first = read::show_password_core(&app_state, app.handle(), &app_state.store, "foo.age")
         .await
         .expect("first show");
     assert_eq!(&*first.password, "hunter2");
@@ -136,7 +139,7 @@ async fn entry_cache_hit_serves_second_show_without_identity() {
 
     // Second show: identity is wiped, but the cache HITS → no re-auth, no decrypt.
     // (Without the cache this would reject with IDENTITY_ENCRYPTED.)
-    let second = read::show_password_core(&app_state, app.handle(), "foo.age")
+    let second = read::show_password_core(&app_state, app.handle(), &app_state.store, "foo.age")
         .await
         .expect("second show must hit the cache, not re-prompt");
     assert_eq!(&*second.password, "hunter2");
@@ -160,7 +163,7 @@ async fn entry_cache_evicts_on_entry_switch() {
     // entry can MISS the cache and re-decrypt — the single-entry eviction path.
     *app_state.lock_mode.lock().unwrap() = LockMode::Never;
 
-    read::show_password_core(&app_state, app.handle(), "foo.age")
+    read::show_password_core(&app_state, app.handle(), &app_state.store, "foo.age")
         .await
         .expect("show foo");
     assert_eq!(
@@ -174,7 +177,7 @@ async fn entry_cache_evicts_on_entry_switch() {
         "cache holds foo"
     );
 
-    read::show_password_core(&app_state, app.handle(), "bar.age")
+    read::show_password_core(&app_state, app.handle(), &app_state.store, "bar.age")
         .await
         .expect("show bar");
     assert_eq!(
@@ -197,7 +200,7 @@ async fn soft_wipe_entry_cache_clears_the_cache() {
     let app = mock_app(state);
     let app_state = app.state::<AppState>();
 
-    read::show_password_core(&app_state, app.handle(), "foo.age")
+    read::show_password_core(&app_state, app.handle(), &app_state.store, "foo.age")
         .await
         .expect("show");
     assert!(
@@ -233,7 +236,7 @@ async fn show_password_core_marks_yaml_secret_edit_blocked() {
     let app = mock_app(state);
     let app_state = app.state::<AppState>();
 
-    let content = read::show_password_core(&app_state, app.handle(), "y.age")
+    let content = read::show_password_core(&app_state, app.handle(), &app_state.store, "y.age")
         .await
         .expect("show");
     assert_eq!(&*content.password, "pw");
@@ -255,6 +258,7 @@ async fn entry_probe_marks_yaml_secret_edit_blocked() {
     let probe = read::entry_probe(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "y.age".into(),
     )
     .await
@@ -273,6 +277,7 @@ async fn non_utf8_wins_over_legacy_yaml() {
     let probe = read::entry_probe(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "y.age".into(),
     )
     .await
@@ -291,7 +296,7 @@ async fn bare_yaml_doc_copy_reports_empty_password() {
     let app = mock_app(state);
     let app_state = app.state::<AppState>();
 
-    let content = read::show_password_core(&app_state, app.handle(), "y.age")
+    let content = read::show_password_core(&app_state, app.handle(), &app_state.store, "y.age")
         .await
         .expect("show");
     assert_eq!(&*content.password, "");
@@ -303,6 +308,7 @@ async fn bare_yaml_doc_copy_reports_empty_password() {
     let result = read::copy_password(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "y.age".into(),
         None,
     )

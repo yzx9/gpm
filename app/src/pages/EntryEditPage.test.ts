@@ -41,6 +41,7 @@ describe("EntryEditPage", () => {
     const w = mountWithApp(EntryEditPage).wrapper;
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("show_password", {
+      repoId: "test-repo",
       entryPath: "servers/prod",
     });
     expect(

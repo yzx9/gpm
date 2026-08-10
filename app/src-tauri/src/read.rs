@@ -267,9 +267,11 @@ pub(crate) fn clipboard_clear_plan(clear_secs: u64) -> (bool, u32) {
 pub(crate) async fn copy_password<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     entry_path: String,
     notify_text: Option<NotifyText>,
 ) -> Result<CopyResult, Error> {
+    let store = state.repo(&repo_id)?;
     let entry_name = entry_path.trim_end_matches(".age").to_string();
     log::info!("copy: {entry_name}");
 
@@ -281,7 +283,7 @@ pub(crate) async fn copy_password<R: Runtime>(
     // clipboard auto-clear window (D8). Project the byproducts + the password
     // (None for attachments / non-UTF-8, which never reach the clipboard).
     let (has_totp, has_attachment, password_non_utf8, password_empty, password) =
-        with_secret(&state, &app, &entry_path, false, |secret, _| {
+        with_secret(&state, &app, &store, &entry_path, false, |secret, _| {
             let has_attachment = rustpass::has_attachment(secret);
             let password_non_utf8 = !secret.password_is_utf8();
             // A bare YAML doc's first line is the `---` marker — no password
@@ -435,6 +437,7 @@ const ENTRY_CACHE_MAX_BYTES: usize = 256 * 1024;
 async fn with_secret<R, T, F>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    store: &Arc<rustpass::Store>,
     entry_path: &str,
     slide: bool,
     project: F,
@@ -458,14 +461,8 @@ where
     if let Some(oid) = cached_oid {
         // D4 freshness: re-fetch the oid; a mismatch (a sync changed the entry, or
         // it's gone) evicts and falls through to a re-decrypt.
-        let fresh = state
-            .store
-            .entry_oid(entry_path)
-            .await
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some(oid.as_str());
+        let fresh =
+            store.entry_oid(entry_path).await.ok().flatten().as_deref() == Some(oid.as_str());
         if fresh {
             // Project under the lock (the secret is NOT cloned — it can't be). A
             // racing wipe between the oid check and here yields None and falls
@@ -480,8 +477,8 @@ where
             {
                 // Activity (no identity used → no Immediate soft-wipe). Slide the
                 // cache timer only on Show (D8).
-                reset_lock_timer(state, app);
-                reset_gate_idle_timer(state, app);
+                reset_lock_timer(state, app, store);
+                reset_gate_idle_timer(state, app, store);
                 if slide {
                     entry_cache::reset_entry_cache_timer(state, app);
                 }
@@ -497,12 +494,12 @@ where
     }
 
     // ---- MISS: decrypt (capture oid atomically) + Immediate post-op tail. ----
-    let read = state.store.get_with_oid(entry_path).await;
+    let read = store.get_with_oid(entry_path).await;
     // The identity was used (decrypt attempted): reset both idle timers and, under
     // Immediate, soft-wipe — a failed read must not leave the identity cached.
-    reset_lock_timer(state, app);
-    reset_gate_idle_timer(state, app);
-    maybe_soft_wipe(state, app).await;
+    reset_lock_timer(state, app, store);
+    reset_gate_idle_timer(state, app, store);
+    maybe_soft_wipe(state, app, store).await;
     let (secret, oid) = read?;
     let project = project.take().expect("project runs once");
     let result = project(&secret, &oid);
@@ -556,13 +553,14 @@ pub(crate) async fn wipe_entry_cache(
 pub(crate) async fn show_password_core<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    store: &rustpass::Store,
     entry_path: &str,
 ) -> Result<SensitiveContent, Error> {
     log::info!("show: {}", entry_path.trim_end_matches(".age"));
     // Through the cache (R086), `slide` = true — Show is the view operation that
     // resets the view-clear window (D8). The closure builds the SensitiveContent
     // from the borrowed secret; the atomic oid fills `version` on both paths.
-    with_secret(state, app, entry_path, true, |secret, oid| {
+    with_secret(state, app, store, entry_path, true, |secret, oid| {
         let body = secret.body();
         let attachment = rustpass::metadata(secret);
         Ok(SensitiveContent {
@@ -597,9 +595,11 @@ pub(crate) async fn show_password_core<R: Runtime>(
 pub(crate) async fn show_password(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     entry_path: String,
 ) -> Result<SensitiveContent, Error> {
-    show_password_core(&state, &app, &entry_path).await
+    let store = state.repo(&repo_id)?;
+    show_password_core(&state, &app, &store, &entry_path).await
 }
 
 /// Blob oid (base version) of `entry` at HEAD, or `null` if absent — the R026
@@ -610,9 +610,11 @@ pub(crate) async fn show_password(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn entry_oid(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     entry_path: String,
 ) -> Result<Option<String>, Error> {
-    state.store.entry_oid(&entry_path).await
+    let store = state.repo(&repo_id)?;
+    store.entry_oid(&entry_path).await
 }
 
 /// Decrypt the entry, compute its TOTP code in Rust, and copy it to the
@@ -625,15 +627,17 @@ pub(crate) async fn entry_oid(
 pub(crate) async fn copy_totp<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     entry_path: String,
     notify_text: Option<NotifyText>,
 ) -> Result<TotpCopyResult, Error> {
+    let store = state.repo(&repo_id)?;
     let entry_name = entry_path.trim_end_matches(".age").to_string();
     log::info!("copy-totp: {entry_name}");
 
     // Through the cache (R086), `slide` = false (Copy-class op — D8). Project the
     // TOTP seed (None when the entry has none).
-    let otp = with_secret(&state, &app, &entry_path, false, |secret, _| {
+    let otp = with_secret(&state, &app, &store, &entry_path, false, |secret, _| {
         rustpass::totp::extract(secret)
     })
     .await
@@ -678,12 +682,14 @@ pub(crate) async fn copy_totp<R: Runtime>(
 pub(crate) async fn entry_probe<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     entry_path: String,
 ) -> Result<Option<EntryProbe>, Error> {
+    let store = state.repo(&repo_id)?;
     // The probe must NEVER trigger an unlock prompt. A cold identity (encrypted +
     // not cached) ⇒ "unknown" with NO timer/cache side effects — check that first
     // (mirrors the original `IDENTITY_ENCRYPTED → Ok(None)` short-circuit).
-    if state.store.is_identity_encrypted().await && !state.store.is_unlocked() {
+    if store.is_identity_encrypted().await && !store.is_unlocked() {
         return Ok(None);
     }
     // Warm identity: through the cache (R086). This is the GATE's warm point —
@@ -691,7 +697,7 @@ pub(crate) async fn entry_probe<R: Runtime>(
     // subsequent copy/show/etc. hit. `slide` is false (a probe is not the view
     // op). A race (the identity wiped between the check above and the decrypt)
     // surfaces as `IDENTITY_ENCRYPTED` from the MISS — map it to "unknown" too.
-    match with_secret(&state, &app, &entry_path, false, |secret, _| {
+    match with_secret(&state, &app, &store, &entry_path, false, |secret, _| {
         Ok(EntryProbe {
             has_totp: rustpass::totp::has_totp(secret),
             attachment: rustpass::metadata(secret),
@@ -719,9 +725,11 @@ pub(crate) async fn entry_probe<R: Runtime>(
 pub(crate) async fn export_attachment(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     entry_path: String,
 ) -> Result<AttachmentExportResult, Error> {
-    export_attachment_core(&state, &app, &entry_path).await
+    let store = state.repo(&repo_id)?;
+    export_attachment_core(&state, &app, &store, &entry_path).await
 }
 
 /// Runtime-generic core of [`export_attachment`], so in-crate tests can drive it
@@ -729,6 +737,7 @@ pub(crate) async fn export_attachment(
 pub(crate) async fn export_attachment_core<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    store: &rustpass::Store,
     entry_path: &str,
 ) -> Result<AttachmentExportResult, Error> {
     let entry_name = entry_path.trim_end_matches(".age").to_string();
@@ -743,7 +752,7 @@ pub(crate) async fn export_attachment_core<R: Runtime>(
     // Through the cache (R086), `slide` = false (Export keeps its plaintext
     // footprint minimal — D8). Project the decoded attachment (None when the
     // entry holds no modern attachment). Bytes never reach the WebView.
-    let Some(attachment) = with_secret(state, app, entry_path, false, |secret, _| {
+    let Some(attachment) = with_secret(state, app, store, entry_path, false, |secret, _| {
         rustpass::attachment::extract(secret)
     })
     .await

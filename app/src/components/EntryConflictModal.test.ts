@@ -116,6 +116,7 @@ describe("EntryConflictModal", () => {
     // show_password was called with the entry name (the teammate's current
     // version IS the local HEAD at the conflict moment).
     expect(invoke).toHaveBeenCalledWith("show_password", {
+      repoId: "test-repo",
       entryPath: "servers/prod",
     });
     // The teammate's password is now visible in the preview panel.

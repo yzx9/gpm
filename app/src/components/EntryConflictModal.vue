@@ -18,7 +18,7 @@ import {
   type EntryConflictOp,
 } from "@/api";
 import type { EntryConflictPayload } from "@/composables";
-import { Z, useSecretReveal } from "@/composables";
+import { Z, useActiveRepo, useSecretReveal } from "@/composables";
 import { useLockState } from "@/composables/useLockState";
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -28,6 +28,7 @@ import EntryAttributes from "./EntryAttributes.vue";
 
 const { t } = useI18n();
 const { runWithAuth } = useLockState();
+const activeRepo = useActiveRepo();
 const {
   attributes,
   password,
@@ -192,8 +193,9 @@ async function previewTheirs() {
   previewLoading.value = true;
   clear();
   try {
+    const repoId = await activeRepo.currentId();
     const claimed = await withClaim(() =>
-      runWithAuth(() => showPasswordCmd(props.conflict!.name)),
+      runWithAuth(() => showPasswordCmd(repoId, props.conflict!.name)),
     );
     if (!claimed) {
       previewError.value = t("common.entryConflict.previewError");
