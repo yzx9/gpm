@@ -36,7 +36,7 @@ log = "0.4"
 # `plugin` enables the age plugin protocol (age-plugin-yubikey etc.). The library
 # spawns `age-plugin-<name>` as a subprocess, so plugin encrypt/decrypt only works
 # where that binary exists (desktop); Android lacks the binary and fails cleanly.
-age = { version = "0.11", features = ["armor", "ssh", "plugin"] }
+age = { version = "0.12", features = ["armor", "ssh", "plugin"] }
 # async-fn-in-trait under `dyn` dispatch. rust-lang/rust#133119 (`async_fn_in_dyn_trait`)
 # is still unstable, so the crypto/storage backend traits desugar through this macro
 # until native support lands. Drop it (and the macro annotations) once that ships.
