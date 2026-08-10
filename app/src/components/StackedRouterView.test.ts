@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import { createNavDirection } from "@/composables/useNavDirection";
+import { createStackedRouterState } from "@/components/StackedRouterView.vue";
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
@@ -47,7 +47,7 @@ async function goto(
   await flushPromises();
 }
 
-describe("createNavDirection", () => {
+describe("createStackedRouterState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     position = 0;
@@ -58,7 +58,7 @@ describe("createNavDirection", () => {
 
   it("does not animate the initial paint", async () => {
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router);
+    const { transitionName } = createStackedRouterState(router);
 
     // The first navigation has no real "from" (START_LOCATION) ⇒ never animates.
     await goto(router, "/secret", 1);
@@ -69,7 +69,7 @@ describe("createNavDirection", () => {
     // R031: the boundary freeze is gone — a push from a secret page to a
     // non-secret page animates forward, where it previously froze to "".
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router);
+    const { transitionName } = createStackedRouterState(router);
 
     await goto(router, "/secret", 1); // initial paint ⇒ ""
     await goto(router, "/", 2); // secret → home: animates now
@@ -78,7 +78,7 @@ describe("createNavDirection", () => {
 
   it("animates push/pop between like routes", async () => {
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router);
+    const { transitionName } = createStackedRouterState(router);
 
     await goto(router, "/secret", 1); // initial paint ⇒ "", current = /secret
     await goto(router, "/other", 2); // forward push animates
@@ -92,13 +92,76 @@ describe("createNavDirection", () => {
 
   it("does not animate a replace (position unchanged)", async () => {
     const router = buildRouter();
-    const { transitionName } = createNavDirection(router);
+    const { transitionName } = createStackedRouterState(router);
 
     await goto(router, "/secret", 1); // initial paint ⇒ "", current = /secret
     position = 1; // unchanged from the previous nav
     await router.replace("/other");
     await flushPromises();
     expect(transitionName.value).toBe("");
+  });
+
+  describe("whenSettled (enter-transition settle signal)", () => {
+    // The settle hooks are driven by <Transition>'s JS hooks in
+    // StackedRouterView.vue; here we call them directly to pin the settle
+    // contract independent of CSS. whenSettled() takes no element — the
+    // component tracks the entering page internally.
+    it("resolves once after-enter fires for that element", async () => {
+      const nav = createStackedRouterState(buildRouter());
+      const el = document.createElement("div");
+      nav.onBeforeEnter(el); // <Transition> before-enter arms the entry
+      let resolved = false;
+      void nav.whenSettled().then(() => {
+        resolved = true;
+      });
+      await flushPromises();
+      expect(resolved).toBe(false); // slide still in flight
+      nav.onAfterEnter(el); // slide ended
+      await flushPromises();
+      expect(resolved).toBe(true);
+    });
+
+    it("resolves immediately when no enter was armed (initial paint / query-only replace)", async () => {
+      const nav = createStackedRouterState(buildRouter());
+      // No onBeforeEnter (no transition ran) ⇒ nothing to wait for.
+      let resolved = false;
+      void nav.whenSettled().then(() => {
+        resolved = true;
+      });
+      await flushPromises();
+      expect(resolved).toBe(true);
+    });
+
+    it("a cancelled enter resolves its own awaiter, not a later page's", async () => {
+      // Pins the per-element (WeakMap) design + the no-arg capture: each page
+      // captures the settle promise current at its before-enter, and a cancelled
+      // enter resolves THAT awaiter while the later page's stays pending.
+      const nav = createStackedRouterState(buildRouter());
+      const a = document.createElement("div");
+      const b = document.createElement("div");
+      nav.onBeforeEnter(a);
+      const aSettle = nav.whenSettled();
+      let aResolved = false;
+      void aSettle.then(() => {
+        aResolved = true;
+      });
+      nav.onBeforeEnter(b); // a newer navigation arms its own entry
+      const bSettle = nav.whenSettled();
+      let bResolved = false;
+      void bSettle.then(() => {
+        bResolved = true;
+      });
+      await flushPromises();
+      expect(aResolved).toBe(false);
+      expect(bResolved).toBe(false);
+      nav.onEnterCancelled(a); // A interrupted, not completed
+      await flushPromises();
+      expect(aResolved).toBe(true);
+      expect(bResolved).toBe(false);
+      nav.onAfterEnter(b); // B completes normally
+      await flushPromises();
+      expect(bResolved).toBe(true);
+    });
   });
 });
 

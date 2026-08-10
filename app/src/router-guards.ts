@@ -15,7 +15,7 @@ import type { Router } from "vue-router";
  * secret-bearing component acquires a claim while its secret is on screen
  * (`useSecureClaim`), so there is nothing for a route guard to raise/settle
  * here, and the secure↔capturable boundary no longer freezes the transition
- * (`useNavDirection` animates every navigation). The locked state is enforced
+ * (`<StackedRouterView>` animates every navigation). The locked state is enforced
  * by the global `UnlockModal` overlay (driven by `useLockState`), not by a
  * route redirect, so the user re-authenticates in place.
  */

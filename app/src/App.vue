@@ -14,6 +14,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import AppLockOverlay from "./components/AppLockOverlay.vue";
 import DialogHost from "./components/DialogHost.vue";
+import StackedRouterView from "./components/StackedRouterView.vue";
 import ToastHost from "./components/ToastHost.vue";
 import UnlockModal from "./components/UnlockModal.vue";
 import {
@@ -21,7 +22,6 @@ import {
   createLockActivity,
   useAppLockState,
   useLockState,
-  useNavDirection,
   useSecureScreen,
   useSecuritySettings,
 } from "./composables";
@@ -71,11 +71,6 @@ const {
   setSecureOverlay,
   reload: reloadSecureScreen,
 } = useSecureScreen();
-// Drives the <router-view> slide transition: "slide-forward" on a push,
-// "slide-back" on a pop, "" (instant) on the initial paint and on replace
-// navigations. Screen-capture protection is component-level (R031), so there
-// is no secure↔capturable boundary to freeze on — every navigation animates.
-const { transitionName } = useNavDirection();
 const { t } = useI18n();
 
 // Both credential overlays — the identity UnlockModal (`overlayUp`) and the
@@ -173,23 +168,14 @@ onMounted(() => {
       {{ t("common.sync.attentionBadge") }}
     </button>
     <!--
-      Stack-style slide between pages. No `mode="out-in"`: push/pop animate the
-      departing and arriving pages simultaneously (iOS NavigationController
-      feel). `:key="route.path"` (NOT fullPath) makes Vue treat each *page* as a
-      distinct element so the transition fires on every real nav — but a
-      query-only change does NOT remount: the Settings→Identity deep-link clears
-      its `?focus=` query after arriving, and keying on fullPath would tear that
-      page down mid-highlight (the flash lives on the arriving instance).
-      `transitionName` is "" only on the initial paint and on replace
-      navigations — screen-capture protection is component-level (R031), so
-      there is no secure↔capturable boundary to freeze the slide on (see
-      useNavDirection).
+      The stacked (push/pop slide) router-view. Owns its own slide transition and
+      the deep-link settle signal routed pages inject via useStackedRouterView —
+      see StackedRouterView.vue. Stays BEFORE <DialogHost> below: equal-z
+      overlays resolve paint order by DOM tree order (CSS2 §E), so a page's
+      confirm (rendered by DialogHost) only paints above the page if this
+      precedes it.
     -->
-    <router-view v-slot="{ Component, route }">
-      <Transition :name="transitionName">
-        <component :is="Component" :key="route.path" />
-      </Transition>
-    </router-view>
+    <StackedRouterView />
     <!--
       App-launch biometric gate overlay: shown over everything while the
       seal master key is not in memory (cold start with the gate on, or after

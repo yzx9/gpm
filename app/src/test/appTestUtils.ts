@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import {
+  STACKED_ROUTER_VIEW_KEY,
+  type StackedRouterViewState,
+} from "@/components/StackedRouterView.vue";
+import {
   APP_LOCK_KEY,
   BACK_HANDLER_KEY,
   createAppLockStore,
@@ -22,7 +26,7 @@ import {
 } from "@/composables";
 import { mount, type ComponentMountingOptions } from "@vue/test-utils";
 import { vi } from "vitest";
-import type { Component } from "vue";
+import { type Component } from "vue";
 
 interface MountWithAppOptions<C extends Component> {
   /** Default `true`: start the lock in the "unlocked, identity cached" state page
@@ -32,14 +36,36 @@ interface MountWithAppOptions<C extends Component> {
   /** Default `true`: start secureScreen with the plugin reported available
    *  (Android, the production target). Pass `false` for desktop/no-plugin. */
   secureAvailable?: boolean;
-  /** Forwarded to `mount`, merged under the 6-key provide block. */
+  /** Forwarded to `mount`, merged under the app-shell provide block. */
   mountOpts?: ComponentMountingOptions<C>;
 }
 
 /**
- * Mount `comp` with ALL 6 app-shell states provided, fresh per call. Returns the
+ * A {@link StackedRouterViewState} stand-in for page tests. Production arms
+ * `whenSettled` from the `<router-view>` `<Transition>`'s after-enter hook
+ * (StackedRouterView.vue), which page tests don't mount — so here `whenSettled`
+ * returns a Promise the test resolves by calling `releaseEnter()`. That lets a
+ * deep-link test hold the page's focus at the slide-settle gate, assert nothing
+ * fires yet, then release and assert it does. For pages that never call
+ * `whenSettled` (no `?focus=`) it stays inert.
+ */
+function createTestStackedRouterView(): StackedRouterViewState & {
+  releaseEnter(): void;
+} {
+  const pending: Array<() => void> = [];
+  return {
+    whenSettled: () => new Promise<void>((resolve) => pending.push(resolve)),
+    releaseEnter: () => {
+      pending.splice(0).forEach((resolve) => resolve());
+    },
+  };
+}
+
+/**
+ * Mount `comp` with every app-shell state provided, fresh per call. Returns the
  * wrapper and every state handle so a test can drive any instance via real
- * methods. Providing all 6 every time covers transitive injection automatically
+ * methods. Providing them all every time covers transitive injection
+ * automatically
  * — e.g. `EntryDetailPage` calls `useSecretReveal()` unconditionally at
  * setup, which injects `useSecuritySettings()` + `useLockState()`, so every
  * CreatePage/EntryDetailPage test needs those keys or setup throws. Fail-loud
@@ -59,6 +85,7 @@ export function mountWithApp<C extends Component>(
   const dialog = createDialog();
   const scrollLock = createScrollLockController();
   const backHandler = createBackHandlerRegistry();
+  const stackedRouterView = createTestStackedRouterView();
   // Page tests don't mount DialogHost, so drive `confirm` directly. Default to
   // "proceed" (the former global confirm()=true default in setup.ts); a test
   // that needs the cancel branch overrides it:
@@ -78,6 +105,7 @@ export function mountWithApp<C extends Component>(
         [DIALOG_KEY]: dialog,
         [SCROLL_LOCK_KEY]: scrollLock,
         [BACK_HANDLER_KEY]: backHandler,
+        [STACKED_ROUTER_VIEW_KEY]: stackedRouterView,
       },
     },
   });
@@ -91,5 +119,6 @@ export function mountWithApp<C extends Component>(
     dialog,
     scrollLock,
     backHandler,
+    stackedRouterView,
   };
 }

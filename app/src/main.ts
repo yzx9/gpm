@@ -14,14 +14,12 @@ import {
   createBackHandlerRegistry,
   createDialog,
   createLockState,
-  createNavDirection,
   createScrollLockController,
   createSecureScreen,
   createSecuritySettings,
   createToast,
   DIALOG_KEY,
   LOCK_KEY,
-  NAV_DIRECTION_KEY,
   SCROLL_LOCK_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
@@ -225,13 +223,8 @@ void (async () => {
   // backend log so a bug report has a persisted frontend trace. Fire-and-forget
   // with a recursion guard — it must never break rendering.
   installFrontendLogger(app);
-  // Direction tracker for the <router-view> slide transition. Registered after
-  // the auth guard. Screen-capture protection is component-level (R031), so
-  // every navigation animates by direction — no secure-boundary freeze.
-  const navDirection = createNavDirection(router);
   app.provide(LOCK_KEY, lockState);
   app.provide(APP_LOCK_KEY, appLockStore);
-  app.provide(NAV_DIRECTION_KEY, navDirection);
   app.provide(SECURE_SCREEN_KEY, secureScreenState);
   app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);
   app.provide(TOAST_KEY, toastState);
@@ -262,8 +255,8 @@ void (async () => {
   // so mounting sooner leaves <router-view> empty until the first page's chunk
   // loads — a blank first frame. This also makes the matched component part of
   // the first render rather than an "enter after mount", so no transition fires
-  // on the initial paint (useNavDirection's START_LOCATION guard is now a
-  // backstop).
+  // on the initial paint (the stacked router-view's START_LOCATION guard is now
+  // a backstop).
   await router.isReady();
   app.mount("#app");
   // Safety net: the Rust setup closure already baked the resolved locale into

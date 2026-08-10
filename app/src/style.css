@@ -252,62 +252,6 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Page transitions (router-view slide)
- *
- * Forward (router.push) = the arriving page slides in from the right and the
- * departing page slides out to the left. Back (router.back/pop) = the reverse.
- * Only the departing page is position:absolute during the swap; the arriving
- * page stays in flow so it carries .app-shell's height (making both absolute
- * would collapse the shell). The global prefers-reduced-motion rule above
- * already pins transition-duration to ~0, so reduced-motion users get an
- * instant swap with no extra rule here.
- *
- * Secure↔non-secure swaps are gated to "" (no animation) in useNavDirection so
- * FLAG_SECURE is never down while a secure page is still visible.
- * --------------------------------------------------------------------------- */
-.slide-forward-enter-active,
-.slide-forward-leave-active,
-.slide-back-enter-active,
-.slide-back-leave-active {
-  transition: transform 0.25s ease;
-}
-
-.slide-forward-leave-active,
-.slide-back-leave-active {
-  position: absolute;
-  /* Match .app-shell's safe-area padding: an absolutely-positioned child is
-     offset from the padding box (the inner border edge), so it ignores the
-     shell's padding-top/left/right. With `0` the departing page would jump up
-     by --safe-area-inset-top the instant the transition starts — its Back
-     button leaps into the cutout, then "falls" back when the in-flow arriving
-     page settles. Offsetting by the same insets keeps the departing page on the
-     content box it occupied in flow, so only the horizontal translateX fires. */
-  top: var(--safe-area-inset-top, 0px);
-  left: var(--safe-area-inset-left, 0px);
-  right: var(--safe-area-inset-right, 0px);
-  /* The departing page must not intercept taps during the slide — a fast
-     second tap could otherwise hit a stale control (e.g. Delete) on the page
-     that's sliding away. */
-  pointer-events: none;
-}
-
-/* Forward: arriving from the right, departing to the left. */
-.slide-forward-enter-from {
-  transform: translateX(100%);
-}
-.slide-forward-leave-to {
-  transform: translateX(-100%);
-}
-
-/* Back: arriving from the left, departing to the right. */
-.slide-back-enter-from {
-  transform: translateX(-100%);
-}
-.slide-back-leave-to {
-  transform: translateX(100%);
-}
-
-/* ---------------------------------------------------------------------------
  * Shared UI utilities
  *
  * Small presentation helpers used across several pages/components that aren't

@@ -14,7 +14,6 @@ export * from "./useEntryConflict";
 export * from "./useForegroundSync";
 export * from "./useLockActivity";
 export * from "./useLockState";
-export * from "./useNavDirection";
 export * from "./useOverlayBackHandler";
 export * from "./usePullToRefresh";
 export * from "./useRelativeTime";
