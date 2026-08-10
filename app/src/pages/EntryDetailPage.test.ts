@@ -238,13 +238,20 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("Check your age identity and try again");
     });
 
-    it("swallows AUTH_CANCELLED silently when the auth overlay is dismissed (Android back)", async () => {
-      // unlocked:false → identity NOT cached → show's runWithAuth parks on the
-      // auth overlay instead of running show_password immediately.
+    it("swallows AUTH_CANCELLED when the gate's Unlock is dismissed (Android back)", async () => {
+      // R086: a cold identity shows the Unlock gate (the button pile is hidden).
+      // Tapping Unlock parks on the auth overlay; dismissing it (back) must
+      // swallow AUTH_CANCELLED with no error UI, mirroring the old action path.
+      vi.mocked(invoke).mockResolvedValue({
+        has_totp: false,
+        attachment: null,
+      });
       const { wrapper, lock } = mountWithApp(EntryDetailPage, {
         unlocked: false,
       });
-      await wrapper.find('button[aria-label="Show password"]').trigger("click");
+      await wrapper
+        .find('button[aria-label="Unlock servers/prod"]')
+        .trigger("click");
       await flushPromises(); // parked awaiting auth
 
       lock.cancelAuth(); // user dismissed the overlay (back)
@@ -342,21 +349,32 @@ describe("EntryDetailPage", () => {
       ).toBe(false);
     });
 
-    it("swallows AUTH_CANCELLED silently on copyPassword when the auth overlay is dismissed", async () => {
-      // unlocked:false → identity NOT cached → copy's runWithAuth parks on the overlay.
-      const { wrapper, lock } = mountWithApp(EntryDetailPage, {
-        unlocked: false,
-      });
-      await wrapper
-        .find('button[aria-label="Copy password to clipboard"]')
-        .trigger("click");
-      await flushPromises(); // parked awaiting auth
-
-      lock.cancelAuth(); // user dismissed the overlay (back)
+    it("hides the whole action pile behind the Unlock gate when cold (R086)", async () => {
+      // R086: a cold identity shows only Unlock + Delete — the Copy/Show/TOTP/
+      // Edit/Revisions pile is hidden so a cold start is a single action, not a
+      // button pile that dead-ends into unlock prompts.
+      const { wrapper } = mountWithApp(EntryDetailPage, { unlocked: false });
       await flushPromises();
-
-      // No error UI — the catch swallowed AUTH_CANCELLED; copy never ran.
-      expect(wrapper.find("[role='alert']").exists()).toBe(false);
+      expect(
+        wrapper
+          .find('button[aria-label="Copy password to clipboard"]')
+          .exists(),
+      ).toBe(false);
+      expect(wrapper.find('button[aria-label="Show password"]').exists()).toBe(
+        false,
+      );
+      expect(
+        wrapper.find('button[aria-label="Edit servers/prod"]').exists(),
+      ).toBe(false);
+      expect(
+        wrapper
+          .find('button[aria-label="Revision history for servers/prod"]')
+          .exists(),
+      ).toBe(false);
+      // The gate's Unlock button is the single primary action.
+      expect(
+        wrapper.find('button[aria-label="Unlock servers/prod"]').exists(),
+      ).toBe(true);
     });
 
     it("clears sensitive data immediately after copy", async () => {
@@ -475,21 +493,22 @@ describe("EntryDetailPage", () => {
       ).toBe(true);
     });
 
-    it("swallows AUTH_CANCELLED silently on copyTotp", async () => {
-      // unlocked:false → identity NOT cached → copy_totp's runWithAuth parks.
-      const { wrapper, lock } = mountWithApp(EntryDetailPage, {
-        unlocked: false,
-      });
-      await wrapper
-        .find('button[aria-label="Copy 2FA code to clipboard"]')
-        .trigger("click");
-      await flushPromises(); // parked awaiting auth
-
-      lock.cancelAuth(); // user dismissed the overlay (back)
+    it("keeps Delete on the cold gate (de-emphasized) so delete-without-decrypt still works (R086)", async () => {
+      // R086 design decision: the cold gate hides the action pile but keeps
+      // Delete (outline, de-emphasized) so a delete-without-decrypt is still one
+      // tap away. Copy/Show stay hidden (they would dead-end into a prompt).
+      const { wrapper } = mountWithApp(EntryDetailPage, { unlocked: false });
       await flushPromises();
-
-      // No error UI — the catch swallowed AUTH_CANCELLED; copy_totp never ran.
-      expect(wrapper.find("[role='alert']").exists()).toBe(false);
+      // Delete is present on the gate...
+      expect(
+        wrapper.find('button[aria-label="Delete servers/prod"]').exists(),
+      ).toBe(true);
+      // ...while the TOTP action (the copyTotp entry point) is hidden.
+      expect(
+        wrapper
+          .find('button[aria-label="Copy 2FA code to clipboard"]')
+          .exists(),
+      ).toBe(false);
     });
   });
 
@@ -831,13 +850,17 @@ describe("EntryDetailPage", () => {
       expect(wrapper.find(totpBtn()).exists()).toBe(false);
     });
 
-    it("shows the button as a fallback when the identity is not cached (no probe, no unlock)", async () => {
-      // unlocked:false → identity NOT cached → the mount probe is skipped so it
-      // can never force an unlock. The button stays as the always-try fallback
-      // until the user authenticates and an action reports the truth.
+    it("hides the button behind the Unlock gate when the identity is not cached (R086)", async () => {
+      // R086: a cold identity shows the Unlock gate, not the button pile — so the
+      // mount probe is skipped (never forces an unlock) and the TOTP button is
+      // absent until the user unlocks.
       const { wrapper } = mountWithApp(EntryDetailPage, { unlocked: false });
       await flushPromises();
-      expect(wrapper.find(totpBtn()).exists()).toBe(true);
+      expect(wrapper.find(totpBtn()).exists()).toBe(false);
+      // The gate's Unlock button shows instead.
+      expect(
+        wrapper.find('button[aria-label="Unlock servers/prod"]').exists(),
+      ).toBe(true);
       // has_totp is identity-gated, so it is NOT probed when uncached; entry_oid
       // (R026, non-secret) does run on mount — assert the identity probe specifically.
       expect(invoke).not.toHaveBeenCalledWith("has_totp", expect.anything());

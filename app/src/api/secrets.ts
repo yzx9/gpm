@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type { ClipboardNotifyText } from "@/i18n/native";
 import type { AuthenticityResult } from "./common";
@@ -258,6 +259,42 @@ export async function showPassword(
  *  page mount so a delete-without-reveal is still protected). Non-secret. */
 export async function entryOid(entryPath: string): Promise<string | null> {
   return invoke<string | null>("entry_oid", { entryPath });
+}
+
+/** Why an entry-cache event fired — the cause of the transition. Mirrors the
+ *  backend `EntryCacheReason` enum (R086). */
+export type EntryCacheReason = "warmed" | "timer" | "lock" | "leave";
+
+/** Payload of an `entry-cache-warmed` / `entry-cache-wiped` event: the backend's
+ *  entry-view cache snapshot. `cached` is true on warm, false on wipe; `reason`
+ *  is the transition cause (see {@link EntryCacheReason}). */
+export interface EntryCacheState {
+  cached: boolean;
+  reason: EntryCacheReason;
+}
+
+/** Wipe the entry-view cache (R086). The frontend calls this on leave/switch so
+ *  the just-left entry's decrypted content does not linger in backend memory.
+ *  Idempotent — a no-op if nothing is cached. */
+export async function wipeEntryCache(entryPath: string): Promise<void> {
+  await invoke("wipe_entry_cache", { entryPath });
+}
+
+/** Subscribe to `entry-cache-warmed` (a miss just populated the cache). Returns
+ *  an unlisten handle. The backend is the source of truth; warm transitions fire
+ *  here so the frontend can mirror cache state from both sides (R086 D9). */
+export async function subscribeEntryCacheWarmed(
+  cb: (e: EntryCacheState) => void,
+): Promise<UnlistenFn> {
+  return listen<EntryCacheState>("entry-cache-warmed", (e) => cb(e.payload));
+}
+
+/** Subscribe to `entry-cache-wiped` (timer / lock / leave emptied the cache).
+ *  Returns an unlisten handle. Mirrors {@link subscribeEntryCacheWarmed}. */
+export async function subscribeEntryCacheWiped(
+  cb: (e: EntryCacheState) => void,
+): Promise<UnlistenFn> {
+  return listen<EntryCacheState>("entry-cache-wiped", (e) => cb(e.payload));
 }
 
 /** Copy an already-generated password string; clipboard auto-clears after 30s. */

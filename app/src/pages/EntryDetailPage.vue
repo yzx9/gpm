@@ -12,6 +12,7 @@ import {
   entryProbe as entryProbeCmd,
   exportAttachment as exportAttachmentCmd,
   showPassword as showPasswordCmd,
+  wipeEntryCache,
   type AppError,
   type AttachmentMeta,
   type DivergenceChoice,
@@ -33,6 +34,7 @@ import {
   useCancellableSave,
   useDialog,
   useDivergence,
+  useEntryCacheState,
   useEntryConflict,
   useLockState,
   useSecretReveal,
@@ -42,7 +44,7 @@ import {
 } from "@/composables";
 import { clipboardNotifyText } from "@/i18n/native";
 import { navBack } from "@/utils/nav";
-import { Clock, Copy, Download, Eye, Paperclip } from "@lucide/vue";
+import { Clock, Copy, Download, Eye, Lock, Paperclip } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
@@ -51,6 +53,10 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const { runWithAuth, identityCached } = useLockState();
+// R086: per-view mirror of the backend entry-view cache. Cold (not cached, and
+// identity not cached either) ⇒ the Unlock gate; warm ⇒ the full button set, and
+// actions skip the per-op auth gate (the cache serves without re-prompting).
+const { entryCached } = useEntryCacheState();
 const { toast } = useToast();
 const { dialog } = useDialog();
 
@@ -80,6 +86,10 @@ const { viewClearSecs } = useSecuritySettings();
 let revealToken = 0;
 useWipeOnLeave(() => {
   revealToken++;
+  // R086: wipe the entry-view cache on leave/switch (popstate / unmount / hard
+  // lock) so the just-left entry's decrypted content does not linger in backend
+  // memory. Best-effort + idempotent — must not throw (useWipeOnLeave contract).
+  void wipeEntryCache(entryPath).catch(() => {});
 });
 const loading = ref(false);
 const error = ref("");
@@ -125,6 +135,74 @@ const totpButtonVisible = computed(() => {
   // Hold the button while a free (cached) probe is in flight to avoid a flash.
   return !probing.value;
 });
+
+// R086: the cold-start gate shows when neither the entry cache nor the identity
+// is warm (we'd need a prompt). Once either is warm the buttons show: the entry
+// cache serves from a HIT (identity soft-wiped but content cached), or the
+// identity cache decrypts on a MISS without a prompt. This also avoids a gate
+// flash when the identity is already cached on mount (the probe warms in the
+// background).
+const gateVisible = computed(() => !entryCached.value && !identityCached.value);
+const unlocking = ref(false);
+
+/** Run a secret action, skipping the per-op auth gate when the entry cache or
+ *  identity is warm (R086) — the backend serves from the cache (or decrypts with
+ *  the cached identity) without re-prompting. Cold (a race the gate normally
+ *  prevents) falls back to `runWithAuth`. */
+async function runEntryAction<T>(fn: () => Promise<T>): Promise<T> {
+  if (entryCached.value || identityCached.value) {
+    try {
+      return await fn();
+    } catch (e) {
+      // The warm snapshot was stale — the cache was evicted under us (view-clear
+      // timer, a hard lock, or a background-sync oid change forcing a MISS). Fall
+      // back to the auth-gated path so the user gets the unlock overlay, not a raw
+      // IDENTITY_ENCRYPTED error (the race the old runWithAuth loop parked for).
+      if ((e as AppError)?.code === "IDENTITY_ENCRYPTED") {
+        return runWithAuth(fn);
+      }
+      throw e;
+    }
+  }
+  return runWithAuth(fn);
+}
+
+/** The gate's single action: probe (decrypt once + warm the cache) behind auth.
+ *  A `null` probe after `runWithAuth` is the Immediate soft-wipe race (the
+ *  identity was wiped between the unlock and the decrypt) — retry once. A second
+ *  `null` stays on the gate with an error (D7; no infinite loop). */
+async function unlockEntry() {
+  if (unlocking.value) return;
+  unlocking.value = true;
+  error.value = "";
+  decryptError.value = false;
+  try {
+    let probe = await runWithAuth(() => entryProbeCmd(entryPath));
+    if (probe === null) {
+      // Immediate soft-wipe race — the unlock succeeded but the identity was
+      // wiped before the probe's decrypt. Retry once.
+      probe = await runWithAuth(() => entryProbeCmd(entryPath));
+    }
+    if (probe === null) {
+      error.value = t("entry.unlockFailed");
+      return;
+    }
+    // Cache warmed — the `entry-cache-warmed` event flips `entryCached` and the
+    // gate swaps to the buttons. Settle the affordances from the probe.
+    showTotp.value = probe.has_totp;
+    showAttachment.value = probe.attachment !== null;
+    attachmentMeta.value = probe.attachment;
+    editBlockedReason.value = probe.edit_blocked;
+  } catch (e) {
+    if (isAuthCancelled(e)) return;
+    const appError = e as AppError;
+    decryptError.value = true;
+    error.value = appError?.message || t("entry.unlockFailed");
+    console.error("[entry-detail] unlock failed", e);
+  } finally {
+    unlocking.value = false;
+  }
+}
 
 async function probeEntry() {
   if (!identityCached.value || showAttachment.value !== null || probing.value) {
@@ -253,7 +331,7 @@ async function showPassword() {
     // leaving/dead component. A failed acquire returns null → abort with a toast
     // (the per-op replacement for the old route-guard abort).
     const claimed = await withClaim(() =>
-      runWithAuth(() => showPasswordCmd(entryPath)),
+      runEntryAction(() => showPasswordCmd(entryPath)),
     );
     if (myToken !== revealToken) return;
     if (!claimed) {
@@ -280,7 +358,7 @@ async function copyPassword() {
   decryptError.value = false;
   try {
     await ensureClipboardNotifyPermission();
-    const result = await runWithAuth(() =>
+    const result = await runEntryAction(() =>
       copyPasswordCmd(entryPath, clipboardNotifyText()),
     );
     showTotp.value = result.has_totp;
@@ -316,7 +394,7 @@ async function copyTotp() {
   decryptError.value = false;
   try {
     await ensureClipboardNotifyPermission();
-    const result = await runWithAuth(() =>
+    const result = await runEntryAction(() =>
       copyTotpCmd(entryPath, clipboardNotifyText()),
     );
     // `copied` is false exactly when the entry has no TOTP seed — reuse it as
@@ -346,7 +424,7 @@ async function exportAttachment() {
   decryptError.value = false;
   loading.value = true;
   try {
-    const result = await runWithAuth(() => exportAttachmentCmd(entryPath));
+    const result = await runEntryAction(() => exportAttachmentCmd(entryPath));
     if (!result.exported) {
       // The entry holds no attachment (the button was a fallback) — settle the
       // signal and tell the user; no file was written.
@@ -478,122 +556,154 @@ function handleKeydown(e: KeyboardEvent) {
       </span>
     </BaseAlert>
 
-    <div v-if="passwordActionsVisible" class="flex gap-3 mb-6">
+    <!-- R086 cold-start gate: a single Unlock instead of the button pile. Delete
+         stays visible but de-emphasized so a delete-without-decrypt still works. -->
+    <div v-if="gateVisible" class="mb-6">
+      <div class="flex flex-col items-center text-muted py-6">
+        <span aria-hidden="true"
+          ><BaseIcon :icon="Lock" class="w-7 h-7"
+        /></span>
+        <p class="text-sm mt-2">{{ t("entry.unlockMicrocopy") }}</p>
+      </div>
       <BaseButton
         variant="primary"
-        class="flex-1"
-        :disabled="loading || deleting"
-        :aria-label="t('entry.copyAria')"
-        @click="copyPassword"
+        block
+        class="mb-3"
+        :loading="unlocking"
+        :disabled="unlocking"
+        :aria-label="t('entry.unlockAria', { name: entryName })"
+        @click="unlockEntry"
       >
-        <BaseIcon :icon="Copy" /> {{ t("entry.copyLabel") }}
+        <BaseIcon :icon="Lock" /> {{ t("entry.unlockLabel") }}
       </BaseButton>
       <BaseButton
         variant="outline"
-        class="flex-1"
-        :disabled="loading || deleting"
-        :aria-label="
-          revealed ? t('entry.showingAria') : t('entry.showPasswordAria')
-        "
-        @click="showPassword"
-      >
-        <BaseIcon :icon="Eye" />
-        {{ revealed ? t("entry.showingLabel") : t("entry.showLabel") }}
-      </BaseButton>
-    </div>
-
-    <!-- Attachment: metadata caption + Export. For a confirmed attachment
-         Export is the primary action (Copy/Show are hidden — empty password,
-         base64 body); while status is unknown Export also shows so the entry
-         stays discoverable when locked. -->
-    <div
-      v-if="isAttachment && attachmentMeta"
-      class="mb-3 text-sm text-muted flex items-center gap-1"
-    >
-      <BaseIcon :icon="Paperclip" />
-      <span>{{
-        t("entry.attachmentMeta", {
-          name: attachmentMeta.filename ?? entryName,
-          size: humanizeSize(attachmentMeta.size),
-        })
-      }}</span>
-    </div>
-    <BaseButton
-      v-if="exportButtonVisible"
-      :variant="isAttachment ? 'primary' : 'outline'"
-      block
-      class="mb-3"
-      :disabled="loading || deleting"
-      :aria-label="t('entry.exportAttachmentAria')"
-      @click="exportAttachment"
-    >
-      <BaseIcon :icon="Download" /> {{ t("entry.exportAttachmentLabel") }}
-    </BaseButton>
-
-    <BaseButton
-      v-if="totpButtonVisible"
-      variant="outline"
-      block
-      class="mb-3"
-      :disabled="loading || deleting"
-      :aria-label="t('entry.copyTotpAria')"
-      @click="copyTotp"
-    >
-      <BaseIcon :icon="Clock" /> {{ t("entry.copyTotpLabel") }}
-    </BaseButton>
-
-    <BaseButton
-      variant="outline"
-      block
-      class="mb-3"
-      :disabled="loading || deleting || editDisabled"
-      :aria-label="t('entry.editAria', { name: entryName })"
-      @click="editEntry"
-    >
-      {{ t("entry.editLabel") }}
-    </BaseButton>
-    <p v-if="editDisabled" class="text-center text-xs text-muted mb-3">
-      {{
-        editBlockedReason === "nonUtf8"
-          ? t("entry.nonUtf8EditDisabledHint")
-          : t("entry.attachmentEditDisabledHint")
-      }}
-    </p>
-
-    <BaseButton
-      v-if="!isAttachment"
-      variant="outline"
-      block
-      class="mb-3"
-      :disabled="loading || deleting"
-      :aria-label="t('entry.revisionsAria', { name: entryName })"
-      @click="openRevisions"
-    >
-      {{ t("entry.revisionsLabel") }}
-    </BaseButton>
-
-    <div class="flex gap-3 mb-6">
-      <BaseButton
-        variant="danger"
-        class="flex-1"
-        :disabled="deleting || loading"
+        block
+        :disabled="unlocking || deleting"
         :aria-label="t('entry.deleteAria', { name: entryName })"
         @click="deleteSecret"
       >
         {{ deleting ? t("entry.deleting") : t("entry.deleteLabel") }}
       </BaseButton>
-      <BaseButton
-        v-if="deleting"
-        variant="outline"
-        type="button"
-        class="flex-1"
-        :disabled="cancelling"
-        :aria-label="t('entry.cancelSaveAria')"
-        @click="cancelSave"
-      >
-        {{ cancelling ? t("entry.cancellingSave") : t("entry.cancelSave") }}
-      </BaseButton>
     </div>
+    <template v-else>
+      <div v-if="passwordActionsVisible" class="flex gap-3 mb-6">
+        <BaseButton
+          variant="primary"
+          class="flex-1"
+          :disabled="loading || deleting"
+          :aria-label="t('entry.copyAria')"
+          @click="copyPassword"
+        >
+          <BaseIcon :icon="Copy" /> {{ t("entry.copyLabel") }}
+        </BaseButton>
+        <BaseButton
+          variant="outline"
+          class="flex-1"
+          :disabled="loading || deleting"
+          :aria-label="
+            revealed ? t('entry.showingAria') : t('entry.showPasswordAria')
+          "
+          @click="showPassword"
+        >
+          <BaseIcon :icon="Eye" />
+          {{ revealed ? t("entry.showingLabel") : t("entry.showLabel") }}
+        </BaseButton>
+      </div>
+
+      <!-- Attachment: metadata caption + Export. For a confirmed attachment
+         Export is the primary action (Copy/Show are hidden — empty password,
+         base64 body); while status is unknown Export also shows so the entry
+         stays discoverable when locked. -->
+      <div
+        v-if="isAttachment && attachmentMeta"
+        class="mb-3 text-sm text-muted flex items-center gap-1"
+      >
+        <BaseIcon :icon="Paperclip" />
+        <span>{{
+          t("entry.attachmentMeta", {
+            name: attachmentMeta.filename ?? entryName,
+            size: humanizeSize(attachmentMeta.size),
+          })
+        }}</span>
+      </div>
+      <BaseButton
+        v-if="exportButtonVisible"
+        :variant="isAttachment ? 'primary' : 'outline'"
+        block
+        class="mb-3"
+        :disabled="loading || deleting"
+        :aria-label="t('entry.exportAttachmentAria')"
+        @click="exportAttachment"
+      >
+        <BaseIcon :icon="Download" /> {{ t("entry.exportAttachmentLabel") }}
+      </BaseButton>
+
+      <BaseButton
+        v-if="totpButtonVisible"
+        variant="outline"
+        block
+        class="mb-3"
+        :disabled="loading || deleting"
+        :aria-label="t('entry.copyTotpAria')"
+        @click="copyTotp"
+      >
+        <BaseIcon :icon="Clock" /> {{ t("entry.copyTotpLabel") }}
+      </BaseButton>
+
+      <BaseButton
+        variant="outline"
+        block
+        class="mb-3"
+        :disabled="loading || deleting || editDisabled"
+        :aria-label="t('entry.editAria', { name: entryName })"
+        @click="editEntry"
+      >
+        {{ t("entry.editLabel") }}
+      </BaseButton>
+      <p v-if="editDisabled" class="text-center text-xs text-muted mb-3">
+        {{
+          editBlockedReason === "nonUtf8"
+            ? t("entry.nonUtf8EditDisabledHint")
+            : t("entry.attachmentEditDisabledHint")
+        }}
+      </p>
+
+      <BaseButton
+        v-if="!isAttachment"
+        variant="outline"
+        block
+        class="mb-3"
+        :disabled="loading || deleting"
+        :aria-label="t('entry.revisionsAria', { name: entryName })"
+        @click="openRevisions"
+      >
+        {{ t("entry.revisionsLabel") }}
+      </BaseButton>
+
+      <div class="flex gap-3 mb-6">
+        <BaseButton
+          variant="danger"
+          class="flex-1"
+          :disabled="deleting || loading"
+          :aria-label="t('entry.deleteAria', { name: entryName })"
+          @click="deleteSecret"
+        >
+          {{ deleting ? t("entry.deleting") : t("entry.deleteLabel") }}
+        </BaseButton>
+        <BaseButton
+          v-if="deleting"
+          variant="outline"
+          type="button"
+          class="flex-1"
+          :disabled="cancelling"
+          :aria-label="t('entry.cancelSaveAria')"
+          @click="cancelSave"
+        >
+          {{ cancelling ? t("entry.cancellingSave") : t("entry.cancelSave") }}
+        </BaseButton>
+      </div>
+    </template>
 
     <div
       v-if="loading"
