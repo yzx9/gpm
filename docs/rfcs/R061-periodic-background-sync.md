@@ -4,7 +4,7 @@
 **Status:** Shipped
 **Phase:** Done
 
-**Retained** past the usual ship-and-delete RFC convention: the AppLock-off limitation documented below was lifted by [R064](R064-background-sync-under-app-lock.md) (which made the git-credential key auth-free), so this rationale stays as the reference for that follow-up.
+**Retained** past the usual ship-and-delete RFC convention: its design rationale (pull-only cadence, the platform scheduler vs. a foreground service vs. an in-process timer, the cross-process lock, no-modal divergence deferral) is not yet captured in `docs/specs/005-git-storage/` or `docs/SECURITY.md`. The AppLock-off limitation noted below was lifted by the shipped auth-free git-credential split (rationale now in [A003](../adr/A003-configuration-storage-tiering.md)).
 
 ## What
 
@@ -58,4 +58,4 @@ This is convergence and UX, not a correctness gap — divergences are already re
 
 ## Depends on / Supersedes
 
-Builds on the shipped foreground sync (whose rationale now lives in the code) and the manual sync path. Carries forward the not-yet-shipped background-timer rationale of the retired periodic-sync draft. Its AppLock-off limitation was lifted by [R064](R064-background-sync-under-app-lock.md) (the retired R063 proposed full decoupling; R064 took only the auth-free git-credential part).
+Builds on the shipped foreground sync (whose rationale now lives in the code) and the manual sync path. Carries forward the not-yet-shipped background-timer rationale of the retired periodic-sync draft. Its AppLock-off limitation was lifted by the shipped auth-free git-credential split ([A003](../adr/A003-configuration-storage-tiering.md); the retired R063 proposed full decoupling, of which only the auth-free git-credential part was taken).
