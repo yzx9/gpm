@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "codegen"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "gpm",
  "rustpass",
@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "gpm"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "age",
  "base64 0.23.1",
@@ -4674,7 +4674,7 @@ dependencies = [
 
 [[package]]
 name = "rustpass"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "aes-gcm",
  "age",
@@ -5616,7 +5616,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-background-work"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "log",
  "serde",
@@ -5641,7 +5641,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-clipboard-notify"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "log",
  "serde",
@@ -5652,7 +5652,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-device-info"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "serde",
  "tauri",
@@ -5679,7 +5679,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-file-picker"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -5691,7 +5691,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-file-save"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "serde",
  "tauri",
@@ -5726,7 +5726,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-keystore"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "base64 0.23.1",
  "log",
@@ -5801,7 +5801,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-safe-area"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "tauri",
  "tauri-plugin",
@@ -5809,7 +5809,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-screen-secure"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "tauri",
  "tauri-plugin",

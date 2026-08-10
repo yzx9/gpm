@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.18.1] - 2026-08-10
+
 ### Changed
 
 - The dropdowns on the **Setup** screen (clone / create / create-GPG), the **password generator**, and the **create-from-template** password fields now open the app's own themed option sheet — the same picker used throughout Settings — instead of the device's built-in dropdown. They're consistent with the rest of the app and a touch easier to use on a phone.
@@ -482,7 +484,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.18.1...HEAD
+[v0.18.1]: https://github.com/yzx9/gpm/compare/v0.18.0...v0.18.1
 [v0.18.0]: https://github.com/yzx9/gpm/compare/v0.17.2...v0.18.0
 [v0.17.2]: https://github.com/yzx9/gpm/compare/v0.17.1...v0.17.2
 [v0.17.1]: https://github.com/yzx9/gpm/compare/v0.17.0...v0.17.1

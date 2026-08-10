@@ -5,7 +5,7 @@ resolver = "2"
 members = ["crates/*", "app/src-tauri"]
 
 [workspace.package]
-version = "0.18.0"
+version = "0.18.1"
 authors = ["Zexin Yuan"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
