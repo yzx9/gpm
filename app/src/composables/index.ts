@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 /** Barrel re-exporting every Vue 3 composable. */
+export * from "./useActiveRepo";
 export * from "./useAppLockState";
 export * from "./useBackHandlerRegistry";
 export * from "./useCancellableSave";

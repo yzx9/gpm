@@ -249,6 +249,12 @@ impl RepoRegistry {
     /// `last_active` is unset or names a missing id (defensive against a
     /// corrupt/partial upgrade — never panics). `None` only when the registry is
     /// empty (⇒ route to setup).
+    ///
+    /// No caller in Step 1 (commands resolve an explicit `repo_id` via
+    /// [`facade`](Self::facade); the active-repo concept only matters once
+    /// switching exists). The two-phase read (`last_active` then `by_id` in
+    /// separate critical sections) is a latent TOCTOU — rework this before
+    /// Step 2 switching lands.
     #[must_use]
     pub(crate) fn active_facade(&self) -> Option<Arc<Store>> {
         let last = self.last_active();

@@ -199,19 +199,21 @@ export type WriteOutcome =
 
 /** List one page of entries (no query). */
 export async function listEntries(
+  repoId: string,
   offset: number,
   limit: number,
 ): Promise<EntryPage> {
-  return invoke<EntryPage>("list_entries", { offset, limit });
+  return invoke<EntryPage>("list_entries", { repoId, offset, limit });
 }
 
 /** Search entries by query; returns one page of matches. */
 export async function searchEntries(
+  repoId: string,
   query: string,
   offset: number,
   limit: number,
 ): Promise<EntryPage> {
-  return invoke<EntryPage>("search_entries", { query, offset, limit });
+  return invoke<EntryPage>("search_entries", { repoId, query, offset, limit });
 }
 
 /** Decrypt + copy the entry's password; clipboard auto-clears after a timer.

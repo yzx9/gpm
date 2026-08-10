@@ -171,6 +171,21 @@ pub(crate) struct AppState {
     pub(crate) app_handle: Option<AppHandle>,
 }
 
+impl AppState {
+    /// Resolve a repository id to its `Store` facade, or a clear not-found error.
+    /// The single funnel every repo-touching command threads through:
+    /// `let store = state.repo(&repo_id)?;`. The error carries no secret — only
+    /// the opaque id that did not resolve (never a path, credential, or entry).
+    pub(crate) fn repo(&self, id: &registry::RepoId) -> Result<Arc<Store>, rustpass::Error> {
+        self.registry.facade(id).ok_or_else(|| {
+            rustpass::Error::new(
+                rustpass::ErrorCode::ConfigError,
+                format!("unknown repository: {id}"),
+            )
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // At-rest master key (Android Keystore)
 // ---------------------------------------------------------------------------

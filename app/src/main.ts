@@ -8,8 +8,10 @@ import App from "./App.vue";
 import "./style.css";
 
 import {
+  ACTIVE_REPO_KEY,
   APP_LOCK_KEY,
   BACK_HANDLER_KEY,
+  createActiveRepoStore,
   createAppLockStore,
   createBackHandlerRegistry,
   createDialog,
@@ -52,6 +54,7 @@ installConsoleCapture();
 // guards below use `secureScreenState`/`toastState` directly because `inject`
 // only resolves inside a component setup.
 const lockState = createLockState();
+const activeRepo = createActiveRepoStore();
 const appLockStore = createAppLockStore();
 const draftsNotice = createDraftsNotice();
 const secureScreenState = createSecureScreen();
@@ -90,6 +93,7 @@ void (async () => {
   // with a recursion guard — it must never break rendering.
   installFrontendLogger(app);
   app.provide(LOCK_KEY, lockState);
+  app.provide(ACTIVE_REPO_KEY, activeRepo);
   app.provide(APP_LOCK_KEY, appLockStore);
   app.provide(DRAFTS_NOTICE_KEY, draftsNotice);
   app.provide(SECURE_SCREEN_KEY, secureScreenState);

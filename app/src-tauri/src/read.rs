@@ -21,6 +21,7 @@ use crate::AppState;
 use crate::entry_cache;
 use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 use crate::page::clamp_limit;
+use crate::registry::RepoId;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -218,10 +219,12 @@ fn page_from(r: Result<RankedPage, Error>, offset: usize) -> Result<EntryPage, E
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn list_entries(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     offset: usize,
     limit: usize,
 ) -> Result<EntryPage, Error> {
-    page_from(state.store.list(offset, clamp_limit(limit)).await, offset)
+    let store = state.repo(&repo_id)?;
+    page_from(store.list(offset, clamp_limit(limit)).await, offset)
 }
 
 /// Fuzzy-search `.age` entries by `query`, ranked by relevance (best score
@@ -232,12 +235,14 @@ pub(crate) async fn list_entries(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn search_entries(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     query: String,
     offset: usize,
     limit: usize,
 ) -> Result<EntryPage, Error> {
+    let store = state.repo(&repo_id)?;
     page_from(
-        state.store.search(&query, offset, clamp_limit(limit)).await,
+        store.search(&query, offset, clamp_limit(limit)).await,
         offset,
     )
 }

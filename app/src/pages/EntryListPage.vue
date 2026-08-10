@@ -37,6 +37,7 @@ import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
+  useActiveRepo,
   useAppLockState,
   useCommitSignature,
   useLockSignals,
@@ -72,6 +73,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const activeRepo = useActiveRepo();
 const { runWithAuth, overlayUp } = useLockState();
 const { appLocked } = useAppLockState();
 const { toast } = useToast();
@@ -198,9 +200,10 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
   loading.value = true;
   try {
     const searching = q.trim().length > 0;
+    const repoId = await activeRepo.currentId();
     const page = searching
-      ? await searchEntries(q, offset, PAGE_SIZE)
-      : await listEntries(offset, PAGE_SIZE);
+      ? await searchEntries(repoId, q, offset, PAGE_SIZE)
+      : await listEntries(repoId, offset, PAGE_SIZE);
     if (myId !== reqId) return; // superseded by a newer query/reset/pull
     displayedEntries.value = replace
       ? page.entries
