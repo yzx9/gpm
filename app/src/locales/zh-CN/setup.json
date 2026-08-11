@@ -132,6 +132,7 @@
     "gpgVerified": "✓ 口令已验证。",
     "unsupportedPq": "暂不支持后量子 age 密钥。",
     "unsupportedPlugin": "age-plugin 身份暂不支持用于解密。",
+    "pluginRecipientReadOnlyNotice": "此仓库使用了 age 插件接收者（如 YubiKey）。你无法在本设备创建或编辑密钥——插件工具无法在 Android 上运行。请在桌面端保存更改。",
     "malformed": "这看起来不是有效的 age 或 SSH 密钥。",
     "sshPassphraseLabel": "SSH 密钥口令",
     "sshPassphrasePlaceholder": "用于解密 SSH 密钥的口令",

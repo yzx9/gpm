@@ -49,6 +49,9 @@ const customName = ref("");
 const customContent = ref("");
 const submitting = ref(false);
 const error = ref("");
+// Caught backend error code — renders the alert as a warning (not red danger)
+// for PLUGIN_UNAVAILABLE (a known platform limitation, not a transient failure).
+const errorCode = ref<string | null>(null);
 const { cancelling, cancelSave } = useCancellableSave();
 
 /** Split raw custom-create content into structured parts for a keep-mine conflict
@@ -157,6 +160,7 @@ async function onSave() {
   if (!canSubmit.value) return;
   submitting.value = true;
   error.value = "";
+  errorCode.value = null;
   try {
     const outcome = await runWithAuth(() =>
       createSecret(customName.value.trim(), customContent.value),
@@ -187,6 +191,7 @@ async function onSave() {
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
+    errorCode.value = appError?.code ?? null;
     error.value = appError?.message || t("create.createFailed");
     console.warn("[create-custom] create failed", e);
   } finally {
@@ -223,9 +228,13 @@ onBeforeUnmount(() => {
       </template>
     </BaseHeader>
 
-    <BaseAlert v-if="error" variant="danger" class="mb-3">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert
+      v-if="error"
+      :variant="errorCode === 'PLUGIN_UNAVAILABLE' ? 'warning' : 'danger'"
+      class="mb-3"
+    >
+      {{ error }}
+    </BaseAlert>
 
     <form class="flex flex-col gap-4" @submit.prevent="onSave">
       <div class="flex flex-col gap-1">

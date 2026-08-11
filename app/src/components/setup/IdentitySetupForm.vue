@@ -23,7 +23,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
-import { useWipeOnLeave } from "@/composables";
+import { useSecureScreen, useWipeOnLeave } from "@/composables";
 import {
   ArrowLeft,
   Check,
@@ -47,6 +47,11 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ done: []; back: [] }>();
+
+// `secureAvailable` is the app's compile-time Android fact (≡ cfg!(target_os =
+// "android")); read its `.value` inside `pluginRecipientReadOnly` so it stays
+// reactive as initSecureScreen resolves (child mounts before App init).
+const { secureAvailable } = useSecureScreen();
 
 // Recipients are read-only context now; the match is derived from the identity,
 // not selected by hand. `derivedRecipient` is the single source of truth for
@@ -102,6 +107,18 @@ const hasSshRecipients = computed(() =>
   recipients.value.some(
     (r) => r.key_type === "ssh_ed25519" || r.key_type === "ssh_rsa",
   ),
+);
+
+// On Android a store with an age plugin recipient (e.g. age1yubikey1…) is
+// readable but unwritable: wrapping a file key to a plugin recipient needs the
+// age-plugin-<name> binary, which can't run here. Surface that up-front so the
+// user isn't surprised by a save failure after completing setup. Read
+// `secureAvailable.value` here (not a snapshot) so it reactively turns on once
+// App.vue's initSecureScreen resolves.
+const pluginRecipientReadOnly = computed(
+  () =>
+    secureAvailable.value &&
+    recipients.value.some((r) => r.key_type === "plugin"),
 );
 
 // A GPG key has been picked: drive the GPG-aware panel off the picked key type
@@ -557,6 +574,19 @@ onUnmounted(clearPendingFile);
         </div>
       </div>
     </div>
+
+    <!-- Android + plugin recipient: this store is read-only on this device.
+         Shown only on Android (secureAvailable) and only while the age
+         recipients list is visible (!gpgPicked — a GPG store reads the age
+         backend and the list is misleading there). -->
+    <BaseAlert v-if="!gpgPicked && pluginRecipientReadOnly" variant="warning">
+      <BaseIcon
+        :icon="TriangleAlert"
+        :size="14"
+        class="inline-block align-middle"
+      />
+      {{ t("setup.identity.pluginRecipientReadOnlyNotice") }}
+    </BaseAlert>
 
     <!-- Single, mutually-exclusive status alert. aria-live so AT announces
          match / no-match when the derived recipient changes. -->

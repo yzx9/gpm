@@ -74,6 +74,9 @@ let generateToken = 0;
 
 const submitting = ref(false);
 const error = ref("");
+// Caught backend error code — renders the alert as a warning (not red danger)
+// for PLUGIN_UNAVAILABLE (a known platform limitation, not a transient failure).
+const errorCode = ref<string | null>(null);
 const { cancelling, cancelSave } = useCancellableSave();
 
 const {
@@ -165,6 +168,7 @@ async function onSave() {
   if (!canSubmit.value || !preset.value) return;
   submitting.value = true;
   error.value = "";
+  errorCode.value = null;
   try {
     const outcome = await runWithAuth(() =>
       createFromPresetSecret(preset.value!.id, fields.value),
@@ -188,6 +192,7 @@ async function onSave() {
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
+    errorCode.value = appError?.code ?? null;
     error.value = appError?.message || t("create.createFailed");
     console.warn("[create-preset] create failed", e);
   } finally {
@@ -215,9 +220,13 @@ useWipeOnLeave(wipeFields);
       </template>
     </BaseHeader>
 
-    <BaseAlert v-if="error" variant="danger" class="mb-3">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert
+      v-if="error"
+      :variant="errorCode === 'PLUGIN_UNAVAILABLE' ? 'warning' : 'danger'"
+      class="mb-3"
+    >
+      {{ error }}
+    </BaseAlert>
 
     <div v-if="presetsLoading" class="loading">
       <BaseSpinner /> {{ t("create.loading") }}

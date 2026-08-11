@@ -80,6 +80,10 @@ const baseOid = ref<string | null>(null);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
+// Caught backend error code, so the save-failure alert can render as a warning
+// (known platform limitation) for PLUGIN_UNAVAILABLE instead of the default red
+// "danger". Null outside the catch; reset wherever `error` is.
+const errorCode = ref<string | null>(null);
 const decryptError = ref(false);
 // Set when the entry is a binary attachment — can't be round-tripped through
 // the text editor without destroying it, so editing is blocked at the source.
@@ -307,6 +311,7 @@ async function onSave() {
   if (!canSave.value) return;
   saving.value = true;
   error.value = "";
+  errorCode.value = null;
   decryptError.value = false;
   try {
     const parts = snapshotParts();
@@ -341,6 +346,7 @@ async function onSave() {
     }
   } catch (e) {
     const appError = e as AppError;
+    errorCode.value = appError?.code ?? null;
     error.value = appError?.message || t("entry.saveFailed");
     console.error("[entry-edit] save failed", e);
   } finally {
@@ -366,7 +372,11 @@ function goBack() {
       </template>
     </BaseHeader>
 
-    <BaseAlert v-if="error" variant="danger" class="mb-4">
+    <BaseAlert
+      v-if="error"
+      :variant="errorCode === 'PLUGIN_UNAVAILABLE' ? 'warning' : 'danger'"
+      class="mb-4"
+    >
       {{ error }}
       <span v-if="decryptError" class="block text-xs opacity-80 mt-1">
         {{ t("entry.checkIdentityHint") }}

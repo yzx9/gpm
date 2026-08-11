@@ -58,12 +58,12 @@ describe("SetupPage", () => {
   // secure-screen (available:false) so the claim is a no-op here and its
   // set_secure IPC doesn't disturb these tests' invoke mock queues. The claim's
   // real IPC behavior is covered in useSecureScreen / useSecureClaim tests.
-  function mountPage() {
+  function mountPage(available = false) {
     return mount(SetupPage, {
       global: {
         provide: {
           [TOAST_KEY]: createToast(),
-          [SECURE_SCREEN_KEY]: createSecureScreen({ available: false }),
+          [SECURE_SCREEN_KEY]: createSecureScreen({ available }),
           [BACK_HANDLER_KEY]: createBackHandlerRegistry(),
           [SCROLL_LOCK_KEY]: createScrollLockController(),
         },
@@ -245,12 +245,15 @@ describe("SetupPage", () => {
   // ── Step 2: Identity ───────────────────────────────────────────────────
 
   describe("step 2 identity", () => {
-    async function mountAtStep2(recipientsList: RecipientInfo[] = []) {
+    async function mountAtStep2(
+      recipientsList: RecipientInfo[] = [],
+      available = false,
+    ) {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce(recipientsList); // list_recipients
 
-      const wrapper = mountPage();
+      const wrapper = mountPage(available);
       await flushPromises();
       return wrapper;
     }
@@ -281,6 +284,45 @@ describe("SetupPage", () => {
       expect(wrapper.text()).toContain(
         "fresh repository with no recipients yet",
       );
+    });
+
+    it("on Android, warns a plugin-recipient store is read-only here", async () => {
+      // Mock by command name (not mountAtStep2's order-based queue): with
+      // secureAvailable true, SetupPage's screen-capture claim fires a
+      // set_secure invoke that would otherwise shift the mockResolvedValueOnce
+      // queue and starve list_recipients. Matching by cmd is robust to that.
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "is_repo_ready") return true;
+        if (cmd === "list_recipients")
+          return [
+            {
+              public_key: "age1yubikey1dummy",
+              comment: null,
+              key_type: "plugin",
+            },
+          ];
+        return undefined; // set_secure etc. resolve harmlessly
+      });
+      const wrapper = mountPage(true);
+      await flushPromises();
+
+      // secureAvailable (Android) + a plugin recipient → the read-only notice.
+      // Wrapping a file key to a plugin recipient needs the age-plugin-<name>
+      // binary, which can't run on Android; the store can't be written from
+      // this device. (The notice deliberately doesn't claim read access — a
+      // plugin-only store isn't readable here either.)
+      expect(wrapper.text()).toContain("can't create or edit");
+    });
+
+    it("on desktop, suppresses the plugin-recipient read-only notice", async () => {
+      const recipients: RecipientInfo[] = [
+        { public_key: "age1yubikey1dummy", comment: null, key_type: "plugin" },
+      ];
+      const wrapper = await mountAtStep2(recipients); // desktop (available=false)
+
+      // Desktop can install the plugin binary, so the store is writable there —
+      // the Android-only read-only notice must not show.
+      expect(wrapper.text()).not.toContain("can't create or edit");
     });
 
     it("highlights the recipient matching a pasted identity", async () => {

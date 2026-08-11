@@ -132,6 +132,7 @@
     "gpgVerified": "✓ Passphrase verified.",
     "unsupportedPq": "Post-quantum age keys aren't supported yet.",
     "unsupportedPlugin": "age-plugin identities aren't supported for decryption yet.",
+    "pluginRecipientReadOnlyNotice": "This store uses an age plugin recipient (e.g. YubiKey). You can't create or edit secrets on this device — the plugin tool can't run on Android. Save changes from a desktop.",
     "malformed": "This doesn't look like a valid age or SSH key.",
     "sshPassphraseLabel": "SSH Key Passphrase",
     "sshPassphrasePlaceholder": "Passphrase to decrypt the SSH key",

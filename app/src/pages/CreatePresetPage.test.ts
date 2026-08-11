@@ -153,4 +153,47 @@ describe("CreatePresetPage", () => {
       expect.objectContaining({ mode: "xkcd" }),
     );
   });
+
+  it("renders a warning when the store needs an age plugin binary", async () => {
+    // create_from_preset_secret rejects PLUGIN_UNAVAILABLE: the store has an age
+    // plugin recipient whose binary can't run here. The alert must be a warning
+    // (role=status) carrying the backend message, not a red danger (role=alert).
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "list_create_presets") return Promise.resolve([preset()]);
+      if (cmd === "create_from_preset_secret")
+        return Promise.reject({
+          code: "PLUGIN_UNAVAILABLE",
+          message:
+            "Encryption needs the age plugin 'age-plugin-yubikey', which can't run on Android",
+        });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(CreatePresetPage).wrapper;
+    await flushPromises();
+    await w.find('input[id="f-name"]').setValue("github");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+
+    const alert = w.find("[role='status']");
+    expect(alert.exists()).toBe(true);
+    expect(alert.text()).toContain("age-plugin-yubikey");
+    expect(w.find("[role='alert']").exists()).toBe(false);
+  });
+
+  it("renders a red error for a generic create failure (baseline)", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "list_create_presets") return Promise.resolve([preset()]);
+      if (cmd === "create_from_preset_secret")
+        return Promise.reject({ code: "DECRYPT_FAILED", message: "boom" });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(CreatePresetPage).wrapper;
+    await flushPromises();
+    await w.find('input[id="f-name"]').setValue("github");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(w.find("[role='alert']").exists()).toBe(true);
+    expect(w.find("[role='status']").exists()).toBe(false);
+  });
 });
