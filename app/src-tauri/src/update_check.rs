@@ -167,8 +167,7 @@ pub(crate) async fn get_update_status(
         return Ok(UpdateStatus::quiet());
     }
     let available = is_newer(cfg.latest_release.as_deref(), env!("CARGO_PKG_VERSION"));
-    let unacknowledged =
-        available && cfg.seen_release.as_deref() != cfg.latest_release.as_deref();
+    let unacknowledged = available && cfg.seen_release.as_deref() != cfg.latest_release.as_deref();
     Ok(UpdateStatus {
         available,
         unacknowledged,
@@ -184,9 +183,7 @@ pub(crate) async fn get_update_status(
 /// re-lights the dot next launch.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn acknowledge_update(
-    state: State<'_, AppState>,
-) -> Result<(), rustpass::Error> {
+pub(crate) async fn acknowledge_update(state: State<'_, AppState>) -> Result<(), rustpass::Error> {
     if let Err(e) = state.app_config.acknowledge_update().await {
         log::warn!("update-check: acknowledge failed: {e}");
     }

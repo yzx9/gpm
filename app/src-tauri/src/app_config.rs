@@ -1497,7 +1497,8 @@ impl AppConfigStore {
     /// under `write_mu`; the command layer treats a failure as best-effort (a
     /// missed ack just re-lights the dot next launch).
     pub(crate) async fn acknowledge_update(&self) -> Result<AppConfig, Error> {
-        self.update(|c| c.seen_release = c.latest_release.clone()).await
+        self.update(|c| c.seen_release = c.latest_release.clone())
+            .await
     }
 
     /// Set the persisted app-launch biometric-gate intent flag (sealed;

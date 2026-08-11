@@ -598,8 +598,7 @@ pub fn run() {
                 // Fire-and-forget: the handle is intentionally dropped (the task
                 // runs to completion on the runtime). `_`-prefixed so it reads as
                 // unused without `let _ =` (which clippy flags on a future).
-                let _update_check =
-                    tauri::async_runtime::spawn(update_check::run_once(app_config));
+                let _update_check = tauri::async_runtime::spawn(update_check::run_once(app_config));
             }
             Ok(())
         })
