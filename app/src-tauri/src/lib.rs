@@ -6,6 +6,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use base64::Engine;
 use rustpass::{LockMode, Store};
@@ -97,6 +98,13 @@ pub(crate) struct AppState {
     /// window. Armed on unlock/enable, disarmed on lock/disable; reset on
     /// activity (the same signal the identity timer consumes).
     pub(crate) gate_idle_timer: identity::IdleTimer,
+    /// Last user-activity instant — a monotonic [`Instant`] (not wall-clock
+    /// `SystemTime`, so an NTP/user-clock backward skew can't make the resume
+    /// grace window read wider than it is). Updated at the single chokepoint
+    /// [`identity::reset_gate_idle_timer`], so every secret op, `bump_idle_timer`,
+    /// and unlock all flow through one update. The resume re-lock path
+    /// (`applock::app_lock`) reads it to decide the R058 grace window.
+    pub(crate) last_activity_at: Mutex<Instant>,
     /// Cached `RepoConfig.unlock_identity_with_app`: when true the identity
     /// session has no independent auto-lock — its lifecycle follows the gate
     /// (R057 coupling). Refreshed in `refresh_security_cache` BEFORE
@@ -327,6 +335,9 @@ fn init_state(
         // Locked at startup iff the gate is on (master key not yet injected).
         app_locked: Arc::new(AtomicBool::new(app_lock_enabled)),
         gate_idle_timer: identity::IdleTimer::new(),
+        // `now` so the grace window is never spuriously huge before the first
+        // `reset_gate_idle_timer` (unlock/activity) lands.
+        last_activity_at: Mutex::new(Instant::now()),
         // Refreshed on the first unlock/set_* (the gate is off / no identity here).
         identity_coupled: AtomicBool::new(false),
         // Legacy-envelope migrate pending; only consumed on the App-Lock path

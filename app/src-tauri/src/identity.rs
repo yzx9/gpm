@@ -625,6 +625,16 @@ pub(crate) fn reset_gate_idle_timer<R: Runtime>(state: &State<'_, AppState>, app
         disarm_gate_idle(state);
         return;
     }
+    // R058 chokepoint: record the activity instant here so EVERY caller stays in
+    // lockstep — `bump_idle_timer` (frontend taps) AND the ~15 secret-op paths
+    // (read/write/revisions/…) that call this directly, bypassing `bump_idle_timer`.
+    // The resume re-lock (`applock::app_lock`) reads it to judge the grace window;
+    // sharing it with the timer armed below keeps the resume check and the idle
+    // timer (both keyed on this instant + N) in lockstep. Monotonic `Instant`.
+    *state
+        .last_activity_at
+        .lock()
+        .expect("last_activity_at poisoned") = std::time::Instant::now();
     match state.app_config.get().gate_idle {
         GateIdle::After(secs) => arm_gate_idle(state, app, secs),
         GateIdle::Off => disarm_gate_idle(state),

@@ -1,43 +1,99 @@
-# App-Launch Lock: Opt-In Timeout for Cross-Background Re-Lock
+# App-Launch Lock: Grace Window for Cross-Background Re-Lock
 
 **Priority:** P2
-**Status:** Draft
-**Phase:** Next
+**Status:** Accepted
+**Phase:** Implementing
 
 ## What
 
-Today the gate re-locks on every foreground return — cold start and warm resume alike. Add an opt-in setting that replaces every-resume with timeout-based resume re-lock: within the timeout, a foreground return resumes the app unlocked; past it, the gate has engaged and the user re-authenticates. The setting is off by default, so today's every-resume behavior remains the default; users who accept the trade for better UX opt in.
+Today the gate re-locks on **every** foreground return (cold start and warm resume
+alike). With `gate_idle = After(N)` (R057), a return within `N` of the last activity
+now **stays unlocked** (a grace window for quick app switches); past `N` it re-locks
+and re-authenticates. `gate_idle = Off` keeps today's every-resume behavior unchanged.
+
+Unifies the resume re-lock into the existing `gate_idle` setting (no new setting):
+"re-lock after N seconds of disuse" applies whether the disuse is foreground-idle
+(R057's idle timer) or backgrounded-away (this RFC).
 
 Serves the app-lock feature (`docs/specs/007-app-lock/`).
 
 ## Why
 
-Every-resume is the strongest stance but the most intrusive: a momentary app switch and back forces a fresh biometric prompt. This RFC makes the timeout relaxation opt-in rather than flipping the default, so the secure behavior stays the default and the regression is a conscious user choice.
+Every-resume is the strongest stance but the most intrusive: a momentary app switch
+and back forces a fresh biometric prompt. Reusing `gate_idle`'s N for the resume
+window removes that friction for users who already accepted "re-lock after N of
+inactivity," without adding a second setting. `Off` (the m0006 default for existing
+users) is untouched, so the secure default is preserved.
 
-The regression lands on the threat model's named attacker — "brief physical access to an unlocked device." Today, any background→foreground transition wipes the master key before content is reachable, so an attacker who picks up an unlocked device and switches into gpm is stopped. Under the timeout, that attacker succeeds if they resume gpm within the window: the master key is still resident and the store opens unlocked. The change widens the accepted exposure from "zero seconds after the app leaves the foreground" to "up to the timeout," against that same in-scope attacker. The out-of-scope lines do not move: a process-running or root attacker could already ask the Keystore to unseal the master key regardless, so for that attacker the two designs are equivalent.
+The relaxation is a deliberate, opt-in widening of the in-scope exposure window
+(from "zero seconds after the app leaves the foreground" to "up to N") against the
+threat model's named attacker — "brief physical access to an unlocked device." New
+installs default `gate_idle = After(300)`, so they get a 5-minute grace by default;
+this is consistent with R057's choice to default the idle timer on. The out-of-scope
+lines do not move (a process-running/root attacker could already ask the Keystore to
+unseal the vault key regardless).
 
 ## Context
 
-**Evaluation happens at the foreground-return instant, not via a background timer.** An in-process timer cannot be relied on to fire while the app is backgrounded — the OS may suspend the process under Doze, or kill it outright. The robust shape is to record the instant the app leaves the foreground and, on every return, compare elapsed time against the timeout. A process killed in the background never evaluates — it cold-starts locked, which is the desired result (the master key died with the process). This is the same "background-duration threshold" shape the every-resume design was chosen over; this RFC makes that reversal opt-in.
+**Backend-authoritative, single state.** `last_activity_at` (a monotonic `Instant`)
+lives in `AppState` and is updated at one chokepoint — `identity::reset_gate_idle_timer`
+— so every caller stays in lockstep: `bump_idle_timer` (frontend taps) **and** the
+~15 secret-op paths (read/write/revisions/…) that reset the timer directly, bypassing
+`bump_idle_timer`. (Updating it in `bump_idle_timer` alone was the first draft; it
+missed those direct callers and broke the invariant.) The resume re-lock
+(`applock::app_lock`, made grace-aware via the `apply_resume_relock` core) reads it.
 
-**Reuses the mask and reason from R057.** A foreground return past the timeout raises the same non-dismissable mask, and because the user just came back it auto-prompts (the reason is "return past timeout," not "idle"). Within the timeout, no lock fires at all.
+**Evaluated at the resume instant, not a background timer.** Android may suspend
+(Doze) or kill a backgrounded process, so an in-process timer can't be relied on to
+fire while away. The resume check (`now − last_activity_at ≥ N`) is the reliable
+backup for when the idle timer was suspended; both share the same `last_activity_at`
+and N, so they agree. A killed process cold-starts locked (desired).
 
-**Threat-model posture.** This is the one of the two app-lock timeout RFCs that modifies the security model: it is an opt-in widening of the in-scope exposure window, documented as a deliberate user-chosen trade rather than a silent default flip.
+**Reuses the existing `app_lock` command + `Return` reason.** `app_lock` already
+disarms the gate idle timer before `do_app_lock` — reusing it (resume-only caller)
+gets the disarm for free and needs no new command/registration/wrapper. A warm
+resume into an already-locked app is a no-op (the existing overlay stays as-is); an
+earlier "re-emit `Return`" promotion was dropped — it sent a spurious cold-start
+`app_lock` ping that could race a just-finished unlock and re-lock `Off` users. No
+new `AppLockReason` variant.
+
+**D1 (grace timer semantics): total-disuse.** The grace branch does **not** disarm
+the idle timer and does **not** stamp `last_activity_at`, so the window keeps counting
+toward N across the backgrounding; switching apps can't reset it (that takes a real
+secret op through the chokepoint). No lock-evasion by app-switching.
 
 ## Alternatives considered
 
-- **Flip the default to timeout (make the relaxation the default).** Rejected: it makes the regression the default for every user. Opt-in keeps the secure default and makes the trade explicit.
+- **A separate opt-in `gate_resume` setting.** Rejected: R057 defaults `gate_idle`
+  **on** (`After 300`) for new users, while this RFC wants the resume relaxation tied
+  to the same choice. A separate setting would be redundant and would force choosing
+  which default wins (idle-on vs resume-strict); unifying makes the relaxation follow
+  the user's existing `gate_idle` choice.
 
-- **Wipe at the instant of backgrounding rather than on resume/timeout.** Rejected for the same reason as before: the background transition is the less reliable of the WebView's two foreground/background signals, and it does not serve the timeout goal anyway.
+- **Option A: a backend `RunEvent::Suspended` → `app-backgrounded` bridge** (record
+  the leave-foreground instant). Rejected: not needed. `last_activity_at`
+  (foreground-trackable via the activity signal the backend already gets) measures
+  total disuse and needs no "entered background" event, avoiding a new backend bridge
+  plus the risk that `Suspended`/`Focused(false)` is unreliable on Android (R029
+  already rejected the foreground `visibilitychange` as OEM-unreliable; `Focused(false)`
+  fires for biometric prompts too).
 
-- **Tie the wipe to OS screen-lock instead of a timeout.** The strongest available "the user is gone" signal and the option with the smallest regression (if the screen is locked, the device is OS-protected regardless). Rejected for now because Android does not expose screen-lock to the WebView reliably — it needs the same kind of native lifecycle hook the authoritative-resume work envisions — and because screen-lock alone does not cover in-app idle. Worth revisiting once a native hook exists; it could subsume part of this design.
+- **A frontend `lastActivityAt` ref.** Rejected: it duplicates the backend's activity
+  state and diverges (the secret-op resets happen server-side). One state, in the
+  backend, is correct.
 
-- **Short grace-only debounce (re-lock only if away more than a few seconds).** A milder version that avoids re-locking on accidental rapid app switches. Rejected: it opens the same in-scope window as a full timeout, just shorter, while not delivering the minutes-long grace that motivates the change.
+- **Flip the default to timeout.** Rejected: `Off` (the existing-user default) keeps
+  every-resume; the relaxation only reaches users who opt into `gate_idle = After(N)`.
 
 ## Effort
 
-~S–M (human) / ~S (CC): the foreground-return timeout evaluation, the opt-in setting and its settings surface, and tests around the timestamp-on-return comparison and the within-window vs. past-window split. Reuses the mask and reason infrastructure from R057.
+~M (human) / ~S (CC): the chokepoint stamp, the grace-aware `app_lock`, the frontend
+`onAppResume`/`useForegroundSync` adjustments, the `Idle`→`Return` reason promotion,
+copy, and tests. Reuses R057's idle timer + R029's resume signal.
 
 ## Depends on / Supersedes
 
-Depends on R057 (in-app idle timeout) for the mask overlay and reason field. Reverses, as an opt-in, the "every resume re-challenge" policy that the authoritative foreground-resume signal (sourced from Android's `Activity.onResume` via `RunEvent::Resumed`) hardened; that signal's goal of being authoritative stays valid and complementary — only the re-challenge policy is relaxed, and only for users who opt in.
+Depends on R057 (in-app idle timeout, for `gate_idle`) and R029 (authoritative
+`app-resumed` signal). Reverses, as an opt-in via `gate_idle = After(N)`, the
+"every resume re-challenge" policy R029 hardened; R029's authoritative-foreground-
+signal goal stays valid and complementary — only the re-challenge policy is relaxed.

@@ -18,6 +18,7 @@
 mod background_sync;
 mod clipboard_clear;
 mod gate_idle;
+mod gate_resume;
 mod git_commands;
 mod lock_state;
 mod locked_writes;
@@ -192,6 +193,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         app_lock_enabled: AtomicBool::new(false),
         app_locked: Arc::new(AtomicBool::new(false)),
         gate_idle_timer: IdleTimer::new(),
+        last_activity_at: Mutex::new(std::time::Instant::now()),
         identity_coupled: AtomicBool::new(false),
         seal_migrate_state: AtomicU8::new(0),
         backend_resolve_state: AtomicU8::new(0),

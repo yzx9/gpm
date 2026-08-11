@@ -140,6 +140,10 @@ describe("useAppLockState", () => {
     vi.mocked(invoke).mockClear();
     fireResume();
 
+    // The appLocked guard is restored: a warm resume into an already-locked app
+    // (e.g. the idle timer fired while away) does NOT ping app_lock — the backend's
+    // apply_resume_relock is a no-op when locked anyway, and skipping avoids a
+    // spurious cold-start ping that could race a just-finished unlock (R058 review).
     expect(invoke).not.toHaveBeenCalledWith("app_lock");
   });
 

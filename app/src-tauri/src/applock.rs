@@ -22,9 +22,10 @@
 //!   startup.
 //! - `app_unlock` retrieves the vault key via a biometric prompt and injects it
 //!   into the `Store` (the auth-free master is loaded non-promptingly just
-//!   before); `app_lock` wipes the vault key (and the identity cache) so a
-//!   locked app cannot read the identity even from memory — while the auth-free
-//!   master stays keyed.
+//!   before); when it re-locks, `app_lock` wipes the vault key (and the identity
+//!   cache) so a locked app cannot read the identity even from memory — while the
+//!   auth-free master stays keyed. (R058: a return within `gate_idle = After(N)`
+//!   is a grace no-op — no wipe.)
 //! - While the gate is active the frontend suppresses the identity overlay, so
 //!   the two never race to show competing prompts.
 //!
@@ -42,10 +43,11 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_keystore::{BiometricState, KeystoreError, KeystoreExt, PromptText};
 use zeroize::Zeroizing;
 
+use crate::identity::LockEventReason;
 use crate::keystore::BiometricSlot;
 use crate::migrations::run_app_migrations;
 use crate::verbose::arm_verbose_timer;
-use crate::{AppState, identity, keystore};
+use crate::{AppState, GateIdle, identity, keystore};
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types
@@ -101,7 +103,8 @@ impl fmt::Display for AppLockError {
 /// fired; the user is present but idle) suppresses the auto-prompt so the mask
 /// shows and they tap; `Return` (a foreground-return re-lock) keeps it. `None`
 /// (cold start, no transition yet) → the frontend treats null as "prompt."
-/// Extensible: R058's return-past-timeout adds a variant here.
+/// R058 reuses `Return` for the resume-past-timeout re-lock (no new variant): the
+/// resume path (`app_lock`) re-emits `Return` for a lock found at the return instant.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum AppLockReason {
@@ -521,13 +524,7 @@ pub(crate) async fn app_unlock(
     // that would force runWithAuth to raise an unusable UnlockModal (no
     // passphrase to enter) on every copy/show.
     if !auto_unlocked && state.store.is_identity_encrypted().await {
-        identity::emit_lock_state(
-            &app,
-            &state.store,
-            true,
-            identity::LockEventReason::SoftWipe,
-        )
-        .await;
+        identity::emit_lock_state(&app, &state.store, true, LockEventReason::SoftWipe).await;
     }
     Ok(())
 }
@@ -620,23 +617,63 @@ pub(crate) fn do_app_lock<R: Runtime>(
     emit_app_lock_state(app, enabled, true, Some(reason));
 }
 
+/// R058 resume-timeout: the grace-aware foreground-return re-lock, called by the
+/// [`app_lock`] command on every resume. A no-op unless the gate is on AND the app
+/// is currently unlocked — the frontend guards both, but this is defense-in-depth
+/// (e.g. a stray cold-start resume ping). A warm resume into an already-locked app
+/// (the idle timer fired while away) leaves the existing overlay as-is: no re-emit,
+/// so there is no emit ordering to race the idle timer's `Idle` fire. (An earlier
+/// "re-emit Return" promotion was dropped — it caused a spurious cold-start ping
+/// and a re-lock-after-unlock race.) If `gate_idle = After(N)` and within `N` of
+/// the last activity, grace (the idle timer is NOT disarmed — total-disuse
+/// semantics). Otherwise (past `N`, or `gate_idle = Off`) disarm the idle timer and
+/// call [`do_app_lock`] with `Return`. Generic over `Runtime` so the host tests
+/// drive it with `MockRuntime` (the `app_lock` command itself is Wry-specific).
+pub(crate) fn apply_resume_relock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+    let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
+    if !enabled || state.app_locked.load(Ordering::SeqCst) {
+        return; // gate off, or already locked → leave the existing state as-is
+    }
+    // R058 grace: within N of the last activity, stay unlocked. `last <= now` gates
+    // grace on a genuinely-past timestamp; a future `last` (impossible for monotonic
+    // Instant, but fail-safe) falls through to re-lock — the safe direction for a
+    // security gate. Do NOT disarm the idle timer here: total-disuse semantics (the
+    // window keeps counting toward N across the backgrounding; only a real secret op
+    // through the chokepoint resets `last_activity_at`, so app-switching can't
+    // extend the window).
+    if let GateIdle::After(secs) = state.app_config.get().gate_idle {
+        let now = std::time::Instant::now();
+        let last = *state
+            .last_activity_at
+            .lock()
+            .expect("last_activity_at poisoned");
+        if last <= now && now.duration_since(last).as_secs() < secs {
+            return; // grace
+        }
+    }
+    // Past the grace window, or `gate_idle = Off`: re-lock. Disarm the idle timer
+    // first so it can't fire `Idle` after this `Return` emit (prompt determinism).
+    identity::disarm_gate_idle(state);
+    do_app_lock(
+        &state.store,
+        app,
+        &state.app_locked,
+        enabled,
+        AppLockReason::Return,
+    );
+}
+
 /// Lock the app from the frontend (the foreground-return re-lock path). The gate
 /// idle timer calls [`do_app_lock`] directly with [`AppLockReason::Idle`].
+///
+/// Thin Wry command wrapper over [`apply_resume_relock`] (R058 resume-timeout).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn app_lock(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), AppLockError> {
-    // Cancel the gate idle timer (the app is locking; the timer is moot).
-    identity::disarm_gate_idle(&state);
-    do_app_lock(
-        &state.store,
-        &app,
-        &state.app_locked,
-        state.app_lock_enabled.load(Ordering::SeqCst),
-        AppLockReason::Return,
-    );
+    apply_resume_relock(&state, &app);
     Ok(())
 }
 

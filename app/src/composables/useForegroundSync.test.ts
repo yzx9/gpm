@@ -276,7 +276,7 @@ describe("useForegroundSync", () => {
     fg.dispose();
   });
 
-  it("does NOT resume-sync while the app-lock gate is enabled", async () => {
+  it("resume-syncs on a grace return (gate enabled + unlocked) — R058", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     mockInvoke({ autosync: true, fg: FF_CHANGED });
@@ -292,14 +292,16 @@ describe("useForegroundSync", () => {
       vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync")
         .length,
     ).toBe(1); // cold-start ran
-    // Past the throttle, a resume must be blocked by the appLockEnabled guard.
+    // Past the throttle, a grace-window resume (gate on + unlocked) MUST sync —
+    // the old `appLockEnabled` bail is gone (R058: it was for every-resume re-lock;
+    // under grace the app stays unlocked, so skipping the sync would lose updates).
     vi.setSystemTime(new Date("2026-01-01T00:02:00Z"));
     fireResume();
     await vi.runAllTimersAsync();
     expect(
       vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync")
         .length,
-    ).toBe(1);
+    ).toBe(2);
     fg.dispose();
   });
 

@@ -55,6 +55,7 @@ use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
+use crate::read::AttributeView;
 
 /// Hard deadline (seconds) for a best-effort background sync. A companion task
 /// flips the background sync's private cancel token at this point so a stalled or
@@ -297,7 +298,7 @@ pub(crate) async fn delete_secret<R: Runtime>(
 #[derive(Deserialize)]
 pub(crate) struct SecretParts {
     password: Zeroizing<String>,
-    attributes: Vec<crate::read::AttributeView>,
+    attributes: Vec<AttributeView>,
     body: Zeroizing<String>,
 }
 

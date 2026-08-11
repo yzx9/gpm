@@ -145,10 +145,10 @@
     "gateIdle": {
       "legend": "Re-lock when inactive",
       "afterLegend": "Re-lock after",
-      "description": "Re-lock the app while it stays open, after a period of inactivity.",
+      "description": "Re-lock after a period of inactivity — whether gpm stays open idle or you switch away to another app.",
       "off": "Off",
-      "offHint": "Re-locks only when you leave and return to gpm.",
-      "idleHint": "Re-locks after the selected period while gpm stays open — this also clears any unlocked passwords. The screen stays in place; tap to unlock.",
+      "offHint": "Re-locks every time you leave and return to gpm.",
+      "idleHint": "Stays unlocked for quick app switches within the selected period, then re-locks and clears any unlocked passwords. After a re-lock the screen stays in place; tap to unlock.",
       "setFailed": "Failed to set idle re-lock"
     }
   },

@@ -162,10 +162,12 @@ export function createAppLockStore(
   }
 
   /**
-   * Resume handler: if the gate is on and the app was unlocked, re-lock so the
-   * user re-authenticates. Skipped when already locked (no-op), when the gate is
-   * off, while a biometric prompt is in flight, or within the post-unlock debounce
-   * window (so the prompt's own dismiss can't re-lock in a loop).
+   * Resume handler: if the gate is on and the app was unlocked, ping the backend
+   * `app_lock` (R058 grace-aware) so it can re-lock past the grace window. Skipped
+   * when the gate is off, when already locked (the backend's `apply_resume_relock`
+   * is a no-op then — and skipping avoids a spurious cold-start ping that could
+   * race a just-finished unlock), while a biometric prompt is in flight, or within
+   * the post-unlock debounce window (loop guard).
    */
   function onAppResume() {
     if (!appLockEnabled.value || appLocked.value || unlockInFlight) return;

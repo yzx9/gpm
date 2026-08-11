@@ -156,10 +156,12 @@ export function createForegroundSyncStore(
     },
   );
 
-  /** Resume handler: sync on return to the foreground, but only when the app-lock
-   *  gate is OFF — when it's on, R058 relocks and the unlock watch owns the sync. */
+  /** Resume handler: sync on return to the foreground. `maybeSync` self-guards on
+   *  `appLocked` (repo.json is unreadable behind the launch gate) and AutoSync, so
+   *  this needs no app-lock bail of its own. R058: a grace-window resume stays
+   *  unlocked, so it MUST still sync — bailing on `appLockEnabled` (the old rule,
+   *  written when every resume re-locked) would skip it. */
   function onAppResume() {
-    if (appLock.appLockEnabled.value) return;
     void maybeSync();
   }
 

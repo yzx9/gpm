@@ -807,6 +807,7 @@ mod tests {
             app_lock_enabled: AtomicBool::new(false),
             app_locked: Arc::new(AtomicBool::new(false)),
             gate_idle_timer: IdleTimer::new(),
+            last_activity_at: Mutex::new(std::time::Instant::now()),
             identity_coupled: AtomicBool::new(false),
             seal_migrate_state: AtomicU8::new(0),
             backend_resolve_state: AtomicU8::new(0),

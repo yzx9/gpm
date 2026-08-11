@@ -42,8 +42,9 @@ encryption at rest means whoever pulls the phone's files only sees ciphertext.
 ### Functionality
 
 - App Lock, Auto-lock's three modes + activity-reset timer, encryption at rest, the
-  App Lock in-app idle re-lock, and identity coupling to the gate (all shipped); an
-  authoritative relock signal (not done).
+  App Lock idle re-lock (in-app idle, and — for `After(N)` — a resume grace so a
+  quick app switch within N no longer re-locks; R058), and identity coupling to the
+  gate (all shipped); an authoritative relock signal (not done).
 
 ### Compatibility
 

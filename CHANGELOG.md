@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- When **Re-lock when inactive** is on, a quick app switch — leaving gpm and returning within the selected period — no longer re-locks the app. That setting now measures total inactivity (time idle in gpm **or** time spent in another app) within one window, instead of re-locking the moment you switch away. Turn it off to keep re-locking on every return.
+
 ### Changed
 
 - The **diagnostics** and **repository** export files (Settings → Logs → Export diagnostics, and Settings → Repository → Export) are now **`.tar.gz`** archives instead of `.zip`. Same contents, new container — open them with `tar -xzf` on desktop.
