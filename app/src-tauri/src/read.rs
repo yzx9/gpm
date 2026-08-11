@@ -55,9 +55,9 @@ pub(crate) struct CopyResult {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct TotpCopyResult {
     /// `false` when the entry holds no TOTP seed (no clipboard write happened).
-    copied: bool,
-    entry_name: String,
-    cleared_after_secs: u32,
+    pub(crate) copied: bool,
+    pub(crate) entry_name: String,
+    pub(crate) cleared_after_secs: u32,
 }
 
 /// Why an entry's Edit affordance is disabled. A non-UTF-8 secret can't be
@@ -400,9 +400,9 @@ pub(crate) async fn entry_oid(
 /// both paths, so a failed read still counts as a secret access.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn copy_totp(
+pub(crate) async fn copy_totp<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     entry_path: String,
     notify_text: Option<NotifyText>,
 ) -> Result<TotpCopyResult, Error> {
@@ -454,9 +454,9 @@ pub(crate) async fn copy_totp(
 /// the decrypt path; the not-cached branch touches no timers (no access).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn entry_probe(
+pub(crate) async fn entry_probe<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     entry_path: String,
 ) -> Result<Option<EntryProbe>, Error> {
     let secret = state.store.get(&entry_path).await;

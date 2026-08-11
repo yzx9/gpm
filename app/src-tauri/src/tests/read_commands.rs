@@ -41,3 +41,67 @@ async fn show_password_core_returns_secret_then_soft_wipes_under_immediate() {
         "Immediate must soft-wipe the identity after show"
     );
 }
+
+/// `entry_probe` decrypts once and reports TOTP-presence + attachment metadata
+/// for the detail view. A normal UTF-8 entry with no TOTP and no attachment
+/// probes to `Some(EntryProbe { has_totp: false, attachment: None, edit_blocked: None })`.
+#[tokio::test]
+async fn entry_probe_returns_metadata_when_unlocked() {
+    let (state, _guard) = make_unlocked_state(&[("foo.age", b"hunter2\n")]).await;
+    let app = mock_app(state);
+    let probe = read::entry_probe(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        "foo.age".into(),
+    )
+    .await
+    .expect("entry_probe should succeed on an unlocked store")
+    .expect("a normal entry should probe to Some");
+    assert!(!probe.has_totp, "no TOTP seed in the fixture");
+    assert!(probe.attachment.is_none(), "no attachment in the fixture");
+    assert!(probe.edit_blocked.is_none(), "a UTF-8 password is editable");
+}
+
+/// `entry_probe` must NEVER raise an unlock prompt. The fixture's identity is
+/// passphrase-encrypted, so wiping the cache makes `Store::get` fail
+/// `IDENTITY_ENCRYPTED`; the probe surfaces that as `Ok(None)` ("unknown")
+/// before touching any lock timer. A regression that prompted would fire an
+/// unlock modal off a passive probe.
+#[tokio::test]
+async fn entry_probe_never_prompts_when_identity_locked() {
+    let (state, _guard) = make_unlocked_state(&[("foo.age", b"hunter2\n")]).await;
+    let app = mock_app(state);
+    app.state::<AppState>().store.lock(); // wipe the cached, passphrase-encrypted identity
+    let probe = read::entry_probe(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        "foo.age".into(),
+    )
+    .await
+    .expect("a locked identity is Ok(None), not an error");
+    assert!(
+        probe.is_none(),
+        "a locked identity must probe to None, never prompt"
+    );
+}
+
+/// With no TOTP seed, `copy_totp` short-circuits BEFORE the clipboard write —
+/// `copied == false`, no clear scheduled — so it's testable without the
+/// clipboard plugin. Pins the no-seed branch + the `cleared_after_secs: 0`
+/// contract.
+#[tokio::test]
+async fn copy_totp_skips_clipboard_when_no_totp_seed() {
+    let (state, _guard) = make_unlocked_state(&[("foo.age", b"hunter2\n")]).await;
+    let app = mock_app(state);
+    let result = read::copy_totp(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        "foo.age".into(),
+        None,
+    )
+    .await
+    .expect("copy_totp should succeed on a no-seed entry");
+    assert!(!result.copied, "no TOTP seed ⇒ copied == false");
+    assert_eq!(result.cleared_after_secs, 0);
+    assert_eq!(result.entry_name, "foo");
+}
