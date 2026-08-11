@@ -34,6 +34,8 @@ use std::path::Path;
 use git2::{DiffOptions, Oid, Repository};
 use serde::{Deserialize, Serialize};
 use ssh_key::{HashAlg, PublicKey, SshSig};
+use time::format_description::well_known::Rfc3339;
+use time::{OffsetDateTime, UtcOffset};
 
 use crate::crypto::openpgp::{self, GpgOutcome, ParsedGpgKey};
 use crate::error::{Error, ErrorCode};
@@ -609,10 +611,7 @@ pub fn commit_sig_info(
 
     let author = format_signature(&commit.author());
     let committer_time = commit.committer().when();
-    let date = format_iso8601(
-        committer_time.seconds(),
-        i64::from(committer_time.offset_minutes()),
-    );
+    let date = format_iso8601(committer_time.seconds(), committer_time.offset_minutes());
     let subject = commit
         .summary()
         .unwrap_or("")
@@ -1077,46 +1076,40 @@ fn format_signature(sig: &git2::Signature<'_>) -> String {
     }
 }
 
-/// Format a Unix timestamp + UTC-offset-minutes as ISO 8601
-/// (`YYYY-MM-DDTHH:MM:SS±HH:MM`).
+/// Fallback for timestamps outside `time`'s default ±9999-year representable
+/// range (the `large-dates` feature is not enabled). Stays parseable by the
+/// frontend's `Date.parse` (the consumer of [`format_iso8601`]'s output), so a
+/// pathological timestamp never yields `""` (which `Date.parse` rejects as NaN).
+const ISO8601_SENTINEL: &str = "1970-01-01T00:00:00Z";
+
+/// Format a Unix timestamp + UTC offset as RFC 3339 — `YYYY-MM-DDTHH:MM:SSZ` for
+/// UTC, `…±HH:MM` otherwise — the form the frontend's `Date.parse` reads
+/// (`HistoryPage.vue`, `RevisionsPage.vue`).
 ///
-/// Uses Howard Hinnant's `civil_from_days` algorithm — no external date crate.
-/// `offset_minutes` is the committer's UTC offset (e.g. `-480` = UTC-8).
-fn format_iso8601(seconds: i64, offset_minutes: i64) -> String {
-    // Shift into the committer's local wall-clock time.
-    let local = seconds + offset_minutes * 60;
-    let days = local.div_euclid(86_400);
-    let secs_of_day = local.rem_euclid(86_400);
-
-    let (year, month, day) = civil_from_days(days);
-    let hour = secs_of_day / 3600;
-    let minute = (secs_of_day % 3600) / 60;
-    let second = secs_of_day % 60;
-
-    let sign = if offset_minutes >= 0 { '+' } else { '-' };
-    let abs_off = offset_minutes.unsigned_abs();
-    let off_hour = abs_off / 60;
-    let off_min = abs_off % 60;
-
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{sign}{off_hour:02}:{off_min:02}"
+/// `offset_minutes` is the committer's UTC offset (e.g. `-480` = UTC-8). Calendar
+/// math is delegated to the `time` crate (replacing the former hand-rolled
+/// `civil_from_days`). Pulled commit bytes are attacker-controllable (per the
+/// Security Model), so every fallible step degrades rather than panics in this
+/// per-commit display path (called once per commit in `verify_range`, reachable
+/// from the pull path): `from_unix_timestamp` outside ±9999 years →
+/// [`ISO8601_SENTINEL`]; `checked_to_offset` (NOT the panicking `to_offset`) when
+/// the offset-shifted local datetime exceeds ±9999 → the UTC datetime; a `format`
+/// error → [`ISO8601_SENTINEL`].
+fn format_iso8601(seconds: i64, offset_minutes: i32) -> String {
+    let offset = UtcOffset::from_whole_seconds(offset_minutes * 60).unwrap_or(UtcOffset::UTC);
+    OffsetDateTime::from_unix_timestamp(seconds).map_or_else(
+        |_| ISO8601_SENTINEL.to_string(),
+        |t| {
+            // checked_to_offset, not to_offset — the latter panics if shifting to
+            // `offset` pushes the local datetime past time's ±9999-year bound
+            // (e.g. a crafted commit dated 9999-12-31 +14:00 → year 10000 local).
+            // Fall back to the UTC datetime rather than panic on the pull path.
+            t.checked_to_offset(offset)
+                .unwrap_or(t)
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| ISO8601_SENTINEL.to_string())
+        },
     )
-}
-
-/// Convert days-since-Unix-epoch to `(year, month, day)` (proleptic Gregorian).
-/// Algorithm by Howard Hinnant.
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
-    let year = if m <= 2 { y + 1 } else { y };
-    (year, m, d)
 }
 
 #[cfg(test)]
@@ -2036,14 +2029,14 @@ mod tests {
     fn iso8601_epoch_utc() {
         // Unix epoch at UTC.
         let s = format_iso8601(0, 0);
-        assert_eq!(s, "1970-01-01T00:00:00+00:00");
+        assert_eq!(s, "1970-01-01T00:00:00Z");
     }
 
     #[test]
     fn iso8601_known_instant() {
         // 2000-01-01T00:00:00Z = 946_684_800.
         let s = format_iso8601(946_684_800, 0);
-        assert_eq!(s, "2000-01-01T00:00:00+00:00");
+        assert_eq!(s, "2000-01-01T00:00:00Z");
     }
 
     #[test]
@@ -2061,13 +2054,39 @@ mod tests {
     }
 
     #[test]
-    fn civil_from_days_known() {
-        // 1970-01-01 is day 0.
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        // 2000-01-01 is day 10957.
-        assert_eq!(civil_from_days(10_957), (2000, 1, 1));
-        // 2026-06-14 is day 20618.
-        assert_eq!(civil_from_days(20_618), (2026, 6, 14));
+    fn iso8601_modern_date() {
+        // 2024-01-01T00:00:00Z = 1_704_067_200 — a modern instant, UTC. Guards
+        // calendar correctness beyond the epoch/2000 samples above.
+        let s = format_iso8601(1_704_067_200, 0);
+        assert_eq!(s, "2024-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn iso8601_pre_epoch() {
+        // One second before the epoch — the rewrite handles negative timestamps,
+        // matching the former hand-rolled `civil_from_days`.
+        let s = format_iso8601(-1, 0);
+        assert_eq!(s, "1969-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn iso8601_out_of_range_falls_back_to_sentinel() {
+        // i64::MAX is outside `time`'s default ±9999-year range — unreachable
+        // for a real git timestamp, but the fallback must stay a parseable date
+        // (never "" or "epoch") so Date.parse never sees NaN.
+        let s = format_iso8601(i64::MAX, 0);
+        assert_eq!(s, ISO8601_SENTINEL);
+    }
+
+    #[test]
+    fn iso8601_offset_pushes_local_past_range_no_panic() {
+        // 9999-12-31T23:59:59Z + a +14:00 offset lands in year 10000 local —
+        // outside time's ±9999 range. `to_offset` would panic here (release too);
+        // the impl uses `checked_to_offset` and falls back to the UTC datetime. A
+        // crafted commit (`git commit --date='@253402300799 +1400'`) reaches this
+        // via verify_range on pull, so it must not panic.
+        let s = format_iso8601(253_402_300_799, 840);
+        assert_eq!(s, "9999-12-31T23:59:59Z");
     }
 
     // ── GPG/OpenPGP verification (rpgp) ─────────────────────────────────

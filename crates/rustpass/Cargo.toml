@@ -38,6 +38,11 @@ log = "0.4"
 # foreground app's Store and a background Worker's separate Store can't mutate
 # the same git repo at once. Unix = flock (Linux + Android); Windows = LockFileEx.
 fs2 = "0.4"
+# RFC 3339 formatting of git commit dates (`signing::format_iso8601`), replacing
+# hand-rolled calendar math. Only `formatting` is used (`Rfc3339` is a const
+# well-known format). `time` is already in the app graph (tauri/plist/etc.) but
+# not rustpass's, so this adds it to rustpass's own (small) compile.
+time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
