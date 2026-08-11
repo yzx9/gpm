@@ -241,6 +241,7 @@ describe("SettingsRepositoryPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("remove_trusted_key", {
+        repoId: "test-repo",
         fingerprint: "SHA256:abcd",
       });
     });
@@ -274,6 +275,7 @@ describe("SettingsRepositoryPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("remove_trusted_gpg_key", {
+        repoId: "test-repo",
         fingerprint: "abcdef0123456789",
       });
     });
@@ -292,6 +294,7 @@ describe("SettingsRepositoryPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("import_trusted_gpg_key_file", {
+        repoId: "test-repo",
         label: "Bob",
       });
     });
@@ -328,6 +331,7 @@ describe("SettingsRepositoryPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_verification_mode", {
+        repoId: "test-repo",
         mode: "audit",
       });
     });

@@ -110,6 +110,7 @@ describe("HistoryPage", () => {
       expect(wrapper.findAll('[role="button"]')).toHaveLength(51);
       expect(findLoadMore(wrapper).exists()).toBe(false);
       expect(invoke).toHaveBeenCalledWith("list_commit_signatures", {
+        repoId: "test-repo",
         offset: 50,
         limit: 50,
       });
@@ -187,6 +188,7 @@ describe("HistoryPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("ignore_commit_issue", {
+        repoId: "test-repo",
         commit: "ign1",
       });
       // In-place refresh must NOT reset the list (no new list_commit_signatures).

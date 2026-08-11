@@ -9,7 +9,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
-import { useToast } from "@/composables";
+import { useActiveRepo, useToast } from "@/composables";
 import { navBack } from "@/utils/nav";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -18,6 +18,7 @@ import { useRouter, type RouteLocationRaw } from "vue-router";
 const { t } = useI18n();
 const router = useRouter();
 const { toast } = useToast();
+const activeRepo = useActiveRepo();
 
 // Shared by the header Back button, the form Cancel (goBack), and Save-success
 // so all three return to settings and can't drift apart.
@@ -37,7 +38,9 @@ async function onSave() {
   saving.value = true;
   error.value = "";
   try {
+    const repoId = await activeRepo.currentId();
     await addTrustedSigningKey(
+      repoId,
       newPublicKey.value.trim(),
       newKeyLabel.value.trim(),
     );

@@ -19,6 +19,7 @@ import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import {
   isSignatureIgnorable,
   signatureSignerFp,
+  useActiveRepo,
   useRelativeTime,
   useToast,
 } from "@/composables";
@@ -37,6 +38,7 @@ const { t } = useI18n();
 const { formatRelativeTime } = useRelativeTime();
 const router = useRouter();
 const { toast } = useToast();
+const activeRepo = useActiveRepo();
 
 const PAGE_SIZE = 50;
 const commits = ref<CommitSigInfo[]>([]);
@@ -66,7 +68,8 @@ async function fetchPage(offset: number, replace: boolean) {
   const myId = ++reqId;
   loading.value = true;
   try {
-    const page = await listCommitSignatures(offset, PAGE_SIZE);
+    const repoId = await activeRepo.currentId();
+    const page = await listCommitSignatures(repoId, offset, PAGE_SIZE);
     if (myId !== reqId) return; // superseded by a newer reset/refresh
     commits.value = replace ? page.commits : commits.value.concat(page.commits);
     hasMore.value = page.has_more;
@@ -109,7 +112,8 @@ async function onTrust(commit: CommitSigInfo) {
   if (label === null) return;
   actionLoading.value = true;
   try {
-    await trustCommitSigner(commit.hash, label.trim() || suggested);
+    const repoId = await activeRepo.currentId();
+    await trustCommitSigner(repoId, commit.hash, label.trim() || suggested);
     toast.success(t("history.trustedToast", { label: label || suggested }));
     // Trust re-derives status for every commit by this signer (possibly outside
     // the loaded pages), so reset to page 0 to refresh the whole view.
@@ -126,9 +130,10 @@ async function onTrust(commit: CommitSigInfo) {
 async function onIgnore(commit: CommitSigInfo) {
   actionLoading.value = true;
   try {
+    const repoId = await activeRepo.currentId();
     // ignore_commit_issue returns the updated signature info — refresh this row
     // in place (preserving scroll position + other rows) instead of reloading.
-    const fresh = await ignoreCommitIssue(commit.hash);
+    const fresh = await ignoreCommitIssue(repoId, commit.hash);
     commits.value = commits.value.map((c) =>
       c.hash === fresh.hash ? fresh : c,
     );

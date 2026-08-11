@@ -292,7 +292,8 @@ watch(search, (q) => {
 
 async function loadAuthState() {
   try {
-    authState.value = await getAuthenticityState();
+    const repoId = await activeRepo.currentId();
+    authState.value = await getAuthenticityState(repoId);
   } catch (e) {
     // Verification unavailable (e.g. repo mid-clone) — leave the badge as-is.
     console.debug("[entry-list] auth-state unavailable", e);
@@ -479,7 +480,8 @@ function cancelDivergence() {
 
 async function ignoreIssue(commit: CommitSigInfo) {
   try {
-    await ignoreCommitIssue(commit.hash);
+    const repoId = await activeRepo.currentId();
+    await ignoreCommitIssue(repoId, commit.hash);
     toast.success(t("entries.toastIgnored"));
     // Remove it from the modal list.
     if (auditIssues.value) {
@@ -502,7 +504,12 @@ async function trustBlockSigner(commit: CommitSigInfo) {
   );
   if (label === null) return;
   try {
-    await trustCommitSigner(commit.hash, label.trim() || commit.short_hash);
+    const repoId = await activeRepo.currentId();
+    await trustCommitSigner(
+      repoId,
+      commit.hash,
+      label.trim() || commit.short_hash,
+    );
     toast.success(t("entries.toastTrusted"));
     blockIssues.value = null;
     await loadAuthState();
@@ -515,7 +522,8 @@ async function trustBlockSigner(commit: CommitSigInfo) {
 
 async function switchToAudit() {
   try {
-    await setVerificationMode("audit");
+    const repoId = await activeRepo.currentId();
+    await setVerificationMode(repoId, "audit");
     toast.info(t("entries.toastSwitchedAudit"));
     blockIssues.value = null;
     await loadAuthState();

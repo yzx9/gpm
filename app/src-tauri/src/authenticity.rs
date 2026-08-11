@@ -17,6 +17,7 @@ use tauri_plugin_file_picker::FilePickerExt;
 
 use crate::AppState;
 use crate::page::clamp_limit;
+use crate::registry::RepoId;
 use crate::setup::map_file_picker_error;
 
 // ---------------------------------------------------------------------------
@@ -117,15 +118,15 @@ fn stage_gpg_key_from_bytes(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_authenticity_state(
     state: State<'_, AppState>,
+    repo_id: RepoId,
 ) -> Result<AuthenticityState, Error> {
-    let mode = state
-        .store
+    let store = state.repo(&repo_id)?;
+    let mode = store
         .authenticity_config()
         .await
         .map_or(VerifyMode::Off, |c| c.mode);
     // If HEAD status can't be computed (e.g. repo mid-clone), surface Unknown.
-    let head_status = state
-        .store
+    let head_status = store
         .head_signature_status()
         .await
         .unwrap_or(CommitSigStatus::Unknown);
@@ -138,11 +139,12 @@ pub(crate) async fn get_authenticity_state(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn set_verification_mode(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     mode: VerifyMode,
 ) -> Result<VerifyMode, Error> {
     log::info!("authenticity: set-mode {mode:?}");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .set_verification_mode(mode)
         .await
         .inspect_err(|e| log::warn!("authenticity: set-mode failed: {e}"))
@@ -153,8 +155,10 @@ pub(crate) async fn set_verification_mode(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_authenticity_config(
     state: State<'_, AppState>,
+    repo_id: RepoId,
 ) -> Result<AuthenticityConfig, Error> {
-    state.store.authenticity_config().await
+    let store = state.repo(&repo_id)?;
+    store.authenticity_config().await
 }
 
 /// Add a trusted signing public key (validated + deduped by fingerprint).
@@ -162,12 +166,13 @@ pub(crate) async fn get_authenticity_config(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn add_trusted_key(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     public_key: String,
     label: String,
 ) -> Result<TrustedKey, Error> {
     log::info!("authenticity: add-key {label}");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .add_trusted_key(&public_key, &label)
         .await
         .inspect_err(|e| log::warn!("authenticity: add-key failed: {e}"))
@@ -179,11 +184,12 @@ pub(crate) async fn add_trusted_key(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn remove_trusted_key(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     fingerprint: String,
 ) -> Result<(), Error> {
     log::info!("authenticity: remove-key {fingerprint}");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .remove_trusted_key(&fingerprint)
         .await
         .inspect_err(|e| log::warn!("authenticity: remove-key failed: {e}"))
@@ -198,18 +204,20 @@ pub(crate) async fn remove_trusted_key(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn add_trusted_signing_key(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     armored: String,
     label: String,
 ) -> Result<AddedTrustedKey, Error> {
     log::info!("authenticity: add-signing-key {label}");
+    let store = state.repo(&repo_id)?;
     if armored
         .trim()
         .starts_with("-----BEGIN PGP PUBLIC KEY BLOCK")
     {
-        let key = state.store.add_trusted_gpg_key(&armored, &label).await?;
+        let key = store.add_trusted_gpg_key(&armored, &label).await?;
         Ok(AddedTrustedKey::Gpg(key))
     } else {
-        let key = state.store.add_trusted_key(&armored, &label).await?;
+        let key = store.add_trusted_key(&armored, &label).await?;
         Ok(AddedTrustedKey::Ssh(key))
     }
 }
@@ -224,6 +232,7 @@ pub(crate) async fn add_trusted_signing_key(
 pub(crate) async fn import_trusted_gpg_key_file(
     app: AppHandle,
     state: State<'_, AppState>,
+    repo_id: RepoId,
     label: String,
 ) -> Result<TrustedGpgKey, Error> {
     let picked = app
@@ -233,8 +242,8 @@ pub(crate) async fn import_trusted_gpg_key_file(
         .map_err(map_file_picker_error)?;
     let (armored, label) =
         stage_gpg_key_from_bytes(&picked.bytes, picked.filename.as_deref(), &label)?;
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .add_trusted_gpg_key(&armored, &label)
         .await
         .inspect_err(|e| log::warn!("authenticity: import-gpg-key-file failed: {e}"))
@@ -246,11 +255,12 @@ pub(crate) async fn import_trusted_gpg_key_file(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn remove_trusted_gpg_key(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     fingerprint: String,
 ) -> Result<(), Error> {
     log::info!("authenticity: remove-gpg-key {fingerprint}");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .remove_trusted_gpg_key(&fingerprint)
         .await
         .inspect_err(|e| log::warn!("authenticity: remove-gpg-key failed: {e}"))
@@ -264,8 +274,10 @@ pub(crate) async fn remove_trusted_gpg_key(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_gpg_key_parse_warnings(
     state: State<'_, AppState>,
+    repo_id: RepoId,
 ) -> Result<Vec<String>, Error> {
-    state.store.gpg_key_parse_warnings().await
+    let store = state.repo(&repo_id)?;
+    store.gpg_key_parse_warnings().await
 }
 
 /// Trust HEAD's SSH-signature signer ("trust this signer" TOFU). Errors if HEAD
@@ -274,17 +286,18 @@ pub(crate) async fn get_gpg_key_parse_warnings(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn trust_head_signer(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     label: String,
 ) -> Result<TrustedKey, Error> {
     log::info!("authenticity: trust-head {label}");
-    let public_key = state.store.head_signer_public_key().await?.ok_or_else(|| {
+    let store = state.repo(&repo_id)?;
+    let public_key = store.head_signer_public_key().await?.ok_or_else(|| {
         Error::new(
             ErrorCode::SshKeyInvalid,
             "HEAD is not signed by an SSH key — nothing to trust.",
         )
     })?;
-    state
-        .store
+    store
         .add_trusted_key(&public_key, &label)
         .await
         .inspect_err(|e| log::warn!("authenticity: trust-head failed: {e}"))
@@ -296,12 +309,13 @@ pub(crate) async fn trust_head_signer(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn trust_commit_signer(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     commit: String,
     label: String,
 ) -> Result<TrustedKey, Error> {
     log::info!("authenticity: trust-commit {commit} {label}");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .trust_commit_signer(&commit, &label)
         .await
         .inspect_err(|e| log::warn!("authenticity: trust-commit failed: {e}"))
@@ -314,11 +328,12 @@ pub(crate) async fn trust_commit_signer(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn ignore_commit_issue(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     commit: String,
 ) -> Result<CommitSigInfo, Error> {
     log::info!("authenticity: ignore-issue {commit}");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .ignore_commit_issue(&commit)
         .await
         .inspect_err(|e| log::warn!("authenticity: ignore-issue failed: {e}"))
@@ -331,11 +346,12 @@ pub(crate) async fn ignore_commit_issue(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn list_commit_signatures(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     offset: usize,
     limit: usize,
 ) -> Result<CommitPage, Error> {
-    let page = state
-        .store
+    let store = state.repo(&repo_id)?;
+    let page = store
         .list_commit_signatures(offset, clamp_limit(limit))
         .await?;
     Ok(CommitPage {
@@ -349,9 +365,11 @@ pub(crate) async fn list_commit_signatures(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_commit_signature(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     hash: String,
 ) -> Result<CommitSigInfo, Error> {
-    state.store.commit_signature(&hash).await
+    let store = state.repo(&repo_id)?;
+    store.commit_signature(&hash).await
 }
 
 #[cfg(test)]

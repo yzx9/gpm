@@ -50,6 +50,7 @@ describe("AddKeyPage", () => {
     await w.find("form").trigger("submit");
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("add_trusted_signing_key", {
+      repoId: "test-repo",
       armored: "ssh-ed25519 AAAA key",
       label: "Alice — laptop",
     });

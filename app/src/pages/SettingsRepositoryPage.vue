@@ -30,7 +30,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import { useDialog, useRepoExport, useToast, Z } from "@/composables";
+import { useActiveRepo, useDialog, useRepoExport, useToast, Z } from "@/composables";
 import { Download, FileUp, History, KeyRound, Plus } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -41,6 +41,7 @@ const { toast } = useToast();
 const { dialog } = useDialog();
 const { t } = useI18n();
 const { exporting, runExport } = useRepoExport();
+const activeRepo = useActiveRepo();
 
 const config = ref<RepoConfig | null>(null);
 const loading = ref(false);
@@ -165,12 +166,13 @@ const VERIFY_MODES: {
 
 async function loadAuthConfig() {
   try {
+    const repoId = await activeRepo.currentId();
     // Warnings are a Settings-only concern (separate command, NOT on the
     // entry-list badge path); fetch alongside the config. A warnings failure
     // must not brick the whole card.
     const [cfg, warnings] = await Promise.all([
-      getAuthenticityConfig(),
-      getGpgKeyParseWarnings().catch(() => [] as string[]),
+      getAuthenticityConfig(repoId),
+      getGpgKeyParseWarnings(repoId).catch(() => [] as string[]),
     ]);
     authConfig.value = cfg;
     gpgWarnings.value = warnings;
@@ -185,7 +187,8 @@ async function onModeChange(mode: VerifyMode) {
   authLoading.value = true;
   error.value = "";
   try {
-    const effective = await setVerificationMode(mode);
+    const repoId = await activeRepo.currentId();
+    const effective = await setVerificationMode(repoId, mode);
     authConfig.value.mode = effective;
   } catch (e) {
     const appError = e as AppError;
@@ -212,10 +215,11 @@ async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
   if (!confirmed) return;
   authLoading.value = true;
   try {
+    const repoId = await activeRepo.currentId();
     if (kind === "gpg") {
-      await removeTrustedGpgKey(fingerprint);
+      await removeTrustedGpgKey(repoId, fingerprint);
     } else {
-      await removeTrustedKey(fingerprint);
+      await removeTrustedKey(repoId, fingerprint);
     }
     toast.success(t("settings.auth.removedToast"));
     await loadAuthConfig();
@@ -238,7 +242,8 @@ async function onImportGpgKey() {
   authLoading.value = true;
   error.value = "";
   try {
-    await importTrustedGpgKeyFile(label.trim());
+    const repoId = await activeRepo.currentId();
+    await importTrustedGpgKeyFile(repoId, label.trim());
     toast.success(t("settings.auth.importGpgToast"));
     await loadAuthConfig();
   } catch (e) {
@@ -254,7 +259,8 @@ async function onTrustHead() {
   if (label === null) return;
   authLoading.value = true;
   try {
-    await trustHeadSigner(label.trim() || "signer");
+    const repoId = await activeRepo.currentId();
+    await trustHeadSigner(repoId, label.trim() || "signer");
     toast.success(t("settings.auth.trustHeadToast"));
     await loadAuthConfig();
   } catch (e) {
