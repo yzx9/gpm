@@ -4,7 +4,7 @@
 
 import type { AppError } from "@/api";
 import { exportRepository, type RepoReadmeEntry } from "@/api/repo";
-import { useDialog, useToast, type ZTier } from "@/composables";
+import { useActiveRepo, useDialog, useToast, type ZTier } from "@/composables";
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES, i18n, loadBundle } from "@/i18n";
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -64,6 +64,7 @@ export function useRepoExport() {
   const { t } = useI18n();
   const { toast } = useToast();
   const { dialog } = useDialog();
+  const activeRepo = useActiveRepo();
   const exporting = ref(false);
 
   async function runExport(opts: RepoExportOptions = {}): Promise<void> {
@@ -81,7 +82,10 @@ export function useRepoExport() {
       if (!confirmed) return;
       // Localize the README for every supported locale (the backend writes one
       // file each — README.md, README.zh-cn.md, …).
-      await exportRepository(await readmeEntries());
+      await exportRepository(
+        await activeRepo.currentId(),
+        await readmeEntries(),
+      );
       toast.success(t("settings.repo.exported"));
     } catch (e) {
       const appError = e as AppError;

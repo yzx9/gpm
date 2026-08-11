@@ -132,7 +132,11 @@ export interface RepoReadmeEntry {
  *  structs unreliably (a single string param is safe there). Runs under App Lock
  *  — no unlock needed; a dismissed save dialog surfaces as `CANCELLED`. */
 export async function exportRepository(
+  repoId: string,
   readmes: RepoReadmeEntry[],
 ): Promise<void> {
-  await invoke("export_repository", { readmes: JSON.stringify(readmes) });
+  await invoke("export_repository", {
+    repoId,
+    readmes: JSON.stringify(readmes),
+  });
 }

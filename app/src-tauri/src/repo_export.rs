@@ -35,6 +35,7 @@ use crate::AppState;
 use crate::app_config::now_unix;
 use crate::archive::{append_entry, finish_tar_gz};
 use crate::read::StageGuard;
+use crate::registry::RepoId;
 
 /// Suggested name for the saved archive (and the staged temp file).
 const ARCHIVE_FILENAME: &str = "gpm-export.tar.gz";
@@ -189,7 +190,7 @@ fn build_export_tar(
     Ok(())
 }
 
-/// Export the active repository as a `gpm-export.tar.gz` archive to a user-chosen
+/// Export repository `repo_id` as a `gpm-export.tar.gz` archive to a user-chosen
 /// location via the system save dialog (`SAF` `ACTION_CREATE_DOCUMENT` on Android,
 /// a native dialog on desktop). The archive bytes never enter the `WebView`.
 /// Returns [`ErrorCode::Cancelled`] if the user dismisses the save dialog.
@@ -207,15 +208,17 @@ fn build_export_tar(
 pub(crate) async fn export_repository(
     app: AppHandle,
     state: State<'_, AppState>,
+    repo_id: RepoId,
     readmes: String,
 ) -> Result<(), Error> {
-    export_repository_core(&state, &app, &readmes).await
+    let store = state.repo(&repo_id)?;
+    export_repository_core(&store, &app, &readmes).await
 }
 
 /// Runtime-generic core of [`export_repository`], so in-crate tests can drive it
 /// against a mock runtime. See [`export_repository`] for the contract.
 pub(crate) async fn export_repository_core<R: Runtime>(
-    state: &State<'_, AppState>,
+    store: &rustpass::Store,
     app: &AppHandle<R>,
     readmes: &str,
 ) -> Result<(), Error> {
@@ -255,7 +258,7 @@ pub(crate) async fn export_repository_core<R: Runtime>(
 
     // 1. Build the bundle to its own stage (rustpass; repo_lock inside; under
     //    App Lock — create_bundle touches storage only, never the identity).
-    state.store.create_bundle(&bundle_path).await?;
+    store.create_bundle(&bundle_path).await?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -264,7 +267,7 @@ pub(crate) async fn export_repository_core<R: Runtime>(
 
     // 2. Assemble the envelope: manifest + one README per locale + the bundle,
     //    streamed into a File-backed gzip tarball on a blocking thread.
-    let cfg = state.store.config().await.ok();
+    let cfg = store.config().await.ok();
     let manifest = build_manifest(cfg.as_ref());
     let tp = tar_path.clone();
     let bp = bundle_path.clone();
