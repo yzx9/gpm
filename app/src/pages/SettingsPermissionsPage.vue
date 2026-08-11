@@ -19,7 +19,7 @@ import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import { useSecureScreen, useToast } from "@/composables";
+import { usePlatform, useToast } from "@/composables";
 import {
   Bell,
   ChevronRight,
@@ -42,7 +42,7 @@ import { useRouter } from "vue-router";
 
 const { t } = useI18n();
 const { toast } = useToast();
-const { secureAvailable } = useSecureScreen();
+const { platform } = usePlatform();
 const router = useRouter();
 
 // Tri-state probe results: the resolved state, or "unknown" while loading / when
@@ -240,7 +240,7 @@ function toneClass(tone: string) {
     <!-- Adjustable permissions (Android only — these are the surfaces the user
          can actually flip, and the ones Android may have suppressed after two
          denials). Hidden on desktop where there's nothing to adjust. -->
-    <template v-if="secureAvailable">
+    <template v-if="platform === 'android'">
       <p class="group-label">{{ t("permissions.groups.adjustable") }}</p>
 
       <div class="cards">

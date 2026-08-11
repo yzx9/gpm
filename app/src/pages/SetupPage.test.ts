@@ -2,12 +2,15 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import { type RuntimePlatform } from "@/api";
 import {
   BACK_HANDLER_KEY,
   createBackHandlerRegistry,
+  createPlatform,
   createScrollLockController,
   createSecureScreen,
   createToast,
+  PLATFORM_KEY,
   SCROLL_LOCK_KEY,
   SECURE_SCREEN_KEY,
   TOAST_KEY,
@@ -58,12 +61,13 @@ describe("SetupPage", () => {
   // secure-screen (available:false) so the claim is a no-op here and its
   // set_secure IPC doesn't disturb these tests' invoke mock queues. The claim's
   // real IPC behavior is covered in useSecureScreen / useSecureClaim tests.
-  function mountPage(available = false) {
+  function mountPage(available = false, platform: RuntimePlatform = "linux") {
     return mount(SetupPage, {
       global: {
         provide: {
           [TOAST_KEY]: createToast(),
           [SECURE_SCREEN_KEY]: createSecureScreen({ available }),
+          [PLATFORM_KEY]: createPlatform({ platform }),
           [BACK_HANDLER_KEY]: createBackHandlerRegistry(),
           [SCROLL_LOCK_KEY]: createScrollLockController(),
         },
@@ -248,12 +252,13 @@ describe("SetupPage", () => {
     async function mountAtStep2(
       recipientsList: RecipientInfo[] = [],
       available = false,
+      platform: RuntimePlatform = "linux",
     ) {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
         .mockResolvedValueOnce(recipientsList); // list_recipients
 
-      const wrapper = mountPage(available);
+      const wrapper = mountPage(available, platform);
       await flushPromises();
       return wrapper;
     }
@@ -303,10 +308,10 @@ describe("SetupPage", () => {
           ];
         return undefined; // set_secure etc. resolve harmlessly
       });
-      const wrapper = mountPage(true);
+      const wrapper = mountPage(true, "android");
       await flushPromises();
 
-      // secureAvailable (Android) + a plugin recipient → the read-only notice.
+      // platform 'android' + a plugin recipient → the read-only notice.
       // Wrapping a file key to a plugin recipient needs the age-plugin-<name>
       // binary, which can't run on Android; the store can't be written from
       // this device. (The notice deliberately doesn't claim read access — a

@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import { type RuntimePlatform } from "@/api";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { mountWithApp } from "@/test/appTestUtils";
 import {
@@ -72,8 +73,11 @@ describe("SettingsPermissionsPage", () => {
     vi.restoreAllMocks();
   });
 
-  function mountPage(secureAvailable = true) {
-    return mountWithApp(SettingsPermissionsPage, { secureAvailable });
+  function mountPage(
+    secureAvailable = true,
+    platform: RuntimePlatform = "android",
+  ) {
+    return mountWithApp(SettingsPermissionsPage, { secureAvailable, platform });
   }
 
   function rowByText(wrapper: VueWrapper, text: string): DOMWrapper<Element> {
@@ -95,7 +99,7 @@ describe("SettingsPermissionsPage", () => {
   });
 
   it("on desktop hides the adjustable group, shows only the 3 info rows", async () => {
-    const { wrapper } = mountPage(false);
+    const { wrapper } = mountPage(false, "linux");
     await flushPromises();
     expect(wrapper.text()).not.toContain("Notifications");
     expect(wrapper.findAll(".perm-row")).toHaveLength(3);

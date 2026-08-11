@@ -319,6 +319,30 @@ export async function screenSecureAvailable(): Promise<boolean> {
 }
 
 /**
+ * The platform gpm runs on — mirrors the backend `RuntimePlatform` enum (serde
+ * `kebab-case` over the wire). `"unknown"` covers an unrecognized build target
+ * and the pre-init state; features opt in per platform, so `"unknown"` activates
+ * nothing. The bare-passthrough return relies on the backend's Rust
+ * serialization test to pin these exact wire strings.
+ */
+export type RuntimePlatform =
+  | "android"
+  | "linux"
+  | "macos"
+  | "windows"
+  | "unknown";
+
+/**
+ * General platform fact for UI gating (distinct from {@link screenSecureAvailable},
+ * a screen-secure capability probe). Resolves to a concrete value once the
+ * frontend's `usePlatform` init runs; `"unknown"` until then and on any
+ * unrecognized build.
+ */
+export async function runtimePlatform(): Promise<RuntimePlatform> {
+  return invoke<RuntimePlatform>("runtime_platform");
+}
+
+/**
  * Push the current `FLAG_SECURE` level for the route (`screen-secure` plugin).
  * Desktop / absent plugin: the invoke rejects and callers treat it as a no-op.
  */

@@ -14,12 +14,14 @@ import {
   createBackHandlerRegistry,
   createDialog,
   createLockState,
+  createPlatform,
   createScrollLockController,
   createSecureScreen,
   createSecuritySettings,
   createToast,
   DIALOG_KEY,
   LOCK_KEY,
+  PLATFORM_KEY,
   SCROLL_LOCK_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
@@ -49,6 +51,7 @@ installConsoleCapture();
 const lockState = createLockState();
 const appLockStore = createAppLockStore();
 const secureScreenState = createSecureScreen();
+const platformState = createPlatform();
 const securitySettingsState = createSecuritySettings();
 const toastState = createToast();
 const dialogState = createDialog();
@@ -226,6 +229,7 @@ void (async () => {
   app.provide(LOCK_KEY, lockState);
   app.provide(APP_LOCK_KEY, appLockStore);
   app.provide(SECURE_SCREEN_KEY, secureScreenState);
+  app.provide(PLATFORM_KEY, platformState);
   app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);
   app.provide(TOAST_KEY, toastState);
   app.provide(DIALOG_KEY, dialogState);

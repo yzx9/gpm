@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import { type RuntimePlatform } from "@/api";
 import {
   STACKED_ROUTER_VIEW_KEY,
   type StackedRouterViewState,
@@ -13,12 +14,14 @@ import {
   createBackHandlerRegistry,
   createDialog,
   createLockState,
+  createPlatform,
   createScrollLockController,
   createSecureScreen,
   createSecuritySettings,
   createToast,
   DIALOG_KEY,
   LOCK_KEY,
+  PLATFORM_KEY,
   SCROLL_LOCK_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
@@ -36,6 +39,10 @@ interface MountWithAppOptions<C extends Component> {
   /** Default `true`: start secureScreen with the plugin reported available
    *  (Android, the production target). Pass `false` for desktop/no-plugin. */
   secureAvailable?: boolean;
+  /** Default `"android"`: the platform fact for per-platform UI gating.
+   *  Independent of `secureAvailable` — a desktop test passes `"linux"` (or
+   *  `"macos"`/`"windows"`) explicitly so the gated UI hides. */
+  platform?: RuntimePlatform;
   /** Forwarded to `mount`, merged under the app-shell provide block. */
   mountOpts?: ComponentMountingOptions<C>;
 }
@@ -80,6 +87,7 @@ export function mountWithApp<C extends Component>(
   const secureScreen = createSecureScreen({
     available: opts.secureAvailable !== false,
   });
+  const platform = createPlatform({ platform: opts.platform ?? "android" });
   const securitySettings = createSecuritySettings();
   const toast = createToast();
   const dialog = createDialog();
@@ -100,6 +108,7 @@ export function mountWithApp<C extends Component>(
         [LOCK_KEY]: lock,
         [APP_LOCK_KEY]: appLock,
         [SECURE_SCREEN_KEY]: secureScreen,
+        [PLATFORM_KEY]: platform,
         [SECURITY_SETTINGS_KEY]: securitySettings,
         [TOAST_KEY]: toast,
         [DIALOG_KEY]: dialog,
@@ -114,6 +123,7 @@ export function mountWithApp<C extends Component>(
     lock,
     appLock,
     secureScreen,
+    platform,
     securitySettings,
     toast,
     dialog,

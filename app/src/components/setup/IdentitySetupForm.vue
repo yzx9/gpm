@@ -23,7 +23,7 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
-import { useSecureScreen, useWipeOnLeave } from "@/composables";
+import { usePlatform, useWipeOnLeave } from "@/composables";
 import {
   ArrowLeft,
   Check,
@@ -48,10 +48,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{ done: []; back: [] }>();
 
-// `secureAvailable` is the app's compile-time Android fact (≡ cfg!(target_os =
-// "android")); read its `.value` inside `pluginRecipientReadOnly` so it stays
-// reactive as initSecureScreen resolves (child mounts before App init).
-const { secureAvailable } = useSecureScreen();
+// `platform` is the app's platform fact (resolved from `runtime_platform`);
+// read its `.value` inside `pluginRecipientReadOnly` so it stays reactive as
+// initPlatform resolves (child mounts before App init). `"unknown"` until then,
+// which keeps the notice off.
+const { platform } = usePlatform();
 
 // Recipients are read-only context now; the match is derived from the identity,
 // not selected by hand. `derivedRecipient` is the single source of truth for
@@ -113,11 +114,11 @@ const hasSshRecipients = computed(() =>
 // readable but unwritable: wrapping a file key to a plugin recipient needs the
 // age-plugin-<name> binary, which can't run here. Surface that up-front so the
 // user isn't surprised by a save failure after completing setup. Read
-// `secureAvailable.value` here (not a snapshot) so it reactively turns on once
-// App.vue's initSecureScreen resolves.
+// `platform.value` here (not a snapshot) so it reactively turns on once
+// App.vue's initPlatform resolves.
 const pluginRecipientReadOnly = computed(
   () =>
-    secureAvailable.value &&
+    platform.value === "android" &&
     recipients.value.some((r) => r.key_type === "plugin"),
 );
 
@@ -576,7 +577,7 @@ onUnmounted(clearPendingFile);
     </div>
 
     <!-- Android + plugin recipient: this store is read-only on this device.
-         Shown only on Android (secureAvailable) and only while the age
+         Shown only on Android (platform === 'android') and only while the age
          recipients list is visible (!gpgPicked — a GPG store reads the age
          backend and the list is misleading there). -->
     <BaseAlert v-if="!gpgPicked && pluginRecipientReadOnly" variant="warning">

@@ -16,6 +16,7 @@ export * from "./useForegroundSync";
 export * from "./useLockActivity";
 export * from "./useLockState";
 export * from "./useOverlayBackHandler";
+export * from "./usePlatform";
 export * from "./usePullToRefresh";
 export * from "./useRelativeTime";
 export * from "./useRepoExport";

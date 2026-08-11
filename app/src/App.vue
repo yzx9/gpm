@@ -22,6 +22,7 @@ import {
   createLockActivity,
   useAppLockState,
   useLockState,
+  usePlatform,
   useSecureScreen,
   useSecuritySettings,
 } from "./composables";
@@ -71,6 +72,7 @@ const {
   setSecureOverlay,
   reload: reloadSecureScreen,
 } = useSecureScreen();
+const { initPlatform } = usePlatform();
 const { t } = useI18n();
 
 // Both credential overlays — the identity UnlockModal (`overlayUp`) and the
@@ -138,6 +140,9 @@ onMounted(() => {
   // reconcile FLAG_SECURE for the current route. The boot default in
   // MainActivity.onCreate keeps every screen secure until this runs.
   initSecureScreen();
+  // Resolve the general platform fact (distinct from screen-secure
+  // availability) for per-platform UI gating.
+  initPlatform();
   // Surface a notice if a verbose session is still active from a prior launch.
   void notifyVerboseOnBoot();
   // Anchor the frontend session alongside the backend's `gpm … starting`.

@@ -1563,6 +1563,48 @@ pub(crate) fn screen_secure_available() -> bool {
     cfg!(target_os = "android")
 }
 
+/// The platform gpm runs on. The four known targets each get their own arm;
+/// `Unknown` covers any other build (e.g. a BSD/iOS port) and the pre-init
+/// state. Returned over IPC as kebab-case (`"android"`/`"linux"`/`"macos"`/
+/// `"windows"`/`"unknown"`); the frontend mirrors it as a typed union and gates
+/// features per-platform (opt-in), so `Unknown` activates nothing. Add a variant
+/// when gpm gains a target.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum RuntimePlatform {
+    Android,
+    Linux,
+    /// `std::env::consts::OS == "macos"`. Named `Macos` (not `MacOS`) so serde
+    /// kebab-case yields `"macos"` — matching `std::env::consts::OS` and the
+    /// hand-written TS type (serde splits `MacOS` into `"mac-o-s"`).
+    Macos,
+    Windows,
+    /// Unrecognized build target, or not yet resolved at boot. Carries no
+    /// platform-specific feature — consumers opt in per platform.
+    Unknown,
+}
+
+/// General platform fact for UI gating. Distinct from `screen_secure_available`
+/// (a screen-secure capability probe with fail-closed semantics for the
+/// secure-IPC path); this one resolves to `Unknown` until the frontend's init
+/// runs and on any build whose target isn't one of the four above.
+#[tauri::command]
+pub(crate) fn runtime_platform() -> RuntimePlatform {
+    if cfg!(target_os = "android") {
+        RuntimePlatform::Android
+    } else if cfg!(target_os = "linux") {
+        RuntimePlatform::Linux
+    } else if cfg!(target_os = "macos") {
+        RuntimePlatform::Macos
+    } else if cfg!(target_os = "windows") {
+        RuntimePlatform::Windows
+    } else {
+        // Not a target gpm ships on. Don't guess — return Unknown so no
+        // platform-specific feature activates.
+        RuntimePlatform::Unknown
+    }
+}
+
 /// Read the merged app config (the IPC view).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -2114,6 +2156,34 @@ mod tests {
             store.get().secure_screen_mode,
             Some(SecureScreenMode::Off),
             "a valid file's secure_screen_mode must load (not revert to default)"
+        );
+    }
+
+    #[test]
+    fn runtime_platform_serializes_to_kebab_case_os_strings() {
+        // The frontend's hand-written `RuntimePlatform` union mirrors these
+        // exact wire strings (the api wrapper is a bare passthrough, so this is
+        // the only guard against serde drift). Note `Macos`, not `MacOS` —
+        // serde kebab-case splits the latter into `"mac-o-s"`.
+        assert_eq!(
+            serde_json::to_string(&RuntimePlatform::Android).unwrap(),
+            "\"android\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimePlatform::Linux).unwrap(),
+            "\"linux\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimePlatform::Macos).unwrap(),
+            "\"macos\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimePlatform::Windows).unwrap(),
+            "\"windows\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimePlatform::Unknown).unwrap(),
+            "\"unknown\""
         );
     }
 

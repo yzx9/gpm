@@ -705,6 +705,7 @@ pub fn run() {
             app_config::set_theme_mode,
             app_config::set_verbose,
             app_config::screen_secure_available,
+            app_config::runtime_platform,
             // update check (RFC R090): passive release-availability detection.
             update_check::get_update_status,
             update_check::acknowledge_update,
