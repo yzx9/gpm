@@ -28,8 +28,6 @@
 //! seal-forced one.)
 
 use std::sync::atomic::Ordering;
-use std::time;
-use std::time::SystemTime;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -38,6 +36,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_device_info::DeviceInfoExt;
 use tauri_plugin_file_save::FileSaveExt;
 
+use crate::app_config::now_unix;
 use crate::archive::{append_entry, finish_tar_gz};
 use crate::{AppState, logging};
 
@@ -72,9 +71,7 @@ fn build_bundle(entries: &[BundleEntry]) -> Result<Vec<u8>, Error> {
 /// (Unix seconds, UTC), app-lock state, the entry list, the repo-config status,
 /// and the redaction note.
 fn build_manifest(app_locked: bool, repo_status: &str, entry_names: &[&str]) -> String {
-    let secs = SystemTime::now()
-        .duration_since(time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
+    let secs = now_unix();
     let list: String = entry_names.iter().fold(String::new(), |mut acc, n| {
         acc.push_str("  - ");
         acc.push_str(n);

@@ -24,7 +24,6 @@
 //! R089; symmetric restore is R087.)
 
 use std::path::Path;
-use std::time::SystemTime;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -33,6 +32,7 @@ use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_file_save::FileSaveExt;
 
 use crate::AppState;
+use crate::app_config::now_unix;
 use crate::archive::{append_entry, finish_tar_gz};
 use crate::read::StageGuard;
 
@@ -98,9 +98,7 @@ fn build_manifest(cfg: Option<&RepoConfig>) -> String {
     let m = Manifest {
         kind: "gpm.export",
         version: 1,
-        generated: SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs()),
+        generated: now_unix(),
         gpm_version: env!("CARGO_PKG_VERSION"),
         repositories: vec![ManifestRepo {
             format: "git-bundle",
