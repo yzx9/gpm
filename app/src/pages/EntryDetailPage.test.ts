@@ -672,6 +672,7 @@ describe("EntryDetailPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("delete_secret", {
+        repoId: "test-repo",
         name: "servers/prod",
         baseOid: "oid-deadbeef",
       });
@@ -687,6 +688,7 @@ describe("EntryDetailPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("delete_secret", {
+        repoId: "test-repo",
         name: "servers/prod",
       });
       // Belt-and-suspendences: no baseOid key at all on the arg object.
@@ -808,6 +810,7 @@ describe("EntryDetailPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("resolve_sync_divergence", {
+        repoId: "test-repo",
         expectedRemoteOid: "abc123",
         choice: "adopt_remote",
       });

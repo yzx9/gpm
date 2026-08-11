@@ -56,6 +56,7 @@ use zeroize::Zeroizing;
 use crate::AppState;
 use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 use crate::read::AttributeView;
+use crate::registry::RepoId;
 
 /// Hard deadline (seconds) for a best-effort background sync. A companion task
 /// flips the background sync's private cancel token at this point so a stalled or
@@ -98,6 +99,7 @@ fn require_unlocked(state: &State<'_, AppState>) -> Result<(), Error> {
 async fn autosync_write_command<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    store: Arc<rustpass::Store>,
     expected: Option<ExpectedEntry>,
     local_write: F,
 ) -> Result<WriteOutcome, Error>
@@ -106,7 +108,6 @@ where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = Result<WriteResult, Error>> + Send + 'static,
 {
-    let store = state.store.clone();
     crate::git::run_cancellable(state, app.clone(), move |cancel, _tx, slot| {
         let store = store.clone();
         async move {
@@ -126,6 +127,7 @@ where
 async fn do_save<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    store: Arc<rustpass::Store>,
     expected: Option<ExpectedEntry>,
     local_write: F,
 ) -> Result<WriteOutcome, Error>
@@ -138,7 +140,7 @@ where
     // Immediate we reset the timer + wipe on the terminal paths (an errored save
     // must not leave the identity cached with no idle timer to eventually clear
     // it).
-    let outcome = autosync_write_command(state, app, expected, local_write).await;
+    let outcome = autosync_write_command(state, app, store, expected, local_write).await;
     reset_lock_timer(state, app);
     reset_gate_idle_timer(state, app);
     // a NeedsDivergenceResolve still needs the cached identity for a keep-mine
@@ -167,9 +169,11 @@ pub(crate) async fn list_create_presets() -> Vec<CreatePreset> {
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn lookup_template(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     name: String,
 ) -> Result<Option<String>, Error> {
-    state.store.lookup_template(&name).await
+    let store = state.repo(&repo_id)?;
+    store.lookup_template(&name).await
 }
 
 /// Preview what [`rustpass::Store::create`] would store for `name` + `content`:
@@ -179,10 +183,12 @@ pub(crate) async fn lookup_template(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn preview_create(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     name: String,
     content: String,
 ) -> Result<Option<String>, Error> {
-    state.store.preview_create(&name, content.as_bytes()).await
+    let store = state.repo(&repo_id)?;
+    store.preview_create(&name, content.as_bytes()).await
 }
 
 /// Create a secret at an explicit path from its raw content (first line is the
@@ -192,6 +198,7 @@ pub(crate) async fn preview_create(
 pub(crate) async fn create_secret<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     name: String,
     content: String,
 ) -> Result<WriteOutcome, Error> {
@@ -208,9 +215,9 @@ pub(crate) async fn create_secret<R: Runtime>(
         base_oid: String::new(),
         kind: ExpectedKind::Create,
     };
-    let store = state.store.clone();
+    let store = state.repo(&repo_id)?;
     let body = content.into_bytes();
-    do_save(&state, &app, Some(expected), move || {
+    do_save(&state, &app, store.clone(), Some(expected), move || {
         let store = store.clone();
         async move { store.create(&name, &body).await }
     })
@@ -226,6 +233,7 @@ pub(crate) async fn create_secret<R: Runtime>(
 pub(crate) async fn create_from_preset_secret<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     preset_id: String,
     fields: HashMap<String, String>,
 ) -> Result<WriteOutcome, Error> {
@@ -245,13 +253,13 @@ pub(crate) async fn create_from_preset_secret<R: Runtime>(
     let name = template::preset_name(preset, &fields_ref)?;
     log::info!("create: {name} (preset {preset_id})");
     let body = template::preset_body(preset, &fields_ref)?;
-    let store = state.store.clone();
+    let store = state.repo(&repo_id)?;
     // R026: preset create is NOT base-version-guarded (custom create is). The
     // keep-mine resolve would need to re-send the template-rendered body, which
     // the frontend doesn't hold (it sends fields, not the body), so a conflict
     // here can't be resolved client-side. A same-name preset collision stays a
     // documented gap (rare: two devices filling the same preset fields).
-    do_save(&state, &app, None, move || {
+    do_save(&state, &app, store.clone(), None, move || {
         let store = store.clone();
         async move { store.create(&name, &body).await }
     })
@@ -269,6 +277,7 @@ pub(crate) async fn create_from_preset_secret<R: Runtime>(
 pub(crate) async fn delete_secret<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     name: String,
     base_oid: Option<String>,
 ) -> Result<WriteOutcome, Error> {
@@ -279,8 +288,8 @@ pub(crate) async fn delete_secret<R: Runtime>(
         base_oid,
         kind: ExpectedKind::Delete,
     });
-    let store = state.store.clone();
-    let outcome = autosync_write_command(&state, &app, expected, move || {
+    let store = state.repo(&repo_id)?;
+    let outcome = autosync_write_command(&state, &app, store.clone(), expected, move || {
         let store = store.clone();
         async move { store.delete(&name).await }
     })
@@ -338,6 +347,7 @@ fn assemble_bytes(parts: SecretParts) -> Result<Zeroizing<Vec<u8>>, Error> {
 pub(crate) async fn edit_secret<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     name: String,
     parts: SecretParts,
     base_oid: Option<String>,
@@ -349,9 +359,9 @@ pub(crate) async fn edit_secret<R: Runtime>(
         base_oid,
         kind: ExpectedKind::Edit,
     });
-    let store = state.store.clone();
+    let store = state.repo(&repo_id)?;
     let body = assemble_bytes(parts)?;
-    do_save(&state, &app, expected, move || {
+    do_save(&state, &app, store.clone(), expected, move || {
         let store = store.clone();
         async move { store.update(&name, body.as_slice()).await }
     })
@@ -368,9 +378,10 @@ pub(crate) async fn edit_secret<R: Runtime>(
 pub(crate) async fn pull_repo(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
 ) -> Result<SyncOutcome, Error> {
     log::info!("pull: start");
-    let store = state.store.clone();
+    let store = state.repo(&repo_id)?;
     crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
         store.sync_with(&slot, Some(cancel), Some(tx)).await
     })
@@ -389,10 +400,11 @@ pub(crate) async fn pull_repo(
 pub(crate) async fn sync_repo<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
 ) -> Result<SyncOutcome, Error> {
     log::info!("sync: start");
     require_unlocked(&state)?;
-    let store = state.store.clone();
+    let store = state.repo(&repo_id)?;
     crate::git::run_cancellable(&state, app, move |cancel, tx, slot| async move {
         store.sync_repo(&slot, Some(cancel), Some(tx)).await
     })
@@ -438,26 +450,31 @@ where
 /// slot the user's pull-to-refresh relies on, and reporting no progress (it's a
 /// headless trigger, not a user-initiated action). Returns the outcome so the
 /// frontend can surface divergence / an Enforce block as a **passive status badge**
-/// (never a modal); `None` when skipped (no repo configured, or `app_locked` —
-/// `repo.json` is unreadable while the `AppLock` biometric launch-gate holds the
-/// master key) or on a silent network error (best-effort: never nags on a flaky
-/// resume). Gated on `AutoSync` being on — the frontend checks first, and the
-/// backend re-checks as defense-in-depth (a compromised `WebView` invoking this
-/// directly must not publish local commits when the user turned `AutoSync` off).
+/// (never a modal); `None` when skipped (`app_locked` — `repo.json` is unreadable
+/// while the `AppLock` biometric launch-gate holds the master key) or on a silent
+/// network error (best-effort: never nags on a flaky resume). An unregistered or
+/// malformed `repo_id` REJECTS via the funnel (`UNKNOWN_REPOSITORY`); the
+/// no-repo-configured skip lives in the frontend gate, which resolves the id
+/// before invoking. Gated on `AutoSync` being on — the frontend checks first, and
+/// the backend re-checks as defense-in-depth (a compromised `WebView` invoking
+/// this directly must not publish local commits when the user turned `AutoSync`
+/// off).
 /// Emits `"sync-outcome"` so a mounted entry list can refresh on a fast-forward.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn background_sync<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
 ) -> Result<Option<SyncOutcome>, Error> {
+    let store = state.repo(&repo_id)?;
     // Defense-in-depth gates (cheap, sync): first-run + app-locked + AutoSync-off.
     // The frontend also gates, but this stops a stray (or XSS-driven) invoke from
     // touching the network before the store exists, while repo.json is sealed
     // behind the launch gate, or when the user turned AutoSync off.
-    if !state.store.is_repo_ready()
+    if !store.is_repo_ready()
         || state.app_locked.load(Ordering::SeqCst)
-        || !state.store.autosync()
+        || !store.autosync()
     {
         return Ok(None);
     }
@@ -465,7 +482,6 @@ pub(crate) async fn background_sync<R: Runtime>(
     // `write_mu` indefinitely and queue every user save/Sync behind it. The
     // private-slot + 30s deadline live in [`run_best_effort_sync`]; this is the
     // foreground (pull+push) variant.
-    let store = state.store.clone();
     let result = run_best_effort_sync(|slot, cancel| async move {
         store.sync_repo(&slot, Some(cancel), None).await
     })
@@ -489,11 +505,14 @@ pub(crate) async fn background_sync<R: Runtime>(
 /// no-op (local-only store), mirroring `pull_repo`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
+pub(crate) async fn push_repo(
+    state: State<'_, AppState>,
+    repo_id: RepoId,
+) -> Result<(), Error> {
     log::info!("push: start");
     require_unlocked(&state)?;
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .push()
         .await
         .inspect_err(|e| log::warn!("push failed: {e}"))
@@ -510,12 +529,13 @@ pub(crate) async fn push_repo(state: State<'_, AppState>) -> Result<(), Error> {
 pub(crate) async fn resolve_sync_divergence<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     expected_remote_oid: String,
     choice: DivergenceChoice,
 ) -> Result<SyncResult, Error> {
     log::info!("resolve: {expected_remote_oid} {choice:?}");
     require_unlocked(&state)?;
-    let store = state.store.clone();
+    let store = state.repo(&repo_id)?;
     let expected = expected_remote_oid;
     let result =
         crate::git::run_cancellable(&state, app.clone(), move |cancel, _tx, slot| async move {
@@ -541,10 +561,11 @@ pub(crate) async fn resolve_sync_divergence<R: Runtime>(
 /// could reuse the cached identity. "Cancel" is client-side — the frontend reuses
 /// [`discard_divergence`].
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub(crate) async fn resolve_entry_conflict<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
     name: String,
     parts: Option<SecretParts>,
     expected_remote_oid: String,
@@ -553,7 +574,7 @@ pub(crate) async fn resolve_entry_conflict<R: Runtime>(
 ) -> Result<SyncResult, Error> {
     log::info!("entry-resolve: {name} {op:?} {choice:?}");
     require_unlocked(&state)?;
-    let store = state.store.clone();
+    let store = state.repo(&repo_id)?;
     let content_bytes = parts.map(assemble_bytes).transpose()?;
     let result =
         crate::git::run_cancellable(&state, app.clone(), move |cancel, _tx, slot| async move {
@@ -591,8 +612,13 @@ pub(crate) async fn resolve_entry_conflict<R: Runtime>(
 pub(crate) async fn discard_divergence<R: Runtime>(
     state: State<'_, AppState>,
     app: AppHandle<R>,
+    repo_id: RepoId,
 ) -> Result<(), Error> {
     log::info!("discard-divergence");
+    // The deferred identity this clears belongs to `repo_id`; validate it. The
+    // registry-aware wipe lands in C1 — for one repo maybe_soft_wipe still
+    // targets this repo's facade (registry == state.store today).
+    let _store = state.repo(&repo_id)?;
     maybe_soft_wipe(&state, &app).await;
     Ok(())
 }

@@ -436,6 +436,24 @@ fn init_state(
             .registry
             .populate(ids, last_active, move |_id| Arc::clone(&device_store));
     }
+    // Self-heal the setup half-state: if `register_first_repo` failed mid-setup
+    // (after identity/config were persisted but before the registry entry + id
+    // landed in `app.json`), the registry is empty here. Fresh installs (no
+    // repo.json yet) skip — only a configured store with an empty registry is
+    // the recoverable half-state. Same path setup uses; idempotent once
+    // `repositories` is non-empty (populate then fills the registry normally).
+    if app_state.registry.is_empty() {
+        let reconciled = tauri::async_runtime::block_on(async {
+            // No repo.json ⇒ fresh install / pre-setup, nothing to register.
+            if app_state.store.config().await.is_err() {
+                return Ok(());
+            }
+            setup::register_first_repo(&app_state).await
+        });
+        if let Err(e) = reconciled {
+            log::warn!("startup repo reconciliation failed: {e}");
+        }
+    }
     app_state
 }
 

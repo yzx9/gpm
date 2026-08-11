@@ -74,7 +74,12 @@ const DIVERGED = {
  */
 function mockInvoke(cfg: { autosync: boolean; fg: unknown }) {
   vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-    if (cmd === "get_app_config") return { autosync: cfg.autosync };
+    if (cmd === "get_app_config")
+      return {
+        autosync: cfg.autosync,
+        repositories: ["test-repo"],
+        last_active: "test-repo",
+      };
     if (cmd === "background_sync") return cfg.fg;
     return undefined;
   });
@@ -101,7 +106,9 @@ describe("useForegroundSync", () => {
 
     await flush();
 
-    expect(invoke).toHaveBeenCalledWith("background_sync");
+    expect(invoke).toHaveBeenCalledWith("background_sync", {
+      repoId: "test-repo",
+    });
     expect(fg.syncAttention.value).toBeNull(); // success is silent
   });
 
@@ -144,7 +151,9 @@ describe("useForegroundSync", () => {
 
     await flush();
 
-    expect(invoke).toHaveBeenCalledWith("background_sync");
+    expect(invoke).toHaveBeenCalledWith("background_sync", {
+      repoId: "test-repo",
+    });
     expect(fg.syncAttention.value).toEqual(DIVERGED);
   });
 
@@ -176,7 +185,9 @@ describe("useForegroundSync", () => {
 
     await flush();
 
-    expect(invoke).toHaveBeenCalledWith("background_sync");
+    expect(invoke).toHaveBeenCalledWith("background_sync", {
+      repoId: "test-repo",
+    });
     expect(fg.syncAttention.value).toBeNull();
   });
 
@@ -272,7 +283,9 @@ describe("useForegroundSync", () => {
     expect(invoke).not.toHaveBeenCalledWith("background_sync"); // locked ⇒ skip
     (store.appLocked as unknown as { value: boolean }).value = false; // unlock
     await vi.runAllTimersAsync();
-    expect(invoke).toHaveBeenCalledWith("background_sync");
+    expect(invoke).toHaveBeenCalledWith("background_sync", {
+      repoId: "test-repo",
+    });
     fg.dispose();
   });
 
@@ -320,7 +333,8 @@ describe("useForegroundSync", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "get_app_config") return { autosync: true };
+      if (cmd === "get_app_config")
+        return { autosync: true, repositories: ["test-repo"], last_active: "test-repo" };
       if (cmd === "background_sync") throw new Error("net down");
       return undefined;
     });
@@ -347,7 +361,8 @@ describe("useForegroundSync", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     let call = 0;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "get_app_config") return { autosync: true };
+      if (cmd === "get_app_config")
+        return { autosync: true, repositories: ["test-repo"], last_active: "test-repo" };
       if (cmd === "background_sync")
         return call++ === 0 ? DIVERGED : FF_CHANGED;
       return undefined;

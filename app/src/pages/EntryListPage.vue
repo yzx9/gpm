@@ -356,7 +356,8 @@ async function syncRepo() {
   pullProgressPercent.value = 0;
   pullProgressUnlisten ??= await subscribeGitProgress(onPullProgress);
   try {
-    const result = await syncRepoCmd();
+    const repoId = await activeRepo.currentId();
+    const result = await syncRepoCmd(repoId);
     if (result.kind === "diverged") {
       // Surface the divergence for resolution instead of erroring.
       divergence.value = result;
@@ -436,12 +437,13 @@ async function resolveDivergence(choice: DivergenceChoice) {
   divergeError.value = "";
   const expectedRemoteOid = divergence.value.remote_tip;
   try {
+    const repoId = await activeRepo.currentId();
     const result =
       choice === "keep_mine"
         ? await runWithAuth(() =>
-            resolveSyncDivergence(expectedRemoteOid, choice),
+            resolveSyncDivergence(repoId, expectedRemoteOid, choice),
           )
-        : await resolveSyncDivergence(expectedRemoteOid, choice);
+        : await resolveSyncDivergence(repoId, expectedRemoteOid, choice);
     divergence.value = null;
     pullResult.value = `Updated to ${result.head}`;
     await fetchPage(search.value.trim(), 0, true);

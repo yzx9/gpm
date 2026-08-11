@@ -485,7 +485,8 @@ async function deleteSecret() {
   error.value = "";
   decryptError.value = false;
   try {
-    const outcome = await deleteSecretCmd(entryName, baseOid.value);
+    const repoId = await activeRepo.currentId();
+    const outcome = await deleteSecretCmd(repoId, entryName, baseOid.value);
     if (outcome.kind === "written") {
       clear();
       toast.success(t("entry.deleted", { commit: outcome.commit }));

@@ -361,24 +361,30 @@ export async function listCreatePresets(): Promise<CreatePreset[]> {
 }
 
 /** Whether a gopass location-based template exists for `name`. */
-export async function lookupTemplate(name: string): Promise<string | null> {
-  return invoke<string | null>("lookup_template", { name });
+export async function lookupTemplate(
+  repoId: string,
+  name: string,
+): Promise<string | null> {
+  return invoke<string | null>("lookup_template", { repoId, name });
 }
 
 /** Preview the rendered body of a custom secret (template-expanded). */
 export async function previewCreate(
+  repoId: string,
   name: string,
   content: string,
 ): Promise<string | null> {
-  return invoke<string | null>("preview_create", { name, content });
+  return invoke<string | null>("preview_create", { repoId, name, content });
 }
 
 /** Create a secret from a preset; returns the write outcome. */
 export async function createFromPresetSecret(
+  repoId: string,
   presetId: string,
   fields: Record<string, string>,
 ): Promise<WriteOutcome> {
   return invoke<WriteOutcome>("create_from_preset_secret", {
+    repoId,
     presetId,
     fields,
   });
@@ -388,21 +394,24 @@ export async function createFromPresetSecret(
  *  returned when a teammate already created the same name — the per-entry resolve
  *  modal lets the user overwrite or keep theirs. */
 export async function createSecret(
+  repoId: string,
   name: string,
   content: string,
 ): Promise<WriteOutcome> {
-  return invoke<WriteOutcome>("create_secret", { name, content });
+  return invoke<WriteOutcome>("create_secret", { repoId, name, content });
 }
 
 /** Edit an existing secret; returns the write outcome. `baseOid` (the blob oid
  *  captured at read time) enables the R026 base-version guard — when set, a
  *  stale edit surfaces `entry_conflict` instead of silently clobbering. */
 export async function editSecret(
+  repoId: string,
   name: string,
   parts: SecretParts,
   baseOid?: string | null,
 ): Promise<WriteOutcome> {
   return invoke<WriteOutcome>("edit_secret", {
+    repoId,
     name,
     parts,
     ...(baseOid != null && { baseOid }),
@@ -414,10 +423,12 @@ export async function editSecret(
  *  when a teammate changed it since the read, or `no_change` when a teammate
  *  already removed it). `baseOid` enables the R026 base-version guard. */
 export async function deleteSecret(
+  repoId: string,
   name: string,
   baseOid?: string | null,
 ): Promise<WriteOutcome> {
   return invoke<WriteOutcome>("delete_secret", {
+    repoId,
     name,
     ...(baseOid != null && { baseOid }),
   });
@@ -428,6 +439,7 @@ export async function deleteSecret(
  *  backend-side (re-encrypts the caller's `parts`); `keep_mine` (delete) and
  *  `keep_theirs` need no identity. Returns the post-resolve result. */
 export async function resolveEntryConflict(
+  repoId: string,
   name: string,
   parts: SecretParts | null,
   expectedRemoteOid: string,
@@ -435,6 +447,7 @@ export async function resolveEntryConflict(
   choice: EntryConflictChoice,
 ): Promise<PullResult> {
   return invoke<PullResult>("resolve_entry_conflict", {
+    repoId,
     name,
     parts,
     expectedRemoteOid,

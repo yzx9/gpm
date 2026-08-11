@@ -109,6 +109,7 @@ describe("CreateCustomPage", () => {
     await w.find("form").trigger("submit");
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("create_secret", {
+      repoId: "test-repo",
       name: "misc/foo",
       content: "hunter2",
     });

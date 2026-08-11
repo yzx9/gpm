@@ -21,7 +21,8 @@ use tauri::test::MockRuntime;
 use tauri::{App, Manager};
 
 use crate::AppState;
-use crate::tests::{make_unlocked_state, mock_app};
+use crate::registry::RepoId;
+use crate::tests::{make_unlocked_state, mock_app, test_repo_id};
 use crate::write::SecretParts;
 
 /// Build an unlocked state, flip `app_locked` on, and wrap it in a mock app.
@@ -50,6 +51,7 @@ async fn create_secret_refused_while_app_locked() {
     let err = crate::write::create_secret(
         app.state::<AppState>(),
         app.handle().clone(),
+        RepoId::from("nonexistent00000000000000000000"),
         "test/locked".into(),
         "body".into(),
     )
@@ -66,6 +68,7 @@ async fn create_from_preset_secret_refused_while_app_locked() {
     let err = crate::write::create_from_preset_secret(
         app.state::<AppState>(),
         app.handle().clone(),
+        RepoId::from("nonexistent00000000000000000000"),
         "nonexistent-preset".into(),
         HashMap::new(),
     )
@@ -80,6 +83,7 @@ async fn edit_secret_refused_while_app_locked() {
     let err = crate::write::edit_secret(
         app.state::<AppState>(),
         app.handle().clone(),
+        RepoId::from("nonexistent00000000000000000000"),
         "test/locked".into(),
         empty_parts(),
         None,
@@ -97,6 +101,7 @@ async fn delete_secret_refused_while_app_locked() {
     let err = crate::write::delete_secret(
         app.state::<AppState>(),
         app.handle().clone(),
+        RepoId::from("nonexistent00000000000000000000"),
         "test/locked".into(),
         None,
     )
@@ -110,18 +115,25 @@ async fn sync_repo_refused_while_app_locked() {
     // sync_repo is user-initiated (the Sync button), so it must Err — NOT the
     // Ok(None) silent skip that background_sync (best-effort headless) uses.
     let app = locked_mock_app().await;
-    let err = crate::write::sync_repo(app.state::<AppState>(), app.handle().clone())
-        .await
-        .expect_err("sync_repo must Err while app-locked");
+    let err = crate::write::sync_repo(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        RepoId::from("nonexistent00000000000000000000"),
+    )
+    .await
+    .expect_err("sync_repo must Err while app-locked");
     assert_eq!(err.code, "APP_LOCKED");
 }
 
 #[tokio::test]
 async fn push_repo_refused_while_app_locked() {
     let app = locked_mock_app().await;
-    let err = crate::write::push_repo(app.state::<AppState>())
-        .await
-        .expect_err("push_repo must Err while app-locked");
+    let err = crate::write::push_repo(
+        app.state::<AppState>(),
+        RepoId::from("nonexistent00000000000000000000"),
+    )
+    .await
+    .expect_err("push_repo must Err while app-locked");
     assert_eq!(err.code, "APP_LOCKED");
 }
 
@@ -131,6 +143,7 @@ async fn resolve_sync_divergence_refused_while_app_locked() {
     let err = crate::write::resolve_sync_divergence(
         app.state::<AppState>(),
         app.handle().clone(),
+        RepoId::from("nonexistent00000000000000000000"),
         "deadbeef".into(),
         DivergenceChoice::AdoptRemote,
     )
@@ -145,6 +158,7 @@ async fn resolve_entry_conflict_refused_while_app_locked() {
     let err = crate::write::resolve_entry_conflict(
         app.state::<AppState>(),
         app.handle().clone(),
+        RepoId::from("nonexistent00000000000000000000"),
         "test/locked".into(),
         None,
         "deadbeef".into(),
@@ -161,9 +175,13 @@ async fn discard_divergence_allowed_while_app_locked() {
     // Negative test: discard_divergence only runs a local identity wipe
     // (maybe_soft_wipe) — no remote contact — so it must NOT be gated.
     let app = locked_mock_app().await;
-    crate::write::discard_divergence(app.state::<AppState>(), app.handle().clone())
-        .await
-        .expect("discard_divergence must Ok(()) while app-locked (no remote contact)");
+    crate::write::discard_divergence(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        test_repo_id(),
+    )
+    .await
+    .expect("discard_divergence must Ok(()) while app-locked (no remote contact)");
 }
 
 #[tokio::test]
@@ -175,6 +193,7 @@ async fn gate_transparent_when_unlocked() {
     let result = crate::write::create_secret(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "test/unlocked".into(),
         "body".into(),
     )
@@ -202,6 +221,7 @@ async fn create_secret_refuses_yaml_marker_content() {
         let err = crate::write::create_secret(
             app.state::<AppState>(),
             app.handle().clone(),
+            test_repo_id(),
             "test/yaml".into(),
             content.into(),
         )
@@ -226,6 +246,7 @@ async fn create_secret_accepts_armor_and_leading_dash_password() {
         let result = crate::write::create_secret(
             app.state::<AppState>(),
             app.handle().clone(),
+            test_repo_id(),
             "test/plain".into(),
             content.into(),
         )
@@ -251,6 +272,7 @@ async fn edit_secret_refuses_yaml_marker_body() {
     let err = crate::write::edit_secret(
         app.state::<AppState>(),
         app.handle().clone(),
+        test_repo_id(),
         "edit/entry".into(),
         parts_with_body("a note\n---\nmore note"),
         None,

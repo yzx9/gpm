@@ -13,6 +13,7 @@ import {
 } from "@/api";
 import { onBeforeUnmount, ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useActiveRepo } from "./useActiveRepo";
 import { useLockSignals } from "./useLockSignals";
 import { isAuthCancelled, useLockState } from "./useLockState";
 
@@ -75,6 +76,7 @@ export function useEntryConflict(opts: {
 } {
   const { cancelAuth, runWithAuth } = useLockState();
   const { t } = useI18n();
+  const activeRepo = useActiveRepo();
 
   const conflict = ref<EntryConflictPayload | null>(null);
   const resolving = ref(false);
@@ -107,6 +109,11 @@ export function useEntryConflict(opts: {
     pendingParts = null;
   });
 
+  // Resolve the repo id ONCE when the conflict opens (mirrors useDivergence):
+  // cancel reuses the same promise so a transient config-read failure at
+  // cancel time cannot skip the deferred identity-wipe release below.
+  let openRepoId: Promise<string> | null = null;
+
   function openConflict(
     payload: EntryConflictPayload,
     parts: SecretParts | null,
@@ -114,6 +121,7 @@ export function useEntryConflict(opts: {
     conflict.value = payload;
     pendingParts = parts;
     conflictError.value = "";
+    openRepoId = activeRepo.currentId();
   }
 
   /** Dismiss without resolving. Reuses `discardDivergence` to release the deferred
@@ -123,7 +131,10 @@ export function useEntryConflict(opts: {
     conflict.value = null;
     conflictError.value = "";
     pendingParts = null;
-    void discardDivergence().catch(() => {});
+    if (openRepoId)
+      void openRepoId
+        .then((repoId) => discardDivergence(repoId))
+        .catch(() => {});
   }
 
   async function resolveConflict(choice: EntryConflictChoice) {
@@ -138,14 +149,22 @@ export function useEntryConflict(opts: {
     resolving.value = true;
     conflictError.value = "";
     try {
+      const repoId = await activeRepo.currentId();
       const result =
         choice === "keep_mine" && (op === "edit" || op === "create")
           ? // keep-mine edit/create re-encrypts → identity-gated (the deferred
             // cache is still warm for edit; create prompts if it expired).
             await runWithAuth(() =>
-              resolveEntryConflict(name, parts, remote_tip, op, choice),
+              resolveEntryConflict(repoId, name, parts, remote_tip, op, choice),
             )
-          : await resolveEntryConflict(name, parts, remote_tip, op, choice);
+          : await resolveEntryConflict(
+              repoId,
+              name,
+              parts,
+              remote_tip,
+              op,
+              choice,
+            );
       conflict.value = null;
       pendingParts = null;
       // Enforce may refuse the resolve's re-fetch (an unverified remote commit).

@@ -53,15 +53,15 @@ export interface GitProgressEvent {
 }
 
 /** Pull the remote. Fast-forwards, or surfaces a divergence to resolve. */
-export async function pullRepo(): Promise<SyncOutcome> {
-  return invoke<SyncOutcome>("pull_repo");
+export async function pullRepo(repoId: string): Promise<SyncOutcome> {
+  return invoke<SyncOutcome>("pull_repo", { repoId });
 }
 
 /** Manual sync (pull + push) — the publish path when autosync is off, and the
  *  "reconcile both directions" action behind the Sync button. Returns a
  *  `diverged` outcome (pull-side or push-rejection race) for the resolve modal. */
-export async function syncRepo(): Promise<SyncOutcome> {
-  return invoke<SyncOutcome>("sync_repo");
+export async function syncRepo(repoId: string): Promise<SyncOutcome> {
+  return invoke<SyncOutcome>("sync_repo", { repoId });
 }
 
 /** Best-effort background sync (cold-start / resume, RFC R060 Tier 1). Pull + push
@@ -69,13 +69,15 @@ export async function syncRepo(): Promise<SyncOutcome> {
  *  caller can surface divergence / an Enforce block as a passive badge, or `null`
  *  when skipped (no repo / app-locked) or on a silent network error. Only invoked
  *  when AutoSync is on — the composable gates that. Emits `"sync-outcome"`. */
-export async function backgroundSync(): Promise<SyncOutcome | null> {
-  return invoke<SyncOutcome | null>("background_sync");
+export async function backgroundSync(
+  repoId: string,
+): Promise<SyncOutcome | null> {
+  return invoke<SyncOutcome | null>("background_sync", { repoId });
 }
 
 /** Push the local store to the remote. */
-export async function pushRepo(): Promise<void> {
-  await invoke("push_repo");
+export async function pushRepo(repoId: string): Promise<void> {
+  await invoke("push_repo", { repoId });
 }
 
 /** Cancel an in-flight git transfer (clone/pull) via the backend cancel token. */
@@ -87,10 +89,12 @@ export async function cancelGit(): Promise<void> {
  *  (`expectedRemoteOid` from the preview). `keep_mine` is identity-gated
  *  backend-side (re-encrypts local-only entries onto the remote tip and pushes). */
 export async function resolveSyncDivergence(
+  repoId: string,
   expectedRemoteOid: string,
   choice: DivergenceChoice,
 ): Promise<PullResult> {
   return invoke<PullResult>("resolve_sync_divergence", {
+    repoId,
     expectedRemoteOid,
     choice,
   });
@@ -98,8 +102,8 @@ export async function resolveSyncDivergence(
 
 /** Abandon a save-triggered divergence without resolving — clears the deferred
  *  Immediate-mode identity wipe (the save kept it alive for a possible keep-mine). */
-export async function discardDivergence(): Promise<void> {
-  await invoke("discard_divergence");
+export async function discardDivergence(repoId: string): Promise<void> {
+  await invoke("discard_divergence", { repoId });
 }
 
 /** Subscribe to git transfer progress during clone/pull; returns an unlisten handle. */

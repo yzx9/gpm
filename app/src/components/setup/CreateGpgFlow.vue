@@ -18,7 +18,7 @@ import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
-import { useWipeOnLeave } from "@/composables";
+import { resolveActiveRepoId, useWipeOnLeave } from "@/composables";
 import { CircleCheck, FileText, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -183,7 +183,7 @@ async function onCreate() {
       // blocks navigation so the user sees it rather than silently believing the
       // store synced.
       try {
-        await pushRepo();
+        await pushRepo(await resolveActiveRepoId());
       } catch (e) {
         const pushError = e as AppError;
         error.value =

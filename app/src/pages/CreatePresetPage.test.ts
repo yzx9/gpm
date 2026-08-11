@@ -109,6 +109,7 @@ describe("CreatePresetPage", () => {
     await w.find("form").trigger("submit");
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("create_from_preset_secret", {
+      repoId: "test-repo",
       presetId: "website-login",
       fields: { name: "github" },
     });

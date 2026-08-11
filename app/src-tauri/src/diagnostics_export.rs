@@ -158,22 +158,32 @@ pub(crate) async fn export_diagnostics(
     let (repo_json, repo_status) = if app_locked {
         (String::new(), "omitted: app locked".to_string())
     } else {
-        match state.store.config().await {
-            Ok(cfg) => (
-                serde_json::to_string_pretty(&cfg.redacted()).unwrap_or_else(|_| "{}".to_string()),
-                "included".to_string(),
-            ),
-            Err(e) if e.code == "NO_REPO" => (
+        // The active repo's facade (the bundle describes the vault the user is
+        // in). After C2 relocate, `state.store` is the device facade (no
+        // repo.json), so this must resolve the registry — not `state.store`.
+        match state.registry.active_facade() {
+            Some(store) => match store.config().await {
+                Ok(cfg) => (
+                    serde_json::to_string_pretty(&cfg.redacted())
+                        .unwrap_or_else(|_| "{}".to_string()),
+                    "included".to_string(),
+                ),
+                Err(e) if e.code == "NO_REPO" => (
+                    String::new(),
+                    "omitted: no repository configured".to_string(),
+                ),
+                Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => {
+                    (String::new(), "omitted: sealed key unavailable".to_string())
+                }
+                Err(e) if e.code == "SEAL_TAMPERED" => {
+                    (String::new(), "omitted: seal tampered".to_string())
+                }
+                Err(e) => (String::new(), format!("omitted: {e}")),
+            },
+            None => (
                 String::new(),
                 "omitted: no repository configured".to_string(),
             ),
-            Err(e) if e.code == "SEAL_KEY_UNAVAILABLE" => {
-                (String::new(), "omitted: sealed key unavailable".to_string())
-            }
-            Err(e) if e.code == "SEAL_TAMPERED" => {
-                (String::new(), "omitted: seal tampered".to_string())
-            }
-            Err(e) => (String::new(), format!("omitted: {e}")),
         }
     };
 

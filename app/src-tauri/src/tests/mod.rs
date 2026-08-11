@@ -45,6 +45,7 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 use crate::AppState;
 use crate::app_config::AppConfigStore;
 use crate::identity::IdleTimer;
+use crate::registry::RepoId;
 
 /// 1-permit serializer guarding identity-crypto round-trips in this test binary.
 ///
@@ -138,6 +139,14 @@ pub(super) struct TestStore {
     pub(super) bare_dir: tempfile::TempDir,
 }
 
+/// The fixed id [`make_unlocked_state`] registers the test store under (mirrors
+/// the production single-repo invariant — registry facade `Arc::ptr_eq`
+/// `state.store`). Threaded commands that resolve `state.repo(id)` take this in
+/// in-crate tests.
+pub(super) fn test_repo_id() -> RepoId {
+    RepoId::from("test")
+}
+
 /// Configure + unlock an **encrypted-identity** store backed by a temp repo
 /// seeded with `entries`. Returns the live [`AppState`] plus the [`TestStore`]
 /// guard that must outlive it. Most tests start here (an unlocked store is the
@@ -204,6 +213,16 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         verbose_timer: Mutex::new(None),
         verbose_generation: Arc::new(AtomicU64::new(0)),
     };
+    // Mirror the production single-repo invariant: register the test store under
+    // [`test_repo_id`] so threaded commands resolving `state.repo(id)` work (the
+    // registry facade is `Arc::ptr_eq` to `state.store`, exactly like a real
+    // single-repo app after init).
+    let store_for_registry = Arc::clone(&state.store);
+    state.registry.populate(
+        [test_repo_id()],
+        Some(test_repo_id()),
+        move |_| Arc::clone(&store_for_registry),
+    );
     (
         state,
         TestStore {

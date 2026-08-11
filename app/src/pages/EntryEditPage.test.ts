@@ -56,6 +56,7 @@ describe("EntryEditPage", () => {
     await w.find("form").trigger("submit");
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("edit_secret", {
+      repoId: "test-repo",
       name: "servers/prod",
       parts: { password: "newpass", attributes: [], body: "note line" },
     });
@@ -152,6 +153,7 @@ describe("EntryEditPage", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("edit_secret", {
+      repoId: "test-repo",
       name: "servers/prod",
       parts: { password: "newpass", attributes: [], body: "note line" },
       baseOid: "oid-cafe",
@@ -210,6 +212,7 @@ describe("EntryEditPage", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("edit_secret", {
+      repoId: "test-repo",
       name: "servers/prod",
       parts: {
         password: "s3cret",

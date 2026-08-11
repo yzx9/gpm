@@ -22,6 +22,7 @@ import DivergenceModal from "@/components/DivergenceModal.vue";
 import EntryConflictModal from "@/components/EntryConflictModal.vue";
 import {
   isAuthCancelled,
+  useActiveRepo,
   useCancellableSave,
   useDivergence,
   useEntryConflict,
@@ -44,6 +45,7 @@ const { t } = useI18n();
 const router = useRouter();
 const { runWithAuth } = useLockState();
 const { toast } = useToast();
+const activeRepo = useActiveRepo();
 
 const customName = ref("");
 const customContent = ref("");
@@ -139,8 +141,9 @@ async function refreshPreview() {
     return;
   }
   try {
-    hasTemplate.value = (await lookupTemplate(name)) !== null;
-    preview.value = await previewCreate(name, customContent.value);
+    const repoId = await activeRepo.currentId();
+    hasTemplate.value = (await lookupTemplate(repoId, name)) !== null;
+    preview.value = await previewCreate(repoId, name, customContent.value);
   } catch (e) {
     // Invalid name mid-typing, or a template references an unknown var — no preview.
     console.debug("[create-custom] preview failed", e);
@@ -179,8 +182,9 @@ async function onSave() {
   error.value = "";
   errorCode.value = null;
   try {
+    const repoId = await activeRepo.currentId();
     const outcome = await runWithAuth(() =>
-      createSecret(customName.value.trim(), customContent.value),
+      createSecret(repoId, customName.value.trim(), customContent.value),
     );
     if (outcome.kind === "written") {
       toast.success(t("create.saved", { commit: outcome.commit }));

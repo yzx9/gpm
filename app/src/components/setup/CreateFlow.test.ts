@@ -17,6 +17,11 @@ function mockInvoke(
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
     const h = handlers[cmd];
     if (h) return h(args as Record<string, unknown> | undefined);
+    // The setup flow resolves the active repo id (for the first push) from the
+    // persisted registry; default to a registered repo so resolveActiveRepoId
+    // succeeds without each push test restating it.
+    if (cmd === "get_app_config")
+      return { repositories: ["test-repo"], last_active: "test-repo" };
     return undefined;
   });
 }
@@ -290,7 +295,9 @@ describe("CreateFlow", () => {
     await wrapper.find('textarea[id="ssh-key"]').setValue("push-auth-key");
     await submit(wrapper);
 
-    expect(invoke).toHaveBeenCalledWith("push_repo");
+    expect(invoke).toHaveBeenCalledWith("push_repo", {
+      repoId: "test-repo",
+    });
     expect(wrapper.emitted("done")).toHaveLength(1);
   });
 
@@ -425,7 +432,9 @@ describe("CreateFlow", () => {
 
     // create + complete_setup_from_file succeeded; the push failed → stay on
     // the page with a visible error so the user knows the store didn't sync.
-    expect(invoke).toHaveBeenCalledWith("push_repo");
+    expect(invoke).toHaveBeenCalledWith("push_repo", {
+      repoId: "test-repo",
+    });
     expect(wrapper.find("[role='alert']").text()).toContain(
       "remote unreachable",
     );

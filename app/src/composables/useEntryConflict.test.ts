@@ -57,7 +57,10 @@ describe("useEntryConflict", () => {
     vi.clearAllMocks();
   });
 
-  function mountConflict(opts?: { unlocked?: boolean }) {
+  function mountConflict(opts?: {
+    unlocked?: boolean;
+    activeRepo?: { currentId: () => Promise<string> };
+  }) {
     const onResolved = vi.fn();
     const onPullFfFailed = vi.fn();
     const onAuthenticityBlocked = vi.fn();
@@ -75,6 +78,7 @@ describe("useEntryConflict", () => {
     });
     const { wrapper, lock, appLock } = mountWithApp(Host, {
       unlocked: opts?.unlocked,
+      activeRepo: opts?.activeRepo,
     });
     return {
       wrapper,
@@ -97,6 +101,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      repoId: "test-repo",
       parts: PARTS,
       op: "edit",
       choice: "keep_mine",
@@ -118,6 +123,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      repoId: "test-repo",
       parts: PARTS,
       op: "create",
       choice: "keep_mine",
@@ -137,6 +143,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      repoId: "test-repo",
       parts: null,
       op: "edit",
       choice: "keep_theirs",
@@ -189,7 +196,9 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(handle.conflict.value).toBeNull();
-    expect(invoke).toHaveBeenCalledWith("discard_divergence");
+    expect(invoke).toHaveBeenCalledWith("discard_divergence", {
+      repoId: "test-repo",
+    });
   });
 
   it("hard lock wipes pendingBody — a subsequent keep_mine edit sends content:null", async () => {
@@ -226,6 +235,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      repoId: "test-repo",
       parts: null,
       op: "edit",
       choice: "keep_mine",
@@ -260,6 +270,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      repoId: "test-repo",
       parts: null,
       op: "edit",
       choice: "keep_mine",
@@ -389,11 +400,33 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      repoId: "test-repo",
       parts: null,
       op: "edit",
       choice: "keep_mine",
       expectedRemoteOid: PAYLOAD.remote_tip,
       name: PAYLOAD.name,
+    });
+  });
+
+  it("cancel still releases the deferred wipe when a cancel-time id resolution would fail", async () => {
+    // Round-3 P2 (mirrors useDivergence): the id resolves once at open; a
+    // cancel-time currentId() rejection must not skip the discard.
+    const currentId = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("test-repo")
+      .mockRejectedValueOnce(new Error("no repository configured"));
+    vi.mocked(invoke).mockResolvedValue(undefined); // discard_divergence
+    const { handle } = mountConflict({ activeRepo: { currentId } });
+
+    handle.openConflict(PAYLOAD, null);
+    await flushPromises();
+    handle.cancelConflict();
+    await flushPromises();
+
+    expect(currentId).toHaveBeenCalledTimes(1); // cancel reused the open promise
+    expect(invoke).toHaveBeenCalledWith("discard_divergence", {
+      repoId: "test-repo",
     });
   });
 });

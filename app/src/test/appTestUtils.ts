@@ -47,6 +47,9 @@ interface MountWithAppOptions<C extends Component> {
    *  Independent of `secureAvailable` — a desktop test passes `"linux"` (or
    *  `"macos"`/`"windows"`) explicitly so the gated UI hides. */
   platform?: RuntimePlatform;
+  /** Override the active-repo store (default: a fixed `"test-repo"` id) — for
+   *  tests that need to control/fail the id resolution itself. */
+  activeRepo?: ActiveRepoStore;
   /** Forwarded to `mount`, merged under the app-shell provide block. */
   mountOpts?: ComponentMountingOptions<C>;
 }
@@ -101,7 +104,7 @@ export function mountWithApp<C extends Component>(
   const stackedRouterView = createTestStackedRouterView();
   // R080: EntryListPage resolves the active repo via useActiveRepo(); tests use a
   // fixed id (createActiveRepoStore() would call the un-mocked getAppConfig).
-  const activeRepo: ActiveRepoStore = {
+  const activeRepo: ActiveRepoStore = opts.activeRepo ?? {
     async currentId() {
       return "test-repo";
     },

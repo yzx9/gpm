@@ -17,6 +17,11 @@ function mockInvoke(
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
     const h = handlers[cmd];
     if (h) return h(args as Record<string, unknown> | undefined);
+    // The setup flow resolves the active repo id (for the first push) from the
+    // persisted registry; default to a registered repo so resolveActiveRepoId
+    // succeeds without each push test restating it.
+    if (cmd === "get_app_config")
+      return { repositories: ["test-repo"], last_active: "test-repo" };
     return undefined;
   });
 }
@@ -276,7 +281,9 @@ describe("CreateGpgFlow", () => {
       .setValue("https://example.com/r.git");
     await submit(wrapper);
 
-    expect(invoke).toHaveBeenCalledWith("push_repo");
+    expect(invoke).toHaveBeenCalledWith("push_repo", {
+      repoId: "test-repo",
+    });
     expect(wrapper.find("[role='alert']").text()).toContain(
       "remote unreachable",
     );

@@ -24,6 +24,7 @@ import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import DivergenceModal from "@/components/DivergenceModal.vue";
 import {
   isAuthCancelled,
+  useActiveRepo,
   useCancellableSave,
   useDivergence,
   useLockState,
@@ -44,6 +45,7 @@ void loadBundle(currentLocale(), "create");
 
 const { t } = useI18n();
 const route = useRoute();
+const activeRepo = useActiveRepo();
 const router = useRouter();
 const { runWithAuth } = useLockState();
 const { toast } = useToast();
@@ -170,8 +172,9 @@ async function onSave() {
   error.value = "";
   errorCode.value = null;
   try {
+    const repoId = await activeRepo.currentId();
     const outcome = await runWithAuth(() =>
-      createFromPresetSecret(preset.value!.id, fields.value),
+      createFromPresetSecret(repoId, preset.value!.id, fields.value),
     );
     if (outcome.kind === "written") {
       toast.success(t("create.saved", { commit: outcome.commit }));

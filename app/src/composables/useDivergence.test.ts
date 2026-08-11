@@ -42,7 +42,10 @@ describe("useDivergence", () => {
     vi.clearAllMocks();
   });
 
-  function mountDivergence(opts?: { unlocked?: boolean }) {
+  function mountDivergence(opts?: {
+    unlocked?: boolean;
+    activeRepo?: { currentId: () => Promise<string> };
+  }) {
     const onResolved = vi.fn();
     const onPullFfFailed = vi.fn();
     let handle!: Handle;
@@ -58,6 +61,7 @@ describe("useDivergence", () => {
     });
     const { wrapper, lock, appLock } = mountWithApp(Host, {
       unlocked: opts?.unlocked,
+      activeRepo: opts?.activeRepo,
     });
     return { wrapper, lock, appLock, handle, onResolved, onPullFfFailed };
   }
@@ -156,5 +160,44 @@ describe("useDivergence", () => {
         .mock.calls.filter((c) => c[0] === "resolve_sync_divergence"),
     ).toHaveLength(0);
     expect(handle.resolving.value).toBe(false);
+  });
+
+  it("cancel still releases the deferred wipe when a cancel-time id resolution would fail", async () => {
+    // Round-3 P2: the repo id is resolved ONCE at open; cancel reuses that
+    // promise. A cancel-time currentId() rejection (transient config read
+    // failure) must not skip the deferred identity-wipe release — the failure
+    // mode the naive resolve-at-cancel shape had.
+    const currentId = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("test-repo") // open-time resolution
+      .mockRejectedValueOnce(new Error("no repository configured"));
+    vi.mocked(invoke).mockResolvedValue(undefined); // discard_divergence
+    const { handle } = mountDivergence({ activeRepo: { currentId } });
+
+    handle.openDivergence(DIVERGENCE);
+    await flushPromises();
+    handle.cancelDivergence();
+    await flushPromises();
+
+    expect(currentId).toHaveBeenCalledTimes(1); // cancel reused the open promise
+    expect(invoke).toHaveBeenCalledWith("discard_divergence", {
+      repoId: "test-repo",
+    });
+  });
+
+  it("resolveDivergence threads the active repoId onto resolve_sync_divergence", async () => {
+    vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
+    const { handle } = mountDivergence({ unlocked: true });
+
+    handle.openDivergence(DIVERGENCE);
+    await flushPromises();
+    await handle.resolveDivergence("adopt_remote");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("resolve_sync_divergence", {
+      repoId: "test-repo",
+      expectedRemoteOid: "tip-ccc",
+      choice: "adopt_remote",
+    });
   });
 });

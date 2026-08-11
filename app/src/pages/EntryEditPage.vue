@@ -353,7 +353,8 @@ async function onSave() {
   decryptError.value = false;
   try {
     const parts = snapshotParts();
-    const outcome = await editSecret(entryName, parts, baseOid.value);
+    const repoId = await activeRepo.currentId();
+    const outcome = await editSecret(repoId, entryName, parts, baseOid.value);
     if (outcome.kind === "written") {
       toast.success(t("entry.saved", { commit: outcome.commit }));
       // Back to the read view (the opener) — it remounts and shows fresh content.

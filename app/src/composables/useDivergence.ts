@@ -12,6 +12,7 @@ import {
 } from "@/api";
 import { ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useActiveRepo } from "./useActiveRepo";
 import { useLockSignals } from "./useLockSignals";
 import { isAuthCancelled, useLockState } from "./useLockState";
 
@@ -58,6 +59,7 @@ export function useDivergence(opts: {
 } {
   const { cancelAuth, runWithAuth } = useLockState();
   const { t } = useI18n();
+  const activeRepo = useActiveRepo();
   const discardOnCancel = opts.discardOnCancel ?? true;
 
   const divergence = ref<SyncDivergence | null>(null);
@@ -76,9 +78,17 @@ export function useDivergence(opts: {
     cancelAuth();
   });
 
+  // Resolve the repo id ONCE when the payload opens — the modal only opens
+  // over a repo that was just written to, so the id is resolvable then. Cancel
+  // reuses the SAME promise: resolving it again at cancel time would let a
+  // transient config-read failure (right when the user taps cancel) skip the
+  // deferred identity-wipe release this exists to perform.
+  let openRepoId: Promise<string> | null = null;
+
   function openDivergence(preview: SyncDivergence) {
     divergence.value = preview;
     divergeError.value = "";
+    openRepoId = activeRepo.currentId();
   }
 
   /** Dismiss the modal without resolving. The local commit stays and publishes
@@ -87,7 +97,10 @@ export function useDivergence(opts: {
     if (!divergence.value) return;
     divergence.value = null;
     divergeError.value = "";
-    if (discardOnCancel) void discardDivergence().catch(() => {});
+    if (discardOnCancel && openRepoId)
+      void openRepoId
+        .then((repoId) => discardDivergence(repoId))
+        .catch(() => {});
   }
 
   async function resolveDivergence(choice: DivergenceChoice) {
@@ -96,12 +109,13 @@ export function useDivergence(opts: {
     divergeError.value = "";
     const expectedRemoteOid = divergence.value.remote_tip;
     try {
+      const repoId = await activeRepo.currentId();
       const result: PullResult =
         choice === "keep_mine"
           ? await runWithAuth(() =>
-              resolveSyncDivergence(expectedRemoteOid, choice),
+              resolveSyncDivergence(repoId, expectedRemoteOid, choice),
             )
-          : await resolveSyncDivergence(expectedRemoteOid, choice);
+          : await resolveSyncDivergence(repoId, expectedRemoteOid, choice);
       divergence.value = null;
       opts.onResolved(result, choice);
     } catch (e) {

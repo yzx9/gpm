@@ -19,7 +19,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
-import { useWipeOnLeave } from "@/composables";
+import { resolveActiveRepoId, useWipeOnLeave } from "@/composables";
 import { CircleCheck, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -235,7 +235,7 @@ async function onCreate() {
       // fully created + configured locally; a failed push blocks navigation so
       // the user sees it rather than silently believing the store synced.
       try {
-        await pushRepo();
+        await pushRepo(await resolveActiveRepoId());
       } catch (e) {
         const pushError = e as AppError;
         error.value =

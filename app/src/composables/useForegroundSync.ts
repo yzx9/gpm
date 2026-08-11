@@ -14,6 +14,7 @@ import { ref, watch, type Ref } from "vue";
 import type { Router } from "vue-router";
 
 import type { AppLockStore } from "./useAppLockState";
+import { resolveActiveRepoId } from "./useActiveRepo";
 
 /**
  * Best-effort foreground sync (RFC R060 Tier 1) — pull + push on app cold-start
@@ -107,15 +108,19 @@ export function createForegroundSyncStore(
     let outcome: SyncOutcome | null = null;
     try {
       let autosync = true;
+      let repoId: string | null = null;
       try {
         autosync = (await getAppConfig()).autosync ?? true;
+        // This factory takes explicit deps (no inject provider), so resolve the
+        // id directly from the persisted registry via the shared helper.
+        repoId = await resolveActiveRepoId();
       } catch {
-        return; // can't read config — don't sync blind
+        return; // can't read config / no repo — don't sync blind
       }
-      if (!autosync) return; // AutoSync off ⇒ no foreground sync
+      if (!autosync || !repoId) return; // AutoSync off / no repo ⇒ no foreground sync
 
       try {
-        outcome = await backgroundSync();
+        outcome = await backgroundSync(repoId);
       } catch {
         outcome = null; // invoke itself rejected — treat as silent skip
       }
