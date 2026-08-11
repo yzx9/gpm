@@ -11,8 +11,12 @@ withDefaults(
     as?: string;
     /** Flat-card border tone: `danger` (Danger Zone), `accent` (pending/unsaved). */
     border?: "edge" | "danger" | "accent";
+    /** One-shot accent ring that lights up then fades (~1.6s, no `forwards` fill
+     *  so the card returns to normal) — e.g. a deep-link target from the
+     *  Permissions screen. */
+    highlight?: boolean;
   }>(),
-  { variant: "flat", as: "div", border: "edge" },
+  { variant: "flat", as: "div", border: "edge", highlight: false },
 );
 </script>
 
@@ -25,6 +29,7 @@ withDefaults(
       {
         'danger-border': border === 'danger',
         'accent-border': border === 'accent',
+        'card-highlight': highlight,
       },
     ]"
   >
@@ -55,5 +60,23 @@ withDefaults(
 .flat.accent-border {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-ring);
+}
+/* One-shot highlight ring for a card you've been deep-linked to (e.g. the
+   biometric/passphrase card from the Permissions screen): a solid accent ring
+   lights up, then fades out. No `forwards` fill, so the card returns to normal.
+   Vue scopes the keyframe name to this component. */
+@keyframes card-highlight-ring {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  30% {
+    box-shadow: 0 0 0 4px var(--color-accent);
+  }
+  100% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+.card-highlight {
+  animation: card-highlight-ring 1.6s ease-out;
 }
 </style>

@@ -857,8 +857,8 @@ defineExpose({ syncRepo });
   gap: 0.5rem;
 }
 /* Spinning refresh icon = the primary "syncing" affordance, leading the row so
-   the sync reads as active work, not as a lone stop button. Uses the global
-   @keyframes spin (see src/style.css). */
+   the sync reads as active work, not as a lone stop button. Local
+   @keyframes spin — Vue scopes the name to this component. */
 .pull-spinner {
   flex: 0 0 auto;
   display: inline-flex;
@@ -866,6 +866,11 @@ defineExpose({ syncRepo });
   justify-content: center;
   color: var(--color-accent);
   animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 /* Pull-to-refresh indicator: a centered icon whose container grows with the
    pull distance. At rest (0) it collapses out of flow; once the sync starts

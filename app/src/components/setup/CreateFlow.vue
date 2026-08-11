@@ -374,3 +374,20 @@ async function onCreate() {
     >
   </form>
 </template>
+
+<style scoped>
+/* The generated recipient (public key), shown truncated to one line — a static
+   monospace box, not interactive: the value is already shortened via
+   truncateKey, so it needs no copy target or scroll. */
+.public-key-display {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  font-size: var(--text-xs);
+  font-family: monospace;
+  word-break: break-all;
+  white-space: pre-wrap;
+  margin: 0;
+}
+</style>

@@ -21,9 +21,11 @@ withDefaults(
 </template>
 
 <style scoped>
-/* Uses the global @keyframes spin from src/assets/main.css. The spinner itself
-   carries no margin — spacing comes from the parent's flex gap (e.g. BaseButton)
-   or a Tailwind gap wrapper for standalone spinner + text. */
+/* Local @keyframes spin — Vue scopes the keyframe name to this component (and
+   rewrites the `animation` reference above to match), so the spinner owns its
+   own rotation without a global keyframe. The spinner carries no margin —
+   spacing comes from the parent's flex gap (e.g. BaseButton) or a Tailwind gap
+   wrapper for standalone spinner + text. */
 .spinner {
   display: inline-block;
   width: 14px;
@@ -38,5 +40,11 @@ withDefaults(
 .spinner-white {
   border-color: color-mix(in srgb, var(--color-on-accent) 30%, transparent);
   border-top-color: var(--color-on-accent);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

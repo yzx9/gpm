@@ -90,8 +90,8 @@ let alive = true;
 // Root element ref — the deep-link card lookup is scoped to it (not document)
 // so it resolves whether or not the page is attached to the document.
 const rootEl = ref<HTMLElement | null>(null);
-// Highlight ring lasts 1.6s (.card-highlight in style.css); the clear timer
-// adds slack so the class outlives the animation and isn't stripped mid-flash.
+// Highlight ring lasts 1.6s (BaseCard's `highlight` prop); the clear timer
+// adds slack so the prop outlives the animation and isn't reset mid-flash.
 const HIGHLIGHT_MS = 1700;
 // The deep-link target card renders after loadConfig commits; poll a few ticks
 // for it. Bounded so we never wait forever on a card that won't exist (SSH).
@@ -762,7 +762,7 @@ onMounted(async () => {
         as="section"
         v-if="!isSshIdentity"
         id="passphrase-card"
-        :class="{ 'card-highlight': highlightKey === 'passphrase' }"
+        :highlight="highlightKey === 'passphrase'"
       >
         <h2 class="text-sm font-medium mb-3">
           {{ t("settings.passphrase.title") }}
@@ -805,7 +805,7 @@ onMounted(async () => {
         as="section"
         v-if="isIdentityEncrypted"
         id="biometric-card"
-        :class="{ 'card-highlight': highlightKey === 'biometric' }"
+        :highlight="highlightKey === 'biometric'"
       >
         <h2 class="text-sm font-medium mb-3">
           {{ t("settings.biometric.title") }}

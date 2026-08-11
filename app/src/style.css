@@ -226,55 +226,6 @@
   }
 }
 
-/* Shared keyframes */
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* One-shot highlight ring for a card you've been deep-linked to (e.g. the
-   biometric/passphrase card from the Permissions screen): a solid accent ring
-   lights up, then fades out. No `forwards` fill, so the card returns to normal. */
-@keyframes card-highlight-ring {
-  0% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-  30% {
-    box-shadow: 0 0 0 4px var(--color-accent);
-  }
-  100% {
-    box-shadow: 0 0 0 4px transparent;
-  }
-}
-.card-highlight {
-  animation: card-highlight-ring 1.6s ease-out;
-}
-
-/* ---------------------------------------------------------------------------
- * Shared UI utilities
- *
- * Small presentation helpers used across several pages/components that aren't
- * worth a full component (monospace key display). The interactive
- * primitives (buttons/inputs/spinner/segmented control) live as Base* components
- * under src/components/base/ instead.
- * --------------------------------------------------------------------------- */
-
-.public-key-display {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-input);
-  font-size: var(--text-xs);
-  font-family: monospace;
-  word-break: break-all;
-  white-space: pre-wrap;
-  cursor: pointer;
-  max-height: 120px;
-  overflow-y: auto;
-  margin: 0;
-}
-
 /* Visually hide an element while keeping it accessible to screen readers
    (used by the sr-only radios inside BaseSegmentedControl). */
 .sr-only {

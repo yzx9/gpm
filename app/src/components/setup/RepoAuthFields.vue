@@ -220,3 +220,23 @@ async function copyPublicKey() {
     </template>
   </template>
 </template>
+
+<style scoped>
+/* The generated public key: a scrollable, tap-to-copy monospace box. Tapping
+   the box copies (the explicit Copy button above is the primary affordance;
+   the box itself is a convenience tap target). */
+.public-key-display {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  font-size: var(--text-xs);
+  font-family: monospace;
+  word-break: break-all;
+  white-space: pre-wrap;
+  cursor: pointer;
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 0;
+}
+</style>
