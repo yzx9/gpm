@@ -62,6 +62,7 @@ describe("RevisionsPage", () => {
     // The page names which secret this is the history of (path minus .age).
     expect(wrapper.text()).toContain("servers/prod");
     expect(invoke).toHaveBeenCalledWith("list_revisions", {
+      repoId: "test-repo",
       entryPath: "servers/prod.age",
       offset: 0,
       limit: 50,
@@ -128,6 +129,7 @@ describe("RevisionsPage", () => {
 
       // The load-more call must anchor to page 0's base_oid.
       expect(invoke).toHaveBeenCalledWith("list_revisions", {
+        repoId: "test-repo",
         entryPath: "servers/prod.age",
         offset: 50,
         limit: 50,

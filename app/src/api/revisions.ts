@@ -47,12 +47,14 @@ export type RevisionView =
 /** List one page of a secret's revisions. Page 0 omits `baseOid` (walks HEAD and
  *  returns it); later pages pass the prior page's `baseOid`. Pure metadata. */
 export async function listRevisions(
+  repoId: string,
   entryPath: string,
   offset: number,
   limit: number,
   baseOid?: string,
 ): Promise<RevisionPage> {
   return invoke<RevisionPage>("list_revisions", {
+    repoId,
     entryPath,
     offset,
     limit,
@@ -63,21 +65,24 @@ export async function listRevisions(
 /** View one revision: decrypt and return it, or report `undecryptable` /
  *  `deleted`. The past value crosses IPC only on the `decrypted` kind. */
 export async function showRevision(
+  repoId: string,
   entryPath: string,
   commit: string,
 ): Promise<RevisionView> {
-  return invoke<RevisionView>("show_revision", { entryPath, commit });
+  return invoke<RevisionView>("show_revision", { repoId, entryPath, commit });
 }
 
 /** Copy a revision's password straight to the clipboard — the past value never
  *  reaches the WebView. Rejects for `undecryptable`/`deleted` (disable copy for
  *  those states); the clipboard auto-clears after the configured timer. */
 export async function copyRevision(
+  repoId: string,
   entryPath: string,
   commit: string,
   notify?: ClipboardNotifyText,
 ): Promise<CopyResult> {
   return invoke<CopyResult>("copy_revision", {
+    repoId,
     entryPath,
     commit,
     notifyText: notify,

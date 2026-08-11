@@ -15,6 +15,7 @@ import CommitSigIndicator from "@/components/CommitSigIndicator.vue";
 import EntryAttributes from "@/components/EntryAttributes.vue";
 import {
   isAuthCancelled,
+  useActiveRepo,
   useLockState,
   useRelativeTime,
   useSecretReveal,
@@ -44,6 +45,7 @@ const { t } = useI18n();
 const { formatRelativeTime } = useRelativeTime();
 const { toast } = useToast();
 const { runWithAuth } = useLockState();
+const activeRepo = useActiveRepo();
 const {
   attributes,
   password,
@@ -104,7 +106,9 @@ async function fetchPage(offset: number, replace: boolean) {
   const myId = ++reqId;
   loading.value = true;
   try {
+    const repoId = await activeRepo.currentId();
     const page = await listRevisions(
+      repoId,
       entryPath,
       offset,
       PAGE_SIZE,
@@ -160,8 +164,9 @@ async function showVersion() {
   if (!commit) return;
   viewState.value = "loading";
   try {
+    const repoId = await activeRepo.currentId();
     const claimed = await withClaim(() =>
-      runWithAuth(() => showRevision(entryPath, commit.hash)),
+      runWithAuth(() => showRevision(repoId, entryPath, commit.hash)),
     );
     if (claimed === null) {
       viewState.value = "idle";
@@ -198,8 +203,9 @@ async function copyVersion() {
   if (!commit) return;
   actionLoading.value = true;
   try {
+    const repoId = await activeRepo.currentId();
     const result = await runWithAuth(() =>
-      copyRevision(entryPath, commit.hash),
+      copyRevision(repoId, entryPath, commit.hash),
     );
     // An attachment revision has no password — the backend skips the clipboard
     // write, so don't claim "Copied" (the clipboard may still hold a prior

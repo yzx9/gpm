@@ -21,6 +21,7 @@ use crate::AppState;
 use crate::identity::{maybe_soft_wipe, reset_gate_idle_timer, reset_lock_timer};
 use crate::page::clamp_limit;
 use crate::read::{AttributeView, CopyResult, attr_view};
+use crate::registry::RepoId;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)
@@ -126,14 +127,15 @@ fn revision_view(content: RevisionContent) -> RevisionView {
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn list_revisions(
     state: State<'_, AppState>,
+    repo_id: RepoId,
     entry_path: String,
     offset: usize,
     limit: usize,
     base_oid: Option<String>,
 ) -> Result<RevisionPage, Error> {
+    let store = state.repo(&repo_id)?;
     let name = entry_path.trim_end_matches(".age");
-    let page = state
-        .store
+    let page = store
         .list_revisions(name, offset, clamp_limit(limit), base_oid.as_deref())
         .await?;
     Ok(RevisionPage {
@@ -150,6 +152,7 @@ pub(crate) async fn list_revisions(
 pub(crate) async fn show_revision_core<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    store: &rustpass::Store,
     entry_path: &str,
     commit: &str,
 ) -> Result<RevisionView, Error> {
@@ -157,7 +160,7 @@ pub(crate) async fn show_revision_core<R: Runtime>(
         "show revision: {} @ {commit}",
         entry_path.trim_end_matches(".age")
     );
-    let content = state.store.get_at_revision(entry_path, commit).await;
+    let content = store.get_at_revision(entry_path, commit).await;
     reset_lock_timer(state, app);
     reset_gate_idle_timer(state, app);
     maybe_soft_wipe(state, app).await;
@@ -174,10 +177,12 @@ pub(crate) async fn show_revision_core<R: Runtime>(
 pub(crate) async fn show_revision(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     entry_path: String,
     commit: String,
 ) -> Result<RevisionView, Error> {
-    show_revision_core(&state, &app, &entry_path, &commit).await
+    let store = state.repo(&repo_id)?;
+    show_revision_core(&state, &app, &store, &entry_path, &commit).await
 }
 
 /// Copy a past revision's password straight to the clipboard — the past value
@@ -191,14 +196,16 @@ pub(crate) async fn show_revision(
 pub(crate) async fn copy_revision(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     entry_path: String,
     commit: String,
     notify_text: Option<NotifyText>,
 ) -> Result<CopyResult, Error> {
+    let store = state.repo(&repo_id)?;
     let entry_name = entry_path.trim_end_matches(".age").to_string();
     log::info!("copy revision: {entry_name}@{commit}");
 
-    let content = state.store.get_at_revision(&entry_path, &commit).await;
+    let content = store.get_at_revision(&entry_path, &commit).await;
     reset_lock_timer(&state, &app);
     reset_gate_idle_timer(&state, &app);
     maybe_soft_wipe(&state, &app).await;
