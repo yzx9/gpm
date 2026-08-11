@@ -381,13 +381,13 @@ onBeforeUnmount(() => {
     >
       <div class="flex justify-between items-start mb-2">
         <code class="text-xs text-muted">{{ selected.short_hash }}</code>
-        <button
-          class="btn-copy"
-          @click="closeDetail"
+        <BaseButton
+          variant="link"
           :aria-label="t('revisions.closeAria')"
+          @click="closeDetail"
         >
           <BaseIcon :icon="X" />
-        </button>
+        </BaseButton>
       </div>
 
       <!-- a revealed OLD value is unmistakably marked as a past version. -->

@@ -119,6 +119,10 @@ function onSheetKeydown(e: KeyboardEvent) {
     <span v-if="legend" :id="`${name}-legend`" class="legend">{{
       legend
     }}</span>
+    <!-- Raw <button> (not BaseButton): the trigger needs a template ref,
+         :inert toggling, and the full aria-expanded/controls/labelledby wiring
+         BaseButton doesn't expose — BaseButton is the wrong layer for a select
+         trigger (you don't wrap a <button> in a <button>). -->
     <button
       ref="trigger"
       type="button"

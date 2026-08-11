@@ -11,6 +11,7 @@ import {
 } from "@/components/about/data";
 import PackageRow from "@/components/about/PackageRow.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
@@ -139,8 +140,8 @@ function togglePkg(p: LicensePackage) {
       <!-- Grouped view -->
       <div v-if="!searching" class="flex flex-col gap-2">
         <section v-for="group in groups" :key="group.license" class="group">
-          <button
-            type="button"
+          <BaseButton
+            variant="action"
             class="group-head"
             :aria-expanded="expandedGroups.has(group.license)"
             @click="toggleGroup(group.license)"
@@ -155,7 +156,7 @@ function togglePkg(p: LicensePackage) {
             <span class="group-count">{{
               t("about.licenses.packageCount", group.count)
             }}</span>
-          </button>
+          </BaseButton>
           <ul v-if="expandedGroups.has(group.license)" class="pkg-list">
             <PackageRow
               v-for="p in group.packages"
@@ -219,30 +220,17 @@ function togglePkg(p: LicensePackage) {
   align-items: baseline;
   padding: 0 0.25rem;
 }
+/* Card of bordered action pills (group-head + each PackageRow). Padded and
+   gapped so each pill's own border doesn't sit against the card border or the
+   next pill — the old flush row separators are gone now that every row carries
+   its border via BaseButton's `action` variant. */
 .group {
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-md);
-  overflow: hidden;
-}
-.group-head {
-  width: 100%;
+  padding: 0.5rem;
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.6rem 0.7rem;
-  background: var(--color-surface);
-  border: 0;
-  cursor: pointer;
-  text-align: left;
-  -webkit-tap-highlight-color: transparent;
-}
-.group-head:active {
-  background: var(--color-hover);
-}
-@media (hover: hover) {
-  .group-head:hover {
-    background: var(--color-hover);
-  }
+  flex-direction: column;
+  gap: 0.5rem;
 }
 .group-license {
   flex: 1;
@@ -259,12 +247,8 @@ function togglePkg(p: LicensePackage) {
   list-style: none;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--color-edge);
-}
-.pkg-list > li {
-  border-bottom: 1px solid var(--color-edge);
-}
-.pkg-list > li:last-child {
-  border-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 </style>

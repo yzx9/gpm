@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import { listCreatePresets, type AppError, type CreatePreset } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
@@ -64,41 +65,47 @@ onMounted(loadPresets);
       </div>
       <ul v-else class="list-none flex flex-col gap-2" role="list">
         <li v-for="p in presets" :key="p.id">
-          <button
-            class="type-card"
+          <BaseButton
+            variant="action"
             @click="
               router.push({ name: 'createPreset', params: { presetId: p.id } })
             "
           >
-            <span class="block text-base font-medium">{{ p.label }}</span>
-            <span class="block text-xs text-muted"
-              >{{ t("create.savedUnder") }} {{ p.prefix }}/</span
-            >
-          </button>
+            <span class="flex flex-col flex-1">
+              <span class="text-base font-medium">{{ p.label }}</span>
+              <span class="text-xs text-muted"
+                >{{ t("create.savedUnder") }} {{ p.prefix }}/</span
+              >
+            </span>
+          </BaseButton>
         </li>
         <li>
-          <button
-            class="type-card"
+          <BaseButton
+            variant="action"
             @click="router.push({ name: 'createCustom' })"
           >
-            <span class="block text-base font-medium">{{
-              t("create.customLabel")
-            }}</span>
-            <span class="block text-xs text-muted">{{
-              t("create.customHint")
-            }}</span>
-          </button>
+            <span class="flex flex-col flex-1">
+              <span class="text-base font-medium">{{
+                t("create.customLabel")
+              }}</span>
+              <span class="text-xs text-muted">{{
+                t("create.customHint")
+              }}</span>
+            </span>
+          </BaseButton>
         </li>
         <li>
-          <button class="type-card" @click="openGenerate">
-            <span class="flex items-center gap-2 text-base font-medium">
-              <BaseIcon :icon="Dices" :size="18" />
-              {{ t("create.generateLabel") }}
+          <BaseButton variant="action" @click="openGenerate">
+            <span class="flex flex-col flex-1">
+              <span class="flex items-center gap-2 text-base font-medium">
+                <BaseIcon :icon="Dices" :size="18" />
+                {{ t("create.generateLabel") }}
+              </span>
+              <span class="text-xs text-muted">{{
+                t("create.generateHint")
+              }}</span>
             </span>
-            <span class="block text-xs text-muted">{{
-              t("create.generateHint")
-            }}</span>
-          </button>
+          </BaseButton>
         </li>
       </ul>
     </section>
@@ -106,26 +113,6 @@ onMounted(loadPresets);
 </template>
 
 <style scoped>
-.type-card {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 0.75rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  cursor: pointer;
-  min-height: 48px;
-}
-.type-card:active {
-  background: var(--color-hover);
-}
-@media (hover: hover) {
-  .type-card:hover {
-    background: var(--color-hover);
-  }
-}
-
 .loading {
   text-align: center;
   color: var(--color-muted);

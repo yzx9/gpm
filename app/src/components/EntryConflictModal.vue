@@ -24,7 +24,6 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import BaseButton from "./base/BaseButton.vue";
 import BaseModalShell from "./base/BaseModalShell.vue";
-import BaseSpinner from "./base/BaseSpinner.vue";
 import EntryAttributes from "./EntryAttributes.vue";
 
 const { t } = useI18n();
@@ -279,16 +278,19 @@ watch(
     <p v-else-if="previewError" class="text-xs text-danger mb-2" role="alert">
       {{ previewError }}
     </p>
-    <button
+    <BaseButton
       v-else
-      class="ec-preview-btn"
-      :disabled="previewLoading || resolving"
+      variant="link"
+      tone="muted"
+      size="xs"
+      class="ec-preview-btn mb-2"
+      :loading="previewLoading"
+      :disabled="resolving"
       :aria-label="t('common.entryConflict.previewAriaLabel')"
       @click="previewTheirs"
     >
-      <BaseSpinner v-if="previewLoading" />
       {{ t("common.entryConflict.previewLabel") }}
-    </button>
+    </BaseButton>
 
     <p v-if="error" class="text-xs text-danger mb-2" role="alert">
       {{ error }}
@@ -381,31 +383,5 @@ watch(
 }
 .ec-clears {
   margin-top: 0.25rem;
-}
-
-.ec-preview-btn {
-  background: none;
-  border: none;
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-  padding: 0.25rem 0;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.5rem;
-  min-height: 44px;
-}
-.ec-preview-btn:active:not(:disabled) {
-  opacity: 0.7;
-}
-@media (hover: hover) {
-  .ec-preview-btn:hover:not(:disabled) {
-    opacity: 0.7;
-  }
-}
-.ec-preview-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 </style>

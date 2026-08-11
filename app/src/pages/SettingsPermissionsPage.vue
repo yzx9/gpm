@@ -14,6 +14,7 @@ import {
   type BiometricState,
   type UnlistenFn,
 } from "@/api";
+import BaseButton from "@/components/base/BaseButton.vue";
 import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
@@ -312,15 +313,17 @@ function toneClass(tone: string) {
             </div>
           </div>
 
-          <button
+          <BaseButton
             v-if="bioAvailable && !isSshIdentity"
-            type="button"
+            variant="link"
+            tone="accent"
+            size="sm"
             class="perm-link"
             @click="openBiometricSettings"
           >
             {{ bioLinkLabel }}
             <BaseIcon :icon="ChevronRight" :size="14" />
-          </button>
+          </BaseButton>
         </BaseCard>
       </div>
     </template>
@@ -426,28 +429,10 @@ function toneClass(tone: string) {
   font-size: var(--text-sm);
   text-align: right;
 }
-/* "Manage in Lock & Identity" — a link-styled button to the in-app unlock
-   toggle. Native button chrome is reset so it reads as an inline accent link. */
+/* "Manage in Lock & Identity" — a link-styled button (BaseButton variant=link,
+   tone=accent). Only the indentation lives here: align under the row body
+   (card edge + 20px icon + 0.75rem gap = 2rem). */
 .perm-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  /* Align under the row body: card edge + 20px icon + 0.75rem gap = 2rem. */
   margin: 0.5rem 0 0 1.5rem;
-  padding: 0.4rem 0.5rem;
-  font-size: var(--text-sm);
-  color: var(--color-accent);
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.perm-link:active {
-  background: var(--color-hover);
-}
-@media (hover: hover) {
-  .perm-link:hover {
-    background: var(--color-hover);
-  }
 }
 </style>

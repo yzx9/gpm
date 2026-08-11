@@ -9,6 +9,7 @@
 
 <script setup lang="ts">
 import type { LicensePackage } from "@/components/about/data";
+import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import { ChevronDown, ChevronRight } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
@@ -20,8 +21,8 @@ const { t } = useI18n();
 
 <template>
   <li>
-    <button
-      type="button"
+    <BaseButton
+      variant="action"
       class="pkg-row"
       :aria-expanded="expanded"
       :aria-label="t('about.licenses.expandAria', { name: pkg.name })"
@@ -31,7 +32,7 @@ const { t } = useI18n();
       <span class="pkg-name">{{ pkg.name }}</span>
       <span class="pkg-version">{{ pkg.version }}</span>
       <span class="pkg-eco">{{ pkg.ecosystem }}</span>
-    </button>
+    </BaseButton>
     <pre v-if="expanded" class="license-text">{{
       pkg.licenseText || t("about.licenses.noLicenseText")
     }}</pre>
@@ -39,26 +40,6 @@ const { t } = useI18n();
 </template>
 
 <style scoped>
-.pkg-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 0.7rem;
-  background: var(--color-input);
-  border: 0;
-  cursor: pointer;
-  text-align: left;
-  -webkit-tap-highlight-color: transparent;
-}
-.pkg-row:active {
-  background: var(--color-hover);
-}
-@media (hover: hover) {
-  .pkg-row:hover {
-    background: var(--color-hover);
-  }
-}
 .pkg-name {
   flex: 1;
   font-size: var(--text-sm);

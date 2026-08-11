@@ -156,6 +156,8 @@ onMounted(() => {
       the user to the entry list, where a pull-to-refresh engages the existing
       resolve flow — the sync itself never opens a modal or enters
       conflict-resolution. The colored word carries the meaning (no icon pill).
+      Raw <button> (not BaseButton): a small pill badge whose sizing fights
+      BaseButton's 48px touch minimum, and which owns no press affordance.
     -->
     <button
       v-if="foregroundSync.syncAttention.value"
