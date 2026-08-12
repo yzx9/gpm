@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import {
+  ACTIVE_REPO_KEY,
   APP_LOCK_KEY,
   BACK_HANDLER_KEY,
   createAppLockStore,
@@ -39,6 +40,7 @@ function mountUnlock(opts?: ComponentMountingOptions<typeof UnlockModal>) {
     global: {
       ...(opts?.global ?? {}),
       provide: {
+        [ACTIVE_REPO_KEY]: { currentId: () => Promise.resolve("test-repo") },
         [SCROLL_LOCK_KEY]: createScrollLockController(),
         [BACK_HANDLER_KEY]: backHandler,
       },
@@ -95,7 +97,10 @@ describe("UnlockModal", () => {
     mountUnlock();
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
+    expect(invoke).toHaveBeenCalledWith("biometric_unlock", {
+      repoId: "test-repo",
+      promptText: expect.anything(),
+    });
   });
 
   it("does not auto-prompt biometric after an idle re-lock (autoPromptBiometric=false)", async () => {
@@ -184,7 +189,10 @@ describe("UnlockModal", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("unlock", { passphrase: "secret" });
+    expect(invoke).toHaveBeenCalledWith("unlock", {
+      repoId: "test-repo",
+      passphrase: "secret",
+    });
   });
 
   it("wipes the typed passphrase on browser back (popstate)", async () => {
@@ -222,7 +230,10 @@ describe("UnlockModal", () => {
     await btn.trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
+    expect(invoke).toHaveBeenCalledWith("biometric_unlock", {
+      repoId: "test-repo",
+      promptText: expect.anything(),
+    });
   });
 
   it("reveals the passphrase form on tap and submits to unlock", async () => {
@@ -251,7 +262,10 @@ describe("UnlockModal", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("unlock", { passphrase: "secret" });
+    expect(invoke).toHaveBeenCalledWith("unlock", {
+      repoId: "test-repo",
+      passphrase: "secret",
+    });
   });
 
   it("offers a back-to-biometric action in passphrase mode that re-prompts", async () => {
@@ -317,7 +331,10 @@ describe("UnlockModal", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("unlock", { passphrase: "wrong" });
+    expect(invoke).toHaveBeenCalledWith("unlock", {
+      repoId: "test-repo",
+      passphrase: "wrong",
+    });
     expect(wrapper.text()).toContain("Wrong passphrase");
   });
 
@@ -460,6 +477,7 @@ describe("UnlockModal", () => {
     const wrapper = mount(Host, {
       global: {
         provide: {
+          [ACTIVE_REPO_KEY]: { currentId: () => Promise.resolve("test-repo") },
           [APP_LOCK_KEY]: appLock,
           [SCROLL_LOCK_KEY]: createScrollLockController(),
           [BACK_HANDLER_KEY]: backHandler,
@@ -486,6 +504,7 @@ describe("UnlockModal", () => {
     const wrapper = mount(UnlockModal, {
       global: {
         provide: {
+          [ACTIVE_REPO_KEY]: { currentId: () => Promise.resolve("test-repo") },
           [LOCK_KEY]: lock,
           [SCROLL_LOCK_KEY]: createScrollLockController(),
           [BACK_HANDLER_KEY]: backHandler,

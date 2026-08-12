@@ -248,6 +248,7 @@ describe("SettingsIdentityPage", () => {
       await modalBtn("Encrypt Identity").trigger("click");
       await flushPromises();
       expect(invoke).toHaveBeenCalledWith("set_passphrase", {
+        repoId: "test-repo",
         passphrase: "secret",
       });
     });
@@ -337,6 +338,7 @@ describe("SettingsIdentityPage", () => {
       await modalBtn("Change Passphrase").trigger("click");
       await flushPromises();
       expect(invoke).toHaveBeenCalledWith("change_passphrase", {
+        repoId: "test-repo",
         oldPassphrase: "old-pass",
         newPassphrase: "new-pass",
       });

@@ -61,8 +61,9 @@ describe("biometric wrappers", () => {
 
   it("enableBiometricUnlock passes the passphrase through", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-    await enableBiometricUnlock("hunter2");
+    await enableBiometricUnlock("test-repo", "hunter2");
     expect(invoke).toHaveBeenCalledWith("enable_biometric_unlock", {
+      repoId: "test-repo",
       passphrase: "hunter2",
     });
   });
@@ -72,7 +73,7 @@ describe("biometric wrappers", () => {
       code: "WRONG_PASSPHRASE",
       message: "nope",
     });
-    await expect(enableBiometricUnlock("x")).rejects.toEqual({
+    await expect(enableBiometricUnlock("test-repo", "x")).rejects.toEqual({
       code: "WRONG_PASSPHRASE",
       message: "nope",
     });
@@ -80,7 +81,7 @@ describe("biometric wrappers", () => {
 
   it("biometricUnlock calls the biometric_unlock command", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-    await biometricUnlock();
+    await biometricUnlock("test-repo");
     expect(invoke).toHaveBeenCalledWith("biometric_unlock", expect.anything());
   });
 
@@ -89,7 +90,7 @@ describe("biometric wrappers", () => {
       code: "KEYSTORE_CANCELLED",
       message: "cancel",
     });
-    await expect(biometricUnlock()).rejects.toEqual({
+    await expect(biometricUnlock("test-repo")).rejects.toEqual({
       code: "KEYSTORE_CANCELLED",
       message: "cancel",
     });

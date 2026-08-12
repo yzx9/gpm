@@ -25,10 +25,13 @@ async fn background_sync_skips_while_app_locked_and_never_arms_cancel_slot() {
     state.app_locked.store(true, Ordering::SeqCst);
     let app = mock_app(state);
 
-    let outcome =
-        crate::write::background_sync(app.state::<AppState>(), app.handle().clone(), test_repo_id())
-            .await
-            .expect("background_sync returns Ok while app-locked");
+    let outcome = crate::write::background_sync(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        test_repo_id(),
+    )
+    .await
+    .expect("background_sync returns Ok while app-locked");
     assert!(
         outcome.is_none(),
         "background_sync must skip (Ok(None)) while app-locked"

@@ -16,8 +16,8 @@ use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::identity;
-use crate::registry::RepoId;
 use crate::keystore::{self, PASSPHRASE_ALIAS, PASSPHRASE_POLICY, PASSPHRASE_PREFS};
+use crate::registry::RepoId;
 
 // ---------------------------------------------------------------------------
 // Tauri-IPC types (not in rustpass — these are UI-layer concerns)

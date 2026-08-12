@@ -29,16 +29,20 @@ export interface SshPrivateKeyResult {
 }
 
 /** Set (or replace) the identity passphrase, encrypting the identity at rest. */
-export async function setPassphrase(passphrase: string): Promise<void> {
-  await invoke("set_passphrase", { passphrase });
+export async function setPassphrase(
+  repoId: string,
+  passphrase: string,
+): Promise<void> {
+  await invoke("set_passphrase", { repoId, passphrase });
 }
 
 /** Rotate the identity passphrase (requires the current one). */
 export async function changePassphrase(
+  repoId: string,
   oldPassphrase: string,
   newPassphrase: string,
 ): Promise<void> {
-  await invoke("change_passphrase", { oldPassphrase, newPassphrase });
+  await invoke("change_passphrase", { repoId, oldPassphrase, newPassphrase });
 }
 
 /**
@@ -53,11 +57,13 @@ export async function generateSshKey(
 }
 
 /** Read the identity's SSH public key (for display / copy to the remote). */
-export async function getSshPublicKey(): Promise<SshPublicKeyResult> {
-  return invoke<SshPublicKeyResult>("get_ssh_public_key");
+export async function getSshPublicKey(repoId: string): Promise<SshPublicKeyResult> {
+  return invoke<SshPublicKeyResult>("get_ssh_public_key", { repoId });
 }
 
 /** Export the SSH private key (sensitive — caller must auto-clear it). */
-export async function exportSshPrivateKey(): Promise<SshPrivateKeyResult> {
-  return invoke<SshPrivateKeyResult>("export_ssh_private_key");
+export async function exportSshPrivateKey(
+  repoId: string,
+): Promise<SshPrivateKeyResult> {
+  return invoke<SshPrivateKeyResult>("export_ssh_private_key", { repoId });
 }

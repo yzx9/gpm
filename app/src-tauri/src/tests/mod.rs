@@ -221,11 +221,11 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
     // registry facade is `Arc::ptr_eq` to `state.store`, exactly like a real
     // single-repo app after init).
     let store_for_registry = Arc::clone(&state.store);
-    state.registry.populate(
-        [test_repo_id()],
-        Some(test_repo_id()),
-        move |_| Arc::clone(&store_for_registry),
-    );
+    state
+        .registry
+        .populate([test_repo_id()], Some(test_repo_id()), move |_| {
+            Arc::clone(&store_for_registry)
+        });
     (
         state,
         TestStore {
@@ -274,5 +274,8 @@ async fn repo_funnel_classifies_unknown_and_malformed_ids() {
 
     // The registered id resolves to the registry facade == state.store today.
     let store = state.repo(&test_repo_id()).expect("registered id resolves");
-    assert!(Arc::ptr_eq(&store, &state.store), "facade must be the device store");
+    assert!(
+        Arc::ptr_eq(&store, &state.store),
+        "facade must be the device store"
+    );
 }

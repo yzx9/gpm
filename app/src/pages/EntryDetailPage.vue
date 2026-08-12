@@ -180,11 +180,12 @@ async function unlockEntry() {
   error.value = "";
   decryptError.value = false;
   try {
-    let probe = await runWithAuth(() => entryProbeCmd(entryPath));
+    const repoId = await activeRepo.currentId();
+    let probe = await runWithAuth(() => entryProbeCmd(repoId, entryPath));
     if (probe === null) {
       // Immediate soft-wipe race — the unlock succeeded but the identity was
       // wiped before the probe's decrypt. Retry once.
-      probe = await runWithAuth(() => entryProbeCmd(entryPath));
+      probe = await runWithAuth(() => entryProbeCmd(repoId, entryPath));
     }
     if (probe === null) {
       error.value = t("entry.unlockFailed");

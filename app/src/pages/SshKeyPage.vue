@@ -15,6 +15,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import {
+  useActiveRepo,
   useDialog,
   useSecureClaim,
   useToast,
@@ -29,6 +30,7 @@ const { t } = useI18n();
 const { toast } = useToast();
 const { dialog } = useDialog();
 const router = useRouter();
+const activeRepo = useActiveRepo();
 
 const publicKey = ref("");
 const privateKey = ref("");
@@ -51,7 +53,8 @@ async function loadPublicKey() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await getSshPublicKey();
+    const repoId = await activeRepo.currentId();
+    const result = await getSshPublicKey(repoId);
     if (result.public_key === null) {
       noKey.value = true;
       publicKey.value = "";
@@ -79,7 +82,8 @@ async function exportPrivateKey() {
   try {
     // withClaim raises FLAG_SECURE before the private key arrives; a failed
     // acquire returns null → abort (the per-op replacement for the route abort).
-    const claimed = await withClaim(() => exportSshPrivateKey());
+    const repoId = await activeRepo.currentId();
+    const claimed = await withClaim(() => exportSshPrivateKey(repoId));
     if (!claimed) {
       error.value = t("common.toast.secureScreenFailed");
       return;

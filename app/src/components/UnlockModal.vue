@@ -14,7 +14,7 @@ import {
   unlock,
   type LockMode,
 } from "@/api";
-import { useWipeOnLeave, Z } from "@/composables";
+import { useActiveRepo, useWipeOnLeave, Z } from "@/composables";
 import { reconcileLocaleFromBackend } from "@/i18n";
 import { identityUnlockPrompt } from "@/i18n/native";
 import { HelpCircle, LockKeyhole, ScanFace, X } from "@lucide/vue";
@@ -104,6 +104,8 @@ function switchToBiometric() {
   tryBiometricUnlock();
 }
 
+const activeRepo = useActiveRepo();
+
 async function tryBiometricUnlock() {
   biometricNotice.value = "";
   biometricLoading.value = true;
@@ -113,7 +115,8 @@ async function tryBiometricUnlock() {
     // pinned locale, not the boot/system guess. This modal auto-prompts on
     // mount, so it can't rely on main.ts's fire-and-forget reconcile.
     await reconcileLocaleFromBackend();
-    await biometricUnlock(identityUnlockPrompt());
+    const repoId = await activeRepo.currentId();
+    await biometricUnlock(repoId, identityUnlockPrompt());
     // Success: the backend emits `identity-lock-state { locked: false }`, which
     // App.vue's `v-if` reacts to and unmounts this overlay. Nothing to do here.
   } catch (e) {
@@ -159,7 +162,8 @@ async function onUnlock() {
 
   loading.value = true;
   try {
-    await unlock(passphrase.value);
+    const repoId = await activeRepo.currentId();
+    await unlock(repoId, passphrase.value);
     // Success: the backend emits `identity-lock-state { locked: false }`, which
     // App.vue reacts to and unmounts this overlay. Nothing to do here.
   } catch (e) {

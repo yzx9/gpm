@@ -475,10 +475,7 @@ pub(crate) async fn background_sync<R: Runtime>(
     // The frontend also gates, but this stops a stray (or XSS-driven) invoke from
     // touching the network before the store exists, while repo.json is sealed
     // behind the launch gate, or when the user turned AutoSync off.
-    if !store.is_repo_ready()
-        || state.app_locked.load(Ordering::SeqCst)
-        || !store.autosync()
-    {
+    if !store.is_repo_ready() || state.app_locked.load(Ordering::SeqCst) || !store.autosync() {
         return Ok(None);
     }
     // Bound the best-effort sync so a stalled/malicious remote can't hold
@@ -508,10 +505,7 @@ pub(crate) async fn background_sync<R: Runtime>(
 /// no-op (local-only store), mirroring `pull_repo`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn push_repo(
-    state: State<'_, AppState>,
-    repo_id: RepoId,
-) -> Result<(), Error> {
+pub(crate) async fn push_repo(state: State<'_, AppState>, repo_id: RepoId) -> Result<(), Error> {
     log::info!("push: start");
     require_unlocked(&state)?;
     let store = state.repo(&repo_id)?;

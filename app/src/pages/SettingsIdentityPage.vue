@@ -50,6 +50,7 @@ import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.
 import { useStackedRouterView } from "@/components/StackedRouterView.vue";
 import {
   Z,
+  useActiveRepo,
   useDialog,
   useSecureClaim,
   useSecuritySettings,
@@ -76,6 +77,7 @@ const router = useRouter();
 // finishes — the deep-link awaits it so scroll/highlight land after the slide,
 // not mid-transform (a visible flicker). See StackedRouterView.vue.
 const { whenSettled } = useStackedRouterView();
+const activeRepo = useActiveRepo();
 // Deep-link target arriving from the Permissions screen: scroll the matching
 // card into view and flash a highlight ring so the user lands on it. Null on a
 // normal visit, and cleared once the flash finishes.
@@ -316,8 +318,9 @@ async function onPassphraseSubmit() {
   }
   passphraseLoading.value = true;
   try {
+    const repoId = await activeRepo.currentId();
     if (mode === "set") {
-      await setPassphrase(ppNew.value);
+      await setPassphrase(repoId, ppNew.value);
       isIdentityEncrypted.value = true;
       // Re-encryption can invalidate a previously-sealed biometric unlock and
       // auto-unlock slot — re-read both from the backend.
@@ -326,13 +329,13 @@ async function onPassphraseSubmit() {
         (await getConfig()).unlock_identity_with_app ?? false;
       toast.success(t("settings.passphrase.setToast"));
     } else if (mode === "change") {
-      await changePassphrase(ppCurrent.value, ppNew.value);
+      await changePassphrase(repoId, ppCurrent.value, ppNew.value);
       biometricEnabled.value = await isBiometricUnlockEnabled();
       identityAutoUnlockEnabled.value =
         (await getConfig()).unlock_identity_with_app ?? false;
       toast.success(t("settings.passphrase.changedToast"));
     } else if (mode === "enable-biometric") {
-      await enableBiometricUnlock(ppCurrent.value, identityEnrollPrompt());
+      await enableBiometricUnlock(repoId, ppCurrent.value, identityEnrollPrompt());
       biometricEnabled.value = true;
       toast.success(t("settings.biometric.enabledToast"));
     } else {

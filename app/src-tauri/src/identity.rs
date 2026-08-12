@@ -263,13 +263,18 @@ pub(crate) async fn lock(
 pub(crate) async fn bump_idle_timer(
     state: State<'_, AppState>,
     app: AppHandle,
-    repo_id: RepoId,
 ) -> Result<(), Error> {
-    let store = state.repo(&repo_id)?;
-    // One activity bump resets BOTH idle timers (identity + gate) — the
-    // consolidation that avoids a second document-listener set + IPC.
-    reset_lock_timer(&state, &app, &store);
-    reset_gate_idle_timer(&state, &app, &store);
+    // The activity bumper is document-level with no repo context — it targets
+    // the active repo's session (the vault the user is browsing), not a specific
+    // `repo_id`. Resolving the active facade here keeps the frontend factory
+    // (`useLockActivity`) free of a per-bump repoId IPC (it isn't a component,
+    // has no inject context, and a `getAppConfig` round-trip per throttled bump
+    // would defeat the throttle). One bump resets BOTH idle timers (identity +
+    // gate) — the consolidation that avoids a second document-listener set.
+    if let Some(store) = state.registry.active_facade() {
+        reset_lock_timer(&state, &app, &store);
+        reset_gate_idle_timer(&state, &app, &store);
+    }
     Ok(())
 }
 

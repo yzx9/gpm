@@ -45,7 +45,9 @@ describe("SshKeyPage", () => {
   it("loads the public key on mount and shows it", async () => {
     const w = mountWithApp(SshKeyPage).wrapper;
     await flushPromises();
-    expect(invoke).toHaveBeenCalledWith("get_ssh_public_key");
+    expect(invoke).toHaveBeenCalledWith("get_ssh_public_key", {
+      repoId: "test-repo",
+    });
     expect(w.text()).toContain("ssh-ed25519 AAAA public");
   });
 
@@ -57,7 +59,9 @@ describe("SshKeyPage", () => {
       .find((b) => b.text().includes("Export Private Key"))!
       .trigger("click");
     await flushPromises();
-    expect(invoke).toHaveBeenCalledWith("export_ssh_private_key");
+    expect(invoke).toHaveBeenCalledWith("export_ssh_private_key", {
+      repoId: "test-repo",
+    });
     expect(w.text()).toContain("-----OPENSSH PRIVATE KEY-----");
   });
 

@@ -88,10 +88,15 @@ export async function isBiometricUnlockEnabled(): Promise<boolean> {
  * `KEYSTORE_CANCELLED`).
  */
 export async function enableBiometricUnlock(
+  repoId: string,
   passphrase: string,
   prompt?: BiometricPromptText,
 ): Promise<void> {
-  await invoke("enable_biometric_unlock", { passphrase, promptText: prompt });
+  await invoke("enable_biometric_unlock", {
+    repoId,
+    passphrase,
+    promptText: prompt,
+  });
 }
 
 /**
@@ -101,9 +106,10 @@ export async function enableBiometricUnlock(
  * failure.
  */
 export async function biometricUnlock(
+  repoId: string,
   prompt?: BiometricPromptText,
 ): Promise<void> {
-  await invoke("biometric_unlock", { promptText: prompt });
+  await invoke("biometric_unlock", { repoId, promptText: prompt });
 }
 
 /**
