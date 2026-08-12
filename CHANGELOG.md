@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.0] - 2026-08-12
+
 ### Added
 
 - When **Re-lock when inactive** is on, a quick app switch — leaving gpm and returning within the selected period — no longer re-locks the app. That setting now measures total inactivity (time idle in gpm **or** time spent in another app) within one window, instead of re-locking the moment you switch away. Turn it off to keep re-locking on every return.
@@ -504,7 +506,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.19.0...HEAD
+[v0.19.0]: https://github.com/yzx9/gpm/compare/v0.18.1...v0.19.0
 [v0.18.1]: https://github.com/yzx9/gpm/compare/v0.18.0...v0.18.1
 [v0.18.0]: https://github.com/yzx9/gpm/compare/v0.17.2...v0.18.0
 [v0.17.2]: https://github.com/yzx9/gpm/compare/v0.17.1...v0.17.2
