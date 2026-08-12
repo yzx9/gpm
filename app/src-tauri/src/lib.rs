@@ -174,12 +174,23 @@ pub(crate) struct AppState {
 impl AppState {
     /// Resolve a repository id to its `Store` facade, or a clear not-found error.
     /// The single funnel every repo-touching command threads through:
-    /// `let store = state.repo(&repo_id)?;`. The error carries no secret — only
-    /// the opaque id that did not resolve (never a path, credential, or entry).
+    /// `let store = state.repo(&repo_id)?;`. A malformed id (wrong length/charset)
+    /// yields `ConfigError "invalid repository id"`; a well-formed but unregistered
+    /// id yields `UnknownRepository`. The error carries no secret — only the
+    /// opaque id that did not resolve (never a path, credential, or entry).
     pub(crate) fn repo(&self, id: &registry::RepoId) -> Result<Arc<Store>, rustpass::Error> {
+        // Bound the IPC-supplied id before it reaches an error message: reject a
+        // malformed id (wrong length/charset) up front. Valid ids are 32 hex
+        // chars, so this also caps the interpolated length below.
+        if !registry::RepoId::is_valid_form(id.as_str()) {
+            return Err(rustpass::Error::new(
+                rustpass::ErrorCode::ConfigError,
+                "invalid repository id".to_string(),
+            ));
+        }
         self.registry.facade(id).ok_or_else(|| {
             rustpass::Error::new(
-                rustpass::ErrorCode::ConfigError,
+                rustpass::ErrorCode::UnknownRepository,
                 format!("unknown repository: {id}"),
             )
         })

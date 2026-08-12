@@ -77,6 +77,17 @@ impl RepoId {
         }
         Ok(Self(id))
     }
+
+    /// Canonical-form check: 32 ascii hex chars (as [`generate`](Self::generate)
+    /// produces). Used at the command funnel to bound an IPC-supplied id before
+    /// it reaches the registry lookup or an error message — a malformed id is
+    /// rejected up front rather than interpolated unbounded. Construction
+    /// ([`From`]) stays infallible since ids read back from the trusted
+    /// `app.json` are already valid; this validates the boundary.
+    #[must_use]
+    pub(crate) fn is_valid_form(id: &str) -> bool {
+        id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())
+    }
 }
 
 impl From<String> for RepoId {

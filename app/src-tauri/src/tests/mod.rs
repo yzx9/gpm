@@ -142,9 +142,12 @@ pub(super) struct TestStore {
 /// The fixed id [`make_unlocked_state`] registers the test store under (mirrors
 /// the production single-repo invariant — registry facade `Arc::ptr_eq`
 /// `state.store`). Threaded commands that resolve `state.repo(id)` take this in
-/// in-crate tests.
+/// in-crate tests. The value is a valid 32-hex form so it passes the funnel's
+/// `is_valid_form` gate.
 pub(super) fn test_repo_id() -> RepoId {
-    RepoId::from("test")
+    // 32 ascii hex chars — the canonical form `RepoId::generate` produces, and
+    // what `AppState::repo` validates at the funnel.
+    RepoId::from("0123456789abcdef0123456789abcdef")
 }
 
 /// Configure + unlock an **encrypted-identity** store backed by a temp repo
@@ -244,4 +247,32 @@ pub(super) fn mock_app(state: AppState) -> App<MockRuntime> {
         .manage(state)
         .build(mock_context(noop_assets()))
         .expect("failed to build mock app")
+}
+
+/// `AppState::repo` is the single funnel every threaded command resolves
+/// through. Pin its three outcomes: a well-formed but unregistered id yields
+/// `UnknownRepository` (carrying only the opaque id); a malformed id (wrong
+/// length/charset) yields `ConfigError "invalid repository id"` and does NOT
+/// interpolate the value; the registered id resolves to the registry facade,
+/// which (for one repo) is `Arc::ptr_eq` to `state.store`.
+#[tokio::test]
+async fn repo_funnel_classifies_unknown_and_malformed_ids() {
+    let (state, _guard) = make_unlocked_state(&[]).await;
+
+    // Well-formed (32 hex) but unregistered → UnknownRepository, opaque id only.
+    let unknown = RepoId::from("ffffffffffffffffffffffffffffffff");
+    let err = state.repo(&unknown).unwrap_err();
+    assert_eq!(err.code, "UNKNOWN_REPOSITORY", "{err}");
+    assert!(err.message.contains(&unknown.to_string()), "{err}");
+
+    // Malformed (wrong length/charset) → ConfigError, bounded fixed message.
+    let malformed = RepoId::from("not-a-real-id");
+    let err = state.repo(&malformed).unwrap_err();
+    assert_eq!(err.code, "CONFIG_ERROR", "{err}");
+    assert_eq!(err.message, "invalid repository id");
+    assert!(!err.message.contains("not-a-real-id"));
+
+    // The registered id resolves to the registry facade == state.store today.
+    let store = state.repo(&test_repo_id()).expect("registered id resolves");
+    assert!(Arc::ptr_eq(&store, &state.store), "facade must be the device store");
 }

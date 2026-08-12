@@ -95,6 +95,10 @@ pub enum ErrorCode {
     /// intentionally allowed while locked — headless sync is pull-only by
     /// design.
     AppLocked,
+    /// A repository id supplied to a command did not resolve to a registered
+    /// repository (multi-repo registry lookup miss). The message carries only
+    /// the opaque id — never a path, credential, or entry name.
+    UnknownRepository,
 }
 
 /// Safe error type that never contains secret content.
@@ -142,6 +146,7 @@ impl Error {
                 ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
                 ErrorCode::SecretInvalid => "SECRET_INVALID",
                 ErrorCode::AppLocked => "APP_LOCKED",
+                ErrorCode::UnknownRepository => "UNKNOWN_REPOSITORY",
             }
             .to_string(),
             message: message.into(),
@@ -244,6 +249,7 @@ mod tests {
             ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
             ErrorCode::SecretInvalid => "SECRET_INVALID",
             ErrorCode::AppLocked => "APP_LOCKED",
+            ErrorCode::UnknownRepository => "UNKNOWN_REPOSITORY",
         }
     }
 
@@ -281,6 +287,7 @@ mod tests {
             ErrorCode::AttachmentInvalid,
             ErrorCode::SecretInvalid,
             ErrorCode::AppLocked,
+            ErrorCode::UnknownRepository,
         ];
         for variant in variants {
             let json = serde_json::to_string(&variant).unwrap_or_default();
@@ -326,6 +333,7 @@ mod tests {
             ErrorCode::AttachmentInvalid,
             ErrorCode::SecretInvalid,
             ErrorCode::AppLocked,
+            ErrorCode::UnknownRepository,
         ];
         for variant in variants {
             let err = Error::new(variant, "test message");
