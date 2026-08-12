@@ -48,7 +48,7 @@ async fn gate_idle_timer_fires_idle_lock() {
     let app_state = app.state::<AppState>();
     let payload = last_app_lock_payload(&app);
 
-    identity::arm_gate_idle(&app_state, app.handle(), 0);
+    identity::arm_gate_idle(&app_state, app.handle(), 0, &app_state.store);
     // Current-thread runtime: the spawned task runs while we await.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -82,7 +82,7 @@ async fn gate_idle_reset_arms_and_disarms() {
         .set_gate_idle(GateIdle::After(60))
         .await
         .unwrap();
-    identity::reset_gate_idle_timer(&app_state, app.handle());
+    identity::reset_gate_idle_timer(&app_state, app.handle(), &app_state.store);
     assert!(
         app_state.gate_idle_timer.is_armed(),
         "After must arm the gate idle timer"
@@ -93,7 +93,7 @@ async fn gate_idle_reset_arms_and_disarms() {
         .set_gate_idle(GateIdle::Off)
         .await
         .unwrap();
-    identity::reset_gate_idle_timer(&app_state, app.handle());
+    identity::reset_gate_idle_timer(&app_state, app.handle(), &app_state.store);
     assert!(
         !app_state.gate_idle_timer.is_armed(),
         "Off must disarm the gate idle timer"
@@ -111,7 +111,7 @@ async fn gate_idle_not_armed_when_gate_disabled() {
     let app = mock_app(state);
     let app_state = app.state::<AppState>();
 
-    identity::reset_gate_idle_timer(&app_state, app.handle());
+    identity::reset_gate_idle_timer(&app_state, app.handle(), &app_state.store);
 
     assert!(
         !app_state.gate_idle_timer.is_armed(),
@@ -130,7 +130,7 @@ async fn coupled_identity_timer_stays_disarmed_under_idle() {
     *app_state.lock_mode.lock().unwrap() = LockMode::Idle(300);
     app_state.identity_coupled.store(true, Ordering::SeqCst);
 
-    identity::reset_lock_timer(&app_state, app.handle());
+    identity::reset_lock_timer(&app_state, app.handle(), &app_state.store);
 
     assert!(
         !app_state.lock_timer.is_armed(),
@@ -148,7 +148,7 @@ async fn coupled_skips_immediate_soft_wipe() {
     *app_state.lock_mode.lock().unwrap() = LockMode::Immediate;
     app_state.identity_coupled.store(true, Ordering::SeqCst);
 
-    identity::maybe_soft_wipe(&app_state, app.handle()).await;
+    identity::maybe_soft_wipe(&app_state, app.handle(), &app_state.store).await;
 
     assert!(
         app_state.store.is_unlocked(),

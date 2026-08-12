@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 
 use crate::AppState;
 use crate::identity;
+use crate::registry::RepoId;
 use crate::keystore::{self, PASSPHRASE_ALIAS, PASSPHRASE_POLICY, PASSPHRASE_PREFS};
 
 // ---------------------------------------------------------------------------
@@ -137,17 +138,19 @@ fn passphrase_from_bytes(bytes: Vec<u8>) -> Result<Zeroizing<String>, BiometricE
 pub(crate) async fn enable_biometric_unlock(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     passphrase: String,
     prompt_text: Option<PromptText>,
 ) -> Result<(), BiometricError> {
     log::info!("biometric: enable");
+    let store = state.repo(&repo_id)?;
     // Refuse a plaintext identity before sealing anything: biometric seals a
     // passphrase, which a plaintext identity has none of. The Settings UI hides
     // this control for plaintext identities — this is the backend backstop so a
     // UI regression (or a direct IPC call) can't reach the Keystore.
-    require_encrypted_identity(state.store.is_identity_encrypted().await)?;
+    require_encrypted_identity(store.is_identity_encrypted().await)?;
     // Reject a wrong passphrase before sealing it (age or SSH).
-    state.store.validate_passphrase(&passphrase).await?;
+    store.validate_passphrase(&passphrase).await?;
     // The Kotlin `store` shows a CryptoObject ENCRYPT biometric prompt.
     let resolved = keystore::resolve_prompt(prompt_text.as_ref());
     app.keystore()
@@ -171,9 +174,11 @@ pub(crate) async fn enable_biometric_unlock(
 pub(crate) async fn biometric_unlock(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     prompt_text: Option<PromptText>,
 ) -> Result<(), BiometricError> {
     log::info!("biometric: unlock");
+    let store = state.repo(&repo_id)?;
     // Flows Kotlin → Rust (never the WebView); wipe as soon as it's used. The
     // bytes go straight to passphrase_from_bytes so they're wrapped in
     // Zeroizing (and wiped on a corrupt-slot decode failure) with no
@@ -190,7 +195,7 @@ pub(crate) async fn biometric_unlock(
             .await?,
     )?;
 
-    if let Err(e) = identity::unlock_and_arm(&state, &app, &passphrase).await {
+    if let Err(e) = identity::unlock_and_arm(&state, &app, &store, &passphrase).await {
         if e.code == "WRONG_PASSPHRASE" &&
             // Stale sealed passphrase — clear it so the page reveals the form.
             let Err(cleanup) = app

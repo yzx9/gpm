@@ -99,7 +99,7 @@ fn require_unlocked(state: &State<'_, AppState>) -> Result<(), Error> {
 async fn autosync_write_command<R, F, Fut>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
-    store: Arc<rustpass::Store>,
+    store: &Arc<rustpass::Store>,
     expected: Option<ExpectedEntry>,
     local_write: F,
 ) -> Result<WriteOutcome, Error>
@@ -140,9 +140,9 @@ where
     // Immediate we reset the timer + wipe on the terminal paths (an errored save
     // must not leave the identity cached with no idle timer to eventually clear
     // it).
-    let outcome = autosync_write_command(state, app, store, expected, local_write).await;
-    reset_lock_timer(state, app);
-    reset_gate_idle_timer(state, app);
+    let outcome = autosync_write_command(state, app, &store, expected, local_write).await;
+    reset_lock_timer(state, app, &store);
+    reset_gate_idle_timer(state, app, &store);
     // a NeedsDivergenceResolve still needs the cached identity for a keep-mine
     // resolve, so defer the wipe to resolve_sync_divergence; an EntryConflict
     // (R026) likewise keeps it cached for a keep-mine edit resolve. Every other
@@ -151,7 +151,7 @@ where
         &outcome,
         Ok(WriteOutcome::NeedsDivergenceResolve(_) | WriteOutcome::EntryConflict { .. })
     ) {
-        maybe_soft_wipe(state, app).await;
+        maybe_soft_wipe(state, app, &store).await;
     }
     outcome
 }
@@ -289,9 +289,12 @@ pub(crate) async fn delete_secret<R: Runtime>(
         kind: ExpectedKind::Delete,
     });
     let store = state.repo(&repo_id)?;
-    let outcome = autosync_write_command(&state, &app, store.clone(), expected, move || {
+    let outcome = autosync_write_command(&state, &app, &store, expected, {
         let store = store.clone();
-        async move { store.delete(&name).await }
+        move || {
+            let store = store.clone();
+            async move { store.delete(&name).await }
+        }
     })
     .await
     .inspect_err(|e| log::warn!("delete failed: {e}"));
@@ -299,8 +302,8 @@ pub(crate) async fn delete_secret<R: Runtime>(
     // succeeded (mirrors the save path). Delete carries no plaintext and doesn't
     // cache the identity, so no maybe_soft_wipe coupling here — a keep-mine
     // resolve after a delete-triggered divergence re-auths via runWithAuth.
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
+    reset_lock_timer(&state, &app, &store);
+    reset_gate_idle_timer(&state, &app, &store);
     outcome
 }
 
@@ -537,20 +540,22 @@ pub(crate) async fn resolve_sync_divergence<R: Runtime>(
     require_unlocked(&state)?;
     let store = state.repo(&repo_id)?;
     let expected = expected_remote_oid;
-    let result =
-        crate::git::run_cancellable(&state, app.clone(), move |cancel, _tx, slot| async move {
+    let result = crate::git::run_cancellable(&state, app.clone(), {
+        let store = store.clone();
+        move |cancel, _tx, slot| async move {
             store
                 .resolve_sync_divergence(&slot, &expected, choice, Some(cancel))
                 .await
-        })
-        .await
-        .inspect_err(|e| log::warn!("resolve failed: {e}"));
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
+        }
+    })
+    .await
+    .inspect_err(|e| log::warn!("resolve failed: {e}"));
+    reset_lock_timer(&state, &app, &store);
+    reset_gate_idle_timer(&state, &app, &store);
     // terminal step for a deferred save-divergence — do the wipe the save
     // path skipped (no-op under Idle/Never; under Immediate it clears the
     // identity kept alive across the modal for keep-mine).
-    maybe_soft_wipe(&state, &app).await;
+    maybe_soft_wipe(&state, &app, &store).await;
     result
 }
 
@@ -576,8 +581,9 @@ pub(crate) async fn resolve_entry_conflict<R: Runtime>(
     require_unlocked(&state)?;
     let store = state.repo(&repo_id)?;
     let content_bytes = parts.map(assemble_bytes).transpose()?;
-    let result =
-        crate::git::run_cancellable(&state, app.clone(), move |cancel, _tx, slot| async move {
+    let result = crate::git::run_cancellable(&state, app.clone(), {
+        let store = store.clone();
+        move |cancel, _tx, slot| async move {
             store
                 .resolve_entry_conflict(
                     &slot,
@@ -589,12 +595,13 @@ pub(crate) async fn resolve_entry_conflict<R: Runtime>(
                     Some(cancel),
                 )
                 .await
-        })
-        .await
-        .inspect_err(|e| log::warn!("entry-resolve failed: {e}"));
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
-    maybe_soft_wipe(&state, &app).await;
+        }
+    })
+    .await
+    .inspect_err(|e| log::warn!("entry-resolve failed: {e}"));
+    reset_lock_timer(&state, &app, &store);
+    reset_gate_idle_timer(&state, &app, &store);
+    maybe_soft_wipe(&state, &app, &store).await;
     result
 }
 
@@ -615,10 +622,9 @@ pub(crate) async fn discard_divergence<R: Runtime>(
     repo_id: RepoId,
 ) -> Result<(), Error> {
     log::info!("discard-divergence");
-    // The deferred identity this clears belongs to `repo_id`; validate it. The
-    // registry-aware wipe lands in C1 — for one repo maybe_soft_wipe still
-    // targets this repo's facade (registry == state.store today).
-    let _store = state.repo(&repo_id)?;
-    maybe_soft_wipe(&state, &app).await;
+    // The deferred identity this clears belongs to `repo_id`; resolve that
+    // repo's facade so the wipe targets it (registry-aware since C1).
+    let store = state.repo(&repo_id)?;
+    maybe_soft_wipe(&state, &app, &store).await;
     Ok(())
 }

@@ -164,9 +164,9 @@ pub(crate) async fn set_lock_mode(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-lock-mode: {mode:?}");
     let cfg = state.app_config.set_lock_mode(mode).await?;
-    refresh_security_cache(&state).await;
+    refresh_security_cache(&state, &state.store).await;
     // Apply the new mode to the live timer (reads the just-refreshed cache).
-    reset_lock_timer(&state, &app);
+    reset_lock_timer(&state, &app, &state.store);
     Ok(cfg)
 }
 
@@ -184,7 +184,7 @@ pub(crate) async fn set_gate_idle(
     log::info!("config: set-gate-idle: {mode:?}");
     let cfg = state.app_config.set_gate_idle(mode).await?;
     // Apply to the live timer (reads the just-updated app_config cache).
-    reset_gate_idle_timer(&state, &app);
+    reset_gate_idle_timer(&state, &app, &state.store);
     Ok(cfg)
 }
 
@@ -211,7 +211,7 @@ pub(crate) async fn set_clipboard_clear_secs(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-clipboard-clear-secs: {secs:?}");
     let cfg = state.app_config.set_clipboard_clear_secs(secs).await?;
-    refresh_security_cache(&state).await;
+    refresh_security_cache(&state, &state.store).await;
     Ok(cfg)
 }
 

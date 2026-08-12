@@ -224,7 +224,7 @@ pub(crate) async fn enable_biometric_app_lock(
     state.app_lock_enabled.store(true, Ordering::SeqCst);
     // The gate is now on with the app unlocked — arm the in-app idle timer
     // (R057). No-op when gate-idle is Off.
-    identity::reset_gate_idle_timer(&state, &app);
+    identity::reset_gate_idle_timer(&state, &app, &state.store);
     Ok(())
 }
 
@@ -517,7 +517,7 @@ pub(crate) async fn app_unlock(
     emit_app_lock_state(&app, enabled, false, None);
     // The app is unlocked with the master key resident — arm the in-app idle
     // timer (R057). No-op when gate-idle is Off.
-    identity::reset_gate_idle_timer(&state, &app);
+    identity::reset_gate_idle_timer(&state, &app, &state.store);
     // Auto-unlock was off / no sealed passphrase / failed: for a passphrase-
     // encrypted identity, a SOFT identity event tells the frontend to use per-op
     // auth (no overlay over the just-unlocked app). A plaintext identity is
@@ -568,7 +568,7 @@ async fn try_identity_auto_unlock<R: Runtime>(
         return false;
     };
     let pass = Zeroizing::new(s.to_owned());
-    match identity::unlock_and_arm(state, app, pass.as_str()).await {
+    match identity::unlock_and_arm(state, app, &state.store, pass.as_str()).await {
         Ok(()) => true,
         Err(e) => {
             if e.code == "WRONG_PASSPHRASE" {
@@ -718,8 +718,8 @@ pub(crate) async fn enable_identity_auto_unlock(
     // Refresh the coupling flag (now true) BEFORE re-applying the identity timer
     // — the flag-before-timer ordering rule (R057). Coupled → the identity timer
     // disarms; its lifecycle now follows the gate.
-    identity::refresh_security_cache(&state).await;
-    identity::reset_lock_timer(&state, &app);
+    identity::refresh_security_cache(&state, &state.store).await;
+    identity::reset_lock_timer(&state, &app, &state.store);
     Ok(())
 }
 
@@ -737,8 +737,8 @@ pub(crate) async fn disable_identity_auto_unlock(
     // Refresh the coupling flag (now false) BEFORE re-applying the identity
     // timer — the flag-before-timer ordering rule (R057). Uncoupled → the
     // identity timer re-arms per LockMode.
-    identity::refresh_security_cache(&state).await;
-    identity::reset_lock_timer(&state, &app);
+    identity::refresh_security_cache(&state, &state.store).await;
+    identity::reset_lock_timer(&state, &app, &state.store);
     Ok(())
 }
 

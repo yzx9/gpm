@@ -30,7 +30,7 @@ async fn do_lock_wipes_cache() {
 
     assert!(app_state.store.is_unlocked(), "precondition: unlocked");
 
-    identity::do_lock(&app_state, app.handle()).await;
+    identity::do_lock(&app_state, app.handle(), &app_state.store).await;
 
     assert!(
         !app_state.store.is_unlocked(),
@@ -52,7 +52,7 @@ async fn do_lock_emits_locked_state() {
     });
 
     let app_state = app.state::<AppState>();
-    identity::do_lock(&app_state, app.handle()).await;
+    identity::do_lock(&app_state, app.handle(), &app_state.store).await;
 
     assert!(
         fired.load(Ordering::SeqCst),
@@ -70,7 +70,7 @@ async fn auto_lock_timer_locks() {
 
     assert!(app_state.store.is_unlocked(), "precondition: unlocked");
 
-    identity::arm_lock(&app_state, app.handle(), 0);
+    identity::arm_lock(&app_state, app.handle(), 0, &app_state.store);
     // Current-thread runtime: the spawned task runs while we await.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -88,7 +88,7 @@ async fn stale_timer_self_disarms_after_rearm() {
     let app_state = app.state::<AppState>();
 
     // Task A captures generation G; the current-thread runtime parks it.
-    identity::arm_lock(&app_state, app.handle(), 0);
+    identity::arm_lock(&app_state, app.handle(), 0, &app_state.store);
     // Simulate a newer arm racing ahead (bumps generation past A's captured G).
     app_state
         .lock_timer
@@ -120,7 +120,7 @@ async fn soft_wipe_empties_cache() {
     let app = mock_app(state);
     let app_state = app.state::<AppState>();
 
-    identity::soft_wipe(&app_state, app.handle()).await;
+    identity::soft_wipe(&app_state, app.handle(), &app_state.store).await;
 
     assert!(
         !app_state.store.is_unlocked(),
@@ -137,7 +137,7 @@ async fn maybe_soft_wipe_wipes_under_immediate() {
     let app_state = app.state::<AppState>();
 
     assert!(app_state.store.is_unlocked(), "precondition: unlocked");
-    identity::maybe_soft_wipe(&app_state, app.handle()).await;
+    identity::maybe_soft_wipe(&app_state, app.handle(), &app_state.store).await;
     assert!(
         !app_state.store.is_unlocked(),
         "Immediate mode must wipe the identity after an op"
@@ -152,7 +152,7 @@ async fn maybe_soft_wipe_noop_under_idle() {
     set_lock_mode(&app, LockMode::Idle(300));
     let app_state = app.state::<AppState>();
 
-    identity::maybe_soft_wipe(&app_state, app.handle()).await;
+    identity::maybe_soft_wipe(&app_state, app.handle(), &app_state.store).await;
     assert!(
         app_state.store.is_unlocked(),
         "Idle mode must keep the identity cached"
@@ -169,7 +169,7 @@ async fn reset_lock_timer_branches_on_mode() {
 
     for mode in [LockMode::Immediate, LockMode::Never] {
         set_lock_mode(&app, mode);
-        identity::reset_lock_timer(&app_state, app.handle());
+        identity::reset_lock_timer(&app_state, app.handle(), &app_state.store);
         assert!(
             !app_state.lock_timer.is_armed(),
             "{mode:?} must not arm an idle timer"
@@ -177,7 +177,7 @@ async fn reset_lock_timer_branches_on_mode() {
     }
 
     set_lock_mode(&app, LockMode::Idle(60));
-    identity::reset_lock_timer(&app_state, app.handle());
+    identity::reset_lock_timer(&app_state, app.handle(), &app_state.store);
     assert!(
         app_state.lock_timer.is_armed(),
         "Idle must arm an idle timer"
@@ -208,7 +208,7 @@ async fn do_lock_tags_reason_manual() {
     let payload = last_lock_payload(&app);
 
     let app_state = app.state::<AppState>();
-    identity::do_lock(&app_state, app.handle()).await;
+    identity::do_lock(&app_state, app.handle(), &app_state.store).await;
 
     let p = payload.lock().unwrap().clone();
     assert!(p.contains("\"locked\":true"), "payload: {p}");
@@ -228,7 +228,7 @@ async fn auto_lock_timer_tags_reason_idle() {
     let payload = last_lock_payload(&app);
 
     let app_state = app.state::<AppState>();
-    identity::arm_lock(&app_state, app.handle(), 0);
+    identity::arm_lock(&app_state, app.handle(), 0, &app_state.store);
     // Current-thread runtime: the spawned task runs while we await.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -250,7 +250,7 @@ async fn soft_wipe_tags_reason_soft_wipe() {
     let payload = last_lock_payload(&app);
 
     let app_state = app.state::<AppState>();
-    identity::soft_wipe(&app_state, app.handle()).await;
+    identity::soft_wipe(&app_state, app.handle(), &app_state.store).await;
 
     let p = payload.lock().unwrap().clone();
     assert!(

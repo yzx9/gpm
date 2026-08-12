@@ -7,6 +7,7 @@
 
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use rustpass::{AttachmentMeta, Entry, Error, ErrorCode, RankedPage};
@@ -553,7 +554,7 @@ pub(crate) async fn wipe_entry_cache(
 pub(crate) async fn show_password_core<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
-    store: &rustpass::Store,
+    store: &Arc<rustpass::Store>,
     entry_path: &str,
 ) -> Result<SensitiveContent, Error> {
     log::info!("show: {}", entry_path.trim_end_matches(".age"));
@@ -737,7 +738,7 @@ pub(crate) async fn export_attachment(
 pub(crate) async fn export_attachment_core<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
-    store: &rustpass::Store,
+    store: &Arc<rustpass::Store>,
     entry_path: &str,
 ) -> Result<AttachmentExportResult, Error> {
     let entry_name = entry_path.trim_end_matches(".age").to_string();

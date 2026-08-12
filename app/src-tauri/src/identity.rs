@@ -41,6 +41,7 @@ use tokio::task::JoinHandle;
 use crate::app_config::GateIdle;
 use crate::applock::AppLockReason;
 use crate::entry_cache::EntryCacheReason;
+use crate::registry::RepoId;
 use crate::{AppState, applock, entry_cache};
 
 // ---------------------------------------------------------------------------
@@ -223,16 +224,23 @@ pub(crate) async fn emit_lock_state<R: Runtime>(
 pub(crate) async fn unlock(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     passphrase: String,
 ) -> Result<(), Error> {
-    unlock_and_arm(&state, &app, &passphrase).await
+    let store = state.repo(&repo_id)?;
+    unlock_and_arm(&state, &app, &store, &passphrase).await
 }
 
 /// Lock the store: clear cached identity and cancel auto-lock timer.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn lock(state: State<'_, AppState>, app: AppHandle) -> Result<(), Error> {
-    do_lock(&state, &app).await;
+pub(crate) async fn lock(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    repo_id: RepoId,
+) -> Result<(), Error> {
+    let store = state.repo(&repo_id)?;
+    do_lock(&state, &app, &store).await;
     Ok(())
 }
 
@@ -255,11 +263,13 @@ pub(crate) async fn lock(state: State<'_, AppState>, app: AppHandle) -> Result<(
 pub(crate) async fn bump_idle_timer(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
 ) -> Result<(), Error> {
+    let store = state.repo(&repo_id)?;
     // One activity bump resets BOTH idle timers (identity + gate) — the
     // consolidation that avoids a second document-listener set + IPC.
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
+    reset_lock_timer(&state, &app, &store);
+    reset_gate_idle_timer(&state, &app, &store);
     Ok(())
 }
 
@@ -268,17 +278,21 @@ pub(crate) async fn bump_idle_timer(
 ///
 /// Cancels the auto-lock timer, disarms any racing in-flight timer task, wipes
 /// the cached identity, and emits the new lock state.
-pub(crate) async fn do_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+pub(crate) async fn do_lock<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    store: &Store,
+) {
     log::info!("identity: locked");
     // Cancel the armed timer + bump the generation so any in-flight timer task
     // self-disarms (shared with the soft-wipe / reset paths).
     disarm_lock(state);
-    state.store.lock();
+    store.lock();
     // A decrypted entry must not outlive the identity that decrypted it — wipe
     // the entry-view cache on the identity hard-lock.
     entry_cache::soft_wipe_entry_cache(state, app, EntryCacheReason::Lock);
     // Emit the current lock state — same path the auto-lock timer takes.
-    emit_lock_state(app, &state.store, false, LockEventReason::Manual).await;
+    emit_lock_state(app, store, false, LockEventReason::Manual).await;
 }
 
 /// Set a passphrase on an existing plaintext identity.
@@ -287,11 +301,12 @@ pub(crate) async fn do_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHa
 pub(crate) async fn set_passphrase(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     passphrase: String,
 ) -> Result<(), Error> {
     log::info!("identity: set-passphrase");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .set_passphrase(&passphrase)
         .await
         .inspect_err(|e| log::warn!("identity: set-passphrase failed: {e}"))?;
@@ -308,7 +323,7 @@ pub(crate) async fn set_passphrase(
     }
     // Setting a passphrase locks the store (forces re-auth with the new
     // passphrase); emit the real state so the frontend shows the overlay.
-    emit_lock_state(&app, &state.store, false, LockEventReason::Manual).await;
+    emit_lock_state(&app, &store, false, LockEventReason::Manual).await;
     Ok(())
 }
 
@@ -318,12 +333,13 @@ pub(crate) async fn set_passphrase(
 pub(crate) async fn change_passphrase(
     state: State<'_, AppState>,
     app: AppHandle,
+    repo_id: RepoId,
     old_passphrase: String,
     new_passphrase: String,
 ) -> Result<(), Error> {
     log::info!("identity: change-passphrase");
-    state
-        .store
+    let store = state.repo(&repo_id)?;
+    store
         .change_passphrase(&old_passphrase, &new_passphrase)
         .await
         .inspect_err(|e| log::warn!("identity: change-passphrase failed: {e}"))?;
@@ -339,7 +355,7 @@ pub(crate) async fn change_passphrase(
         log::warn!("identity: stale biometric slot delete failed: {e:?}");
     }
     // Changing the passphrase locks the store; emit the real state.
-    emit_lock_state(&app, &state.store, false, LockEventReason::Manual).await;
+    emit_lock_state(&app, &store, false, LockEventReason::Manual).await;
     Ok(())
 }
 
@@ -361,8 +377,10 @@ pub(crate) fn generate_ssh_key(passphrase: Option<String>) -> Result<SshKeyPairR
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_ssh_public_key(
     state: State<'_, AppState>,
+    repo_id: RepoId,
 ) -> Result<SshPublicKeyResult, Error> {
-    let config = state.store.config().await?;
+    let store = state.repo(&repo_id)?;
+    let config = store.config().await?;
     let Some(private_key) = config.ssh_key else {
         // No SSH key configured is a normal state, not an error — surface it as
         // an empty page rather than a red danger alert.
@@ -379,9 +397,11 @@ pub(crate) async fn get_ssh_public_key(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn export_ssh_private_key(
     state: State<'_, AppState>,
+    repo_id: RepoId,
 ) -> Result<SshPrivateKeyResult, Error> {
     log::info!("identity: export-ssh-private-key");
-    let config = state.store.config().await?;
+    let store = state.repo(&repo_id)?;
+    let config = store.config().await?;
     let private_key_pem = config
         .ssh_key
         .ok_or_else(|| Error::new(ErrorCode::SshKeyInvalid, "No SSH key configured"))?;
@@ -405,21 +425,21 @@ pub(crate) async fn export_ssh_private_key(
 pub(crate) async fn unlock_and_arm<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
+    store: &Arc<Store>,
     passphrase: &str,
 ) -> Result<(), Error> {
     log::info!("identity: unlocking");
-    state
-        .store
+    store
         .unlock(passphrase)
         .await
         .inspect_err(|e| log::warn!("identity: unlock failed: {e}"))?;
     log::info!("identity: unlocked");
     // Refresh the cached effective lock_mode so reset_lock_timer branches on the
     // user's actual setting (config may have changed since the last refresh).
-    refresh_security_cache(state).await;
-    reset_lock_timer(state, app);
+    refresh_security_cache(state, store).await;
+    reset_lock_timer(state, app, store);
     // The backend is the single source of truth for lock state; tell the frontend.
-    emit_lock_state(app, &state.store, false, LockEventReason::Unlock).await;
+    emit_lock_state(app, store, false, LockEventReason::Unlock).await;
     Ok(())
 }
 
@@ -464,10 +484,9 @@ pub(crate) fn apply_security_caches(state: &AppState) {
 /// the hot path. This runs BEFORE those callers read the flag in every call
 /// graph (`unlock_and_arm`, the set_* commands) — the flag-before-timer ordering
 /// rule.
-pub(crate) async fn refresh_security_cache(state: &State<'_, AppState>) {
+pub(crate) async fn refresh_security_cache(state: &State<'_, AppState>, store: &Store) {
     apply_security_caches(state.inner());
-    let coupled = state
-        .store
+    let coupled = store
         .config()
         .await
         .is_ok_and(|rc| rc.unlock_identity_with_app);
@@ -551,7 +570,11 @@ impl IdleTimer {
 /// prior `Idle` setting. Reads the [`AppState`] cache, so this stays sync (no
 /// per-op config decrypt). On a cache miss (poisoned) it fails safe to the
 /// default idle timer.
-pub(crate) fn reset_lock_timer<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+pub(crate) fn reset_lock_timer<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    store: &Arc<Store>,
+) {
     // R057 coupling: while identity-auto-unlock is on, the identity session has
     // no independent auto-lock — its lifecycle follows the gate (restored on
     // gate unlock, wiped on gate lock). Disarm and let the gate own it,
@@ -565,7 +588,7 @@ pub(crate) fn reset_lock_timer<R: Runtime>(state: &State<'_, AppState>, app: &Ap
         |m| *m,
     );
     match mode {
-        LockMode::Idle(secs) => arm_lock(state, app, secs),
+        LockMode::Idle(secs) => arm_lock(state, app, secs, store),
         // No idle timer: Never keeps the session, Immediate wipes per-op. Either
         // way, disarm any idle timer armed under a prior Idle setting so it can't
         // fire and surprise-lock right after the mode switch.
@@ -600,8 +623,9 @@ pub(crate) fn arm_gate_idle<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
     secs: u64,
+    store: &Arc<Store>,
 ) {
-    let store = state.store.clone();
+    let store = store.clone();
     let app_handle = app.clone();
     let app_locked = state.app_locked.clone();
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
@@ -624,7 +648,11 @@ pub(crate) fn arm_gate_idle<R: Runtime>(
 /// Reset the gate idle timer per the cached effective `GateIdle` setting:
 /// `After(secs)` arms; `Off` disarms. Reads the `AppConfigStore` cache (sync), so
 /// this stays sync like [`reset_lock_timer`].
-pub(crate) fn reset_gate_idle_timer<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+pub(crate) fn reset_gate_idle_timer<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    store: &Arc<Store>,
+) {
     // The gate idle timer only makes sense with the gate ENABLED and the app
     // UNLOCKED. Arming it otherwise fires `do_app_lock` on a session with no
     // biometric master key stored — a soft-brick: the non-dismissable overlay
@@ -646,7 +674,7 @@ pub(crate) fn reset_gate_idle_timer<R: Runtime>(state: &State<'_, AppState>, app
         .lock()
         .expect("last_activity_at poisoned") = std::time::Instant::now();
     match state.app_config.get().gate_idle {
-        GateIdle::After(secs) => arm_gate_idle(state, app, secs),
+        GateIdle::After(secs) => arm_gate_idle(state, app, secs, store),
         GateIdle::Off => disarm_gate_idle(state),
     }
 }
@@ -660,10 +688,14 @@ pub(crate) fn reset_gate_idle_timer<R: Runtime>(state: &State<'_, AppState>, app
 /// [`rustpass::WriteOutcome::NeedsDivergenceResolve`] skips it so a keep-mine
 /// resolve can reuse the cached identity, then performs the wipe itself once the
 /// resolve settles.
-pub(crate) async fn soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+pub(crate) async fn soft_wipe<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    store: &Store,
+) {
     disarm_lock(state);
-    state.store.lock();
-    emit_lock_state(app, &state.store, true, LockEventReason::SoftWipe).await;
+    store.lock();
+    emit_lock_state(app, store, true, LockEventReason::SoftWipe).await;
 }
 
 /// After a secret operation: under `Immediate` (no-cache) mode, soft-wipe the
@@ -674,7 +706,11 @@ pub(crate) async fn soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &App
 /// returned `NeedsDivergenceResolve` skips it (`resolve_sync_divergence` still
 /// needs the identity for a keep-mine resolve) and `resolve_sync_divergence`
 /// does the wipe after it settles.
-pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+pub(crate) async fn maybe_soft_wipe<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    store: &Store,
+) {
     // R057 coupling: when identity-auto-unlock is on, Immediate's per-op wipe is
     // suppressed too — the identity persists until the gate locks.
     if state.identity_coupled.load(Ordering::SeqCst) {
@@ -685,7 +721,7 @@ pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app
         .lock()
         .is_ok_and(|m| matches!(*m, LockMode::Immediate));
     if immediate {
-        soft_wipe(state, app).await;
+        soft_wipe(state, app, store).await;
     }
 }
 
@@ -696,9 +732,14 @@ pub(crate) async fn maybe_soft_wipe<R: Runtime>(state: &State<'_, AppState>, app
 /// The spawned task captures its `generation` and self-disarms if a newer arm
 /// happened while it slept — `abort` alone is not a generation check, so without
 /// this a task already past its sleep could fire right after a fresh unlock.
-pub(crate) fn arm_lock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>, secs: u64) {
+pub(crate) fn arm_lock<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    secs: u64,
+    store: &Arc<Store>,
+) {
     let app_handle = app.clone();
-    let store = state.store.clone();
+    let store = store.clone();
     let cached_entry = Arc::clone(&state.cached_entry);
     state.lock_timer.arm(secs, move || async move {
         log::info!("identity: locked (idle)");

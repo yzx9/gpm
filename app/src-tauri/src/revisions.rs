@@ -10,6 +10,7 @@
 //! so ciphertext never crosses IPC.
 
 use std::fmt;
+use std::sync::Arc;
 
 use rustpass::{AttachmentMeta, CommitSigInfo, Error, ErrorCode, RevisionContent};
 use serde::Serialize;
@@ -152,7 +153,7 @@ pub(crate) async fn list_revisions(
 pub(crate) async fn show_revision_core<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
-    store: &rustpass::Store,
+    store: &Arc<rustpass::Store>,
     entry_path: &str,
     commit: &str,
 ) -> Result<RevisionView, Error> {
@@ -161,9 +162,9 @@ pub(crate) async fn show_revision_core<R: Runtime>(
         entry_path.trim_end_matches(".age")
     );
     let content = store.get_at_revision(entry_path, commit).await;
-    reset_lock_timer(state, app);
-    reset_gate_idle_timer(state, app);
-    maybe_soft_wipe(state, app).await;
+    reset_lock_timer(state, app, store);
+    reset_gate_idle_timer(state, app, store);
+    maybe_soft_wipe(state, app, store).await;
     let content = content.inspect_err(|e| {
         log::warn!("show revision failed: {entry_path}@{commit}: {e}");
     })?;
@@ -206,9 +207,9 @@ pub(crate) async fn copy_revision(
     log::info!("copy revision: {entry_name}@{commit}");
 
     let content = store.get_at_revision(&entry_path, &commit).await;
-    reset_lock_timer(&state, &app);
-    reset_gate_idle_timer(&state, &app);
-    maybe_soft_wipe(&state, &app).await;
+    reset_lock_timer(&state, &app, &store);
+    reset_gate_idle_timer(&state, &app, &store);
+    maybe_soft_wipe(&state, &app, &store).await;
     let content = content.inspect_err(|e| {
         log::warn!("copy revision failed: {entry_name}@{commit}: {e}");
     })?;
