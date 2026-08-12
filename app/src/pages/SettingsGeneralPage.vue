@@ -29,7 +29,13 @@ import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseOnOffToggle from "@/components/base/BaseOnOffToggle.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSelect from "@/components/base/BaseSelect.vue";
-import { useDialog, useSecureScreen, useToast, Z } from "@/composables";
+import {
+  useDialog,
+  usePlatform,
+  useSecureScreen,
+  useToast,
+  Z,
+} from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
 import { applyTheme, normalizeThemeMode, type ThemeMode } from "@/theme";
 import { Trash2 } from "@lucide/vue";
@@ -134,6 +140,7 @@ const error = ref("");
 
 const { secureScreenMode, secureAvailable, setSecureScreenMode } =
   useSecureScreen();
+const { platform } = usePlatform();
 
 async function loadConfig() {
   loading.value = true;
@@ -422,8 +429,13 @@ onMounted(() => {
           </template>
         </BaseOnOffToggle>
 
-        <!-- Periodic background sync (R061): on/off primary + cadence select. -->
-        <div v-if="autosyncEnabled" class="mt-4 pt-4 border-t border-edge">
+        <!-- Periodic background sync (R061): on/off primary + cadence select.
+             Android-only — driven by WorkManager; desktop has no equivalent
+             (the backend no-ops), so the whole block hides off-Android. -->
+        <div
+          v-if="autosyncEnabled && platform === 'android'"
+          class="mt-4 pt-4 border-t border-edge"
+        >
           <h3 class="text-sm font-medium mb-1">
             {{ t("settings.backgroundSync.title") }}
           </h3>

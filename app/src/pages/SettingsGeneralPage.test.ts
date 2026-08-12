@@ -497,6 +497,24 @@ describe("SettingsGeneralPage", () => {
       ).find((c) => c.props("name") === name);
     }
 
+    it("on desktop, hides the periodic background-sync block (Android-only)", async () => {
+      // Periodic background sync uses Android's WorkManager — desktop has no
+      // equivalent (the backend no-ops). The whole periodic block (toggle +
+      // cadence) stays hidden on desktop even when AutoSync is on.
+      when("get_app_config", { autosync: true, background_sync: "1h" });
+      const { wrapper } = mountWithApp(SettingsGeneralPage, {
+        platform: "linux",
+      });
+      await flushPromises();
+
+      expect(
+        findControl(wrapper, BaseSegmentedControl, "background-sync-enabled"),
+      ).toBeUndefined();
+      expect(
+        findControl(wrapper, BaseSelect, "background-sync-cadence"),
+      ).toBeUndefined();
+    });
+
     it("toggling on persists the default cadence and reveals the select", async () => {
       when("set_background_sync", { background_sync: "6h" });
       const wrapper = mountPage();
