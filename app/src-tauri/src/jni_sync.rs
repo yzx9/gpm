@@ -17,7 +17,8 @@ use std::sync::Arc;
 use rustpass::{Store, SyncOutcome};
 use serde::Serialize;
 
-use crate::app_config::AppConfigStore;
+use crate::app_config::{AppConfigStore, PeekOutcome};
+use crate::migrations::APP_CONFIG_SCHEMA_VERSION;
 
 /// The result crossed back to `Kotlin` as JSON, then mapped to a `WorkManager`
 /// `Result` (`ok`/`skipped` → `Result.success()`, `error` → `retry`/`failure`).
@@ -38,8 +39,10 @@ pub(crate) enum BackgroundSyncResult {
 /// dir + a base64 master key the Kotlin Worker retrieved from the Keystore.
 ///
 /// Gates (defense-in-depth, since the Worker also gates): the auth-free master
-/// key present, cadence ≠ `Off`, `is_repo_ready`, and `AutoSync`-on (background
-/// sync is linked to `AutoSync`). Runs under App Lock too (R064): the worker
+/// key present, cadence ≠ `Off`, and `AutoSync`-on (background sync is linked
+/// to `AutoSync`). The per-repo migrate/resolve/`is_repo_ready` gates run
+/// inside [`sync_registered_repositories`], one facade per registered repo.
+/// Runs under App Lock too (R064): the worker
 /// reads only the auth-free master key — never the biometric-gated vault key —
 /// so `repo.json` (git credential) is readable while the identity stays gated.
 /// R074: cadence + `AutoSync` now live in the sealed merged `app.json`, so the
@@ -64,13 +67,26 @@ pub(crate) async fn run_headless_sync(
     };
 
     let app_cfg = AppConfigStore::new(&config_dir).await;
-    let store = Arc::new(Store::new(config_dir, Some(master_key)));
-    // R064: the worker is pull-only — it reads `repo.json`/`app.json` under the
-    // auth-free master but never the identity. Drop the vault_seal bridge so no
-    // identity key sits in worker memory, and migrate ONLY `repo_config` (the
-    // vault-tier files are under the distinct vault key the worker lacks).
-    store.set_vault_key(None);
-    app_cfg.set_store(Arc::clone(&store));
+    // The device facade (rooted at config_dir) reads the sealed merged
+    // `app.json` (cadence + autosync + the registry). The per-repo facades for
+    // the pull fan-out are built inside `sync_registered_repositories`.
+    let device = Arc::new(Store::new(config_dir.clone(), Some(master_key)));
+    // R064: the worker is pull-only — auth-free master only, never the vault
+    // key. Drop the vault_seal bridge so no identity key sits in worker memory.
+    device.set_vault_key(None);
+    app_cfg.set_store(Arc::clone(&device));
+    // Schema gate (D2): a separate-process WorkManager fire can land mid-m0010,
+    // when the repo files are half-moved and the registry is already non-empty.
+    // Skip (never error) until the schema settles to current. Absent/Corrupt
+    // fall through — an unconfigured app skips at the cadence gate anyway.
+    if matches!(
+        app_cfg.peek_schema_version().await,
+        PeekOutcome::Version(v) if v < APP_CONFIG_SCHEMA_VERSION
+    ) {
+        return BackgroundSyncResult::Skipped {
+            reason: "mid_migrate",
+        };
+    }
     // Load the sealed merged config so the gates below read the persisted
     // cadence + autosync (not cold-start defaults).
     if let Err(e) = app_cfg.reload().await {
@@ -82,61 +98,87 @@ pub(crate) async fn run_headless_sync(
     if app_cfg.background_sync().is_off() {
         return BackgroundSyncResult::Skipped { reason: "disabled" };
     }
-    // migrate_repo_seal now also normalizes a legacy absent `crypto` field (a
-    // repo.json content rewrite). Kept before resolve_storage/pull by convention
-    // (migrations before ops); a pull does not touch repo.json (it lives in the
-    // config dir, not the git working tree), so there is no pull-vs-migration
-    // race. Cross-writer serialization is handled by the ConfigLock every
-    // repo.json writer takes (R097); see Config::normalize_repo_config_crypto.
-    if let Err(e) = store.migrate_repo_seal().await {
-        return BackgroundSyncResult::Error {
-            message: e.to_string(),
-        };
-    }
-    if let Err(e) = store.resolve_storage().await {
-        return BackgroundSyncResult::Error {
-            message: e.to_string(),
-        };
-    }
-    if !store.is_repo_ready() {
-        return BackgroundSyncResult::Skipped {
-            reason: "not_ready",
-        };
-    }
-    // AutoSync gate (autosync loaded above from the merged config).
+    // AutoSync gate (background sync is linked to AutoSync; autosync loaded above
+    // from the merged config). The per-repo migrate/resolve/ready gates run INSIDE
+    // `sync_registered_repositories` with the worker fan-out — each repo's facade
+    // is built there at `repositories/<id>/`.
     if !app_cfg.get_behavior().autosync {
         return BackgroundSyncResult::Skipped {
             reason: "autosync_off",
         };
     }
+    // Fan out over the registered repositories (built at repositories/<id>/).
+    sync_registered_repositories(&config_dir, master_key, &app_cfg).await
+}
 
-    // Pull-only: the heavy-autofill persona is read-only, so push is dead
-    // weight. Foreground autosync_write still publishes occasional creates.
-    let store_for_sync = Arc::clone(&store);
-    let result = crate::write::run_best_effort_sync(|slot, cancel| async move {
-        store_for_sync.sync_with(&slot, Some(cancel), None).await
-    })
-    .await;
-
-    match result {
-        Ok(outcome) => {
+/// Iterate the registered repositories and pull-sync each ready one. The
+/// host-testable core of the worker fan-out: [`run_headless_sync`] runs the
+/// device-level gates (key, schema, cadence, autosync), then this handles the
+/// per-repo work.
+///
+/// Per-repo error-tolerant (D2): a facade build, `repo.json` read, or clone
+/// missing mid-migrate skips THAT repo (`continue`), never a hard `Error` — the
+/// next `WorkManager` fire retries. Returns `Skipped { "no_repositories" }` when
+/// the registry is empty, `Skipped { "no_syncable_repo" }` when none was ready,
+/// else `Ok` with the last synced outcome (one repo in Step 1).
+#[allow(dead_code)] // called by run_headless_sync + the host gate tests.
+async fn sync_registered_repositories(
+    config_dir: &std::path::Path,
+    master_key: [u8; 32],
+    app_cfg: &AppConfigStore,
+) -> BackgroundSyncResult {
+    let ids = app_cfg.get().repositories.clone();
+    if ids.is_empty() {
+        return BackgroundSyncResult::Skipped {
+            reason: "no_repositories",
+        };
+    }
+    let mut synced: Option<SyncOutcome> = None;
+    for id_str in &ids {
+        // Build a facade at repositories/<id>/. Migrate ONLY repo_config (the
+        // vault-tier files are under the distinct vault key the worker lacks).
+        let id = crate::registry::RepoId::from(id_str.clone());
+        let store = crate::build_repo_facade(config_dir, Some(master_key), &id);
+        store.set_vault_key(None);
+        // migrate_repo_seal also normalizes a legacy absent `crypto` field (a
+        // repo.json content rewrite). Kept before resolve_storage/pull by
+        // convention (migrations before ops); a pull does not touch repo.json
+        // (it lives in the config dir, not the git working tree), so there is
+        // no pull-vs-migration race. Cross-writer serialization is handled by
+        // the ConfigLock every repo.json writer takes (R097); see
+        // Config::normalize_repo_config_crypto.
+        if store.migrate_repo_seal().await.is_err() {
+            continue;
+        }
+        if store.resolve_storage().await.is_err() {
+            continue;
+        }
+        if !store.is_repo_ready() {
+            continue;
+        }
+        // Pull-only: the heavy-autofill persona is read-only, so push is dead
+        // weight. Foreground autosync_write still publishes occasional creates.
+        let store_for_sync = Arc::clone(&store);
+        let result = crate::write::run_best_effort_sync(|slot, cancel| async move {
+            store_for_sync.sync_with(&slot, Some(cancel), None).await
+        })
+        .await;
+        if let Ok(outcome) = result {
             // Persist a passive marker only (the full SyncOutcome leaks entry
             // names). A dedicated marker file — NOT a pref.json field — so the
             // write can't race a concurrent foreground pref write.
             let needs_attention = matches!(outcome, SyncOutcome::Diverged(_))
                 || matches!(&outcome, SyncOutcome::FastForwarded(r) if r.authenticity.blocked);
-            let marker_res = if needs_attention {
-                app_cfg.set_sync_attention_marker().await
-            } else {
-                Ok(())
-            };
-            if let Err(e) = marker_res {
+            if needs_attention && let Err(e) = app_cfg.set_sync_attention_marker().await {
                 log::warn!("bg-sync: could not persist attention marker: {e}");
             }
-            BackgroundSyncResult::Ok { outcome }
+            synced = Some(outcome);
         }
-        Err(e) => BackgroundSyncResult::Error {
-            message: e.to_string(),
+    }
+    match synced {
+        Some(outcome) => BackgroundSyncResult::Ok { outcome },
+        None => BackgroundSyncResult::Skipped {
+            reason: "no_syncable_repo",
         },
     }
 }
@@ -277,11 +319,12 @@ mod tests {
     }
 
     /// R074: with a real key + a non-Off cadence in the sealed merged config, the
-    /// worker proceeds past the cadence + autosync gates to `not_ready` (no
-    /// repo.json) — pinning that the key-first order loads the sealed cadence
-    /// correctly. Also pins the R064 chunk-7 wiring: the pull-only worker never
-    /// touches vault-tier files (a plaintext identity is left untouched; a revert
-    /// to `migrate_seal` would `SealKeyUnavailable` on it ⇒ `Error`).
+    /// worker proceeds past the cadence + autosync gates to `no_repositories`
+    /// (empty registry, nothing to sync) — pinning that the key-first order loads
+    /// the sealed cadence correctly. Also pins the R064 chunk-7 wiring: the
+    /// pull-only worker never touches vault-tier files (a plaintext identity is
+    /// left untouched; a revert to `migrate_seal` would `SealKeyUnavailable` on
+    /// it ⇒ `Error`).
     #[tokio::test]
     async fn headless_sync_proceeds_past_cadence_and_leaves_identity_untouched() {
         let dir = tempfile::TempDir::new().expect("tempdir");
@@ -296,15 +339,47 @@ mod tests {
             matches!(
                 res,
                 BackgroundSyncResult::Skipped {
-                    reason: "not_ready"
+                    reason: "no_repositories"
                 }
             ),
-            "with key + cadence, the worker proceeds to not_ready (no repo.json)"
+            "with key + cadence + autosync, the worker proceeds past the gates to \
+             no_repositories (empty registry, no repo to sync)"
         );
         assert_eq!(
             std::fs::read(dir.path().join("identity")).unwrap(),
             b"plaintext-identity",
             "headless worker must not touch vault-tier identity"
+        );
+    }
+
+    /// D2: a `WorkManager` fire that lands mid-m0010 (schema still < current) must
+    /// skip, never error — the repo files may be half-moved.
+    #[tokio::test]
+    async fn skips_when_schema_below_current() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let master = rustpass::seal::generate_master_key().unwrap();
+        let master_b64 = crate::B64.encode(master);
+        // Seed a pre-m0010 app.json (schema 9) with a registered repo id, sealed
+        // with the master key. The schema gate fires before the cadence gate.
+        let store = Arc::new(Store::new(dir.path().to_path_buf(), Some(master)));
+        let cfg = crate::app_config::AppConfig {
+            schema_version: 9,
+            repositories: vec!["0123456789abcdef0123456789abcdef".to_string()],
+            ..Default::default()
+        };
+        let json = serde_json::to_vec(&cfg).unwrap();
+        store.save_app_config(&json).await.unwrap();
+        drop(store);
+
+        let res = run_headless_sync(dir.path().to_path_buf(), master_b64).await;
+        assert!(
+            matches!(
+                res,
+                BackgroundSyncResult::Skipped {
+                    reason: "mid_migrate"
+                }
+            ),
+            "schema < current must skip (mid-migrate): {res:?}"
         );
     }
 }

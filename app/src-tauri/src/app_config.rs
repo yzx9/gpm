@@ -2747,4 +2747,27 @@ mod tests {
         );
         assert_eq!(cfg.schema_version, 4);
     }
+
+    /// The registry fields cross IPC to a hand-written TS mirror
+    /// (`api/system.ts`, consumed by `useActiveRepo`) — pin the raw JSON key
+    /// names and the skip-when-absent optionality the TS `?` fields rely on
+    /// (the same drift class the `ErrorCode` wire strings are pinned against).
+    #[test]
+    fn app_config_registry_fields_pin_wire_names() {
+        let id = "0123456789abcdef0123456789abcdef".to_string();
+        let v = serde_json::to_value(AppConfig {
+            repositories: vec![id.clone()],
+            last_active: Some(id),
+            ..AppConfig::default()
+        })
+        .unwrap();
+        assert!(v.get("repositories").is_some(), "wire key: repositories");
+        assert!(v.get("last_active").is_some(), "wire key: last_active");
+
+        let d = serde_json::to_value(AppConfig::default()).unwrap();
+        assert!(
+            d.get("repositories").is_none() && d.get("last_active").is_none(),
+            "empty registry fields are omitted (pre-registry files round-trip identically)"
+        );
+    }
 }

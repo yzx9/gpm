@@ -34,6 +34,7 @@ pub(crate) mod m0006_gate_idle_timeout;
 pub(crate) mod m0007_vault_key;
 pub(crate) mod m0008_collapse_pref_into_sealed;
 pub(crate) mod m0009_multi_repo_register;
+pub(crate) mod m0010_multi_repo_relocate;
 
 /// Outcome of a single migration step.
 ///
@@ -57,6 +58,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (7, "0007_vault_key"),
     (8, "0008_collapse_pref_into_sealed"),
     (9, "0009_multi_repo_register"),
+    (10, "0010_multi_repo_relocate"),
 ];
 
 /// The `app.json`/`pref.json` schema version once every registered migration has
@@ -111,10 +113,11 @@ pub(crate) async fn run_app_migrations(state: &AppState) {
         }
     }
     // Re-read the migrated files into the cache so the post-migration runtime
-    // reads (`effective_log_filter`, the autosync seed, etc.) see the migrated
-    // values. No reload on Pending/Err: the next run re-peeks disk and resumes.
-    // ADDITIVE — does NOT replace main's standalone `reload_behavior` +
-    // `set_autosync` in `init_state`/`app_unlock`, which cover the no-migration
+    // reads (`effective_log_filter`, the facade autosync seed, etc.) see the
+    // migrated values. No reload on Pending/Err: the next run re-peeks disk
+    // and resumes. ADDITIVE — does NOT replace the standalone
+    // `reload_behavior` in `init_state`/`app_unlock` + the
+    // `seed_registry_facades` autosync seed, which cover the no-migration
     // cold-start path (where `ran=false`).
     if ran && let Err(e) = state.app_config.reload().await {
         log::warn!("app-config: post-migration cache reload failed: {e}");
@@ -132,6 +135,7 @@ async fn apply_migration(state: &AppState, version: u32) -> Result<MigrationOutc
         7 => m0007_vault_key::apply(state, version).await,
         8 => m0008_collapse_pref_into_sealed::apply(state, version).await,
         9 => m0009_multi_repo_register::apply(state, version).await,
+        10 => m0010_multi_repo_relocate::apply(state, version).await,
         // Unreachable in practice — `version` comes from iterating `MIGRATIONS`,
         // whose every entry has a match arm above. Return an `Err` (not a panic)
         // so a future mismatch (a registry row without a dispatch arm) surfaces

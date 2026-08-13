@@ -29,6 +29,7 @@ async fn keyed_state(dir: &Path) -> AppState {
     let store = Arc::new(Store::new(dir.to_path_buf(), Some(key)));
     let state = AppState {
         store,
+        master_key: Some(key),
         registry: crate::registry::RepoRegistry::empty(),
         app_config: Arc::new(AppConfigStore::new(dir).await),
         app_handle: None,

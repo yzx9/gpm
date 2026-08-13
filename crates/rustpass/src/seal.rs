@@ -188,6 +188,17 @@ impl Seal {
         self.key.read().is_ok_and(|guard| guard.is_some())
     }
 
+    /// The current key, if any — for transferring an injected key onto another
+    /// facade built mid-session (e.g. the m0007-minted vault key onto a freshly
+    /// populated registry facade after a deferred migration chain completes at
+    /// unlock). Plain `[u8; 32]`, matching the existing `set_key` boundary.
+    pub(crate) fn key(&self) -> Option<[u8; MASTER_KEY_LEN]> {
+        self.key
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|k| **k))
+    }
+
     /// Seal `plaintext` for the named slot into an seal envelope.
     ///
     /// In passthrough mode (`None` key, and no key was ever injected —

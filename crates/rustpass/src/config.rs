@@ -236,6 +236,23 @@ impl Config {
         self.vault_seal.has_key()
     }
 
+    /// The current master seal key, if any — for transferring an injected key
+    /// onto a facade built mid-session (see [`Seal::key`]). `None` on
+    /// desktop/tests (passthrough).
+    #[must_use]
+    pub fn master_key(&self) -> Option<[u8; 32]> {
+        self.master_seal.key()
+    }
+
+    /// The current vault seal key, if any — for transferring an injected key
+    /// (e.g. the m0007-minted vault) onto a facade built mid-session (see
+    /// [`Seal::key`]). `None` on desktop/tests (passthrough) and while the
+    /// app-launch lock holds it wiped.
+    #[must_use]
+    pub fn vault_key(&self) -> Option<[u8; 32]> {
+        self.vault_seal.key()
+    }
+
     /// Get the config directory used by this instance.
     #[must_use]
     pub fn config_dir(&self) -> &Path {

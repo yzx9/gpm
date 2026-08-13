@@ -214,8 +214,8 @@ pub(crate) async fn enable_biometric_app_lock(
     keystore::store_slot(ks, &vault, BiometricSlot::Vault, prompt_text.as_ref()).await?;
     // Re-key identity + app_id_pass master→vault. These are repo-scoped (the
     // identity + passphrase slot live under the active repo facade), so route
-    // them through the active facade — which, under the single-repo invariant,
-    // is `state.store`. The auth-free master is twin-injected onto it so its
+    // them through the active repo facade (rooted at the
+    // per-repo subdir). The auth-free master is twin-injected onto it so its
     // master_seal can read identity under the master; both seals are keyed now
     // (master_seal reads, the just-injected vault_seal writes).
     let active = state.active_repo()?;
@@ -312,14 +312,31 @@ pub(crate) async fn disable_biometric_app_lock(
 /// mid-flight makes the legacy branch soft-skip → Ok → Done; that envelope
 /// stays legacy, kept readable by dual-read until the v1.0.x forced migrate.
 // TODO: v1.0.x — remove with the legacy-magic compat path.
+/// Whether the migration chain halted over a configured repo: schema still
+/// below current AND `repo.json` still at the config root (m0009/m0010 not
+/// both done — files not relocated, registry not derivable). The discriminator
+/// [`app_unlock`] fails loudly on; extracted for unit tests.
+pub(crate) async fn chain_left_repo_at_root(state: &AppState) -> bool {
+    if !matches!(
+        state.app_config.peek_schema_version().await,
+        crate::app_config::PeekOutcome::Version(v)
+            if v < crate::migrations::APP_CONFIG_SCHEMA_VERSION
+    ) {
+        return false;
+    }
+    crate::exists_or_err(&state.store.config_dir().join("repo.json"))
+        .await
+        .unwrap_or(false)
+}
+
 pub(crate) async fn run_seal_migrate_once(state: &AppState) {
     const SM_PENDING: u8 = 0;
     const SM_INFLIGHT: u8 = 1;
     const SM_DONE: u8 = 2;
     // The identity/repo.json/app_id_pass envelope migrate is repo-scoped — run
-    // it on the active repo facade (== `state.store` under the single-repo
-    // invariant). No active repo ⇒ nothing to migrate; return without claiming
-    // the one-shot so a later unlock retries.
+    // it on the active repo facade (rooted at the per-repo subdir). No active
+    // repo ⇒ nothing to migrate; return without claiming the one-shot so a
+    // later unlock retries.
     let Some(active) = state.registry.active_facade() else {
         return;
     };
@@ -358,10 +375,10 @@ pub(crate) async fn run_backend_resolve_once(state: &AppState) {
     const BR_PENDING: u8 = 0;
     const BR_INFLIGHT: u8 = 1;
     const BR_DONE: u8 = 2;
-    // The backend type + root live in the repo-scoped `repo.json` — resolve them
-    // on the active repo facade (== `state.store` under the single-repo
-    // invariant). No active repo ⇒ nothing to resolve; leave the one-shot
-    // pending so a later unlock retries.
+    // The backend type + root live in the repo-scoped `repo.json` — resolve
+    // them on the active repo facade (rooted at the per-repo subdir). No active
+    // repo ⇒ nothing to resolve; leave the one-shot pending so a later unlock
+    // retries.
     let Some(active) = state.registry.active_facade() else {
         return;
     };
@@ -415,10 +432,14 @@ pub(crate) async fn app_unlock(
     if !state.app_locked.load(Ordering::SeqCst) {
         return Ok(());
     }
-    // The identity/vault-key/repo.json operations below are repo-scoped — route
-    // them through the active repo facade (== `state.store` under the
-    // single-repo invariant).
-    let active = state.active_repo()?;
+    // Order matters: the migration chain resumes HERE (below) — a deferred
+    // chain (an app-lock upgrader below schema 7) has not yet run m0009/m0010,
+    // so the registry may still be empty and the repo's files still sit at the
+    // config root. Every repo-scoped step therefore resolves the active facade
+    // AFTER the chain (via the device-facade fallback, which is also the
+    // correct target while the files are unrelocated), and the keys retrieved
+    // below are injected into the DEVICE facade first — m0005/m0006/m0007 gate
+    // on and operate on it.
     // Disarm the gate-idle timer for the duration of the unlock awaits (the
     // DECRYPT prompt, m0007's ENCRYPT, run_app_migrations). A fire in that
     // window would call do_app_lock mid-unlock, wiping vault_seal before
@@ -431,11 +452,12 @@ pub(crate) async fn app_unlock(
     // pre-m0007: absent — its master lives in the legacy biometric alias).
     // Non-prompting; a failure (incl. a malformed key) degrades to None (the
     // deadlock-fix below or m0007 supplies the master on the upgrader path).
+    let mut retrieved_master = None;
     if let Ok(Some(master)) = keystore::retrieve_master(ks).await {
-        // Twin-inject: the device facade (seals app.json) and the active repo
-        // facade (seals repo.json/identity) each get the auth-free master keyed.
+        // Device facade first (seals app.json; also the pre-relocate home of
+        // repo.json). The repo facade gets it after the chain resolves below.
         state.store.set_master_key(Some(master));
-        active.set_master_key(Some(master));
+        retrieved_master = Some(master);
     }
     // Retrieve the biometric key: the vault (post-m0007), or — when the vault
     // alias is absent (`None`, non-prompting) — the legacy master (upgrader
@@ -461,12 +483,14 @@ pub(crate) async fn app_unlock(
                 // Idempotent on retry (overwrites the same value). A failure aborts
                 // the unlock so the user retries rather than landing half-relocated.
                 keystore::store_master(ks, &key).await?;
-                // Inject BOTH seals with this master so identity (still under master
-                // pre-m0007) stays readable if m0007's ENCRYPT cancels, and so
-                // m0005/m0006 un-defer. m0007 mints the distinct vault + re-keys.
+                // Inject BOTH seals of the DEVICE facade with this master so
+                // identity (still under master pre-m0007) stays readable if
+                // m0007's ENCRYPT cancels, so m0005/m0006 un-defer, and so
+                // m0007's `has_vault_key` deferral gate passes (it reads the
+                // device facade — the repo facade did not exist yet when the
+                // chain was deferred). m0007 mints the distinct vault + re-keys.
                 state.store.set_master_key(Some(key));
-                active.set_master_key(Some(key));
-                active.set_vault_key(Some(key));
+                state.store.set_vault_key(Some(key));
                 (key, false)
             }
             Err(e) => {
@@ -475,27 +499,27 @@ pub(crate) async fn app_unlock(
                 return Err(ae);
             }
         };
-    if from_vault {
-        // Post-m0007: inject the vault key (master already loaded above).
-        active.set_vault_key(Some(key));
-        // Crash-safety resume: a half-finished enable/disable left identity
-        // under the master while the vault alias is present — finish moving it
-        // under the vault. An interrupted disable is undone here (identity stays
-        // readable; the user re-disables) — no data loss either way.
-        if active.is_identity_under_master().await {
-            active.rekey_identity_to_vault().await?;
-            if let Err(e) = state.app_config.set_biometric_app_lock(true).await {
-                log::warn!("app-lock: resume set_biometric_app_lock persist failed: {e}");
-            }
-            log::info!("app-lock: resumed unfinished master→vault re-key");
-        }
-    }
     log::info!("app-lock: biometric key retrieved");
     // Copy the app-scoped behavior prefs out of a pre-split repo.json into
     // app.json BEFORE anything reads them — the first unlock, and the cache
     // refresh inside try_identity_auto_unlock, must see the migrated values, not
     // the defaults. The master key is now in memory, so the sealed read succeeds.
     run_app_migrations(state.inner()).await;
+    // A chain that HALTED mid-way (m0007 returning `Pending` when the user
+    // cancels its one-time ENCRYPT prompt, or any migration error) leaves the
+    // schema below current with the repo files still at the config root: the
+    // registry cannot populate (no relocated subdir), so every repo-scoped
+    // identity path dies — `unlock` funnels through the registry and the
+    // WebView cannot even resolve a repoId, while `get_auth_state`'s
+    // device-facade fallback reports configured=true, locking the user into a
+    // session whose unlock overlay can never succeed. Fail loudly instead so
+    // the user retries — the chain re-runs and re-prompts.
+    if chain_left_repo_at_root(state.inner()).await {
+        return Err(AppLockError::from(Error::new(
+            ErrorCode::ConfigError,
+            "app config migration incomplete — lock and unlock again to retry".to_string(),
+        )));
+    }
     // Re-apply the runtime log gate after migrations: under app-lock, the
     // verbose carry-over (m0004_verbose_from_debug) runs here, not in init_state.
     // Without this an upgrading user previously pinned to "debug" would spend
@@ -510,12 +534,50 @@ pub(crate) async fn app_unlock(
     log::set_max_level(state.app_config.effective_log_filter());
     // Re-arm the mid-session revert timer if a verbose window is still live.
     arm_verbose_timer(state.inner(), &app);
-    // Reload the sealed config + reseed the Store's injected `autosync`. R074/D:
-    // the auth-free key is loaded at `.setup()`, so the merged config is already
-    // in the caches — this is a defensive post-migration refresh (a just-run
-    // m0008 collapsed pref.json into the sealed merged app.json). Runs before
-    // `app_locked` is cleared so the frontend sees real values after the emit.
+    // Reload the sealed config. R074/D: the auth-free key is loaded at
+    // `.setup()`, so the merged config is already in the caches — this is a
+    // defensive post-migration refresh (a just-run m0008 collapsed pref.json
+    // into the sealed merged app.json; in the new world the refresh covers the
+    // WHOLE cache, so a just-run m0009 registry write is visible below). Runs
+    // before `app_locked` is cleared so the frontend sees real values after the
+    // emit.
     state.app_config.reload_behavior().await.ok();
+    // A chain that completed m0009/m0010 in THIS call (the deferred-upgrader
+    // path) rewrote the registry on disk after init_state populated the
+    // in-memory one — re-derive it (no-op when already populated). The seeding
+    // inside also transfers the device facade's keys onto any freshly built
+    // facade, including the vault key m0007 just minted.
+    crate::repopulate_registry_if_empty(state.inner()).await;
+    // Resolve the active facade AFTER the chain: post-relocate this is the
+    // registry facade (rooted at `repositories/<id>/`); the device-facade
+    // fallback covers the no-repo window and a chain that halted mid-way
+    // (files still at the config root — where the device facade reads them).
+    let active = crate::setup::active_or_device_facade(state.inner());
+    if let Some(master) = retrieved_master {
+        active.set_master_key(Some(master));
+    }
+    if from_vault {
+        // Post-m0007: inject the vault key onto the active repo facade (the
+        // master twin-inject above covered the device facade pre-chain).
+        active.set_vault_key(Some(key));
+        // Crash-safety resume: a half-finished enable/disable left identity
+        // under the master while the vault alias is present — finish moving it
+        // under the vault. An interrupted disable is undone here (identity stays
+        // readable; the user re-disables) — no data loss either way.
+        if active.is_identity_under_master().await {
+            active.rekey_identity_to_vault().await?;
+            if let Err(e) = state.app_config.set_biometric_app_lock(true).await {
+                log::warn!("app-lock: resume set_biometric_app_lock persist failed: {e}");
+            }
+            log::info!("app-lock: resumed unfinished master→vault re-key");
+        }
+    } else {
+        // Legacy upgrader: post-chain the identity lives under the vault
+        // m0007 minted (injected into the device facade pre-chain and
+        // transferred onto the repo facade by the re-populate seeding).
+        active.set_master_key(Some(key));
+        active.set_vault_key(state.store.vault_key());
+    }
     active.set_autosync(state.app_config.get_behavior().autosync);
     // One-shot legacy-envelope migrate, BEFORE the unlock emit so the app isn't
     // interactive while repo.json is re-wrapped (no race with a settings write).
@@ -570,9 +632,9 @@ async fn try_identity_auto_unlock<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
 ) -> bool {
-    // The config/identity/passphrase-slot reads below are repo-scoped — operate
-    // on the active repo facade (== `state.store` under the single-repo
-    // invariant). No active repo ⇒ no identity to auto-unlock.
+    // The config/identity/passphrase-slot reads below are repo-scoped —
+    // operate on the active repo facade (rooted at the per-repo subdir). No
+    // active repo ⇒ no identity to auto-unlock.
     let Some(active) = state.registry.active_facade() else {
         return false;
     };
@@ -745,7 +807,7 @@ pub(crate) async fn enable_identity_auto_unlock(
         ));
     }
     // The identity + passphrase slot are repo-scoped — operate on the active
-    // repo facade (== `state.store` under the single-repo invariant).
+    // repo facade (rooted at the per-repo subdir).
     let active = state.active_repo()?;
     if !active.is_identity_encrypted().await {
         return Err(AppLockError::from(Error::new(

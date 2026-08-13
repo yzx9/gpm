@@ -207,6 +207,28 @@ impl Store {
         StoreBuilder::new().build(config_dir, master_key)
     }
 
+    /// Delegate for [`Config::config_dir`] — the root this store reads/writes its
+    /// config + identity files relative to. The app shell derives per-repo
+    /// subdirectory paths (`config_dir/repositories/<id>/`) from the device
+    /// facade's root.
+    #[must_use]
+    pub fn config_dir(&self) -> &Path {
+        self.config.config_dir()
+    }
+
+    /// Delegate for [`Config::save_repo_config_locked`] — persist a full
+    /// [`RepoConfig`] to `repo.json` (sealed under the master key) UNDER the
+    /// cross-process [`ConfigLock`] (R097: no unlocked public repo.json writer
+    /// exists). The multi-repo relocation rewrites `local_path` through this.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`Config::save_repo_config_locked`] errors (lock contention
+    /// → `ConfigBusy`, seal/write failures).
+    pub async fn save_repo_config_locked(&self, config: &RepoConfig) -> Result<(), Error> {
+        self.config.save_repo_config_locked(config).await
+    }
+
     /// Construct a `Store` with an injected backend registry. The crate-private
     /// construction path used by
     /// [`StoreBuilder::build`](crate::storage::StoreBuilder::build); not public
@@ -277,6 +299,22 @@ impl Store {
     #[must_use]
     pub fn has_vault_key(&self) -> bool {
         self.config.has_vault_key()
+    }
+
+    /// The current master seal key, if any — delegate for
+    /// [`Config::master_key`], for transferring an injected key onto another
+    /// facade built mid-session.
+    #[must_use]
+    pub fn master_key(&self) -> Option<[u8; 32]> {
+        self.config.master_key()
+    }
+
+    /// The current vault seal key, if any — delegate for
+    /// [`Config::vault_key`], for transferring an injected key (e.g. the
+    /// m0007-minted vault) onto another facade built mid-session.
+    #[must_use]
+    pub fn vault_key(&self) -> Option<[u8; 32]> {
+        self.config.vault_key()
     }
 
     /// Reset all configuration and local data. Clears the identity cache.

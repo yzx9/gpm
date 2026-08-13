@@ -34,6 +34,21 @@ export interface ActiveRepoStore {
 export const ACTIVE_REPO_KEY: InjectionKey<ActiveRepoStore> =
   Symbol("activeRepo");
 
+/** Pick the active repository id from an already-fetched `AppConfig`:
+ *  `last_active` iff it names a registered repo, else the first, else `null`.
+ *  Pure — callers that already hold the config (e.g. `useForegroundSync`,
+ *  which also reads `autosync` from the same fetch) share one IPC round-trip
+ *  instead of a second `getAppConfig` per fire. */
+export function pickActiveRepoId(cfg: {
+  repositories?: string[];
+  last_active?: string | null;
+}): string | null {
+  const ids = cfg.repositories ?? [];
+  return cfg.last_active && ids.includes(cfg.last_active)
+    ? cfg.last_active
+    : (ids[0] ?? null);
+}
+
 /** Resolve the active repository id from the persisted registry (`AppConfig`).
  *  The shared resolution behind [`createActiveRepoStore`]'s `currentId()` — also
  *  called directly by pre-shell callers with no inject provider (the foreground
@@ -41,12 +56,7 @@ export const ACTIVE_REPO_KEY: InjectionKey<ActiveRepoStore> =
  *  shell's `provide`). Rejects if no repository is configured. */
 export async function resolveActiveRepoId(): Promise<string> {
   const cfg = await getAppConfig();
-  const ids = cfg.repositories ?? [];
-  // last_active wins iff it names a registered repo; else the first; else none.
-  const id =
-    cfg.last_active && ids.includes(cfg.last_active)
-      ? cfg.last_active
-      : (ids[0] ?? null);
+  const id = pickActiveRepoId(cfg);
   if (!id) throw new Error("no repository configured");
   return id;
 }

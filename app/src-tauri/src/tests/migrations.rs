@@ -35,6 +35,7 @@ fn build_state(store: Arc<Store>, app_config: AppConfigStore) -> AppState {
     app_config.set_store(Arc::clone(&store));
     AppState {
         store,
+        master_key: None,
         registry: crate::registry::RepoRegistry::empty(),
         app_config: Arc::new(app_config),
         app_handle: None,
@@ -1225,8 +1226,9 @@ async fn m0008_corrupt_sealed_propagates_err() {
 // --- m0009: multi-repository register (R080) ---------------------------------
 
 /// A schema-8 install with a valid `repo.json` is adopted into the registry:
-/// after the chain, `app.json` carries a non-empty `repositories`, `last_active`
-/// points at it, and schema is 9. No files move (register half only).
+/// after the chain (m0009 registers the id, m0010 relocates the files),
+/// `app.json` carries a non-empty `repositories`, `last_active` points at it,
+/// and schema is 10.
 #[tokio::test]
 async fn m0009_registers_existing_single_repo_into_registry() {
     let dir = tempfile::tempdir().unwrap();
@@ -1240,7 +1242,7 @@ async fn m0009_registers_existing_single_repo_into_registry() {
     run_app_migrations(&state).await;
 
     let reloaded = reload_at(dir.path(), &store).await;
-    assert_eq!(reloaded.schema_version, 9);
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(reloaded.repositories.len(), 1);
     assert_eq!(reloaded.last_active, reloaded.repositories.first().cloned());
 }
@@ -1257,7 +1259,7 @@ async fn m0009_leaves_registry_empty_when_no_repo() {
     run_app_migrations(&state).await;
 
     let reloaded = reload_at(dir.path(), &store).await;
-    assert_eq!(reloaded.schema_version, 9);
+    assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert!(reloaded.repositories.is_empty());
     assert!(reloaded.last_active.is_none());
 }
@@ -1295,13 +1297,155 @@ async fn m0009_is_idempotent_preserves_minted_id() {
 
     run_app_migrations(&state).await;
     let after_first = reload_at(dir.path(), &store).await;
-    assert_eq!(after_first.schema_version, 9);
+    assert_eq!(after_first.schema_version, APP_CONFIG_SCHEMA_VERSION);
     let id = after_first.repositories.first().cloned().unwrap();
 
-    // Second pass: schema is 9, so m0009 is skipped — the id must not change.
+    // Second pass: schema is current, so m0009 + m0010 are skipped — the id must
+    // not change.
     run_app_migrations(&state).await;
     let after_second = reload_at(dir.path(), &store).await;
-    assert_eq!(after_second.schema_version, 9);
+    assert_eq!(after_second.schema_version, APP_CONFIG_SCHEMA_VERSION);
     assert_eq!(after_second.repositories, vec![id.clone()]);
     assert_eq!(after_second.last_active, Some(id));
+}
+
+// --- m0010: multi-repository relocate (R080) ---------------------------------
+
+/// Seed a post-m0009 single-repo layout at the config root (schema 9, one
+/// registered id) for m0010 tests. When `with_files` is set, also seeds
+/// `repo.json` (with a real clone dir at `local_path`), `identity`, and
+/// `app_id_pass` — the full pre-relocate footprint.
+async fn seed_pre_relocate(dir: &Path, id: &str, with_files: bool) -> Arc<Store> {
+    let store = Arc::new(Store::new(dir.to_path_buf(), None));
+    if with_files {
+        let clone = dir.join("repo");
+        std::fs::create_dir_all(&clone).unwrap();
+        std::fs::write(clone.join("HEAD"), b"ref: refs/heads/main").unwrap();
+        let repo_json = format!(
+            r#"{{"url":"https://x/repo.git","local_path":"{}"}}"#,
+            clone.to_string_lossy()
+        );
+        std::fs::write(dir.join("repo.json"), repo_json).unwrap();
+        std::fs::write(dir.join("identity"), b"identity-bytes").unwrap();
+        std::fs::write(dir.join("app_id_pass"), b"pass-bytes").unwrap();
+    }
+    let cfg = AppConfig {
+        schema_version: 9,
+        repositories: vec![id.to_string()],
+        last_active: Some(id.to_string()),
+        ..AppConfig::default()
+    };
+    let json = serde_json::to_vec(&cfg).unwrap();
+    store.save_app_config(&json).await.unwrap();
+    store
+}
+
+/// A registered repo at the config root is relocated into
+/// `repositories/<id>/`: all sealed files + the clone move, the clone's
+/// `local_path` is rewritten, and schema bumps to 10.
+#[tokio::test]
+async fn m0010_relocates_repo_into_subdir() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = "0123456789abcdef0123456789abcdef";
+    let store = seed_pre_relocate(dir.path(), id, true).await;
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    let subdir = dir.path().join("repositories").join(id);
+    for name in ["repo.json", "identity", "app_id_pass"] {
+        assert!(
+            subdir.join(name).exists(),
+            "{name} should be under repositories/<id>/"
+        );
+        assert!(
+            !dir.path().join(name).exists(),
+            "{name} should be gone from the config root"
+        );
+    }
+    assert!(
+        subdir.join("repo").exists(),
+        "clone moved under repositories/<id>/"
+    );
+    assert!(
+        !dir.path().join("repo").exists(),
+        "clone gone from the root"
+    );
+    assert_eq!(
+        reload_at(dir.path(), &store).await.schema_version,
+        APP_CONFIG_SCHEMA_VERSION
+    );
+    // local_path rewritten to the clone's new location.
+    let facade = Arc::new(Store::new(subdir.clone(), None));
+    let rc = facade.config().await.unwrap();
+    assert_eq!(rc.local_path, subdir.join("repo").to_string_lossy());
+}
+
+/// An empty registry (fresh install / never-completed setup) ⇒ nothing
+/// relocated: a stray `repo.json` at the root is untouched and no subdir is
+/// created. Schema still bumps so the step doesn't re-run forever.
+#[tokio::test]
+async fn m0010_noop_when_no_registered_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::new(dir.path().to_path_buf(), None));
+    let cfg = AppConfig {
+        schema_version: 9,
+        ..AppConfig::default()
+    };
+    let json = serde_json::to_vec(&cfg).unwrap();
+    store.save_app_config(&json).await.unwrap();
+    std::fs::write(dir.path().join("repo.json"), OLD_REPO_JSON).unwrap();
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+
+    run_app_migrations(&state).await;
+
+    assert_eq!(
+        reload_at(dir.path(), &store).await.schema_version,
+        APP_CONFIG_SCHEMA_VERSION
+    );
+    assert!(
+        dir.path().join("repo.json").exists(),
+        "no registered id ⇒ repo.json untouched"
+    );
+    assert!(
+        !dir.path().join("repositories").exists(),
+        "no subdir created when there is nothing to relocate"
+    );
+}
+
+/// CRASH-RESUME: a run killed mid-m0010 (some files already moved, schema still
+/// 9) must complete to the identical end state on re-run — no duplication, no
+/// loss. Pins the idempotent-move contract that makes the schema bump a safe
+/// commit point.
+#[tokio::test]
+async fn m0010_crash_resume_completes_partial_move() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = "0123456789abcdef0123456789abcdef";
+    let store = seed_pre_relocate(dir.path(), id, true).await;
+    // Simulate a crash after a partial move: identity + app_id_pass already
+    // relocated, repo.json + clone still at the root, schema still 9.
+    let subdir = dir.path().join("repositories").join(id);
+    std::fs::create_dir_all(&subdir).unwrap();
+    std::fs::rename(dir.path().join("identity"), subdir.join("identity")).unwrap();
+    std::fs::rename(dir.path().join("app_id_pass"), subdir.join("app_id_pass")).unwrap();
+    assert!(!dir.path().join("identity").exists());
+
+    let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
+    run_app_migrations(&state).await;
+
+    for name in ["repo.json", "identity", "app_id_pass"] {
+        assert!(
+            subdir.join(name).exists(),
+            "{name} under repositories/<id>/ after resume"
+        );
+        assert!(
+            !dir.path().join(name).exists(),
+            "{name} gone from the root after resume (no duplication)"
+        );
+    }
+    assert!(subdir.join("repo").exists(), "clone moved on resume");
+    assert_eq!(
+        reload_at(dir.path(), &store).await.schema_version,
+        APP_CONFIG_SCHEMA_VERSION
+    );
 }

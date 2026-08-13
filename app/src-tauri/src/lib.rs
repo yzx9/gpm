@@ -58,7 +58,23 @@ mod tests;
 
 /// Application state shared across all Tauri commands.
 pub(crate) struct AppState {
+    /// The **device** facade — a `Store` rooted at `config_dir` that owns only the
+    /// device-scoped `app.json` (prefs + the multi-repo registry) after the m0010
+    /// relocation. It does NOT hold any repo's `identity`/`repo.json` (those live
+    /// on the per-repo registry facades at `config_dir/repositories/<id>/`,
+    /// resolved via [`Self::repo`] / [`Self::active_repo`]). Seals `app.json`
+    /// under the auth-free master key, and is the master-key twin-inject target so
+    /// app-config writes stay keyed. Commands reading repo data must NOT read this
+    /// directly — resolve the active/registered facade instead.
     pub(crate) store: Arc<Store>,
+    /// The auth-free seal master key (R074), held so per-repository facades can
+    /// be constructed on demand: each repo's `Store` is rooted at
+    /// `config_dir/repositories/<id>/` and shares this key (keys are NOT
+    /// per-repo). `None` on desktop and in tests (seal passthrough). The key
+    /// already lives in `store`'s seal cache; this is a second reference for
+    /// facade construction, not a new secret surface (a process/memory attacker
+    /// is an explicit non-goal per R074).
+    pub(crate) master_key: Option<[u8; 32]>,
     /// Multi-repository registry (R080): the ordered index of per-repository
     /// `Store` facades, keyed by [`registry::RepoId`]. Populated from
     /// `AppConfig.repositories` after the migration chain runs (so m0009's
@@ -198,13 +214,13 @@ impl AppState {
 
     /// The active repository's facade — the vault the user is currently "in".
     /// App-shell commands that operate on repo data (identity, vault key,
-    /// `repo.json`) resolve this rather than referencing `self.store` by name,
-    /// so they stay correct once the registry facade diverges from the device
-    /// facade at the multi-repo relocation (C2b). Under the single-repo
-    /// invariant this is `Arc::ptr_eq` to `self.store`, so it is
-    /// behavior-identical until then. `None` (no registered repo) surfaces as a
-    /// `ConfigError` — the shell commands that reach this only run once a repo
-    /// is set up.
+    /// `repo.json`) resolve this rather than referencing `self.store` by name:
+    /// post-m0010 the active facade is a distinct `Store` rooted at the
+    /// per-repo subdir (`config_dir/repositories/<id>/`), while `self.store`
+    /// is the device facade owning only `app.json`. `None` (no registered
+    /// repo) surfaces as a `ConfigError` — the shell commands that reach this
+    /// only run once a repo is set up (the unlock path uses the
+    /// device-facade fallback in `setup::active_or_device_facade` instead).
     pub(crate) fn active_repo(&self) -> Result<Arc<Store>, rustpass::Error> {
         self.registry.active_facade().ok_or_else(|| {
             rustpass::Error::new(
@@ -213,6 +229,191 @@ impl AppState {
             )
         })
     }
+
+    /// The registry facade constructor bound to this state: one `Store` per
+    /// repo id, rooted at `config_dir/repositories/<id>/` and sharing the
+    /// auth-free master key ([`build_repo_facade`]). The single shape every
+    /// registry-population site passes to `RepoRegistry::populate`.
+    pub(crate) fn facade_builder(&self) -> impl Fn(&registry::RepoId) -> Arc<Store> + '_ {
+        let config_dir = self.store.config_dir().to_path_buf();
+        let master_key = self.master_key;
+        move |id| build_repo_facade(&config_dir, master_key, id)
+    }
+}
+
+/// The per-repository root: `config_dir/repositories/`. Each repository's
+/// `Store` facade — and its `repo.json` / `identity` / clone — lives under
+/// `<this>/<id>/` after the multi-repo relocation.
+pub(crate) fn repositories_dir(config_dir: &std::path::Path) -> std::path::PathBuf {
+    config_dir.join("repositories")
+}
+
+/// Relocate one repository's files from the device config root into its per-repo
+/// subdirectory `config_dir/repositories/<id>/`, rewriting `RepoConfig.local_path`
+/// to the clone's new location. Shared by the m0010 upgrade migration and
+/// [`setup::register_first_repo`](crate::setup::register_first_repo) (fresh-install
+/// + reconcile) so every adoption path lands the same on-disk layout.
+///
+/// Idempotent / crash-safe: each file is moved only while still at the config
+/// root (a prior partial run already moved it ⇒ skip), and `local_path` is
+/// rewritten while `repo.json` is still at the root (the device store reads
+/// `config_dir/repo.json`, master key in hand). The caller's commit point — the
+/// schema bump (m0010) or the `app.json` registry write (`register_first_repo`)
+/// — lands after this returns.
+pub(crate) async fn relocate_repo_into_subdir(
+    device_store: &Store,
+    id: &registry::RepoId,
+) -> Result<(), rustpass::Error> {
+    let config_dir = device_store.config_dir().to_path_buf();
+    let repo_subdir = repositories_dir(&config_dir).join(id.as_str());
+    tokio::fs::create_dir_all(&repo_subdir).await?;
+    // `repo.json` still at the config root ⇒ this run owns the clone move +
+    // `local_path` rewrite. If it is already gone, a prior partial run did this.
+    // Every existence probe propagates an IO error (see [`exists_or_err`]) — an
+    // indeterminate probe must halt the migration, never read as "already moved".
+    if exists_or_err(&config_dir.join("repo.json")).await? {
+        let mut rc = device_store.config().await?;
+        if let Some(name) = std::path::PathBuf::from(&rc.local_path)
+            .file_name()
+            .map(std::ffi::OsStr::to_owned)
+        {
+            let old_clone = std::path::PathBuf::from(&rc.local_path);
+            let new_clone = repo_subdir.join(&name);
+            if exists_or_err(&old_clone).await? && old_clone != new_clone {
+                tokio::fs::rename(&old_clone, &new_clone).await?;
+            }
+            rc.local_path = new_clone.to_string_lossy().into_owned();
+            device_store.save_repo_config_locked(&rc).await?;
+        }
+    }
+    // Move the sealed repo files (idempotent: a missing source was already moved).
+    for name in ["repo.json", "identity", "app_id_pass"] {
+        let src = config_dir.join(name);
+        if exists_or_err(&src).await? {
+            tokio::fs::rename(src, repo_subdir.join(name)).await?;
+        }
+    }
+    Ok(())
+}
+
+/// `Ok(true)` iff the path exists; an IO error on the probe propagates. In a
+/// file-moving migration whose commit point is the schema bump, an
+/// indeterminate probe (EACCES/EIO) must halt — leaving the schema un-bumped
+/// so the engine retries — never silently read as "already moved" and strand
+/// the file at the config root past recovery.
+pub(crate) async fn exists_or_err(path: &std::path::Path) -> Result<bool, rustpass::Error> {
+    tokio::fs::try_exists(path)
+        .await
+        .map_err(rustpass::Error::from)
+}
+
+/// Construct one registry facade: a `Store` rooted at
+/// `config_dir/repositories/<id>/` sharing the auth-free master key. The
+/// single construction path for every registry-population site (`init_state`,
+/// `setup::register_first_repo`, the unlock-time re-population) so the
+/// rooting rule lives in one place.
+pub(crate) fn build_repo_facade(
+    config_dir: &std::path::Path,
+    master_key: Option<[u8; 32]>,
+    id: &registry::RepoId,
+) -> Arc<Store> {
+    Arc::new(Store::new(
+        repositories_dir(config_dir).join(id.as_str()),
+        master_key,
+    ))
+}
+
+/// Seed every registry facade for use: transfer the device facade's seal keys
+/// (the master, and the vault while the seals are bridged — including a vault
+/// key a just-run migration chain minted, e.g. m0007), seed the persisted
+/// `autosync` pref (the facade cache defaults to `true`; an unseeded `OFF`
+/// would pull-write-push every save against the user's setting), and
+/// best-effort resolve the storage/crypto backends + legacy envelopes. All
+/// steps soft-skip when a facade's `repo.json` is missing or keyless, so this
+/// is safe to run unconditionally at any population site.
+pub(crate) async fn seed_registry_facades(state: &AppState) {
+    let autosync = state.app_config.get_behavior().autosync;
+    let master = state.store.master_key();
+    let vault = state.store.vault_key();
+    for id in state.registry.list_ids() {
+        let Some(facade) = state.registry.facade(&id) else {
+            continue;
+        };
+        facade.set_master_key(master);
+        facade.set_vault_key(vault);
+        facade.set_autosync(autosync);
+        if let Err(e) = facade.migrate_seal().await {
+            log::warn!("registry facade seal migrate failed: {e}");
+        }
+        if let Err(e) = facade.resolve_storage().await {
+            log::warn!("registry facade storage resolve failed: {e}");
+        }
+        if let Err(e) = facade.resolve_crypto().await {
+            log::warn!("registry facade crypto resolve failed: {e}");
+        }
+    }
+}
+
+/// Re-derive the in-memory registry from the persisted `AppConfig` when it is
+/// empty — the unlock-time companion to `init_state`'s populate: a deferred
+/// migration chain that completes m0009/m0010 inside `app_unlock` rewrites the
+/// registry on disk AFTER `init_state` already ran, and without this every
+/// repo-scoped command of the session fails with "no repository configured"
+/// until restart. No-op when the registry is already populated (the normal
+/// path). Callers must have refreshed the config cache past the chain
+/// (`reload_behavior` re-reads the whole merged `app.json` in the new world).
+/// Freshly built facades are seeded via [`seed_registry_facades`], which also
+/// transfers the device facade's keys — including a vault key the chain just
+/// minted.
+pub(crate) async fn repopulate_registry_if_empty(state: &AppState) {
+    if !state.registry.is_empty() {
+        return;
+    }
+    populate_registry_from_config(state).await;
+    seed_registry_facades(state).await;
+}
+
+/// The single `AppConfig` → registry derivation: map the persisted id list +
+/// `last_active` to facades via [`AppState::facade_builder`] and populate the
+/// live registry. Shared by `init_state`'s cold-start populate and
+/// [`repopulate_registry_if_empty`]'s unlock-time re-derive so the two can't
+/// drift.
+///
+/// An id is registered only when its `repositories/<id>/repo.json` provably
+/// exists (the relocation landed). Everything else — files still at the
+/// config root (a halted or persistently-failing m0010, a half-setup clone),
+/// an indeterminate/`ENOTDIR` probe, or nothing at all — is SKIPPED:
+/// registering a facade over a not-yet-existing home wedges recovery
+/// (`register_first_repo` no-ops on the non-empty registry while no facade
+/// ever sees the real files). Skipping keeps the registry empty so the
+/// device-facade fallback serves the session and the chain /
+/// `startup_reconcile` paths retry the relocate.
+pub(crate) async fn populate_registry_from_config(state: &AppState) {
+    let cfg = state.app_config.get();
+    let root = state.store.config_dir().to_path_buf();
+    let mut ids = Vec::with_capacity(cfg.repositories.len());
+    for s in &cfg.repositories {
+        let id = registry::RepoId::from(s.clone());
+        // Register only a PROVABLY relocated repo: its `repo.json` exists at
+        // `repositories/<id>/`. Anything else — files still at the config root
+        // (m0010 not run or persistently failing, an ENOTDIR/indeterminate
+        // probe), or nothing at all — skips: the chain, `startup_reconcile`,
+        // and the device-facade fallback own recovery, and registering a
+        // facade over a not-yet-existing home is exactly the wedge
+        // (`register_first_repo` no-ops on the non-empty registry while no
+        // facade ever sees the real files).
+        let subdir_json = repositories_dir(&root).join(id.as_str()).join("repo.json");
+        if matches!(tokio::fs::try_exists(&subdir_json).await, Ok(true)) {
+            ids.push(id);
+        }
+    }
+    let last_active = cfg
+        .last_active
+        .map(registry::RepoId::from)
+        .filter(|id| ids.contains(id));
+    state
+        .registry
+        .populate(ids, last_active, state.facade_builder());
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +550,7 @@ fn init_state(
     store: Arc<Store>,
     app_config: AppConfigStore,
     app_lock_enabled: bool,
+    master_key: Option<[u8; 32]>,
 ) -> AppState {
     // Apply the persisted log level NOW (the sealed config is already loaded by
     // the setup closure's reload). The plugin is capped at Debug (see `run()`),
@@ -385,6 +587,7 @@ fn init_state(
 
     let app_state = AppState {
         store,
+        master_key,
         // Empty until the migration chain runs (m0009 registers the existing
         // repo's id); populated just below, after `run_app_migrations`.
         registry: registry::RepoRegistry::empty(),
@@ -437,52 +640,33 @@ fn init_state(
     // Arm the mid-session revert timer if a verbose window is still live (a
     // relaunch inside the window keeps capturing at Debug, then auto-reverts).
     verbose::arm_verbose_timer(&app_state, app.handle());
-    // Reload the sealed config + reseed the Store's injected `autosync`
-    // so a cold start sees the persisted values. R074/D: the auth-free master key
-    // is always loaded (even under app-lock), so the sealed merged config is
-    // readable here unconditionally — no app-lock guard. (The setup closure's
-    // reload already populated the caches; this is a defensive re-seed covering
-    // the no-migration cold start + post-migration refresh.)
+    // Reload the sealed config so a cold start sees the persisted values.
+    // R074/D: the auth-free master key is always loaded (even under app-lock),
+    // so the sealed merged config is readable here unconditionally — no
+    // app-lock guard. (The setup closure's reload already populated the caches;
+    // this is a defensive re-seed covering the no-migration cold start +
+    // post-migration refresh. In the new world this refreshes the WHOLE cache,
+    // so the registry populate below sees m0009's `repositories` write.)
     tauri::async_runtime::block_on(app_state.app_config.reload_behavior()).ok();
-    app_state
-        .store
-        .set_autosync(app_state.app_config.get_behavior().autosync);
     // Populate the multi-repository registry from the (now-migrated) `AppConfig`:
-    // m0009 has registered the existing repo's id into `repositories`/`last_active`.
-    // Until the relocate migration lands, the facade root is still `config_dir`
-    // (the single repo's historical location), so every entry shares the device
-    // store. One repo ⇒ behavior identical to today.
-    {
-        let device_store = Arc::clone(&app_state.store);
-        let cfg = app_state.app_config.get();
-        let ids = cfg
-            .repositories
-            .iter()
-            .map(|s| registry::RepoId::from(s.clone()))
-            .collect::<Vec<_>>();
-        let last_active = cfg.last_active.map(registry::RepoId::from);
-        app_state
-            .registry
-            .populate(ids, last_active, move |_id| Arc::clone(&device_store));
+    // m0009 registered the existing repo's id; m0010 relocated its files under
+    // `config_dir/repositories/<id>/`. Build one facade per id via the shared
+    // [`AppState::facade_builder`]. `state.store` stays the device facade
+    // (rooted at `config_dir`, owns `app.json`). One repo ⇒ behavior identical.
+    tauri::async_runtime::block_on(populate_registry_from_config(&app_state));
+    // Self-heal the registry half-states (adopt an unregistered configured
+    // repo; finish a registered-but-unrelocated one). Schema-gated — see
+    // `startup_reconcile`.
+    if let Err(e) = tauri::async_runtime::block_on(setup::startup_reconcile(&app_state)) {
+        log::warn!("startup repo reconciliation failed: {e}");
     }
-    // Self-heal the setup half-state: if `register_first_repo` failed mid-setup
-    // (after identity/config were persisted but before the registry entry + id
-    // landed in `app.json`), the registry is empty here. Fresh installs (no
-    // repo.json yet) skip — only a configured store with an empty registry is
-    // the recoverable half-state. Same path setup uses; idempotent once
-    // `repositories` is non-empty (populate then fills the registry normally).
-    if app_state.registry.is_empty() {
-        let reconciled = tauri::async_runtime::block_on(async {
-            // No repo.json ⇒ fresh install / pre-setup, nothing to register.
-            if app_state.store.config().await.is_err() {
-                return Ok(());
-            }
-            setup::register_first_repo(&app_state).await
-        });
-        if let Err(e) = reconciled {
-            log::warn!("startup repo reconciliation failed: {e}");
-        }
-    }
+    // Seed every registry facade for use: transfer the device facade's seal
+    // keys, seed the persisted `autosync` pref, and best-effort resolve the
+    // storage/crypto backends. Without this the facades stay backend-less —
+    // `storage()`/`crypto()` return `BackendNotAvailable` and every repo op
+    // fails on installs whose `app_unlock` one-shots never run (all desktop,
+    // Android with the gate off).
+    tauri::async_runtime::block_on(seed_registry_facades(&app_state));
     app_state
 }
 
@@ -676,7 +860,7 @@ pub fn run() {
                 .initialization_script(theme_script)
                 .initialization_script(locale_script)
                 .build()?;
-            let state = init_state(app, store, app_config, app_lock_enabled);
+            let state = init_state(app, store, app_config, app_lock_enabled, master_key);
             // Apply the persisted background-sync cadence on launch
             // (enqueue/cancel the WorkManager periodic work).
             #[cfg(target_os = "android")]

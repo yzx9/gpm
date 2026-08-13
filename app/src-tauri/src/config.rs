@@ -62,8 +62,8 @@ impl From<RepoConfig> for RepoConfigPublic {
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_config(state: State<'_, AppState>) -> Result<RepoConfigPublic, Error> {
-    // repo.json is repo-scoped — read it off the active repo facade (==
-    // `state.store` under the single-repo invariant).
+    // repo.json is repo-scoped — read it off the active repo facade (rooted at
+    // `config_dir/repositories/<id>/` post-m0010, NOT the device facade).
     state
         .active_repo()?
         .config()
@@ -86,26 +86,74 @@ pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> 
         &app,
         crate::entry_cache::EntryCacheReason::Lock,
     );
-    // Wipe every registered repository's files (each repo's repo.json/identity/
-    // app_id_pass/repo clone). Iterating the registry keeps this correct once
-    // each repo lives under its own facade at the relocation; today it is the
-    // single repo on the device facade, identical to the prior `state.store
-    // .reset()`. `reset()` wipes the repo dir + sealed repo files and leaves the
-    // device-scoped `app.json` (and its prefs) intact.
-    for id in state.registry.list_ids() {
-        if let Some(facade) = state.registry.facade(&id) {
-            facade.reset().await?;
-        }
-    }
-    // Drop the in-memory index and the persisted registry fields
-    // (repositories/last_active) — the repos they named are gone. Device prefs
-    // in `app.json` (locale/theme/lock-mode/…) survive.
-    state.registry.clear();
-    state.app_config.clear_repositories().await?;
+    reset_config_core(&state).await?;
     // After a reset there is no identity, so the app is no longer locked — emit
     // the real state so any open unlock overlay closes. Emit against the device
     // facade (the registry is now empty); its identity was wiped by the reset.
     emit_lock_state(&app, &state.store, false, LockEventReason::Reset).await;
+    Ok(())
+}
+
+/// The data-wipe core of Emergency Reset: every registered repository's files,
+/// any repo files stranded at the config root, orphaned `repositories/<id>/`
+/// dirs, and the persisted registry fields. Device prefs in `app.json`
+/// (locale/theme/lock-mode/…) survive. Extracted from the command so the wipe
+/// contract is testable without a Wry handle.
+pub(crate) async fn reset_config_core(state: &AppState) -> Result<(), Error> {
+    // Wipe every registered repository's files (each repo's repo.json/identity/
+    // app_id_pass/repo clone). Each registered facade is rooted at its own
+    // per-repo dir (post-m0010: `config_dir/repositories/<id>/`), so iterating
+    // the registry wipes each one wherever it lives — NOT the device facade
+    // (`state.store` at `config_dir`, which owns only `app.json`). `reset()`
+    // wipes the repo dir + sealed repo files and leaves the device-scoped
+    // `app.json` (and its prefs) intact.
+    //
+    // A per-wipe fs failure (EBUSY/EACCES on an in-flight sync's file, …) logs
+    // and CONTINUES: the registry bookkeeping below must be cleared no matter
+    // what — a reset that aborted early with `repositories` still persisted
+    // would re-register dead ids on the next launch and wedge re-setup behind
+    // `register_first_repo`'s non-empty no-op. The first collected failure is
+    // surfaced to the caller after the bookkeeping lands.
+    let mut first_err: Option<Error> = None;
+    for id in state.registry.list_ids() {
+        if let Some(facade) = state.registry.facade(&id)
+            && let Err(e) = facade.reset().await
+        {
+            log::warn!("config: reset could not wipe repository {id}: {e}");
+            first_err.get_or_insert(e);
+        }
+    }
+    // Residue the registry loop cannot reach — "erase ALL local data" must not
+    // leave secrets behind in either stranded shape:
+    // (a) repo files still at the config root (a half-registered or
+    //     mid-migration state — exactly when a user reaches for reset). The
+    //     device facade's own `reset()` removes exactly those root files
+    //     (identity/repo.json/app_id_pass + the clone at repo.json's
+    //     local_path) while leaving the device-scoped `app.json` intact.
+    if let Err(e) = state.store.reset().await {
+        log::warn!("config: reset could not wipe root-stranded files: {e}");
+        first_err.get_or_insert(e);
+    }
+    // (b) every `repositories/<id>/` dir — the (now file-less) registered
+    //     roots and any orphan whose id never made it into `app.json`.
+    //     Best-effort: a removal failure logs and continues — the registered
+    //     file wipes above already succeeded.
+    let repos_dir = crate::repositories_dir(state.store.config_dir());
+    if let Ok(mut entries) = tokio::fs::read_dir(&repos_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if let Err(e) = tokio::fs::remove_dir_all(entry.path()).await {
+                log::warn!("config: reset could not remove repo dir: {e}");
+            }
+        }
+    }
+    // Drop the in-memory index and the persisted registry fields
+    // (repositories/last_active) — the repos they named are gone. Runs even
+    // after a partial wipe (see above).
+    state.registry.clear();
+    state.app_config.clear_repositories().await?;
+    if let Some(e) = first_err {
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -190,8 +238,7 @@ pub(crate) async fn set_lock_mode(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-lock-mode: {mode:?}");
     let cfg = state.app_config.set_lock_mode(mode).await?;
-    // Re-apply the mode to the active repo's identity cache + timer (==
-    // `state.store` under the single-repo invariant).
+    // Re-apply the mode to the active repo's identity cache + timer.
     let active = state.active_repo()?;
     refresh_security_cache(&state, &active).await;
     // Apply the new mode to the live timer (reads the just-refreshed cache).
@@ -212,8 +259,8 @@ pub(crate) async fn set_gate_idle(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-gate-idle: {mode:?}");
     let cfg = state.app_config.set_gate_idle(mode).await?;
-    // Apply to the active repo's gate-idle timer (== `state.store` under the
-    // single-repo invariant); reads the just-updated app_config cache.
+    // Apply to the active repo's gate-idle timer; reads the just-updated
+    // app_config cache.
     let active = state.active_repo()?;
     reset_gate_idle_timer(&state, &app, &active);
     Ok(cfg)
@@ -262,8 +309,8 @@ pub(crate) async fn set_autosync(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-autosync: {enabled}");
     let cfg = state.app_config.set_autosync(enabled).await?;
-    // Seed the active repo facade's injected autosync cache (== `state.store`
-    // under the single-repo invariant); `autosync_write` reads it.
+    // Seed the active repo facade's injected autosync cache;
+    // `autosync_write` reads it.
     state.active_repo()?.set_autosync(enabled);
     // Background sync is linked to AutoSync — re-apply the schedule
     // when AutoSync goes on, cancel it when off (else the Worker wakes every

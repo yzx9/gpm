@@ -14,9 +14,11 @@
 //! and resolves a `RepoId` to its facade in O(1).
 //!
 //! Step 1 introduces the structure with exactly one repository, behavior-
-//! identical to today's single-repo app. The on-disk per-repo relocation
-//! (`config_dir/repositories/<id>/`) lands with the `m0009` migration; until
-//! then the facade is rooted at `config_dir` (the historical single-repo layout).
+//! identical to today's single-repo app. The `m0009` migration assigns the
+//! existing repo its id (writing `repositories`/`last_active` into `app.json`);
+//! `m0010` relocates its files into `config_dir/repositories/<id>/`. The
+//! registry's facades are rooted at that per-repo subdir; the device facade
+//! (`AppState::store` at `config_dir`) keeps only the device-scoped `app.json`.
 
 // R080 multi-repository is introduced incrementally: the `RepoEntry` one-shots
 // and the wider `RepoRegistry` API land now and are consumed by the threading
@@ -49,12 +51,6 @@ const ONE_SHOT_PENDING: u8 = 0;
 pub(crate) struct RepoId(String);
 
 impl RepoId {
-    /// Wrap an already-validated id string.
-    #[must_use]
-    pub(crate) fn new(id: String) -> Self {
-        Self(id)
-    }
-
     /// The raw id string.
     #[must_use]
     pub(crate) fn as_str(&self) -> &str {
@@ -360,5 +356,24 @@ mod tests {
         let empty = RepoRegistry::empty();
         assert!(empty.is_empty());
         assert!(empty.active_facade().is_none());
+    }
+
+    /// The producer/consumer contract: `generate` is the ONLY producer of
+    /// persisted ids and the command funnel hard-rejects anything failing
+    /// `is_valid_form` — a hex-encoding regression would mint ids every
+    /// command then rejects, bricking all real installs while hand-written
+    /// test literals stay green.
+    #[test]
+    fn generated_ids_are_canonical_form_and_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..32 {
+            let id = RepoId::generate().unwrap();
+            assert!(
+                RepoId::is_valid_form(id.as_str()),
+                "generate must produce funnel-passable ids: {}",
+                id.as_str()
+            );
+            assert!(seen.insert(id), "ids must not repeat");
+        }
     }
 }

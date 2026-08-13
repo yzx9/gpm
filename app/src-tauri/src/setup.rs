@@ -5,11 +5,13 @@
 //! Setup & identity commands — repo clone, identity pick / verify / save, and
 //! the auth-state snapshot the router guard reads.
 
+use std::sync::Arc;
+
 use rustpass::crypto::{CryptoBackend, GpgBackend};
 use rustpass::error::ErrorCode;
 use rustpass::identity::{IdentityType, classify_identity};
 use rustpass::ssh;
-use rustpass::{Error, IdentityInfo, KeyType, Recipient};
+use rustpass::{Error, IdentityInfo, KeyType, Recipient, Store};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_file_picker::{FilePickerError, FilePickerExt};
@@ -131,31 +133,51 @@ pub(crate) struct PendingIdentity {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
+/// Resolve the facade the auth/configured-state commands read from: the active
+/// repo facade once a repository is registered, else the device facade. After the
+/// m0010 relocation the repo's `identity`/`repo.json` live at
+/// `config_dir/repositories/<id>/` (the registry facade), while `state.store`
+/// (the device facade at `config_dir`) holds only `app.json` — so reading
+/// `state.store` directly reports `configured: false` forever, looping the router
+/// guard (`router-guards.ts`) to `/setup` after every completed setup. The
+/// device-facade fallback covers the pre-setup window, when the repo's files
+/// still sit at the config root before [`register_first_repo`] relocates them.
+pub(crate) fn active_or_device_facade(state: &AppState) -> Arc<Store> {
+    state
+        .registry
+        .active_facade()
+        .unwrap_or_else(|| Arc::clone(&state.store))
+}
+
 /// Get the authentication state as a single atomic snapshot.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_auth_state(state: State<'_, AppState>) -> Result<AuthState, Error> {
-    let itype = state.store.identity_type().await;
+    // Read off the active repo facade (post-relocate), not the device facade.
+    let store = active_or_device_facade(&state);
+    let itype = store.identity_type().await;
     Ok(AuthState {
-        configured: state.store.is_configured(),
-        encrypted: state.store.is_identity_encrypted().await,
-        unlocked: state.store.is_unlocked(),
+        configured: store.is_configured(),
+        encrypted: store.is_identity_encrypted().await,
+        unlocked: store.is_unlocked(),
         identity_type: identity_type_string(itype),
     })
 }
 
-/// Check if the app has been configured (identity + repo exist).
+/// Check if the app has been configured (identity + repo exist) on the active
+/// repo facade (post-relocate), not the device facade.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
 pub(crate) fn is_configured(state: State<'_, AppState>) -> Result<bool, Error> {
-    Ok(state.store.is_configured())
+    Ok(active_or_device_facade(&state).is_configured())
 }
 
-/// Check if the repo has been cloned (step 1 done, identity may be missing).
+/// Check if the active repo has been cloned (step 1 done, identity may be
+/// missing), reading off the registry facade post-relocate.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
 pub(crate) fn is_repo_ready(state: State<'_, AppState>) -> Result<bool, Error> {
-    Ok(state.store.is_repo_ready())
+    Ok(active_or_device_facade(&state).is_repo_ready())
 }
 
 /// Step 1 of setup: clone the repo and save repo config (no identity).
@@ -393,8 +415,12 @@ pub(crate) async fn complete_setup(
         .inspect_err(|e| log::warn!("setup: complete failed: {e}"))?;
     register_first_repo(&state).await?;
     // Setup may leave an encrypted identity locked (the passphrase isn't cached);
-    // emit the real state so the frontend shows the unlock overlay if needed.
-    emit_lock_state(&app, &state.store, false, LockEventReason::Setup).await;
+    // emit the real state so the frontend shows the unlock overlay if needed. Read
+    // off the active repo facade — register_first_repo just relocated the identity
+    // there, so the device facade (state.store) has none and would emit a wrong
+    // locked=false, hiding the overlay for an encrypted identity.
+    let facade = active_or_device_facade(&state);
+    emit_lock_state(&app, &facade, false, LockEventReason::Setup).await;
     Ok(())
 }
 
@@ -676,8 +702,10 @@ pub(crate) async fn complete_setup_from_file(
         .await
         .inspect_err(|e| log::warn!("setup: complete-from-file failed: {e}"))?;
     register_first_repo(&state).await?;
-    // See [`complete_setup`]: emit the real post-setup lock state.
-    emit_lock_state(&app, &state.store, false, LockEventReason::Setup).await;
+    // See [`complete_setup`]: emit the real post-setup lock state off the active
+    // repo facade (the identity was just relocated there, not the device facade).
+    let facade = active_or_device_facade(&state);
+    emit_lock_state(&app, &facade, false, LockEventReason::Setup).await;
     Ok(())
 }
 
@@ -735,7 +763,9 @@ pub(crate) async fn setup(
     // Adopt the configured device store into the registry (fresh installs skip
     // m0009, so without this the registry stays empty).
     if result.is_ok() {
-        register_first_repo(&state).await?;
+        register_first_repo(&state)
+            .await
+            .inspect_err(|e| log::warn!("setup: register-first-repo failed: {e}"))?;
     }
     result.inspect_err(|e| log::warn!("setup: start failed: {e}"))
 }
@@ -745,28 +775,117 @@ pub(crate) async fn setup(
 // ---------------------------------------------------------------------------
 
 /// Adopt the device store into the multi-repo registry on first-run setup:
-/// mint a `RepoId`, persist `repositories`/`last_active`, and populate the live
-/// registry with `state.store` as the entry facade. Fresh installs skip the
-/// m0009 migration (schema starts at 9), so without this the registry stays
-/// empty and the active-repo resolver throws on `EntryListPage`. Reuses the
-/// device store as the facade (same as startup `populate`) — no identity-model
-/// work. Called from every setup finalize path.
+/// mint a `RepoId`, relocate the just-created repo into `repositories/<id>/`,
+/// persist `repositories`/`last_active`, and populate the live registry with a
+/// facade rooted at that subdir. Fresh installs skip the m0009/m0010 migrations
+/// (empty registry at first launch), so without this the registry stays empty
+/// and the active-repo resolver throws on `EntryListPage`. Called from every
+/// setup finalize path + the startup reconciliation.
+///
+/// Retry-safe: the id is persisted to `app.json` BEFORE the (id-keyed) relocate,
+/// so a retry after a partial failure reuses the same id rather than orphaning
+/// the half-moved repo under a stale one. [`set_first_repository`] is idempotent
+/// (a non-empty `repositories` ⇒ returns the existing id unchanged).
 pub(crate) async fn register_first_repo(state: &AppState) -> Result<(), Error> {
-    // Idempotent: if a repository is already registered, do nothing. Without
-    // this guard a second finalize pass would mint a FRESH id, overwrite
-    // `app.json` via `set_first_repository`, and populate the live registry
-    // with the new id — diverging the registry from persistence. (The
-    // startup-reconciliation caller already gates on `is_empty`; the setup
-    // finalize paths do not, so this is the load-bearing guard.)
+    // Idempotent: if a repository is already registered, do nothing. (The
+    // startup-reconciliation caller gates on `is_empty`; the setup finalize paths
+    // do not, so this is the load-bearing guard.)
     if !state.registry.is_empty() {
         return Ok(());
     }
-    let id = crate::registry::RepoId::generate()?;
-    state.app_config.set_first_repository(&id).await?;
-    let device_store = state.store.clone();
+    // Reuse a persisted id if one is already in `app.json` (a prior partial run
+    // minted it); otherwise mint + persist a fresh one. Persisting first keeps
+    // the id stable across retries.
+    let cfg = state.app_config.get();
+    let id = if let Some(id_str) = cfg.repositories.first() {
+        crate::registry::RepoId::from(id_str.clone())
+    } else {
+        let id = crate::registry::RepoId::generate()?;
+        state.app_config.set_first_repository(&id).await?;
+        id
+    };
+    // Land the multi-repo layout: move the repo's files from the device config
+    // root into `repositories/<id>/`. Idempotent — a no-op if already relocated.
+    crate::relocate_repo_into_subdir(&state.store, &id).await?;
+    // Register a facade rooted at the repo's new home (shared constructor +
+    // seeding: keys, the persisted autosync pref, backend resolution).
     state
         .registry
-        .populate(vec![id.clone()], Some(id), move |_| device_store.clone());
+        .populate(vec![id.clone()], Some(id), state.facade_builder());
+    crate::seed_registry_facades(state).await;
+    Ok(())
+}
+
+/// Startup self-heal for the registry half-states, schema-gated. Runs in
+/// `init_state` after the migration chain attempt:
+///
+/// - **Adopt** — registry empty but a configured repo still sits at the config
+///   root: `register_first_repo` (mint/reuse an id, relocate, register).
+///   Covers a setup that died between persisting identity/config and the
+///   registry write landing in `app.json`.
+/// - **Finish** — a registered id exists but `repo.json` is still at the
+///   config root (a `register_first_repo` that died between persisting the id
+///   and moving the files): re-run the idempotent relocate for the first
+///   registered id. Neither recovery may gate on registry emptiness alone —
+///   the half-registered state would otherwise be unrecoverable (the facade
+///   roots at an empty subdir forever and re-setup early-returns).
+///
+/// The schema gate mirrors the headless worker's `mid_migrate` skip: while the
+/// chain is deferred (app-lock upgraders below schema 7 resume it at unlock),
+/// m0009/m0010 have not run — relocating here would pull the very files the
+/// pending migrations read via the config-root-rooted device facade out from
+/// under the chain and wedge it at `Pending` forever. Those users are picked
+/// up by the post-chain re-population in `app_unlock` instead.
+pub(crate) async fn startup_reconcile(state: &AppState) -> Result<(), Error> {
+    match state.app_config.peek_schema_version().await {
+        crate::app_config::PeekOutcome::Version(v)
+            if v < crate::migrations::APP_CONFIG_SCHEMA_VERSION =>
+        {
+            return Ok(()); // mid-migrate: the chain must finish first
+        }
+        // A present-but-unreadable app.json halts the migration engine
+        // (re-setup may be required); the reconcile must not adopt past that
+        // halt — the adopt path's registry write would overwrite the corrupt
+        // config with cache defaults, silently dropping the user's prefs.
+        crate::app_config::PeekOutcome::Corrupt => return Ok(()),
+        _ => {}
+    }
+    let root_repo_json = crate::exists_or_err(&state.store.config_dir().join("repo.json")).await?;
+    let root_identity = crate::exists_or_err(&state.store.config_dir().join("identity")).await?;
+    if state.registry.is_empty() {
+        if !root_repo_json {
+            return Ok(()); // fresh install / pre-setup — nothing to adopt
+        }
+        if !root_identity {
+            // A clone completed but setup never did (the user is mid-way through
+            // the identity step). Adopting now would relocate `repo.json` into
+            // the subdir and register the repo, after which `complete_setup`'s
+            // identity save lands on the device root while `register_first_repo`
+            // no-ops on the now-non-empty registry — a facade with no identity,
+            // `is_configured() == false` forever, and an unrecoverable /setup
+            // loop. Leave the half-setup footprint alone: `complete_setup`'s own
+            // `register_first_repo` (registry still empty) does the relocate.
+            return Ok(());
+        }
+        return register_first_repo(state).await;
+    }
+    // Registered but not relocated: finish the move (idempotent).
+    if root_repo_json {
+        let id = state
+            .app_config
+            .get()
+            .repositories
+            .first()
+            .cloned()
+            .map(crate::registry::RepoId::from)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::ConfigError,
+                    "registered repository has no id in app.json".to_string(),
+                )
+            })?;
+        crate::relocate_repo_into_subdir(&state.store, &id).await?;
+    }
     Ok(())
 }
 
@@ -829,6 +948,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let state = AppState {
             store: Arc::new(Store::new(dir.path().to_path_buf(), None)),
+            master_key: None,
             registry: crate::registry::RepoRegistry::empty(),
             app_config: Arc::new(AppConfigStore::new(dir.path()).await),
             app_handle: None,

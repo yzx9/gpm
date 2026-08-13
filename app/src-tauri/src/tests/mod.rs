@@ -24,6 +24,7 @@ mod lock_state;
 mod locked_writes;
 mod migrations;
 mod read_commands;
+mod registry_lifecycle;
 mod seal_migrate;
 mod setup_flow;
 
@@ -194,6 +195,7 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
     // it into the config dir's repo.
     let state = AppState {
         store,
+        master_key: None,
         registry: crate::registry::RepoRegistry::empty(),
         app_config: Arc::new(app_config),
         app_handle: None,
@@ -216,10 +218,13 @@ pub(super) async fn make_unlocked_state(entries: &[(&str, &[u8])]) -> (AppState,
         verbose_timer: Mutex::new(None),
         verbose_generation: Arc::new(AtomicU64::new(0)),
     };
-    // Mirror the production single-repo invariant: register the test store under
-    // [`test_repo_id`] so threaded commands resolving `state.repo(id)` work (the
-    // registry facade is `Arc::ptr_eq` to `state.store`, exactly like a real
-    // single-repo app after init).
+    // Register the test store under [`test_repo_id`] so threaded commands
+    // resolving `state.repo(id)` work. CAUTION: the registry facade is
+    // `Arc::ptr_eq` to `state.store` — the PRE-relocate single-repo shape, NOT
+    // production post-m0010 (where the registry facade roots at
+    // `repositories/<id>/` and diverges from the device facade). Device-vs-
+    // repo-facade bugs are INVISIBLE through this factory; the divergent
+    // shape is covered by `tests/registry_lifecycle.rs`.
     let store_for_registry = Arc::clone(&state.store);
     state
         .registry
@@ -277,5 +282,74 @@ async fn repo_funnel_classifies_unknown_and_malformed_ids() {
     assert!(
         Arc::ptr_eq(&store, &state.store),
         "facade must be the device store"
+    );
+}
+
+/// R080 post-relocate regression: `get_auth_state`/`is_configured`/`is_repo_ready`
+/// must read the active REPO facade, not the device facade. After m0010 the repo's
+/// `identity`/`repo.json` live at `repositories/<id>/` (the registry facade);
+/// `state.store` (device facade at `config_dir`) holds only `app.json`. The
+/// [`make_unlocked_state`] factory registers the facade as `Arc::ptr_eq(&state
+/// .store)` — mirroring the PRE-relocate single-repo invariant — which MASKS the
+/// bug (a ptr-equal facade reads identically either way). So build the production
+/// divergent shape directly: an empty device facade + a configured registry facade
+/// at a distinct dir.
+#[tokio::test]
+async fn active_or_device_facade_reads_the_registry_facade_post_relocate() {
+    let device_dir = tempfile::tempdir().unwrap();
+    let repo_dir = tempfile::tempdir().unwrap();
+    // The registry facade's repo: identity + repo.json present ⇒ configured.
+    std::fs::write(repo_dir.path().join("identity"), b"test-identity").unwrap();
+    std::fs::write(repo_dir.path().join("repo.json"), b"{}").unwrap();
+
+    let state = AppState {
+        store: Arc::new(Store::new(device_dir.path().to_path_buf(), None)),
+        master_key: None,
+        registry: crate::registry::RepoRegistry::empty(),
+        app_config: Arc::new(AppConfigStore::new(device_dir.path()).await),
+        app_handle: None,
+        lock_timer: IdleTimer::new(),
+        pending_identity: Mutex::new(None),
+        lock_mode: Mutex::new(LockMode::default()),
+        clipboard_clear_secs: Mutex::new(rustpass::config::DEFAULT_CLIPBOARD_CLEAR_SECS),
+        clipboard_clear_handle: Mutex::new(None),
+        clipboard_clear_generation: Arc::new(AtomicU64::new(0)),
+        app_lock_enabled: AtomicBool::new(false),
+        app_locked: Arc::new(AtomicBool::new(false)),
+        gate_idle_timer: IdleTimer::new(),
+        last_activity_at: Mutex::new(std::time::Instant::now()),
+        cached_entry: Arc::new(Mutex::new(None)),
+        entry_cache_timer: IdleTimer::new(),
+        identity_coupled: AtomicBool::new(false),
+        seal_migrate_state: AtomicU8::new(0),
+        backend_resolve_state: AtomicU8::new(0),
+        active_cancel_slot: Arc::new(Mutex::new(None)),
+        verbose_timer: Mutex::new(None),
+        verbose_generation: Arc::new(AtomicU64::new(0)),
+    };
+    let repo_facade = Arc::new(Store::new(repo_dir.path().to_path_buf(), None));
+    let facade_for_registry = Arc::clone(&repo_facade);
+    state
+        .registry
+        .populate([test_repo_id()], Some(test_repo_id()), move |_| {
+            Arc::clone(&facade_for_registry)
+        });
+
+    // The device facade (state.store) sees NO repo — the value get_auth_state used
+    // to read, which would report configured=false and loop the router to /setup.
+    assert!(
+        !state.store.is_configured(),
+        "device facade must be unconfigured post-relocate"
+    );
+    // The helper resolves to the registry facade (NOT state.store), which IS
+    // configured — the value the router guard needs to avoid the /setup loop.
+    let resolved = crate::setup::active_or_device_facade(&state);
+    assert!(
+        Arc::ptr_eq(&resolved, &repo_facade),
+        "must resolve the registry facade, not the device facade"
+    );
+    assert!(
+        resolved.is_configured(),
+        "registry facade reports configured=true post-relocate"
     );
 }
