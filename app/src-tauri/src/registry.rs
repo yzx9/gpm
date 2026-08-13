@@ -307,6 +307,21 @@ impl RepoRegistry {
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Drop every entry, leaving an empty registry (no `last_active`). Used by
+    /// `reset_config` after it has wiped each repo's files: the in-memory index
+    /// mirrors the now-empty `app.json` registry fields the caller also clears.
+    pub(crate) fn clear(&self) {
+        self.entries
+            .write()
+            .expect("registry entries poisoned")
+            .clear();
+        self.by_id.write().expect("registry by_id poisoned").clear();
+        *self
+            .last_active
+            .write()
+            .expect("registry last_active poisoned") = None;
+    }
 }
 
 #[cfg(test)]

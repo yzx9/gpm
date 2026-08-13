@@ -52,10 +52,10 @@ async fn resume_within_window_stays_unlocked() {
         .await
         .unwrap();
     // Arms the timer AND stamps last_activity_at = now (the chokepoint).
-    identity::reset_gate_idle_timer(&app_state, app.handle());
+    identity::reset_gate_idle_timer(&app_state, app.handle(), &app_state.store);
     assert!(app_state.gate_idle_timer.is_armed());
 
-    applock::apply_resume_relock(&app_state, app.handle());
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store);
 
     assert!(
         !app_state.app_locked.load(Ordering::SeqCst),
@@ -82,13 +82,13 @@ async fn resume_past_window_relocks_with_return() {
         .set_gate_idle(GateIdle::After(300))
         .await
         .unwrap();
-    identity::reset_gate_idle_timer(&app_state, app.handle());
+    identity::reset_gate_idle_timer(&app_state, app.handle(), &app_state.store);
     // Simulate "last activity 400s ago" (N=300) — past the grace window.
     *app_state.last_activity_at.lock().unwrap() = Instant::now()
         .checked_sub(Duration::from_secs(400))
         .unwrap();
 
-    applock::apply_resume_relock(&app_state, app.handle());
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store);
 
     assert!(
         app_state.app_locked.load(Ordering::SeqCst),
@@ -123,7 +123,7 @@ async fn resume_off_always_relocks() {
     // would keep it unlocked — asserting it locks regardless pins Off ≠ grace).
     *app_state.last_activity_at.lock().unwrap() = Instant::now();
 
-    applock::apply_resume_relock(&app_state, app.handle());
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store);
 
     assert!(
         app_state.app_locked.load(Ordering::SeqCst),
@@ -154,7 +154,7 @@ async fn resume_already_locked_is_noop() {
         .await
         .unwrap();
     // Fire the idle timer (0s) → do_app_lock(Idle) → locked, reason idle.
-    identity::arm_gate_idle(&app_state, app.handle(), 0);
+    identity::arm_gate_idle(&app_state, app.handle(), 0, &app_state.store);
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(app_state.app_locked.load(Ordering::SeqCst));
     assert!(
@@ -163,7 +163,7 @@ async fn resume_already_locked_is_noop() {
     );
 
     // The return into an already-locked app: no-op (no re-emit, no state change).
-    applock::apply_resume_relock(&app_state, app.handle());
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store);
 
     assert!(
         app_state.app_locked.load(Ordering::SeqCst),
@@ -197,7 +197,7 @@ async fn reset_gate_idle_timer_stamps_last_activity_chokepoint() {
         .unwrap();
 
     // A secret op resets the timer directly through this chokepoint.
-    identity::reset_gate_idle_timer(&app_state, app.handle());
+    identity::reset_gate_idle_timer(&app_state, app.handle(), &app_state.store);
 
     let stamped = *app_state.last_activity_at.lock().unwrap();
     let drift = Instant::now().saturating_duration_since(stamped).as_secs();
@@ -224,7 +224,7 @@ async fn resume_grace_boundary_is_strict_less_than() {
     // elapsed == N (as_secs truncates sub-second jitter) → NOT < N → re-lock.
     *app_state.last_activity_at.lock().unwrap() =
         Instant::now().checked_sub(Duration::from_mins(5)).unwrap();
-    applock::apply_resume_relock(&app_state, app.handle());
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store);
     assert!(
         app_state.app_locked.load(Ordering::SeqCst),
         "elapsed==N must re-lock (strict <)"
@@ -235,7 +235,7 @@ async fn resume_grace_boundary_is_strict_less_than() {
     *app_state.last_activity_at.lock().unwrap() = Instant::now()
         .checked_sub(Duration::from_secs(299))
         .unwrap();
-    applock::apply_resume_relock(&app_state, app.handle());
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store);
     assert!(
         !app_state.app_locked.load(Ordering::SeqCst),
         "elapsed N-1 must grace"
@@ -262,7 +262,7 @@ async fn resume_grace_does_not_reset_last_activity() {
         .unwrap();
     *app_state.last_activity_at.lock().unwrap() = stale_at;
 
-    applock::apply_resume_relock(&app_state, app.handle()); // grace (100 < 300)
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store); // grace (100 < 300)
     assert!(!app_state.app_locked.load(Ordering::SeqCst), "must grace");
 
     let after = *app_state.last_activity_at.lock().unwrap();
@@ -291,7 +291,7 @@ async fn resume_future_last_activity_relocks_safe_direction() {
         .unwrap();
     *app_state.last_activity_at.lock().unwrap() = Instant::now() + Duration::from_mins(1);
 
-    applock::apply_resume_relock(&app_state, app.handle());
+    applock::apply_resume_relock(&app_state, app.handle(), &app_state.store);
     assert!(
         app_state.app_locked.load(Ordering::SeqCst),
         "future last (clock anomaly) must re-lock, not grace — fail-safe direction"

@@ -44,7 +44,6 @@ use tauri_plugin_keystore::{BiometricState, KeystoreError, KeystoreExt, PromptTe
 use zeroize::Zeroizing;
 
 use crate::entry_cache::EntryCacheReason;
-use crate::identity::LockEventReason;
 use crate::keystore::BiometricSlot;
 use crate::migrations::run_app_migrations;
 use crate::verbose::arm_verbose_timer;
@@ -213,18 +212,24 @@ pub(crate) async fn enable_biometric_app_lock(
     // Create the vault alias FIRST (ENCRYPT prompt). Crash-safe: the vault key
     // is recoverable BEFORE identity moves under it.
     keystore::store_slot(ks, &vault, BiometricSlot::Vault, prompt_text.as_ref()).await?;
-    // Re-key identity + app_id_pass master→vault. Both seals keyed: master_seal
-    // reads, the just-injected vault_seal writes.
+    // Re-key identity + app_id_pass master→vault. These are repo-scoped (the
+    // identity + passphrase slot live under the active repo facade), so route
+    // them through the active facade — which, under the single-repo invariant,
+    // is `state.store`. The auth-free master is twin-injected onto it so its
+    // master_seal can read identity under the master; both seals are keyed now
+    // (master_seal reads, the just-injected vault_seal writes).
+    let active = state.active_repo()?;
     state.store.set_master_key(Some(master));
-    state.store.set_vault_key(Some(vault));
-    state.store.rekey_identity_to_vault().await?;
+    active.set_master_key(Some(master));
+    active.set_vault_key(Some(vault));
+    active.rekey_identity_to_vault().await?;
     // The auth-free master stays (permanent) — do NOT delete it. Persist the
     // flag last so a crash before this leaves the resume to finish the enable.
     state.app_config.set_biometric_app_lock(true).await?;
     state.app_lock_enabled.store(true, Ordering::SeqCst);
     // The gate is now on with the app unlocked — arm the in-app idle timer
     // (R057). No-op when gate-idle is Off.
-    identity::reset_gate_idle_timer(&state, &app, &state.store);
+    identity::reset_gate_idle_timer(&state, &app, &active);
     Ok(())
 }
 
@@ -252,21 +257,28 @@ pub(crate) async fn disable_biometric_app_lock(
     let vault = keystore::retrieve_slot(ks, BiometricSlot::Vault, prompt_text.as_ref())
         .await?
         .ok_or_else(|| AppLockError::failed("No vault key to migrate back"))?;
-    state.store.set_vault_key(Some(vault)); // key vault_seal to read identity
+    // The identity + passphrase slot are repo-scoped — route their reads/writes
+    // through the active repo facade (== `state.store` under the single-repo
+    // invariant).
+    let active = state.active_repo()?;
+    active.set_vault_key(Some(vault)); // key vault_seal to read identity
     // Load the auth-free master (permanent, non-prompting) to write identity
     // back under it. The in-memory master may have been wiped by a prior
     // `app_lock` (disable can run while locked), so re-inject it BEFORE the
-    // re-key — rekey_identity_to_master writes via master_seal.
+    // re-key — rekey_identity_to_master writes via master_seal. Twin-inject:
+    // the device facade (seals app.json) and the active repo facade (seals
+    // repo.json/identity) each need the master keyed.
     let master = keystore::retrieve_master(ks)
         .await?
         .ok_or_else(|| AppLockError::failed("No auth-free master to disable into"))?;
     state.store.set_master_key(Some(master));
+    active.set_master_key(Some(master));
     // Re-key identity + app_id_pass vault→master, drop the vault alias, then
     // collapse vault_seal onto the master (post-disable there is no separate
     // vault — identity lives under the master).
-    state.store.rekey_identity_to_master().await?;
+    active.rekey_identity_to_master().await?;
     keystore::delete_slot(ks, BiometricSlot::Vault).await?;
-    state.store.set_vault_key(Some(master));
+    active.set_vault_key(Some(master));
     state.app_config.set_biometric_app_lock(false).await?;
     // The identity-auto-unlock opt-in is meaningless without the gate (app_unlock
     // is never called when app_lock_enabled is false). Clear its flag + sealed
@@ -274,10 +286,10 @@ pub(crate) async fn disable_biometric_app_lock(
     // persisted flag would silently re-activate auto-unlock with the old sealed
     // passphrase, and the Settings UI (which hides the opt-in while the gate is
     // off) would offer no way to clear it.
-    if let Err(e) = state.store.clear_app_identity_pass().await {
+    if let Err(e) = active.clear_app_identity_pass().await {
         log::warn!("app-lock: clear-app-identity-pass cleanup failed: {e}");
     }
-    if let Err(e) = state.store.set_unlock_identity_with_app(false).await {
+    if let Err(e) = active.set_unlock_identity_with_app(false).await {
         log::warn!("app-lock: set-unlock-identity-with-app cleanup failed: {e}");
     }
 
@@ -304,12 +316,19 @@ pub(crate) async fn run_seal_migrate_once(state: &AppState) {
     const SM_PENDING: u8 = 0;
     const SM_INFLIGHT: u8 = 1;
     const SM_DONE: u8 = 2;
+    // The identity/repo.json/app_id_pass envelope migrate is repo-scoped — run
+    // it on the active repo facade (== `state.store` under the single-repo
+    // invariant). No active repo ⇒ nothing to migrate; return without claiming
+    // the one-shot so a later unlock retries.
+    let Some(active) = state.registry.active_facade() else {
+        return;
+    };
     if state
         .seal_migrate_state
         .compare_exchange(SM_PENDING, SM_INFLIGHT, Ordering::AcqRel, Ordering::Acquire)
         .is_ok()
     {
-        match state.store.migrate_seal().await {
+        match active.migrate_seal().await {
             Ok(()) => {
                 state.seal_migrate_state.store(SM_DONE, Ordering::Release);
             }
@@ -339,6 +358,13 @@ pub(crate) async fn run_backend_resolve_once(state: &AppState) {
     const BR_PENDING: u8 = 0;
     const BR_INFLIGHT: u8 = 1;
     const BR_DONE: u8 = 2;
+    // The backend type + root live in the repo-scoped `repo.json` — resolve them
+    // on the active repo facade (== `state.store` under the single-repo
+    // invariant). No active repo ⇒ nothing to resolve; leave the one-shot
+    // pending so a later unlock retries.
+    let Some(active) = state.registry.active_facade() else {
+        return;
+    };
     if state
         .backend_resolve_state
         .compare_exchange(BR_PENDING, BR_INFLIGHT, Ordering::AcqRel, Ordering::Acquire)
@@ -348,14 +374,12 @@ pub(crate) async fn run_backend_resolve_once(state: &AppState) {
         // They read the same sealed repo.json at the same unlock instant, so a
         // failure in either is a failure of the shared config read — retry both
         // on the next unlock.
-        let storage_ok = state
-            .store
+        let storage_ok = active
             .resolve_storage()
             .await
             .inspect_err(|e| log::warn!("storage resolve failed: {e}"))
             .is_ok();
-        let crypto_ok = state
-            .store
+        let crypto_ok = active
             .resolve_crypto()
             .await
             .inspect_err(|e| log::warn!("crypto resolve failed: {e}"))
@@ -391,6 +415,10 @@ pub(crate) async fn app_unlock(
     if !state.app_locked.load(Ordering::SeqCst) {
         return Ok(());
     }
+    // The identity/vault-key/repo.json operations below are repo-scoped — route
+    // them through the active repo facade (== `state.store` under the
+    // single-repo invariant).
+    let active = state.active_repo()?;
     // Disarm the gate-idle timer for the duration of the unlock awaits (the
     // DECRYPT prompt, m0007's ENCRYPT, run_app_migrations). A fire in that
     // window would call do_app_lock mid-unlock, wiping vault_seal before
@@ -404,7 +432,10 @@ pub(crate) async fn app_unlock(
     // Non-prompting; a failure (incl. a malformed key) degrades to None (the
     // deadlock-fix below or m0007 supplies the master on the upgrader path).
     if let Ok(Some(master)) = keystore::retrieve_master(ks).await {
+        // Twin-inject: the device facade (seals app.json) and the active repo
+        // facade (seals repo.json/identity) each get the auth-free master keyed.
         state.store.set_master_key(Some(master));
+        active.set_master_key(Some(master));
     }
     // Retrieve the biometric key: the vault (post-m0007), or — when the vault
     // alias is absent (`None`, non-prompting) — the legacy master (upgrader
@@ -434,7 +465,8 @@ pub(crate) async fn app_unlock(
                 // pre-m0007) stays readable if m0007's ENCRYPT cancels, and so
                 // m0005/m0006 un-defer. m0007 mints the distinct vault + re-keys.
                 state.store.set_master_key(Some(key));
-                state.store.set_vault_key(Some(key));
+                active.set_master_key(Some(key));
+                active.set_vault_key(Some(key));
                 (key, false)
             }
             Err(e) => {
@@ -445,13 +477,13 @@ pub(crate) async fn app_unlock(
         };
     if from_vault {
         // Post-m0007: inject the vault key (master already loaded above).
-        state.store.set_vault_key(Some(key));
+        active.set_vault_key(Some(key));
         // Crash-safety resume: a half-finished enable/disable left identity
         // under the master while the vault alias is present — finish moving it
         // under the vault. An interrupted disable is undone here (identity stays
         // readable; the user re-disables) — no data loss either way.
-        if state.store.is_identity_under_master().await {
-            state.store.rekey_identity_to_vault().await?;
+        if active.is_identity_under_master().await {
+            active.rekey_identity_to_vault().await?;
             if let Err(e) = state.app_config.set_biometric_app_lock(true).await {
                 log::warn!("app-lock: resume set_biometric_app_lock persist failed: {e}");
             }
@@ -484,9 +516,7 @@ pub(crate) async fn app_unlock(
     // m0008 collapsed pref.json into the sealed merged app.json). Runs before
     // `app_locked` is cleared so the frontend sees real values after the emit.
     state.app_config.reload_behavior().await.ok();
-    state
-        .store
-        .set_autosync(state.app_config.get_behavior().autosync);
+    active.set_autosync(state.app_config.get_behavior().autosync);
     // One-shot legacy-envelope migrate, BEFORE the unlock emit so the app isn't
     // interactive while repo.json is re-wrapped (no race with a settings write).
     // Under App Lock the key is absent at cold start, so convert it now.
@@ -517,15 +547,15 @@ pub(crate) async fn app_unlock(
     emit_app_lock_state(&app, enabled, false, None);
     // The app is unlocked with the master key resident — arm the in-app idle
     // timer (R057). No-op when gate-idle is Off.
-    identity::reset_gate_idle_timer(&state, &app, &state.store);
+    identity::reset_gate_idle_timer(&state, &app, &active);
     // Auto-unlock was off / no sealed passphrase / failed: for a passphrase-
     // encrypted identity, a SOFT identity event tells the frontend to use per-op
     // auth (no overlay over the just-unlocked app). A plaintext identity is
     // always readable straight from disk, so it must NOT receive a soft event —
     // that would force runWithAuth to raise an unusable UnlockModal (no
     // passphrase to enter) on every copy/show.
-    if !auto_unlocked && state.store.is_identity_encrypted().await {
-        identity::emit_lock_state(&app, &state.store, true, LockEventReason::SoftWipe).await;
+    if !auto_unlocked && active.is_identity_encrypted().await {
+        identity::emit_lock_state(&app, &active, true, identity::LockEventReason::SoftWipe).await;
     }
     Ok(())
 }
@@ -540,8 +570,13 @@ async fn try_identity_auto_unlock<R: Runtime>(
     state: &State<'_, AppState>,
     app: &AppHandle<R>,
 ) -> bool {
-    let Ok(rc) = state
-        .store
+    // The config/identity/passphrase-slot reads below are repo-scoped — operate
+    // on the active repo facade (== `state.store` under the single-repo
+    // invariant). No active repo ⇒ no identity to auto-unlock.
+    let Some(active) = state.registry.active_facade() else {
+        return false;
+    };
+    let Ok(rc) = active
         .config()
         .await
         .inspect_err(|e| log::debug!("auto-unlock: config read failed, skipping: {e}"))
@@ -551,11 +586,10 @@ async fn try_identity_auto_unlock<R: Runtime>(
     if !rc.unlock_identity_with_app {
         return false;
     }
-    if !state.store.is_identity_encrypted().await {
+    if !active.is_identity_encrypted().await {
         return false;
     }
-    let Ok(pass_bytes) = state
-        .store
+    let Ok(pass_bytes) = active
         .load_app_identity_pass()
         .await
         .inspect_err(|e| log::debug!("auto-unlock: slot read failed, skipping: {e}"))
@@ -568,15 +602,15 @@ async fn try_identity_auto_unlock<R: Runtime>(
         return false;
     };
     let pass = Zeroizing::new(s.to_owned());
-    match identity::unlock_and_arm(state, app, &state.store, pass.as_str()).await {
+    match identity::unlock_and_arm(state, app, &active, pass.as_str()).await {
         Ok(()) => true,
         Err(e) => {
             if e.code == "WRONG_PASSPHRASE" {
                 log::warn!("auto-unlock: stale sealed passphrase, clearing slot");
-                if let Err(cleanup) = state.store.clear_app_identity_pass().await {
+                if let Err(cleanup) = active.clear_app_identity_pass().await {
                     log::warn!("auto-unlock: clear-app-identity-pass cleanup failed: {cleanup}");
                 }
-                if let Err(cleanup) = state.store.set_unlock_identity_with_app(false).await {
+                if let Err(cleanup) = active.set_unlock_identity_with_app(false).await {
                     log::warn!(
                         "auto-unlock: set-unlock-identity-with-app cleanup failed: {cleanup}"
                     );
@@ -630,7 +664,11 @@ pub(crate) fn do_app_lock<R: Runtime>(
 /// semantics). Otherwise (past `N`, or `gate_idle = Off`) disarm the idle timer and
 /// call [`do_app_lock`] with `Return`. Generic over `Runtime` so the host tests
 /// drive it with `MockRuntime` (the `app_lock` command itself is Wry-specific).
-pub(crate) fn apply_resume_relock<R: Runtime>(state: &State<'_, AppState>, app: &AppHandle<R>) {
+pub(crate) fn apply_resume_relock<R: Runtime>(
+    state: &State<'_, AppState>,
+    app: &AppHandle<R>,
+    active: &rustpass::Store,
+) {
     let enabled = state.app_lock_enabled.load(Ordering::SeqCst);
     if !enabled || state.app_locked.load(Ordering::SeqCst) {
         return; // gate off, or already locked → leave the existing state as-is
@@ -659,8 +697,10 @@ pub(crate) fn apply_resume_relock<R: Runtime>(state: &State<'_, AppState>, app: 
     // the vault key being dropped. (Grace-window resumes return above, before this, so
     // a resumed session keeps its cache.)
     entry_cache::soft_wipe_entry_cache(state, app, EntryCacheReason::Lock);
+    // The vault-key wipe is repo-scoped — lock the active repo facade (rooted at
+    // `repositories/<id>/` post-relocate, NOT the device facade `state.store`).
     do_app_lock(
-        &state.store,
+        active,
         app,
         &state.app_locked,
         enabled,
@@ -678,7 +718,10 @@ pub(crate) async fn app_lock(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), AppLockError> {
-    apply_resume_relock(&state, &app);
+    // The vault-key wipe inside is repo-scoped — lock the active repo facade
+    // (rooted at `repositories/<id>/` post-relocate, NOT the device facade).
+    let active = state.active_repo()?;
+    apply_resume_relock(&state, &app, &active);
     Ok(())
 }
 
@@ -701,7 +744,10 @@ pub(crate) async fn enable_identity_auto_unlock(
             "Enable the app lock before identity auto-unlock",
         ));
     }
-    if !state.store.is_identity_encrypted().await {
+    // The identity + passphrase slot are repo-scoped — operate on the active
+    // repo facade (== `state.store` under the single-repo invariant).
+    let active = state.active_repo()?;
+    if !active.is_identity_encrypted().await {
         return Err(AppLockError::from(Error::new(
             ErrorCode::IdentityNotEncrypted,
             "Identity auto-unlock requires a passphrase-encrypted identity",
@@ -709,17 +755,14 @@ pub(crate) async fn enable_identity_auto_unlock(
     }
     let passphrase = Zeroizing::new(passphrase);
     // Validate before sealing (rejects a wrong passphrase before it is stored).
-    state.store.validate_passphrase(passphrase.as_str()).await?;
-    state
-        .store
-        .save_app_identity_pass(passphrase.as_str())
-        .await?;
-    state.store.set_unlock_identity_with_app(true).await?;
+    active.validate_passphrase(passphrase.as_str()).await?;
+    active.save_app_identity_pass(passphrase.as_str()).await?;
+    active.set_unlock_identity_with_app(true).await?;
     // Refresh the coupling flag (now true) BEFORE re-applying the identity timer
     // — the flag-before-timer ordering rule (R057). Coupled → the identity timer
     // disarms; its lifecycle now follows the gate.
-    identity::refresh_security_cache(&state, &state.store).await;
-    identity::reset_lock_timer(&state, &app, &state.store);
+    identity::refresh_security_cache(&state, &active).await;
+    identity::reset_lock_timer(&state, &app, &active);
     Ok(())
 }
 
@@ -732,13 +775,14 @@ pub(crate) async fn disable_identity_auto_unlock(
     app: AppHandle,
 ) -> Result<(), AppLockError> {
     log::info!("identity-auto-unlock: disable");
-    state.store.clear_app_identity_pass().await?;
-    state.store.set_unlock_identity_with_app(false).await?;
+    let active = state.active_repo()?;
+    active.clear_app_identity_pass().await?;
+    active.set_unlock_identity_with_app(false).await?;
     // Refresh the coupling flag (now false) BEFORE re-applying the identity
     // timer — the flag-before-timer ordering rule (R057). Uncoupled → the
     // identity timer re-arms per LockMode.
-    identity::refresh_security_cache(&state, &state.store).await;
-    identity::reset_lock_timer(&state, &app, &state.store);
+    identity::refresh_security_cache(&state, &active).await;
+    identity::reset_lock_timer(&state, &app, &active);
     Ok(())
 }
 

@@ -195,6 +195,24 @@ impl AppState {
             )
         })
     }
+
+    /// The active repository's facade — the vault the user is currently "in".
+    /// App-shell commands that operate on repo data (identity, vault key,
+    /// `repo.json`) resolve this rather than referencing `self.store` by name,
+    /// so they stay correct once the registry facade diverges from the device
+    /// facade at the multi-repo relocation (C2b). Under the single-repo
+    /// invariant this is `Arc::ptr_eq` to `self.store`, so it is
+    /// behavior-identical until then. `None` (no registered repo) surfaces as a
+    /// `ConfigError` — the shell commands that reach this only run once a repo
+    /// is set up.
+    pub(crate) fn active_repo(&self) -> Result<Arc<Store>, rustpass::Error> {
+        self.registry.active_facade().ok_or_else(|| {
+            rustpass::Error::new(
+                rustpass::ErrorCode::ConfigError,
+                "no repository configured".to_string(),
+            )
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

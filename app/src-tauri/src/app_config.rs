@@ -1546,6 +1546,20 @@ impl AppConfigStore {
         .await
     }
 
+    /// Clear the registry fields (`repositories`, `last_active`) while leaving
+    /// the device-scoped prefs (locale, theme, lock mode, …) intact. `reset_config`
+    /// calls this after wiping each repo's files: the wiped repos must no longer
+    /// be referenced, but the surviving `app.json` device prefs stay. Mirrors
+    /// [`set_first_repository`](Self::set_first_repository)'s `update` path
+    /// (cache-coherent sealed write).
+    pub(crate) async fn clear_repositories(&self) -> Result<AppConfig, Error> {
+        self.update(|c| {
+            c.repositories.clear();
+            c.last_active = None;
+        })
+        .await
+    }
+
     /// Set the app-launch-gate in-app idle timeout (sealed). `After(n)` is
     /// clamped to the preset range first. The Tauri `set_gate_idle` command
     /// applies the new value to the live backend timer (R057); this store method

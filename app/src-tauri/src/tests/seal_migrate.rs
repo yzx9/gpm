@@ -27,7 +27,7 @@ use crate::identity::IdleTimer;
 async fn keyed_state(dir: &Path) -> AppState {
     let key = rustpass::seal::generate_master_key().unwrap();
     let store = Arc::new(Store::new(dir.to_path_buf(), Some(key)));
-    AppState {
+    let state = AppState {
         store,
         registry: crate::registry::RepoRegistry::empty(),
         app_config: Arc::new(AppConfigStore::new(dir).await),
@@ -50,7 +50,16 @@ async fn keyed_state(dir: &Path) -> AppState {
         active_cancel_slot: Arc::new(Mutex::new(None)),
         verbose_timer: Mutex::new(None),
         verbose_generation: Arc::new(AtomicU64::new(0)),
-    }
+    };
+    // Mirror the production single-repo invariant: register the store under a
+    // test id so the app-shell one-shots (which now route repo-scoped ops
+    // through the registry's active facade) resolve it.
+    let store_for_registry = Arc::clone(&state.store);
+    let id = super::test_repo_id();
+    state.registry.populate([id.clone()], Some(id), move |_| {
+        Arc::clone(&store_for_registry)
+    });
+    state
 }
 
 #[tokio::test]

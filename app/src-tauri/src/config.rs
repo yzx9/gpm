@@ -62,7 +62,13 @@ impl From<RepoConfig> for RepoConfigPublic {
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn get_config(state: State<'_, AppState>) -> Result<RepoConfigPublic, Error> {
-    state.store.config().await.map(RepoConfigPublic::from)
+    // repo.json is repo-scoped — read it off the active repo facade (==
+    // `state.store` under the single-repo invariant).
+    state
+        .active_repo()?
+        .config()
+        .await
+        .map(RepoConfigPublic::from)
 }
 
 /// Reset all configuration and local data.
@@ -80,9 +86,25 @@ pub(crate) async fn reset_config(state: State<'_, AppState>, app: AppHandle) -> 
         &app,
         crate::entry_cache::EntryCacheReason::Lock,
     );
-    state.store.reset().await?;
+    // Wipe every registered repository's files (each repo's repo.json/identity/
+    // app_id_pass/repo clone). Iterating the registry keeps this correct once
+    // each repo lives under its own facade at the relocation; today it is the
+    // single repo on the device facade, identical to the prior `state.store
+    // .reset()`. `reset()` wipes the repo dir + sealed repo files and leaves the
+    // device-scoped `app.json` (and its prefs) intact.
+    for id in state.registry.list_ids() {
+        if let Some(facade) = state.registry.facade(&id) {
+            facade.reset().await?;
+        }
+    }
+    // Drop the in-memory index and the persisted registry fields
+    // (repositories/last_active) — the repos they named are gone. Device prefs
+    // in `app.json` (locale/theme/lock-mode/…) survive.
+    state.registry.clear();
+    state.app_config.clear_repositories().await?;
     // After a reset there is no identity, so the app is no longer locked — emit
-    // the real state so any open unlock overlay closes.
+    // the real state so any open unlock overlay closes. Emit against the device
+    // facade (the registry is now empty); its identity was wiped by the reset.
     emit_lock_state(&app, &state.store, false, LockEventReason::Reset).await;
     Ok(())
 }
@@ -98,7 +120,7 @@ pub(crate) async fn set_commit_identity(
 ) -> Result<RepoConfigPublic, Error> {
     log::info!("config: set-commit-identity");
     state
-        .store
+        .active_repo()?
         .set_commit_identity(name, email)
         .await
         .map(RepoConfigPublic::from)
@@ -113,7 +135,11 @@ pub(crate) async fn set_pat(
     pat: Option<String>,
 ) -> Result<RepoConfigPublic, Error> {
     log::info!("config: set-pat");
-    state.store.set_pat(pat).await.map(RepoConfigPublic::from)
+    state
+        .active_repo()?
+        .set_pat(pat)
+        .await
+        .map(RepoConfigPublic::from)
 }
 
 /// Remove the stored SSH key + passphrase. A stored PAT, if any, becomes the
@@ -123,7 +149,7 @@ pub(crate) async fn set_pat(
 pub(crate) async fn clear_ssh_key(state: State<'_, AppState>) -> Result<RepoConfigPublic, Error> {
     log::info!("config: clear-ssh-key");
     state
-        .store
+        .active_repo()?
         .clear_ssh_key()
         .await
         .map(RepoConfigPublic::from)
@@ -141,7 +167,7 @@ pub(crate) async fn verify_git_auth(
     pat: String,
 ) -> Result<(), Error> {
     log::info!("config: verify-git-auth");
-    let store = state.store.clone();
+    let store = state.active_repo()?;
     crate::git::run_cancellable(&state, app, move |cancel, _tx, slot| async move {
         // Setup-time op (no `write_mu`): arm up-front so the probe is
         // cancellable. The guard disarms when the future drops.
@@ -164,9 +190,12 @@ pub(crate) async fn set_lock_mode(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-lock-mode: {mode:?}");
     let cfg = state.app_config.set_lock_mode(mode).await?;
-    refresh_security_cache(&state, &state.store).await;
+    // Re-apply the mode to the active repo's identity cache + timer (==
+    // `state.store` under the single-repo invariant).
+    let active = state.active_repo()?;
+    refresh_security_cache(&state, &active).await;
     // Apply the new mode to the live timer (reads the just-refreshed cache).
-    reset_lock_timer(&state, &app, &state.store);
+    reset_lock_timer(&state, &app, &active);
     Ok(cfg)
 }
 
@@ -183,8 +212,10 @@ pub(crate) async fn set_gate_idle(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-gate-idle: {mode:?}");
     let cfg = state.app_config.set_gate_idle(mode).await?;
-    // Apply to the live timer (reads the just-updated app_config cache).
-    reset_gate_idle_timer(&state, &app, &state.store);
+    // Apply to the active repo's gate-idle timer (== `state.store` under the
+    // single-repo invariant); reads the just-updated app_config cache.
+    let active = state.active_repo()?;
+    reset_gate_idle_timer(&state, &app, &active);
     Ok(cfg)
 }
 
@@ -211,7 +242,10 @@ pub(crate) async fn set_clipboard_clear_secs(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-clipboard-clear-secs: {secs:?}");
     let cfg = state.app_config.set_clipboard_clear_secs(secs).await?;
-    refresh_security_cache(&state, &state.store).await;
+    // Refresh the active repo's cache (== `state.store` under the single-repo
+    // invariant) so the next copy honors the new clear window.
+    let active = state.active_repo()?;
+    refresh_security_cache(&state, &active).await;
     Ok(cfg)
 }
 
@@ -228,7 +262,9 @@ pub(crate) async fn set_autosync(
 ) -> Result<AppConfig, Error> {
     log::info!("config: set-autosync: {enabled}");
     let cfg = state.app_config.set_autosync(enabled).await?;
-    state.store.set_autosync(enabled);
+    // Seed the active repo facade's injected autosync cache (== `state.store`
+    // under the single-repo invariant); `autosync_write` reads it.
+    state.active_repo()?.set_autosync(enabled);
     // Background sync is linked to AutoSync — re-apply the schedule
     // when AutoSync goes on, cancel it when off (else the Worker wakes every
     // interval just to no-op-skip on the autosync gate, wasting battery).
