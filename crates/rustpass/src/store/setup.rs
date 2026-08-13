@@ -6,7 +6,9 @@ use std::str;
 use tokio::fs;
 use zeroize::Zeroizing;
 
-use crate::crypto::{CryptoBackend, GPG_PUBLIC_KEYS_DIR, GPG_RECIPIENTS_FILE, GpgBackend};
+use crate::crypto::{
+    BackendKind, CryptoBackend, GPG_PUBLIC_KEYS_DIR, GPG_RECIPIENTS_FILE, GpgBackend,
+};
 use crate::error::{Error, ErrorCode};
 use crate::identity::{self, validate_identity_format};
 use crate::recipient::serialize_recipients;
@@ -62,7 +64,7 @@ impl Store {
         }
 
         self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
-        self.resolve_and_set_crypto(None)?;
+        self.resolve_and_set_crypto(BackendKind::Age);
         self.storage()?
             .clone_repo(auth, repo_url, cancel, progress)
             .await?;
@@ -136,7 +138,7 @@ impl Store {
 
         let bootstrap = async {
             self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
-            self.resolve_and_set_crypto(None)?;
+            self.resolve_and_set_crypto(BackendKind::Age);
             self.storage()?.init_repo().await?;
 
             let recipients_bytes = serialize_recipients(&[recipient.to_string()]);
@@ -283,7 +285,7 @@ impl Store {
 
         let bootstrap = async {
             self.resolve_and_set(Some("git"), &repo_dir.to_string_lossy())?;
-            self.resolve_and_set_crypto(Some("gpg"))?;
+            self.resolve_and_set_crypto(BackendKind::Gpg);
             self.storage()?.init_repo().await?;
 
             // gopass's `fixConfig`: record the diff-driver config that the
@@ -352,7 +354,7 @@ impl Store {
 
             let local_path = repo_dir.to_string_lossy().to_string();
             self.config
-                .save_repo_config_with_crypto(url, auth, &local_path, Some("gpg"))
+                .save_repo_config_with_crypto(url, auth, &local_path, BackendKind::Gpg)
                 .await?;
             Ok::<(), Error>(())
         };
@@ -417,7 +419,7 @@ impl Store {
         // A fresh/cloned store uses the age built-in; pin it before the identity
         // validation below touches the crypto backend. (A GPG store has its own
         // setup path; the post-unlock resolve corrects this default.)
-        self.resolve_and_set_crypto(None)?;
+        self.resolve_and_set_crypto(BackendKind::Age);
 
         // Validate identity can derive a recipient (verifies key is usable)
         let _ = self
@@ -490,7 +492,10 @@ impl Store {
         let recipient = GpgBackend.identity_recipient(identity, None)?;
 
         let is_recipient = match self.config.load_repo_config().await {
-            Ok(_) => self.probe_membership(identity, Some("gpg"), None).await?,
+            Ok(_) => {
+                self.probe_membership(identity, BackendKind::Gpg, None)
+                    .await?
+            }
             Err(e) if e.code == "NO_REPO" => None,
             Err(e) => return Err(e),
         };

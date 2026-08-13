@@ -5,7 +5,7 @@ use std::path::Path;
 use std::str;
 use std::sync::{Arc, Mutex};
 
-use crate::crypto::{AgeBackend, CryptoBackend, GpgBackend, SecretExt};
+use crate::crypto::{AgeBackend, BackendKind, CryptoBackend, GpgBackend, SecretExt};
 use crate::error::{Error, ErrorCode};
 use crate::recipient::Recipient;
 use crate::storage::{RepoFiles, StorageBackend};
@@ -186,8 +186,9 @@ impl Store {
     }
 
     /// Resolve the crypto backend from the persisted `repo.json` config — a typed
-    /// match on [`RepoConfig::crypto`] (`None`/`"age"` → `AgeBackend`, `"gpg"` →
-    /// `GpgBackend`). Intended post-unlock (sealed `repo.json` is readable once
+    /// match on [`RepoConfig::crypto`] (`BackendKind::Age` → `AgeBackend`,
+    /// `BackendKind::Gpg` → `GpgBackend`). Intended post-unlock (sealed
+    /// `repo.json` is readable once
     /// the master key is injected); soft-skips when the config isn't readable yet
     /// (`NoRepo` pre-setup; `SealKeyUnavailable` under app-lock), mirroring
     /// [`resolve_storage`](Self::resolve_storage). There is no `ext:` crypto
@@ -213,40 +214,28 @@ impl Store {
                 return Err(e);
             }
         };
-        match self.resolve_and_set_crypto(rc.crypto.as_deref()) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                Self::stash_err(&self.crypto_resolve_err, e.clone());
-                Err(e)
-            }
-        }
+        self.resolve_and_set_crypto(rc.crypto);
+        Ok(())
     }
 
     /// Construct the typed crypto backend for `kind` and swap it in.
-    /// `None`/`"age"` → the age built-in; `"gpg"` → the GPG built-in; anything
-    /// else → [`ErrorCode::BackendNotAvailable`] (an unknown crypto kind in
-    /// `repo.json`).
-    pub(super) fn resolve_and_set_crypto(&self, kind: Option<&str>) -> Result<(), Error> {
+    /// `Age` → the age built-in; `Gpg` → the GPG built-in. Infallible: an invalid
+    /// on-disk value can no longer reach here (the `BackendKind` deserializer
+    /// rejects it at `repo.json` load — a `CONFIG_ERROR` at the first
+    /// `load_repo_config`, rather than the prior runtime
+    /// [`ErrorCode::BackendNotAvailable`] from this site), and a poisoned
+    /// `crypto` lock is swallowed (leaving the slot unset, which `crypto()`
+    /// then surfaces). Returns `()` rather than `Result`; if a future `ext:`
+    /// crypto backend needs fallible construction, widen the signature then.
+    pub(super) fn resolve_and_set_crypto(&self, kind: BackendKind) {
         let backend: Arc<dyn CryptoBackend> = match kind {
-            None | Some("age") => Arc::new(AgeBackend),
-            Some("gpg") => Arc::new(GpgBackend),
-            Some(other) => {
-                // Clear any prior backend so crypto() surfaces THIS error
-                // instead of a stale backend from a previous resolve.
-                if let Ok(mut slot) = self.crypto.lock() {
-                    *slot = None;
-                }
-                return Err(Error::new(
-                    ErrorCode::BackendNotAvailable,
-                    format!("unknown crypto backend {other:?} (expected \"age\" or \"gpg\")"),
-                ));
-            }
+            BackendKind::Age => Arc::new(AgeBackend),
+            BackendKind::Gpg => Arc::new(GpgBackend),
         };
         if let Ok(mut slot) = self.crypto.lock() {
             *slot = Some(backend);
         }
         Self::clear_err(&self.crypto_resolve_err);
-        Ok(())
     }
 
     /// The crypto backend's typed secret-file extension (`.age` today; `.gpg`
@@ -330,7 +319,7 @@ mod tests {
         store
             .resolve_and_set(Some("git"), &repo_dir.path().to_string_lossy())
             .unwrap();
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         symlink(
             "/nonexistent/gpm-dangling",
             repo_dir.path().join(".age-recipients"),
@@ -353,7 +342,7 @@ mod tests {
         store2
             .resolve_and_set(Some("git"), &repo_dir2.path().to_string_lossy())
             .unwrap();
-        store2.resolve_and_set_crypto(None).unwrap();
+        store2.resolve_and_set_crypto(BackendKind::Age);
         let err = store2.read_recipients_raw().await.unwrap_err();
         assert_eq!(
             err.code, "STORE_ERROR",
@@ -368,7 +357,7 @@ mod tests {
         store3
             .resolve_and_set(Some("git"), &repo_dir3.path().to_string_lossy())
             .unwrap();
-        store3.resolve_and_set_crypto(None).unwrap();
+        store3.resolve_and_set_crypto(BackendKind::Age);
         let got = store3.read_recipients_raw().await.unwrap();
         assert_eq!(got.len(), 1, "regular index still parses");
 
@@ -378,7 +367,7 @@ mod tests {
         store4
             .resolve_and_set(Some("git"), &repo_dir4.path().to_string_lossy())
             .unwrap();
-        store4.resolve_and_set_crypto(None).unwrap();
+        store4.resolve_and_set_crypto(BackendKind::Age);
         assert!(
             store4.read_recipients_raw().await.unwrap().is_empty(),
             "missing index is an uninitialized store, not an error"
@@ -394,7 +383,7 @@ mod tests {
         store5
             .resolve_and_set(Some("git"), &missing_checkout.to_string_lossy())
             .unwrap();
-        store5.resolve_and_set_crypto(None).unwrap();
+        store5.resolve_and_set_crypto(BackendKind::Age);
         assert_eq!(
             store5.read_recipients_raw().await.unwrap_err().code,
             "STORE_ERROR",
@@ -463,34 +452,30 @@ mod tests {
     }
 
     #[test]
-    fn resolve_and_set_crypto_picks_age_for_none() {
+    fn resolve_and_set_crypto_picks_age() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         let crypto = store.crypto().unwrap();
         assert_eq!(crypto.profile().backend_kind, BackendKind::Age);
         assert_eq!(crypto.profile().secret_extension.as_str(), ".age");
     }
 
     #[test]
-    fn resolve_and_set_crypto_picks_gpg_for_gpg() {
+    fn resolve_and_set_crypto_picks_gpg() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(Some("gpg")).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Gpg);
         let crypto = store.crypto().unwrap();
         assert_eq!(crypto.profile().backend_kind, BackendKind::Gpg);
         assert_eq!(crypto.profile().secret_extension.as_str(), ".gpg");
     }
 
-    #[test]
-    fn resolve_and_set_crypto_rejects_unknown_kind() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path().to_path_buf(), None);
-        let err = store.resolve_and_set_crypto(Some("quux")).unwrap_err();
-        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
-        // A failed resolve leaves no backend — crypto() still errors.
-        assert!(store.crypto().is_err());
-    }
+    // The prior `rejects_unknown_kind` / `surfaces_unknown_kind_via_crypto` tests
+    // are gone: an invalid crypto value can no longer reach resolve_and_set_crypto
+    // — BackendKind rejects it at repo.json deserialization (a CONFIG_ERROR at the
+    // first load). That serde-level behavior is covered in config.rs
+    // (repo_config_crypto_field_*).
 
     #[tokio::test]
     async fn resolve_crypto_soft_skips_when_no_repo() {
@@ -506,7 +491,7 @@ mod tests {
     async fn reset_clears_crypto_backend() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(Some("gpg")).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Gpg);
         assert!(store.crypto().is_ok(), "gpg backend resolved");
         store.reset().await.unwrap();
         let err = store.crypto().err().unwrap();
@@ -516,43 +501,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolve_and_set_crypto_picks_age_for_explicit_age_string() {
-        // The Some("age") arm is a documented input (mirrors None); cover it so a
-        // refactor that dropped it (matching only None) would fail.
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(Some("age")).unwrap();
-        let crypto = store.crypto().unwrap();
-        assert_eq!(crypto.profile().backend_kind, BackendKind::Age);
-        assert_eq!(crypto.profile().secret_extension.as_str(), ".age");
-    }
-
-    #[tokio::test]
-    async fn resolve_crypto_surfaces_unknown_kind_via_crypto() {
-        // Driving the full resolve_crypto path with an unknown kind must (a)
-        // hard-fail and (b) leave crypto() surfacing the stashed unknown-kind
-        // error — not a stale backend from a prior resolve.
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap(); // seed a backend first
-        assert!(store.crypto().is_ok());
-
-        Config::new(dir.path().to_path_buf(), None)
-            .save_repo_config_full(&RepoConfig {
-                local_path: dir.path().join("repo").to_string_lossy().to_string(),
-                crypto: Some("quux".to_string()),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-
-        store.resolve_crypto().await.unwrap_err();
-        let err = store.crypto().err().unwrap();
-        assert_eq!(err.code, "BACKEND_NOT_AVAILABLE");
-        assert!(
-            err.message.contains("unknown crypto backend"),
-            "crypto() must surface the stashed unknown-kind error, not a stale backend: {err}"
-        );
-    }
+    // resolve_crypto's soft-skip path (NoRepo/SealKeyUnavailable → Ok, with
+    // crypto() then surfacing BackendNotAvailable) is covered by
+    // resolve_crypto_soft_skips_when_no_repo above. The hard-error stash path
+    // (a load error → stashed + returned) is a trivial branch not exercised
+    // here; the invalid-crypto-value case is now a repo.json deserialization
+    // error, covered at the serde level in config.rs
+    // (repo_config_crypto_field_*), not here.
 }

@@ -6,7 +6,8 @@ use std::str;
 use std::sync::Arc;
 
 use crate::crypto::{
-    AgeBackend, CryptoBackend, GPG_RECIPIENTS_FILE, GpgBackend, RECIPIENTS_FILE, SecretExt,
+    AgeBackend, BackendKind, CryptoBackend, GPG_RECIPIENTS_FILE, GpgBackend, RECIPIENTS_FILE,
+    SecretExt,
 };
 use crate::error::{Error, ErrorCode};
 use crate::identity::{self, IdentityType, classify_identity, validate_identity_format};
@@ -52,7 +53,18 @@ impl Store {
     ///
     /// Returns an error if a file cannot be read, sealed/unsealed, or written.
     pub async fn migrate_seal(&self) -> Result<(), Error> {
-        self.config.migrate_seal().await
+        self.config.migrate_seal().await?;
+        // Content migration (not just envelope): normalize a legacy absent
+        // `crypto` field to explicit "age". The repo_lock serializes this
+        // against the headless worker's `migrate_repo_seal` (both take it), but
+        // NOT against `save_repo_config_full` writers (save_identity / set_pat /
+        // add_trusted_key / authenticity), which don't take the lock — see the
+        // known-race note on `normalize_repo_config_crypto`. Accepted for now.
+        if self.config.repo_config_exists() {
+            let _repo_lock = self.repo_lock()?;
+            self.config.normalize_repo_config_crypto().await?;
+        }
+        Ok(())
     }
 
     /// Delegate for [`Config::migrate_repo_seal`] — the headless background
@@ -63,7 +75,17 @@ impl Store {
     ///
     /// Propagates errors from [`Config::migrate_repo_seal`].
     pub async fn migrate_repo_seal(&self) -> Result<(), Error> {
-        self.config.migrate_repo_seal().await
+        self.config.migrate_repo_seal().await?;
+        // Same content migration as migrate_seal; the headless worker also reads
+        // repo.json (the master key is auth-free, R064). The repo_lock
+        // serializes this against the foreground `migrate_seal`, but not against
+        // unlocked `save_repo_config_full` writers — see the known-race note on
+        // `normalize_repo_config_crypto`. Accepted for now.
+        if self.config.repo_config_exists() {
+            let _repo_lock = self.repo_lock()?;
+            self.config.normalize_repo_config_crypto().await?;
+        }
+        Ok(())
     }
 
     /// Check if the stored identity requires a passphrase.
@@ -261,12 +283,12 @@ impl Store {
         let itype = classify_identity(identity_bytes);
 
         // The backend kind this identity selects (R079 locked decision #1: the
-        // identity TYPE drives backend selection): `"gpg"` for an OpenPGP secret
-        // key, the age built-in (`None`) otherwise. There is no separate
-        // "confirm backend" step.
-        let kind: Option<&str> = match itype {
-            IdentityType::PgpSecretKey => Some("gpg"),
-            _ => None,
+        // identity TYPE drives backend selection): `BackendKind::Gpg` for an
+        // OpenPGP secret key, `BackendKind::Age` otherwise. There is no
+        // separate "confirm backend" step.
+        let kind: BackendKind = match itype {
+            IdentityType::PgpSecretKey => BackendKind::Gpg,
+            _ => BackendKind::Age,
         };
 
         // Load the repo config once. `None` means no store is configured yet (a
@@ -325,32 +347,33 @@ impl Store {
 
         // Save the identity FIRST (the durable fact), then correct `repo.json`'s
         // crypto kind to match it. `save_identity` is the crypto-persistence
-        // authority: it sets `crypto` SYMMETRICALLY — age → `None`, gpg →
-        // `Some("gpg")` — writing only when the value changes (a fresh age setup
-        // already has `crypto: None`, so no churn), so a stale kind left by an
-        // earlier partial save self-heals on the next save. Saving the identity
-        // before the kind persist means a persist failure leaves identity +
-        // stale-kind (recoverable by re-saving) — never `crypto=gpg` stranded
-        // with no identity. The kind persist + slot swap run only when a repo is
+        // authority: it sets `crypto` to `BackendKind::Age` / `BackendKind::Gpg`
+        // — writing only when the value changes (a fresh age setup already has
+        // `crypto: Age`, so no churn), so a stale kind left by an earlier
+        // partial save self-heals on the next save. Saving the identity before
+        // the kind persist means a persist failure leaves identity + stale-kind
+        // (recoverable by re-saving) — never `crypto=Gpg` stranded with no
+        // identity. The kind persist + slot swap run only when a repo is
         // configured; the create/clone-first flow has no `repo.json` yet (its
-        // later clone writes `crypto: None`).
+        // later clone writes `crypto: Age`).
         self.config
             .save_identity(identity_bytes, storage_passphrase)
             .await?;
         if let Some(mut rc) = repo {
-            if rc.crypto.as_deref() != kind {
-                rc.crypto = kind.map(str::to_string);
+            if rc.crypto != kind {
+                rc.crypto = kind;
                 self.config.save_repo_config_full(&rc).await?;
             }
-            self.resolve_and_set_crypto(kind)?;
+            self.resolve_and_set_crypto(kind);
         }
         Ok(())
     }
 
     /// Refuse a crypto-backend flip that would orphan the store's existing
     /// secrets OR recipients marker of the other extension. If the identity
-    /// being saved selects backend `kind` (`Some("gpg")` → `.gpg`, else `.age`),
-    /// switching backends makes any secrets of the OTHER extension unreachable —
+    /// being saved selects backend `kind` (`BackendKind::Gpg` → `.gpg`,
+    /// `BackendKind::Age` → `.age`), switching backends makes any secrets of
+    /// the OTHER extension unreachable —
     /// they'd vanish from `list` and from keep-mine replay. The guard refuses
     /// when EITHER the orphaned extension has secret files already, OR its root
     /// recipients marker is present: a store defined by its marker but with zero
@@ -359,13 +382,13 @@ impl Store {
     /// the orphaned extension are invisible.
     async fn assert_no_conflicting_secrets(
         &self,
-        kind: Option<&str>,
+        kind: BackendKind,
         repo_path: &Path,
     ) -> Result<(), Error> {
         // The backend orphaned by this identity + its root recipients marker.
         let (orphaned_ext, orphaned_marker) = match kind {
-            Some("gpg") => (SecretExt::AGE, RECIPIENTS_FILE),
-            _ => (SecretExt::GPG, GPG_RECIPIENTS_FILE),
+            BackendKind::Gpg => (SecretExt::AGE, RECIPIENTS_FILE),
+            BackendKind::Age => (SecretExt::GPG, GPG_RECIPIENTS_FILE),
         };
         let repo_path = repo_path.to_path_buf();
         let (count, marker_present) = tokio::task::spawn_blocking(move || {
@@ -380,7 +403,7 @@ impl Store {
         .await
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("conflict scan: {e}")))?;
         if count > 0 || marker_present {
-            let chosen = kind.unwrap_or("age");
+            let chosen = kind.as_str();
             let orphaned = orphaned_ext.as_str().trim_start_matches('.');
             return Err(Error::new(
                 ErrorCode::InvalidIdentity,
@@ -412,14 +435,14 @@ impl Store {
     pub(super) async fn probe_membership(
         &self,
         identity: &str,
-        kind: Option<&str>,
+        kind: BackendKind,
         passphrase: Option<&str>,
     ) -> Result<Option<bool>, Error> {
         let storage = self.storage()?;
         let view = RepoFiles::new(&*storage);
         let backend: Arc<dyn CryptoBackend> = match kind {
-            Some("gpg") => Arc::new(GpgBackend),
-            _ => Arc::new(AgeBackend),
+            BackendKind::Gpg => Arc::new(GpgBackend),
+            BackendKind::Age => Arc::new(AgeBackend),
         };
         if backend.list_recipients(&view).await?.is_empty() {
             return Ok(None);
@@ -604,7 +627,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         assert!(
             !store.is_unlocked(),
             "store must start locked for an encrypted SSH identity"
@@ -642,7 +665,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         let err = store.unlock("wrong-passphrase").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
         assert!(
@@ -665,7 +688,7 @@ mod tests {
         let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(rsa_key, None).await.unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         assert!(
             !store.is_identity_encrypted().await,
             "legacy RSA PEM must not be treated as encrypted"
@@ -707,7 +730,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         assert!(store.is_identity_encrypted().await);
     }
 
@@ -722,7 +745,7 @@ mod tests {
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         assert!(!store.is_identity_encrypted().await);
     }
 
@@ -731,7 +754,7 @@ mod tests {
         let unencrypted_ssh_key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQAAAJCfEwtqnxML\nagAAAAtzc2gtZWQyNTUxOQAAACB7Ci6nqZYaVvrjm8+XbzII89TsXzP111AflR7WeorBjQ\nAAAEADBJvjZT8X6JRJI8xVq/1aU8nMVgOtVnmdwqWwrSlXG3sKLqeplhpW+uObz5dvMgjz\n1OxfM/XXUB+VHtZ6isGNAAAADHN0cjRkQGNhcmJvbgE=\n-----END OPENSSH PRIVATE KEY-----";
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
 
         // Even when a passphrase is supplied, SSH keys are stored as-is — gpm
         // never re-encrypts them (they rely on their own native protection),
@@ -830,7 +853,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         store
             .validate_passphrase("test-passphrase")
             .await
@@ -847,7 +870,7 @@ mod tests {
         config.save_identity(encrypted_ssh_key, None).await.unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         let err = store
             .validate_passphrase("wrong-passphrase")
             .await
@@ -870,7 +893,7 @@ mod tests {
             .unwrap();
 
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(None).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Age);
         let err = store.validate_passphrase("nope").await.unwrap_err();
         assert_eq!(err.code, "WRONG_PASSPHRASE");
     }
@@ -908,7 +931,7 @@ mod tests {
         let config = Config::new(dir.path().to_path_buf(), None);
         config.save_identity(armor.as_bytes(), None).await.unwrap();
         let store = Store::new(dir.path().to_path_buf(), None);
-        store.resolve_and_set_crypto(Some("gpg")).unwrap();
+        store.resolve_and_set_crypto(BackendKind::Gpg);
         store
             .validate_passphrase(passphrase)
             .await

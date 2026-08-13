@@ -87,11 +87,7 @@ fn build_manifest(cfg: Option<&RepoConfig>) -> String {
                 Some(b) if !b.is_empty() => b.to_string(),
                 _ => "git".to_string(),
             };
-            let crypto = match c.crypto.as_deref() {
-                Some("gpg") => "gpg",
-                _ => "age",
-            }
-            .to_string();
+            let crypto = c.crypto.as_str().to_string();
             (backend, crypto)
         },
     );
@@ -321,6 +317,7 @@ pub(crate) async fn sweep_repo_export_stage<R: Runtime>(app: &AppHandle<R>) {
 mod tests {
     use super::*;
     use flate2::read::GzDecoder;
+    use rustpass::BackendKind;
     use std::io::Read;
 
     /// Read a single entry back out of the archive (for round-trip assertions).
@@ -346,7 +343,7 @@ mod tests {
     fn build_manifest_emits_r088_v1_minimal_instance() {
         let age_cfg = RepoConfig {
             backend: None,
-            crypto: None,
+            crypto: BackendKind::Age,
             ..Default::default()
         };
         let m: serde_json::Value = serde_json::from_str(&build_manifest(Some(&age_cfg))).unwrap();
@@ -363,7 +360,7 @@ mod tests {
 
         // GPG store: crypto gpg.
         let gpg_cfg = RepoConfig {
-            crypto: Some("gpg".to_string()),
+            crypto: BackendKind::Gpg,
             ..Default::default()
         };
         let m: serde_json::Value = serde_json::from_str(&build_manifest(Some(&gpg_cfg))).unwrap();

@@ -557,11 +557,11 @@ impl Config {
         }
     }
 
-    /// Save repository configuration (URL + local path), age crypto backend.
+    /// Save repository configuration (URL + local path) for the age crypto
+    /// backend.
     ///
-    /// Convenience wrapper for the age/clone setup case (`crypto: None`); the
-    /// GPG create path uses [`Self::save_repo_config_with_crypto`] with
-    /// `Some("gpg")`.
+    /// Convenience wrapper for the age/clone setup case; the GPG create path
+    /// uses [`Self::save_repo_config_with_crypto`] with `BackendKind::Gpg`.
     ///
     /// # Errors
     ///
@@ -573,7 +573,7 @@ impl Config {
         auth: &GitAuth,
         local_path: &str,
     ) -> Result<(), Error> {
-        self.save_repo_config_with_crypto(url, auth, local_path, None)
+        self.save_repo_config_with_crypto(url, auth, local_path, crypto::BackendKind::Age)
             .await
     }
 
@@ -582,8 +582,8 @@ impl Config {
     /// (the reverse of `to_git_auth`, which resolves through `pick_auth`); the
     /// serialized shape stays flat `pat`/`ssh_key`/`ssh_passphrase`, so no
     /// on-disk migration. `username` is intentionally not persisted — see
-    /// `GitAuth::from_ssh`. `crypto` is `None` (age) for the age/clone setup
-    /// paths and `Some("gpg")` for the GPG create path.
+    /// `GitAuth::from_ssh`. `crypto` is `BackendKind::Age` for the age/clone
+    /// setup paths and `BackendKind::Gpg` for the GPG create path.
     ///
     /// # Errors
     ///
@@ -594,7 +594,7 @@ impl Config {
         url: &str,
         auth: &GitAuth,
         local_path: &str,
-        crypto: Option<&str>,
+        crypto: crypto::BackendKind,
     ) -> Result<(), Error> {
         // Decompose the in-memory auth into the persisted flat fields.
         let (pat, ssh_key, ssh_passphrase) = match auth {
@@ -623,7 +623,7 @@ impl Config {
             // Setup always configures the git built-in; an `ext:` backend is
             // chosen only by its own (0046) setup path via `save_repo_config_full`.
             backend: None,
-            crypto: crypto.map(String::from),
+            crypto,
         };
         // Delegate to the atomic variant so `repo.json` is never observed
         // half-written (temp file + rename), matching `save_identity`. Matters
@@ -765,6 +765,77 @@ impl Config {
             .await
     }
 
+    /// One-time content migration: make `repo.json`'s `crypto` field explicit.
+    ///
+    /// A legacy `repo.json` (written when `crypto` was `Option<String>` and age
+    /// stores omitted it) has no `crypto` key. The `BackendKind` deserializer
+    /// already loads such a record as `Age`, but the on-disk file stays absent —
+    /// and a read-only user (the primary `copy_password` persona) never triggers
+    /// a [`save_repo_config_full`](Self::save_repo_config_full) that would
+    /// re-persist it. This rewrites the field to explicit `"age"` once, so every
+    /// store's on-disk representation is honest regardless of usage pattern.
+    ///
+    /// Unlike [`wrap_if_needed`](Self::wrap_if_needed) (which rewrites only the
+    /// seal *envelope* — losing such a write loses nothing), this is a *content*
+    /// read-modify-write, so it joins the set of `repo.json` RMW writers.
+    ///
+    /// **Known race (accepted for now):** `repo.json` has no cross-writer
+    /// serialization. The `repo_lock` taken by the caller
+    /// ([`Store::migrate_seal`](crate::store::Store::migrate_seal) /
+    /// [`migrate_repo_seal`](crate::store::Store::migrate_repo_seal)) serializes
+    /// the *two migration paths* (foreground vs headless worker) against each
+    /// other, but [`save_repo_config_full`](Self::save_repo_config_full) and its
+    /// callers (`save_identity`, `set_pat`, `add_trusted_key`, the authenticity
+    /// paths) do **not** take it. So a concurrent config write during this
+    /// read→write window can be silently reverted, and (worst case) a
+    /// `save_identity` writing `crypto:"gpg"` can be clobbered back to `"age"`,
+    /// bricking the store on next restart. Low probability (first-launch/sync
+    /// window), accepted while the user base is tiny; the proper fix is a
+    /// `repo.json` write-lock all writers respect (tracked in #57).
+    ///
+    /// Detection uses a [`serde_json::Value`] presence-probe (the only way to
+    /// tell an absent key from an explicit `null`): absent → migrate; an
+    /// explicit `null` (corruption) or any present value → no-op, so a `null`
+    /// is left for the strict typed load to error rather than silently
+    /// normalized. The rewrite mutates the [`serde_json::Value`] in place (adding
+    /// the `crypto` key) rather than round-tripping through [`RepoConfig`]: that
+    /// preserves any unknown/forward-compat fields a newer gpm may have written
+    /// and is robust to a legacy JSON missing other fields. Re-serialized +
+    /// re-sealed under AAD `repo_config` (cosmetic key reordering in a sealed
+    /// file no one reads raw). Idempotent (write-once); soft-skips `NO_REPO` /
+    /// `SEAL_KEY_UNAVAILABLE` (App Lock), mirroring `wrap_if_needed`.
+    ///
+    /// # Errors
+    ///
+    /// Soft-skips (`Ok`) on `NO_REPO` / `SEAL_KEY_UNAVAILABLE`; otherwise
+    /// propagates load/save errors.
+    pub async fn normalize_repo_config_crypto(&self) -> Result<(), Error> {
+        let mut probe: serde_json::Value = match self.load_repo_config_as().await {
+            Ok(v) => v,
+            Err(e) if e.code == "NO_REPO" || e.code == "SEAL_KEY_UNAVAILABLE" => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        // Only an absent `crypto` key (legacy age store) is migrated. A non-object
+        // (malformed repo.json), an explicit null (corruption — left for the
+        // strict typed load to error), or any present value ("age"/"gpg") is a
+        // no-op. Mutate the parsed object in place (preserves any unknown
+        // forward-compat fields), then re-serialize + re-seal under AAD repo_config.
+        let Some(obj) = probe.as_object_mut() else {
+            return Ok(());
+        };
+        if obj.contains_key("crypto") {
+            return Ok(());
+        }
+        obj.insert(
+            "crypto".to_string(),
+            serde_json::Value::String("age".to_string()),
+        );
+        let json = serde_json::to_string_pretty(&probe)?;
+        let sealed = self.master_seal.seal("repo_config", json.as_bytes())?;
+        save_atomic(&self.repo_config_path(), &sealed).await?;
+        Ok(())
+    }
+
     /// If `path` holds plaintext, seal it; if it holds a legacy-magic envelope,
     /// re-wrap it under the current magic. No-op for current-magic envelopes and
     /// missing files.
@@ -865,15 +936,20 @@ pub struct RepoConfig {
     /// unreadable until app unlock — resolved post-unlock, not at `Store::new`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub backend: Option<String>,
-    /// Which crypto backend this store uses. `None` (the default) means the
-    /// built-in age backend; `"gpg"` selects the GPG/OpenPGP built-in. Lives in
-    /// sealed `repo.json`, so it is unreadable until app unlock — resolved
-    /// post-unlock, not at `Store::new`. (No `ext:` crypto namespace yet: both
-    /// backends are rustpass-internal pure-Rust, so selection is a typed match,
-    /// not a registry lookup. Add an extension seam only when an external crypto
-    /// backend appears.)
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub crypto: Option<String>,
+    /// Which crypto backend this store uses (`Age` or `Gpg`). Always serialized
+    /// — the on-disk migration (`normalize_repo_config_crypto`) makes the field
+    /// explicit for every store, including read-only ones that never re-save
+    /// config (the primary `copy_password` persona). A legacy `repo.json`
+    /// lacking the field still deserializes to `Age` via `BackendKind::default()`
+    /// (forward-defensive insurance — see the `TODO(1.0)` below). Lives in sealed
+    /// `repo.json`, unreadable until app unlock — resolved post-unlock, not at
+    /// `Store::new`. (No `ext:` crypto namespace: both backends are
+    /// rustpass-internal pure-Rust, so selection is a typed match, not a
+    /// registry lookup.)
+    // TODO(1.0): once normalize_repo_config_crypto has shipped broadly, consider
+    // dropping the serde(default) absent→Age tolerance.
+    #[serde(default)]
+    pub crypto: crypto::BackendKind,
 }
 
 /// Redacts credential fields and sanitizes `url` — a pasted remote may embed
@@ -937,9 +1013,8 @@ pub struct RedactedRepoConfig {
     /// Storage backend selection (`None` = built-in git).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
-    /// Crypto backend selection (`None` = built-in age).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub crypto: Option<String>,
+    /// Crypto backend selection (`"age"` / `"gpg"`), always present.
+    pub crypto: crypto::BackendKind,
 }
 
 /// Strip any `user:pass@` userinfo from a URL so a credentialed remote cannot
@@ -997,7 +1072,7 @@ impl RepoConfig {
             unlock_identity_with_app: self.unlock_identity_with_app,
             authenticity: self.authenticity.clone(),
             backend: self.backend.clone(),
-            crypto: self.crypto.clone(),
+            crypto: self.crypto,
         }
     }
 }
@@ -1462,31 +1537,142 @@ mod tests {
         assert_eq!(cfg.pat, None);
     }
 
-    /// A default `RepoConfig` (crypto = None) must NOT serialize a `crypto` key,
-    /// so existing age stores stay byte-identical after the field is added; and
-    /// an explicit `"gpg"` round-trips. Guards the backward-compat claim of the
-    /// crypto-backend field.
+    /// `RepoConfig::crypto` is a typed `BackendKind`, always serialized as
+    /// `"age"`/`"gpg"`. This deliberately discards the prior byte-identical-
+    /// legacy-stores invariant: the on-disk migration makes the field explicit
+    /// for every store, so age stores are no longer byte-identical to pre-field
+    /// configs. A legacy JSON lacking `crypto` still deserializes to `Age`
+    /// (forward-defensive `BackendKind::default()`); an explicit `null` or an
+    /// unknown value is corruption and hard-errors at deserialize.
     #[test]
-    fn repo_config_crypto_field_backward_compatible() {
+    fn repo_config_crypto_field_always_present() {
+        // Default RepoConfig serializes crypto explicitly as "age".
         let default_json = serde_json::to_string(&RepoConfig::default()).unwrap();
         assert!(
-            !default_json.contains("\"crypto\""),
-            "default RepoConfig must omit `crypto` so existing stores are byte-identical: {default_json}"
+            default_json.contains("\"crypto\":\"age\""),
+            "default RepoConfig must serialize crypto explicitly: {default_json}"
         );
-        let back: RepoConfig = serde_json::from_str(&default_json).unwrap();
-        assert_eq!(back.crypto, None);
+        assert_eq!(
+            serde_json::from_str::<RepoConfig>(&default_json)
+                .unwrap()
+                .crypto,
+            crypto::BackendKind::Age
+        );
 
-        let gpg = RepoConfig {
-            crypto: Some("gpg".to_string()),
+        // A legacy JSON with NO crypto field still loads as Age (the serde default).
+        let legacy: RepoConfig = serde_json::from_str(r#"{"url":"u","local_path":"p"}"#).unwrap();
+        assert_eq!(legacy.crypto, crypto::BackendKind::Age);
+
+        // Explicit gpg round-trips.
+        let gpg_json = serde_json::to_string(&RepoConfig {
+            crypto: crypto::BackendKind::Gpg,
             ..Default::default()
-        };
-        let gpg_json = serde_json::to_string(&gpg).unwrap();
+        })
+        .unwrap();
         assert!(
             gpg_json.contains("\"crypto\":\"gpg\""),
             "explicit gpg must serialize: {gpg_json}"
         );
-        let back: RepoConfig = serde_json::from_str(&gpg_json).unwrap();
-        assert_eq!(back.crypto.as_deref(), Some("gpg"));
+        assert_eq!(
+            serde_json::from_str::<RepoConfig>(&gpg_json)
+                .unwrap()
+                .crypto,
+            crypto::BackendKind::Gpg
+        );
+
+        // An unknown crypto value is corruption → hard deserialize error.
+        serde_json::from_str::<RepoConfig>(r#"{"url":"u","local_path":"p","crypto":"quux"}"#)
+            .expect_err("unknown crypto value must not deserialize");
+        // An explicit null is corruption → hard deserialize error.
+        serde_json::from_str::<RepoConfig>(r#"{"url":"u","local_path":"p","crypto":null}"#)
+            .expect_err("explicit null crypto must not deserialize");
+    }
+
+    #[tokio::test]
+    async fn normalize_repo_config_crypto_migrates_absent_to_age() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        std::fs::create_dir_all(dir.path()).unwrap();
+        // Legacy repo.json: no `crypto` field (a pre-typed-BackendKind age store).
+        let legacy = r#"{"url":"https://x/repo","local_path":"/p"}"#;
+        std::fs::write(dir.path().join("repo.json"), legacy).unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        cfg.migrate_seal().await.unwrap(); // seal the plaintext, as production would
+
+        // Before: crypto is absent on disk (loads as Age only via the serde default).
+        let before: serde_json::Value = cfg.load_repo_config_as().await.unwrap();
+        assert!(
+            before.get("crypto").is_none(),
+            "precondition: legacy file has no crypto field"
+        );
+
+        cfg.normalize_repo_config_crypto().await.unwrap();
+
+        // After: crypto is explicit "age" on disk, and still loads as Age.
+        let after: serde_json::Value = cfg.load_repo_config_as().await.unwrap();
+        assert_eq!(
+            after.get("crypto").and_then(serde_json::Value::as_str),
+            Some("age")
+        );
+        assert_eq!(
+            cfg.load_repo_config().await.unwrap().crypto,
+            crypto::BackendKind::Age
+        );
+
+        // Idempotent: a second normalize is a no-op (write-once).
+        let bytes_before = std::fs::read(dir.path().join("repo.json")).unwrap();
+        cfg.normalize_repo_config_crypto().await.unwrap();
+        let bytes_after = std::fs::read(dir.path().join("repo.json")).unwrap();
+        assert_eq!(bytes_before, bytes_after, "second normalize is a no-op");
+    }
+
+    #[tokio::test]
+    async fn normalize_repo_config_crypto_leaves_gpg_store_untouched() {
+        // CRITICAL regression: a GPG store (crypto already explicit "gpg") must
+        // NOT be rewritten — the migration must never clobber a gpg store to age.
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        std::fs::create_dir_all(dir.path()).unwrap();
+        let gpg = r#"{"url":"https://x/repo","local_path":"/p","crypto":"gpg"}"#;
+        std::fs::write(dir.path().join("repo.json"), gpg).unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        cfg.migrate_seal().await.unwrap();
+
+        let bytes_before = std::fs::read(dir.path().join("repo.json")).unwrap();
+        cfg.normalize_repo_config_crypto().await.unwrap();
+        let bytes_after = std::fs::read(dir.path().join("repo.json")).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "a gpg store must not be touched by the migration"
+        );
+        assert_eq!(
+            cfg.load_repo_config().await.unwrap().crypto,
+            crypto::BackendKind::Gpg
+        );
+    }
+
+    #[tokio::test]
+    async fn normalize_repo_config_crypto_leaves_explicit_null_alone() {
+        // An explicit null is corruption — the migration leaves it for the strict
+        // typed load to error, rather than silently normalizing to age (C1A).
+        let dir = tempfile::tempdir().unwrap();
+        let key = crate::seal::generate_master_key().unwrap();
+        std::fs::create_dir_all(dir.path()).unwrap();
+        let null_crypto = r#"{"url":"https://x/repo","local_path":"/p","crypto":null}"#;
+        std::fs::write(dir.path().join("repo.json"), null_crypto).unwrap();
+        let cfg = Config::new(dir.path().to_path_buf(), Some(key));
+        cfg.migrate_seal().await.unwrap();
+
+        let bytes_before = std::fs::read(dir.path().join("repo.json")).unwrap();
+        cfg.normalize_repo_config_crypto().await.unwrap(); // no-op
+        let bytes_after = std::fs::read(dir.path().join("repo.json")).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "explicit null must be left untouched"
+        );
+        cfg.load_repo_config()
+            .await
+            .expect_err("null crypto must fail the typed load");
     }
 
     #[test]

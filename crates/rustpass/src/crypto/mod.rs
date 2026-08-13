@@ -59,12 +59,37 @@ pub use gpg::GpgBackend;
 /// cold start. (The master key itself is auth-free — R064 — so the headless
 /// worker reads `repo.json` without a prompt; only the foreground Store defers
 /// it.)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BackendKind {
     /// The age (X25519 / SSH) crypto backend.
     Age,
     /// The GPG/OpenPGP crypto backend.
     Gpg,
+}
+
+impl BackendKind {
+    /// The on-disk wire string (`"age"` / `"gpg"`), for error messages and the
+    /// export manifest. Mirrors the serde `rename_all = "lowercase"` rendering
+    /// without a serialize round-trip.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Age => "age",
+            Self::Gpg => "gpg",
+        }
+    }
+}
+
+impl Default for BackendKind {
+    /// age is the gopass/gpm default crypto backend, so an absent `crypto` field
+    /// in a legacy `repo.json` deserializes to `Age`. The `Default` impl itself
+    /// stays (it backs `RepoConfig::default`); the `#[serde(default)]` attribute
+    /// that consumes it for the legacy-absent case is the removable candidate
+    /// flagged by `TODO(1.0)` at the field.
+    fn default() -> Self {
+        Self::Age
+    }
 }
 
 /// A crypto backend's secret-file extension — a typed wrapper so a bare
@@ -430,5 +455,34 @@ impl CryptoBackend for AgeBackend {
         let derived = self.identity_recipient(identity, passphrase)?;
         let recipients = self.list_recipients(view).await?;
         Ok(recipients.iter().any(|r| r.public_key == derived))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BackendKind;
+
+    /// `as_str()` must stay in sync with `#[serde(rename_all = "lowercase")]` —
+    /// the export manifest and error messages rely on the wire string, and a
+    /// future variant or attr change must not silently drift.
+    #[test]
+    fn as_str_matches_serde_lowercase() {
+        for kind in [BackendKind::Age, BackendKind::Gpg] {
+            let ser = serde_json::to_value(kind).unwrap();
+            assert_eq!(ser.as_str().unwrap(), kind.as_str());
+        }
+    }
+
+    #[test]
+    fn default_is_age() {
+        assert_eq!(BackendKind::default(), BackendKind::Age);
+    }
+
+    #[test]
+    fn rejects_uppercase_variant_string() {
+        // rename_all = "lowercase": the wire form is "age"/"gpg", so "Age"/"Gpg"
+        // (the Rust variant names) must NOT deserialize.
+        serde_json::from_str::<BackendKind>("\"Age\"")
+            .expect_err("uppercase variant string must not deserialize");
     }
 }

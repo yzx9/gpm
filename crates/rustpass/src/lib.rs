@@ -71,6 +71,7 @@ pub mod totp;
 // Re-export core types at crate root (gopass-aligned)
 pub use attachment::{Attachment, AttachmentMeta, has_attachment, metadata};
 pub use config::{Config, LockMode, RepoConfig};
+pub use crypto::BackendKind;
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};
 pub use generator::{GenerateMode, GenerateOptions, generate_password};

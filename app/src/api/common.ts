@@ -43,9 +43,9 @@ export interface RepoConfig {
   ssh_key: string | null;
   ssh_passphrase: string | null;
   local_path: string;
-  /** The crypto backend kind (`"gpg"` for a GPG store; null/absent ⇒ the age
-   *  built-in). Drives the Settings "backend" line. */
-  crypto?: string | null;
+  /** The crypto backend kind: `"age"` (default) or `"gpg"`. Always present after
+   *  the on-disk migration; drives the Settings "backend" line. */
+  crypto: string;
   /** Git commit author name; null/absent uses the app default. */
   commit_user_name?: string | null;
   /** Git commit author email; null/absent uses the app default. */

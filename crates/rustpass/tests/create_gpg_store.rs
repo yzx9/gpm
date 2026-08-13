@@ -181,10 +181,10 @@ mod tests {
             "diff.gpg.binary set, got:\n{git_config}"
         );
 
-        // crypto kind persisted as "gpg" (the load-bearing save_repo_config_with_crypto path).
+        // crypto kind persisted as Gpg (the load-bearing save_repo_config_with_crypto path).
         assert_eq!(
-            store.config().await.unwrap().crypto.as_deref(),
-            Some("gpg"),
+            store.config().await.unwrap().crypto,
+            rustpass::BackendKind::Gpg,
             "repo.json crypto must be gpg"
         );
 

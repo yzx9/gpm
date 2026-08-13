@@ -23,7 +23,7 @@
 
 mod common;
 
-use rustpass::crypto::{CryptoBackend, GpgBackend};
+use rustpass::crypto::{BackendKind, CryptoBackend, GpgBackend};
 use rustpass::{Config, RepoConfig, Store};
 
 /// Committed system-gpg RSA-2048 fixture key (S2K-passphrase-protected secret).
@@ -70,7 +70,7 @@ async fn gpg_store_decrypts_through_store_facade() {
     Config::new(config_dir.path().to_path_buf(), None)
         .save_repo_config_full(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
-            crypto: Some("gpg".to_string()),
+            crypto: BackendKind::Gpg,
             ..Default::default()
         })
         .await
@@ -125,7 +125,7 @@ async fn save_identity_persists_gpg_kind_from_none() {
     Config::new(config_dir.path().to_path_buf(), None)
         .save_repo_config_full(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
-            crypto: None,
+            crypto: BackendKind::Age,
             ..Default::default()
         })
         .await
@@ -138,9 +138,9 @@ async fn save_identity_persists_gpg_kind_from_none() {
         .expect("save_identity accepts the PGP key matching .gpg-id");
 
     assert_eq!(
-        store.config().await.unwrap().crypto.as_deref(),
-        Some("gpg"),
-        "save_identity persists crypto=gpg (the authority) starting from None"
+        store.config().await.unwrap().crypto,
+        BackendKind::Gpg,
+        "save_identity persists crypto=gpg (the authority) starting from the age default"
     );
 }
 
@@ -163,7 +163,7 @@ async fn save_identity_refuses_gpg_flip_into_age_store() {
     Config::new(config_dir.path().to_path_buf(), None)
         .save_repo_config_full(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
-            crypto: None,
+            crypto: BackendKind::Age,
             ..Default::default()
         })
         .await
@@ -179,7 +179,7 @@ async fn save_identity_refuses_gpg_flip_into_age_store() {
         "flip-guard refuses the age→gpg backend switch"
     );
     assert!(
-        store.config().await.unwrap().crypto.is_none(),
+        store.config().await.unwrap().crypto == BackendKind::Age,
         "a refused save must not mutate the persisted crypto kind"
     );
 }
@@ -208,7 +208,7 @@ async fn save_identity_refuses_gpg_into_marker_only_age_store() {
     Config::new(config_dir.path().to_path_buf(), None)
         .save_repo_config_full(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
-            crypto: None,
+            crypto: BackendKind::Age,
             ..Default::default()
         })
         .await
@@ -224,7 +224,7 @@ async fn save_identity_refuses_gpg_into_marker_only_age_store() {
         "the marker-only flip must be refused"
     );
     assert!(
-        store.config().await.unwrap().crypto.is_none(),
+        store.config().await.unwrap().crypto == BackendKind::Age,
         "a refused save must not mutate the persisted crypto kind"
     );
 }
@@ -255,7 +255,7 @@ async fn gpg_store_round_trips_a_written_secret() {
     Config::new(config_dir.path().to_path_buf(), None)
         .save_repo_config_full(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
-            crypto: Some("gpg".to_string()),
+            crypto: BackendKind::Gpg,
             ..Default::default()
         })
         .await
