@@ -77,8 +77,8 @@ weird secret, and a read failure must never block access to the store).
 
 ## Related
 
-- [A004](A004-yaml-secret-format-out-of-scope.md) — YAML format out of scope
-  (the other Secret-model scoping decision).
+- [A004](A004-yaml-secret-format-out-of-scope.md) — YAML secrets: read-only
+  display + lossless-only migration (the other Secret-model scoping decision).
 - `crates/rustpass/src/secret.rs` — the bytes-native `Secret`, `to_bytes`,
   `is_utf8`, and the `non_utf8_*` tests pinning the round-trip.
 - The attribute region (phase 2, shipped) is built on this bytes-native

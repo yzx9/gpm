@@ -1,111 +1,116 @@
-# A004: YAML Secret Format Out of Scope — Opaque-Body Compatibility
+# A004: YAML Secrets — Read-Only Display + Lossless-Only Migration to AKV
 
 **Status:** Accepted
 
-**Date:** 2026-08-03
+**Date:** 2026-08-03 · revised 2026-08-14
 
 ## Context
 
-gopass secrets come in three on-disk formats (verified against the gopass
-source under `pkg/gopass/secrets/`): **AKV** (the modern default), **MIME**
-(`GOPASS-SECRET-1.0`, legacy), and **YAML** (legacy, discouraged). For each,
-gpm must decide whether to parse it as structured data or carry it as opaque
-bytes. gpm already does structured handling for two:
+gopass secrets come in three on-disk formats (verified against the gopass source
+under `pkg/gopass/secrets/`): **AKV** (the modern default), **MIME**
+(`GOPASS-SECRET-1.0`, legacy), and **YAML** (legacy, discouraged). gpm does
+structured handling for AKV (read + write) and MIME (read-only normalization
+into AKV).
 
-- **AKV** — `Secret::parse` → `modern_split`: first line is the password, the
-  rest is the body.
-- **MIME** — `parse_legacy`: read-only normalization that lifts the `Password:`
-  header into the password slot and renders the remaining headers as body text
-  (mirroring gopass's own MIME→AKV normalization).
+**The original 2026-08-03 decision** was to not implement YAML parsing at all: a
+YAML secret fell through `modern_split` — password = first line, the `---`
+marker and YAML block carried as opaque body text. That was safe while the
+editor reassembled `password + body` verbatim, and aligned with gopass's own
+posture: gopass never writes new YAML secrets and gives the format no migration
+path (unlike MIME, which gets a one-way `fromMime` conversion via fsck).
 
-The open question is **YAML** — must gpm recognize its `---` document marker
-and YAML data block, or can YAML secrets pass through as opaque body?
+**It stopped being safe with R069's attribute region.** `split_attrs` extracts
+every `": "` line as an attribute, position-agnostic — including `k: v` lines
+*inside a YAML block*. Combined with `to_bytes`'s canonical reorder (password →
+attributes → body), an edit through gpm rewrites a YAML secret into a shape
+gopass re-reads with a different type and with YAML fields demoted to body text
+— silent corruption on edit.
+
+Verified against the gopass source (`pkg/gopass/secrets/{akv,yaml}.go`,
+`secparse/parse.go`):
+
+- gopass's cascade parses a `---`-bearing secret as **YAML, not AKV** — the
+  `---` marker routes it through `ParseYAML` before the AKV fallback. gpm
+  treating it as AKV was divergence, not parity.
+- YAML→AKV is **lossy in general**: nesting, typed scalars, arrays, and the
+  `---` marker itself are all lost. Only a flat map of string→string scalars
+  converts without loss.
+
+Two facts shape the fix:
+
+1. The corruption **cannot occur unless gpm writes the secret back** — blocking
+   the edit path eliminates the bug without touching the write path.
+2. The original concern was a YAML parser **in the read path** (decoding every
+   secret, octal footguns on manual edit). That concern can be honored while
+   still adding a parser, by **quarantining** the parser to a one-way migration.
 
 ## Decision
 
-**Do not implement YAML parsing.** YAML secrets fall through to `modern_split`:
-password = first line, the `---` separator and YAML data block are carried as
-opaque body text. gpm's gopass-format compatibility surface is therefore
-**AKV (read + write) and MIME (read-only normalization); YAML is not parsed.**
+YAML stays out of scope for structured access — no parsed YAML display, no YAML
+fields, no YAML write path — and is handled as **read-only display + opt-in,
+lossless-only migration**:
 
-## Why YAML is safe as opaque body
+1. **Detection (read path, parser-free).** A secret containing a line beginning
+   with `---` is treated as YAML. A strict byte check — no YAML decode on the
+   read path.
+2. **Read-only display.** A detected YAML secret is shown read-only via a new
+   `EditBlockReason` mirroring the existing `NonUtf8` path. The password — the
+   first line, unless the first line is itself `---` (a bare YAML document) —
+   remains copyable through `copy_password`; the rest is an opaque text view.
+   gpm never writes a YAML secret back, so the edit-time corruption is
+   impossible.
+3. **Migration (user-initiated; the only place a YAML parser runs).** A
+   migrate-to-AKV action parses the `---` block. If the **entire** YAML is a
+   flat map of string→string scalars — no nesting, no arrays, no non-string
+   scalars (numbers/bools/null), the only subset that converts without loss —
+   it is rewritten in place as AKV (attributes from the flat pairs, the password
+   preserved). Any nesting, array, or non-string scalar **aborts** the migration
+   (all-or-nothing per secret) with a prompt to edit the secret in gopass
+   instead. The parser must be YAML **1.2** (bare `0123` stays a string, not
+   octal) and must be matched on node variants — never coerced — so non-strings
+   are rejected rather than silently mangled.
 
-The decisive fact: **in both AKV and YAML the password is the first line.**
-`modern_split` extracts it correctly. MIME is the different case — its password
-lives in a `Password:` header, not the first line, so `modern_split` alone would
-set the password to the magic string `GOPASS-SECRET-1.0` (and `copy_password`
-would copy that magic to the clipboard). That correctness bug is exactly why
-MIME required dedicated `parse_legacy` handling. YAML has no such hazard: the
-first line is the password, identical to AKV, so there is no bug to fix.
-
-The opaque-body path is also **lossless on round-trip.** A YAML secret on disk
-is `<password>\n<body text>\n---\n<yaml>`. gpm parses password = first line,
-body = everything else, including the `---` marker and the YAML block. The
-editor's `reassemble(pw, body)` writes `${pw}\n${body}` back verbatim, so an
-edit preserves the marker and YAML block and gopass re-reads the secret with
-its full structured YAML intact. gpm does not corrupt YAML secrets — it merely
-does not expose their fields as structured data. (`Secret::parse` trims trailing
-whitespace and normalizes CRLF, so the round-trip is gopass-readable, not
-byte-identical — consistent with gpm's stated bar of gopass-readability over
-byte-identity.)
-
-**gopass's own posture supports leaving YAML unparsed.** YAML is a discouraged
-legacy format. gopass never writes new YAML secrets — `New()` and the create
-wizard both produce AKV (`pkg/gopass/secrets/new.go`,
-`internal/create/wizard.go`); there is no `NewYAML` write constructor, only a
-read-side `ParseYAML`. Existing YAML secrets are preserved through edits (read
-via `ParseYAML`, re-serialized via `Bytes()`), but, unlike MIME, are given **no
-migration path**: MIME carries a `fromMime` provenance flag and fsck-driven
-conversion to AKV; YAML has neither. The format is frozen in place, not winding
-down via conversion. Aligning with gopass therefore means treating YAML as a
-read-source gpm can safely pass through, not one it must model.
-
-This also fits the attribute-region direction (consolidating secret handling on
-AKV). Adding a YAML parser would move against both gopass's deprecation
-trajectory and gpm's AKV-first model, and would import a YAML dependency with
-its own manual-editing footguns (e.g. unquoted numeric strings parsed as octal)
-for a dying format.
+The YAML parser is a **migration-only dependency** (a maintained MIT/Apache
+YAML 1.2 crate), never on the read path.
 
 ## Consequences
 
-- **YAML secrets are safe in gpm.** The password extracts correctly and the data
-  round-trips without corruption; a YAML secret remains gopass-readable after a
-  gpm edit.
-- **No structured field access for YAML.** A YAML secret displays its `---`
-  marker and indented YAML as body text, not as named fields. The TOTP and
-  attachment body scanners incidentally scan those lines too, so a `totp:` or
-  `Content-Transfer-Encoding:` inside a YAML block may be detected by accident —
-  tolerated, not guaranteed.
-- **Known cosmetic edge case.** A YAML secret whose first line is the `---`
-  marker itself (a password-less YAML document) shows `---` as the password.
-  Rare, immediately visible, and still non-destructive: it round-trips as valid
-  YAML.
-- **The format-compat surface is now stated.** AKV (read + write) and MIME
-  (read-only); future format questions resolve against this boundary. If
-  structured YAML display ever becomes a real requirement, the preferred
-  mitigation is a one-way "flatten to AKV on edit" normalize (drop the `---`
-  block into the attribute region / body), not a full YAML parser. Revisit this
-  ADR only then.
+- **The edit-time YAML corruption is eliminated** by removing the edit path for
+  YAML, not by repairing the write path.
+- **A YAML crate becomes a gpm dependency**, confined to the migration command.
+- **Rich YAML — the common real-world case — cannot migrate.** Such secrets stay
+  read-only with a prompt pointing the user to gopass. Intentional: lossy
+  migration would silently mangle data, and gpm declines to model YAML
+  structure.
+- **Known cosmetic divergence.** Strict `---` detection treats a small set of
+  `---`-bearing non-YAML secrets as read-only where gopass treats them as
+  editable AKV. Recoverable (edit in gopass), and self-diagnoses at migration
+  time when the parser finds no valid YAML mapping.
+- If structured YAML display ever becomes a real requirement, the answer remains
+  "not a full YAML parser on the read path" — revisit this ADR only then.
 
 ## Alternatives considered
 
-- **Full YAML parser (read structured fields).** Rejected: gopass deprecated the
-  format, never writes it, and offers no migration path; the structured benefit
-  accrues only to users who hand-authored YAML years ago. It costs a YAML
-  dependency plus its editing footguns, and cuts against the AKV-consolidation
-  direction.
-- **Read-only YAML recognition (mirroring MIME).** Rejected as unnecessary:
-  MIME needed special handling because its password is not on the first line (a
-  correctness bug). YAML's password is on the first line, so `modern_split`
-  already handles it correctly — there is no bug to fix.
-- **One-way flatten to AKV on edit (normalize YAML away).** Deferred, not
-  rejected: it is the cheap mitigation if structured display is ever required,
-  but it is not needed while opaque-body handling is both safe and lossless.
+- **Opaque-body passthrough (the original stance).** Correct only while writes
+  preserved the body verbatim; broken by the attribute region. Preserved here in
+  spirit (read-only, no parsing) with the edit path closed.
+- **Round-trip fidelity via raw-retention (a `Secret` that stores the original
+  bytes and writes them back verbatim).** Deferred: a larger `Secret`-model
+  refactor that also changes AKV line-order behavior; read-only + migrate fixes
+  the YAML corruption at lower cost. (It remains the candidate fix for the
+  separate AKV interleaved-line reorder issue, out of scope here.)
+- **Structured YAML read/edit (full gopass parity: a YAML type with a parsed
+  data map).** Rejected: reopens the structured-access question this ADR closes,
+  needs a read-path parser, and the edit UI has no model for nested YAML — for a
+  format gopass itself no longer writes.
+- **Lossy migration (flatten nesting with dotted keys).** Rejected: irreversible
+  and silently loses structure/types.
 
 ## Related
 
-- [A002](A002-rust-first-without-gopass.md) — Rust-first, narrow-scope stance;
-  age-only, no GPG. Declining a legacy format gopass itself discourages is the
-  same direction.
-- `crates/rustpass/src/secret.rs` — `modern_split` (AKV/YAML path) and
-  `parse_legacy` (MIME path).
+- [A002](A002-rust-first-without-gopass.md) — narrow-scope stance; declining to
+  model a deprecated format is the same direction.
+- [A005](A005-secret-stored-as-bytes.md) — the bytes-native `Secret` this
+  builds on.
+- gopass `pkg/gopass/secrets/{akv,yaml}.go`, `secparse/parse.go` — the cascade
+  and format models gpm stays compatible with.
