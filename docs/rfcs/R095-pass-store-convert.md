@@ -16,8 +16,8 @@ Serves `docs/specs/004-encryption-gpg`.
 
 ## Why
 
-Read-only support (R093) lets a `pass` user *view* their store in gpm; to
-*create or edit* secrets they must leave the `pass` format, because gpm cannot
+Read-only support (R093) lets a `pass` user _view_ their store in gpm; to
+_create or edit_ secrets they must leave the `pass` format, because gpm cannot
 encrypt to a `pass` store's recipient set without a system keyring (A006).
 Conversion is that move. Doing it generally (multi-key) from the start avoids
 shipping a single-recipient slice that would be reworked the moment a team or
@@ -33,14 +33,14 @@ re-encryption machinery. Convert is a thin orchestration over both — it
 introduces no new crypto of its own.
 
 **Mirrors gopass.** gopass's `convert` decrypts with the old backend and
-re-encrypts with the new; its `recipients add/remove` *eagerly* re-encrypts the
+re-encrypts with the new; its `recipients add/remove` _eagerly_ re-encrypts the
 whole store so a membership change takes effect immediately (lazy re-encryption
 is rejected as silently inconsistent — a teammate discovers, at the worst time,
 that they cannot read an entry). gpm matches the eager model for gopass
 compatibility.
 
 **Result is gopass-GPG, not `pass`.** The output carries `.public-keys/` and
-gpm-managed recipients, so gpm can write it. Standard `pass` can still *read*
+gpm-managed recipients, so gpm can write it. Standard `pass` can still _read_
 the re-encrypted `.gpg` files (still OpenPGP, still encrypted to keys in its
 keyring), but the store is no longer maintained as a `pass` store. A clean break
 to gpm's native age format (GPG→age) is a separate, heavier conversion and is

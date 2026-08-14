@@ -34,7 +34,7 @@ identities for back-compat with stores gpm cannot fully classify.
 
 **Recipient source differs from age.** `.age-recipients` lists public keys
 directly; `.gpg-id` lists identifiers (key IDs / fingerprints) that gpm resolves
-to its own *imported identities* by fingerprint / key-ID match — the same
+to its own _imported identities_ by fingerprint / key-ID match — the same
 resolution R093 uses for the membership gate. gpm does not resolve `.gpg-id`
 against a system keyring (A006); only the identities the user has imported are
 visible.
@@ -58,7 +58,7 @@ settles on rather than introducing a GPG-specific cache.
   RFC obscures both. Keep R005 (age/SSH) and this RFC (GPG) as parallel,
   symmetric records, matching how the crypto backends themselves are tracked.
 - **Single GPG identity forever; rely on convert.** Rejected: reading a
-  multi-key store *without* migrating it is a legitimate standing need, not just
+  multi-key store _without_ migrating it is a legitimate standing need, not just
   a convert stepping-stone (a user may want to keep using `pass`/gopass on the
   desktop and only read from gpm).
 

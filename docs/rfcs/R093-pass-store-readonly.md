@@ -39,27 +39,27 @@ email) — and no `.public-keys/`, so the gate hard-errors before the user ever
 reaches decryption.
 
 **Reads do not need public keys.** OpenPGP decryption needs only the
-recipient's secret key; `.gpg-id` and `.public-keys/` are about *who to encrypt
-to*, not how to decrypt. The decrypt path is already independent of
+recipient's secret key; `.gpg-id` and `.public-keys/` are about _who to encrypt
+to_, not how to decrypt. The decrypt path is already independent of
 `.public-keys/`, so the sole blocker is the membership gate itself.
 
 **The relaxation.** When no `.public-keys/` pool exists, confirm membership by
 deriving the imported secret key's primary fingerprint and key IDs (available
 from public-packet data alone, no passphrase) and matching them against the
 `.gpg-id` tokens. A key absent from `.gpg-id` is definitively rejected — it
-cannot decrypt anything in the store. When a `.public-keys/` pool *does* exist,
+cannot decrypt anything in the store. When a `.public-keys/` pool _does_ exist,
 today's gopass path is unchanged, so gopass-GPG stores are unaffected.
 
 **gopass alignment.** gopass opens `pass` stores natively, but resolves
 `.gpg-id` tokens through the system `gpg` binary and the `~/.gnupg` keyring —
-exactly what gpm forbids (A006). gpm therefore reproduces gopass's *on-disk
-format and recipient semantics* while substituting its bundled OpenPGP library
+exactly what gpm forbids (A006). gpm therefore reproduces gopass's _on-disk
+format and recipient semantics_ while substituting its bundled OpenPGP library
 and the imported identity everywhere gopass shells out. The on-disk store is
 left untouched (gpm adds nothing, writes nothing), so `pass` and gpm can
 coexist on the same repo.
 
 **No write.** A `pass` store stays strictly read-only in gpm. Encrypting a new
-secret would require resolving *all* `.gpg-id` recipients' public keys, which
+secret would require resolving _all_ `.gpg-id` recipients' public keys, which
 gpm cannot do without a keyring or keyserver. Write-to-a-`pass`-store is
 deliberately out of scope; the route to writability is conversion (R095), which
 re-encrypts into a gpm-native store.
@@ -77,7 +77,7 @@ follow-up can add a user-ID match pass. The common `pass init <fingerprint>` and
 - **Keyserver lookup to materialize `.public-keys/`.** Rejected for reads:
   decryption needs no public keys, so a keyserver would add a network trust
   surface for no read-path benefit. (A keyserver may matter for a future
-  *write* path, not this RFC.)
+  _write_ path, not this RFC.)
 - **Read-write in place (encrypt to self when the store is single-recipient).**
   Rejected as the v1 shape: it adds a conditional GPG write path with
   recipient-shrinkage hazards and competes with the cleaner "convert, then
