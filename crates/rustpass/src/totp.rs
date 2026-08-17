@@ -14,17 +14,17 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use totp_rs::{Algorithm, TOTP};
+use totp_rs::{Algorithm, Builder, Totp};
 use zeroize::Zeroizing;
 
 use crate::Secret;
 use crate::error::{Error, ErrorCode};
 
-/// A parsed TOTP configuration, ready to mint codes. Wraps a [`totp_rs::TOTP`];
+/// A parsed TOTP configuration, ready to mint codes. Wraps a [`totp_rs::Totp`];
 /// the inner seed is wiped on drop through totp-rs's `zeroize` feature. The
 /// [`Debug`](fmt::Debug) impl is hand-rolled to redact the seed — never derive
 /// it, or a stray log line leaks the seed into the disk-persisted log pipeline.
-pub struct Otp(TOTP);
+pub struct Otp(Totp);
 
 impl fmt::Debug for Otp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -99,17 +99,18 @@ pub fn generate_at(otp: &Otp, now: SystemTime) -> Result<Zeroizing<String>, Erro
             )
         })?
         .as_secs();
-    Ok(Zeroizing::new(otp.0.generate(secs)))
+    // `generate` returns a stack-allocated `Token` that wipes itself on drop
+    // (zeroize feature); the `Zeroizing` guards the formatted `String` copy.
+    Ok(Zeroizing::new(otp.0.generate(secs).to_string()))
 }
 
 /// Build an [`Otp`] from a full `otpauth://` URI.
 ///
 /// `totp-rs` parses the URI and validates `digits` (6..=8), `algorithm`
-/// (SHA1/256/512), and secret size (≥ 128 bits). It does **not** validate the
-/// OTP type segment, the `encoder` query param, or the time step — so we guard
-/// those ourselves: a HOTP URI, a Steam Guard encoder, or a zero period are
-/// rejected here rather than silently producing a code that never matches the
-/// server.
+/// (SHA1/256/512), secret size (≥ 128 bits), and a non-zero time step. It does
+/// **not** validate the OTP type segment or the `encoder` query param — so we
+/// guard those ourselves: a HOTP URI or a Steam Guard encoder is rejected here
+/// rather than silently producing a code that never matches the server.
 fn from_uri(uri: &str) -> Result<Otp, Error> {
     if type_segment(uri).is_some_and(|t| !t.eq_ignore_ascii_case("totp")) {
         return Err(Error::new(
@@ -123,15 +124,7 @@ fn from_uri(uri: &str) -> Result<Otp, Error> {
             "Steam Guard / non-default OTP encoders are not supported",
         ));
     }
-    let totp = TOTP::from_url(uri).map_err(parse_err)?;
-    // totp-rs does not validate step; its `generate` divides by it.
-    if totp.step == 0 {
-        return Err(Error::new(
-            ErrorCode::StoreError,
-            "TOTP period must be at least 1 second",
-        ));
-    }
-    Ok(Otp(totp))
+    Ok(Otp(Totp::from_url(uri).map_err(parse_err)?))
 }
 
 /// Build an [`Otp`] from a bare base32 secret (the `totp:` key path) using
@@ -149,10 +142,15 @@ fn from_bare_secret(secret: &str) -> Result<Otp, Error> {
             "TOTP seed has no base32 characters",
         ));
     }
-    let bytes = totp_rs::Secret::Encoded(normalized)
-        .to_bytes()
-        .map_err(parse_err)?;
-    TOTP::new(Algorithm::SHA1, 6, 0, 30, bytes, None, "gpm".to_string())
+    let secret = totp_rs::Secret::try_from_base32(normalized).map_err(parse_err)?;
+    Builder::new()
+        .with_algorithm(Algorithm::SHA1)
+        .with_secret(secret)
+        .with_digits(6)
+        .with_skew(0)
+        .with_step_duration(30)
+        .with_account_name("gpm")
+        .build()
         .map(Otp)
         .map_err(parse_err)
 }
@@ -229,7 +227,15 @@ mod tests {
             (Algorithm::SHA512, sha512_seed, 1_111_111_111, "99943326"),
         ];
         for (alg, seed, t, expected) in cases {
-            let totp = TOTP::new(*alg, 8, 0, 30, seed.clone(), None, "t".to_string()).unwrap();
+            let totp = Builder::new()
+                .with_algorithm(*alg)
+                .with_secret(seed.clone())
+                .with_digits(8)
+                .with_skew(0)
+                .with_step_duration(30)
+                .with_account_name("t")
+                .build()
+                .unwrap();
             let otp = Otp(totp);
             let got = generate_at(&otp, UNIX_EPOCH + Duration::from_secs(*t)).unwrap();
             assert_eq!(&*got, *expected, "RFC 6238 {alg:?} @ t={t}");
@@ -238,10 +244,15 @@ mod tests {
 
     #[test]
     fn generate_at_errors_before_epoch() {
-        let bytes = totp_rs::Secret::Encoded("KRSXG5CTMVRXEZLUKN2XAZLSKNSWG4TFOQ".to_string())
-            .to_bytes()
-            .unwrap();
-        let otp = Otp(TOTP::new(Algorithm::SHA1, 6, 0, 30, bytes, None, "t".to_string()).unwrap());
+        let secret =
+            totp_rs::Secret::try_from_base32("KRSXG5CTMVRXEZLUKN2XAZLSKNSWG4TFOQ").unwrap();
+        let otp = Otp(Builder::new()
+            .with_algorithm(Algorithm::SHA1)
+            .with_secret(secret)
+            .with_skew(0)
+            .with_account_name("t")
+            .build()
+            .unwrap());
         assert!(generate_at(&otp, SystemTime::UNIX_EPOCH - Duration::from_secs(1)).is_err());
     }
 
@@ -279,11 +290,15 @@ mod tests {
         // a code: extract must agree with a directly-built TOTP for the same secret.
         let body = format!("pw\ntotp: {SECRET}");
         let extracted = extract(&sec(&body)).unwrap().unwrap();
-        let bytes = totp_rs::Secret::Encoded(SECRET.to_string())
-            .to_bytes()
-            .unwrap();
-        let direct =
-            Otp(TOTP::new(Algorithm::SHA1, 6, 0, 30, bytes, None, "gpm".to_string()).unwrap());
+        let direct = Otp(Builder::new()
+            .with_algorithm(Algorithm::SHA1)
+            .with_secret(totp_rs::Secret::try_from_base32(SECRET).unwrap())
+            .with_digits(6)
+            .with_skew(0)
+            .with_step_duration(30)
+            .with_account_name("gpm")
+            .build()
+            .unwrap());
         let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         assert_eq!(
             &*generate_at(&extracted, now).unwrap(),
@@ -343,7 +358,8 @@ mod tests {
 
     #[test]
     fn extract_rejects_zero_period() {
-        // totp-rs accepts period=0 from the URI; we reject before generate divides by zero.
+        // totp-rs 6 rejects a zero step at build time (InvalidStepZero); pinned
+        // here so a future upstream relaxation can't reintroduce a divide-by-zero.
         assert!(
             extract(&sec(&format!(
                 "pw\notpauth://totp/A:x?secret={SECRET}&period=0"
@@ -380,7 +396,7 @@ mod tests {
 
     #[test]
     fn extract_rejects_short_secret_via_totp_rs() {
-        // < 16 bytes (128 bits) → totp-rs SecretSize error. This is the documented
+        // < 16 bytes (128 bits) → totp-rs SecretTooShort error. This is the documented
         // gopass divergence: gopass accepts these, gpm does not. The canonical toy
         // secret JBSWY3DPEHPK3PXP (10 bytes) is rejected for the same reason.
         assert!(extract(&sec("pw\ntotp: ABCD")).is_err());

@@ -85,7 +85,7 @@ bech32 = "0.11"
 # analogue). `otpauth` parses otpauth:// URIs; `zeroize` wipes the seed on drop.
 # `qr` is deliberately off — unused, and it would pull `qrcode` + `image` and
 # bloat the Android build.
-totp-rs = { version = "5", default-features = false, features = [
+totp-rs = { version = "6", default-features = false, features = [
   "otpauth",
   "zeroize",
 ] }
