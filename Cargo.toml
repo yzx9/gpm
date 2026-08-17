@@ -66,7 +66,7 @@ ssh-key = { version = "0.6", features = [
 # Same pure-Rust, MIT/Apache, no-ring/openssl posture as `age`/`ssh-key`, so it
 # cross-compiles to Android NDK with no C deps. The `crypto::openpgp` wrapper is
 # also the shared seam for the future GPG crypto backend (RFC 0036).
-pgp = "0.19"
+pgp = "0.20"
 # RNG + SmallVec for rpgp's key-generation and MessageBuilder paths (builder
 # methods take `&mut impl CryptoRng`; preferred-algorithm lists are SmallVec).
 rand = "0.8"

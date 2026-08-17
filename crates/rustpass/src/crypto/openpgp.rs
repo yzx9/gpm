@@ -375,7 +375,7 @@ pub(crate) fn generate_keypair(
 ) -> Result<(SignedSecretKey, SignedPublicKey), Error> {
     let mut rng = thread_rng();
     let subkey = SubkeyParamsBuilder::default()
-        .key_type(KeyType::ECDH(ECCCurve::Curve25519))
+        .key_type(KeyType::ECDH(ECCCurve::Curve25519Legacy))
         .can_encrypt(EncryptionCaps::All)
         .build()
         .map_err(|e| Error::new(ErrorCode::StoreError, format!("subkey params: {e}")))?;
