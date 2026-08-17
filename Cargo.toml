@@ -42,7 +42,7 @@ age = { version = "0.12", features = ["armor", "ssh", "plugin"] }
 # until native support lands. Drop it (and the macro annotations) once that ships.
 async-trait = "0.1"
 zeroize = { version = "1", features = ["derive", "serde"] }
-git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
+git2 = { version = "0.21", features = ["vendored-openssl", "vendored-libgit2"] }
 # For Android HTTPS CA loading (see `rustpass::git::ensure_https_ca_loaded`):
 # `libgit2-sys` for the `GIT_OPT_ADD_SSL_X509_CERT` call (already transitive via
 # git2), and the high-level `openssl` crate for PEM parsing. `openssl` depends
