@@ -56,7 +56,7 @@ which recognizes a backend by its marker's presence.
 **Consent is captured where gpm introduces the store.** One hard gate before
 registering a cloned plain store (cancel cleans up the working copy); after
 that, a lightweight inline confirmation on every create/edit, worded to cover
-both facts at the moment of risk — the entry is stored unencrypted *and*, if
+both facts at the moment of risk — the entry is stored unencrypted _and_, if
 sync is on, pushed to the store's remote. No ambient badge; reads are untouched.
 The ethical stance is informed consent, which is also gopass's own: the owner
 chose an unencrypted store; gpm's job is to make that choice visible at the
