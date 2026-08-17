@@ -39,6 +39,7 @@ use std::fmt;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use aes_gcm::aead::consts::U12;
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use zeroize::Zeroizing;
@@ -71,6 +72,10 @@ const KEY_ID: u8 = 1;
 
 /// GCM nonce length, in bytes (the standard 96-bit size).
 const NONCE_LEN: usize = 12;
+
+// The envelope nonce length and the `Nonce<U12>` at the AEAD calls must stay
+// the same number; this fails to compile if either drifts.
+const _: [(); NONCE_LEN] = [(); 12];
 
 /// Length of the fixed header preceding the ciphertext: `magic | key_id`.
 const HEADER_LEN: usize = MAGIC.len() + 1;
@@ -220,11 +225,11 @@ impl Seal {
 
         let mut nonce_bytes = [0u8; NONCE_LEN];
         fill_random(&mut nonce_bytes)?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce: Nonce<U12> = nonce_bytes.into();
 
         let ct = cipher
             .encrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: plaintext,
                     aad: name.as_bytes(),
@@ -275,8 +280,9 @@ impl Seal {
         }
 
         // Envelope: magic(MAGIC.len()) | key_id(1) | nonce(NONCE_LEN) | ct‖tag.
-        // The length check above guarantees every split is in bounds; split_at is
-        // used instead of indexing so there is no panicking slice for clippy.
+        // The length check above guarantees every split is in bounds and the
+        // nonce TryFrom below infallible; split_at is used instead of indexing
+        // so there is no panicking slice for clippy.
         let (_magic, rest) = raw.split_at(MAGIC.len());
         let (key_id_slice, rest) = rest.split_at(1);
         let (nonce_bytes, ct) = rest.split_at(NONCE_LEN);
@@ -292,12 +298,13 @@ impl Seal {
             ));
         }
 
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::<U12>::try_from(nonce_bytes)
+            .map_err(|_| Error::new(ErrorCode::SealTampered, "Truncated seal envelope"))?;
 
         let cipher = Aes256Gcm::new_from_slice(&**key).expect("master key is 32 bytes");
         cipher
             .decrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: ct,
                     aad: name.as_bytes(),

@@ -73,7 +73,7 @@ rand = "0.8"
 smallvec = "1"
 # At-rest AEAD for local private files (repo.json, identity). AES-256-GCM gives
 # confidentiality + integrity in one op with a random symmetric master key.
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 # OS RNG for the master key + per-seal GCM nonces.
 getrandom = { version = "0.4", features = ["std"] }
 # Base64 for the master key crossing the Rust ↔ Android-plugin IPC boundary.
