@@ -247,19 +247,22 @@ mod tests {
         assert!(!config_dir.path().join("repo").exists());
     }
 
-    /// Cleanup-on-failure: if the FINAL bootstrap step (`save_repo_config_full`)
-    /// fails — here its atomic temp `repo.tmp` is blocked by a directory — the
-    /// partial repo (with `.gitattributes`, `.gpg-id`, `.public-keys/`, the two
-    /// commits, and the `.git/config` writes) is removed so the next attempt
-    /// starts clean. Proves the multi-file seed needs no special cleanup.
+    /// Cleanup-on-failure: if the FINAL bootstrap step (`save_repo_config_locked`)
+    /// fails — here the config write lock's lockfile path is blocked by a
+    /// directory, so the locked persist cannot even open the lock — the
+    /// partial repo (with `.gitattributes`, `.gpg-id`, `.public-keys/`, the
+    /// two commits, and the `.git/config` writes) is removed so the next
+    /// attempt starts clean. Proves the multi-file seed needs no special
+    /// cleanup.
     #[tokio::test]
     async fn create_gpg_store_cleans_up_partial_state_when_persist_fails() {
         let config_dir = tempfile::tempdir().expect("failed to create config dir");
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
-        // `save_atomic` writes the temp to `repo.tmp`; a directory there makes
-        // the persist fail AFTER init + seed + both commits have already landed.
-        std::fs::create_dir(config_dir.path().join("repo.tmp")).unwrap();
+        // The persist takes the ConfigLock first; a directory at the lockfile
+        // path makes every acquire (hence the persist) fail AFTER init + seed
+        // + both commits have already landed.
+        std::fs::create_dir(config_dir.path().join("gpm_config.lock")).unwrap();
 
         let err = store
             .create_gpg_store(None, &GitAuth::None, fixture_identity())

@@ -111,7 +111,10 @@ async function removeKey() {
     router.push({ name: "settingsRepository" });
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || t("sshKey.removeFailed");
+    error.value =
+      appError?.code === "CONFIG_BUSY"
+        ? t("settings.auth.configBusy")
+        : appError?.message || t("sshKey.removeFailed");
   } finally {
     removing.value = false;
   }

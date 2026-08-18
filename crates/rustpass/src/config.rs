@@ -8,6 +8,7 @@ use std::{fmt, io};
 use serde_json;
 use tokio::fs;
 
+use crate::config_lock::ConfigLock;
 use crate::crypto;
 use crate::error::{Error, ErrorCode};
 use crate::identity::{IdentityType, classify_identity};
@@ -70,15 +71,70 @@ impl LockMode {
 /// behavior slot — each written after its `.seal()`) and, via the app shell,
 /// for the plaintext `pref.json` and `.sync_attention` marker.
 ///
+/// The temp name is made unique per call (`<name>.<pid>.<counter>.tmp`), so
+/// two concurrent saves to the same target never write the same temp file
+/// (the pre-suffix fixed `.tmp` could commit one writer's content under the
+/// other's rename). Stale temps from a crashed process are swept best-effort
+/// at startup alongside the seal migration.
+///
 /// # Errors
 ///
 /// Returns an error if the temp write or the rename fails (e.g. disk full,
-/// permission denied, or a collision at the `.tmp` path).
+/// permission denied).
 pub async fn save_atomic(path: &Path, data: &[u8]) -> Result<(), Error> {
-    let temp_path = path.with_extension("tmp");
-    fs::write(&temp_path, data).await?;
-    fs::rename(&temp_path, path).await?;
-    Ok(())
+    static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let file_name = path
+        .file_name()
+        .map_or_else(|| "gpm".to_string(), |s| s.to_string_lossy().into_owned());
+    let temp_path = path.with_file_name(format!("{file_name}.{}.{}.tmp", std::process::id(), n));
+    if let Err(e) = fs::write(&temp_path, data).await {
+        // A failed temp write (ENOSPC/EACCES) must not strand the partial temp;
+        // the startup sweep only catches the process-death case.
+        let _ = fs::remove_file(&temp_path).await;
+        return Err(e.into());
+    }
+    match fs::rename(&temp_path, path).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&temp_path).await;
+            Err(e.into())
+        }
+    }
+}
+
+/// Best-effort sweep of orphaned temp files (`*.tmp`, any writer) in the
+/// config dir. Runs at startup next to the seal migration: a `save_atomic`
+/// interrupted by a process death leaves its temp behind forever otherwise.
+///
+/// Race window: a LIVE writer's in-flight temp (created, rename pending) can
+/// be caught by the sweep — the deletion turns that one save into a loud
+/// error, never corruption. Only temps older than a grace window are swept to
+/// shrink that window to process-death leftovers (a live writer's temp is
+/// milliseconds old; a crashed one's is at least one app-restart old).
+#[allow(clippy::case_sensitive_file_extension_comparisons)] // ".tmp" is our naming, not an extension
+pub(crate) fn sweep_tmp_files(config_dir: &Path) {
+    const GRACE: std::time::Duration = std::time::Duration::from_mins(1);
+    let Ok(entries) = std::fs::read_dir(config_dir) else {
+        return;
+    };
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(GRACE)
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.ends_with(".tmp") {
+            continue;
+        }
+        // Only stale temps: modified before the grace cutoff. An unreadable
+        // mtime keeps the file (fail-safe, never sweeps live data).
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else { continue };
+        if modified < cutoff {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Configuration and identity persistence for a password store.
@@ -625,20 +681,71 @@ impl Config {
             backend: None,
             crypto,
         };
-        // Delegate to the atomic variant so `repo.json` is never observed
-        // half-written (temp file + rename), matching `save_identity`. Matters
-        // for the create bootstraps, which save config after git init.
-        self.save_repo_config_full(&config).await
+        // Delegate to the LOCKED full-write entry so setup writes serialize
+        // against concurrent writers (a worker migration, another setup).
+        self.save_repo_config_locked(&config).await
     }
 
-    /// Persist a full [`RepoConfig`] atomically (used by the
-    /// authenticity-mutation paths, which load → mutate a field → save).
+    /// The single locked read-modify-write entry for `repo.json` (R097).
+    ///
+    /// Acquires the cross-process [`ConfigLock`], loads the CURRENT config
+    /// inside the critical section (so the mutation applies to the latest
+    /// committed state, never a stale pre-lock snapshot), runs `f`, and —
+    /// only when `f` reports [`UpdateOutcome::Changed`] — saves. `Unchanged`
+    /// returns without touching the file (debounce/idempotence preserved).
+    /// If `f` errors, nothing is written and the lock is released with the
+    /// error propagated.
+    ///
+    /// This is the ONLY public RMW path: every field-mutating writer must go
+    /// through it, so interleaved writers can never drop each other's
+    /// fields. Do not call it while already holding the lock
+    /// (non-reentrant). The lock is held across the inner `.await`s — the
+    /// critical section is one file read + AEAD seal + rename (microseconds),
+    /// far under the 5 s acquire deadline.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lock acquisition failure ([`ErrorCode::ConfigBusy`] past
+    /// the deadline), load errors, `f`'s error as-is, and save errors.
+    pub async fn update_repo_config<T>(
+        &self,
+        f: impl FnOnce(&mut RepoConfig) -> Result<UpdateOutcome<T>, Error>,
+    ) -> Result<T, Error> {
+        let _guard = ConfigLock::acquire(self.config_dir()).await?;
+        let mut rc = self.load_repo_config().await?;
+        match f(&mut rc)? {
+            UpdateOutcome::Changed(out) => {
+                self.save_repo_config_full(&rc).await?;
+                Ok(out)
+            }
+            UpdateOutcome::Unchanged(out) => Ok(out),
+        }
+    }
+
+    /// Public locked full write: replaces `repo.json` wholesale under the
+    /// [`ConfigLock`]. Used by the setup paths (a fresh clone/create knows
+    /// the whole config) and by integration tests seeding a config directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock cannot be acquired, the config directory
+    /// cannot be created, or the file cannot be written.
+    pub async fn save_repo_config_locked(&self, config: &RepoConfig) -> Result<(), Error> {
+        let _guard = ConfigLock::acquire(self.config_dir()).await?;
+        self.save_repo_config_full(config).await
+    }
+
+    /// Persist a full [`RepoConfig`] atomically. **Caller must already hold
+    /// the [`ConfigLock`]** — this is the lock-scoped sink behind
+    /// [`update_repo_config`](Self::update_repo_config) and
+    /// [`save_repo_config_locked`](Self::save_repo_config_locked); there is
+    /// no unlocked public writer left.
     ///
     /// # Errors
     ///
     /// Returns an error if the config directory cannot be created or the file
     /// cannot be written.
-    pub async fn save_repo_config_full(&self, config: &RepoConfig) -> Result<(), Error> {
+    pub(crate) async fn save_repo_config_full(&self, config: &RepoConfig) -> Result<(), Error> {
         fs::create_dir_all(&self.config_dir).await?;
         let json = serde_json::to_string_pretty(config)?;
         let sealed = self.master_seal.seal("repo_config", json.as_bytes())?;
@@ -701,11 +808,17 @@ impl Config {
     ///
     /// Returns an error if the files cannot be removed.
     pub async fn clear_all(&self) -> Result<(), Error> {
+        // The repo.json deletion takes the ConfigLock so it cannot interleave
+        // with a concurrent writer's rename (which would resurrect a file the
+        // user just reset away). The other two files are single-writer slots.
+        {
+            let _guard = ConfigLock::acquire(self.config_dir()).await?;
+            if self.repo_config_path().exists() {
+                fs::remove_file(self.repo_config_path()).await?;
+            }
+        }
         if self.identity_path().exists() {
             fs::remove_file(self.identity_path()).await?;
-        }
-        if self.repo_config_path().exists() {
-            fs::remove_file(self.repo_config_path()).await?;
         }
         // The sealed identity-passphrase slot is repo-scoped (paired with the
         // identity above), so a repo reset clears it too — leaving the at-rest
@@ -735,8 +848,18 @@ impl Config {
     ///
     /// Returns an error if a file cannot be read, sealed/unsealed, or written.
     pub async fn migrate_seal(&self) -> Result<(), Error> {
-        self.wrap_if_needed(&self.master_seal, &self.repo_config_path(), "repo_config")
-            .await?;
+        // Startup hook: sweep orphaned save_atomic temps (a crashed writer's
+        // leftovers) — runs before anything might mistake them for live files.
+        sweep_tmp_files(&self.config_dir);
+        // The repo_config wrap runs under the ConfigLock — an envelope rewrite
+        // is still a read→seal(stale bytes)→rename that could clobber a
+        // concurrent content writer (R097). The vault-tier files are not
+        // repo.json; single-writer slots, no config lock.
+        {
+            let _guard = ConfigLock::acquire(self.config_dir()).await?;
+            self.wrap_if_needed(&self.master_seal, &self.repo_config_path(), "repo_config")
+                .await?;
+        }
         self.wrap_if_needed(&self.vault_seal, &self.identity_path(), "identity")
             .await?;
         self.wrap_if_needed(
@@ -761,6 +884,8 @@ impl Config {
     /// Returns an error if `repo_config` cannot be read, sealed/unsealed, or
     /// written.
     pub async fn migrate_repo_seal(&self) -> Result<(), Error> {
+        // Same ConfigLock discipline as migrate_seal's repo_config wrap.
+        let _guard = ConfigLock::acquire(self.config_dir()).await?;
         self.wrap_if_needed(&self.master_seal, &self.repo_config_path(), "repo_config")
             .await
     }
@@ -771,27 +896,18 @@ impl Config {
     /// stores omitted it) has no `crypto` key. The `BackendKind` deserializer
     /// already loads such a record as `Age`, but the on-disk file stays absent —
     /// and a read-only user (the primary `copy_password` persona) never triggers
-    /// a [`save_repo_config_full`](Self::save_repo_config_full) that would
-    /// re-persist it. This rewrites the field to explicit `"age"` once, so every
-    /// store's on-disk representation is honest regardless of usage pattern.
+    /// a config re-persist that would write it. This rewrites the field to
+    /// explicit `"age"` once, so every store's on-disk representation is honest
+    /// regardless of usage pattern.
     ///
-    /// Unlike [`wrap_if_needed`](Self::wrap_if_needed) (which rewrites only the
-    /// seal *envelope* — losing such a write loses nothing), this is a *content*
-    /// read-modify-write, so it joins the set of `repo.json` RMW writers.
-    ///
-    /// **Known race (accepted for now):** `repo.json` has no cross-writer
-    /// serialization. The `repo_lock` taken by the caller
-    /// ([`Store::migrate_seal`](crate::store::Store::migrate_seal) /
-    /// [`migrate_repo_seal`](crate::store::Store::migrate_repo_seal)) serializes
-    /// the *two migration paths* (foreground vs headless worker) against each
-    /// other, but [`save_repo_config_full`](Self::save_repo_config_full) and its
-    /// callers (`save_identity`, `set_pat`, `add_trusted_key`, the authenticity
-    /// paths) do **not** take it. So a concurrent config write during this
-    /// read→write window can be silently reverted, and (worst case) a
-    /// `save_identity` writing `crypto:"gpg"` can be clobbered back to `"age"`,
-    /// bricking the store on next restart. Low probability (first-launch/sync
-    /// window), accepted while the user base is tiny; the proper fix is a
-    /// `repo.json` write-lock all writers respect (tracked in #57).
+    /// This is a *content* read-modify-write, so it runs INSIDE the
+    /// [`ConfigLock`] like every other repo.json writer (R097): the probe read
+    /// and the rewrite are one critical section, and a concurrent writer
+    /// (foreground command or headless worker) either finishes before the
+    /// probe or waits until the rewrite lands — no lost update either way.
+    /// The `repo_lock` the caller additionally holds serializes the two
+    /// migration paths (foreground vs headless worker) against each other;
+    /// lock order is `repo_lock` → `config_lock`.
     ///
     /// Detection uses a [`serde_json::Value`] presence-probe (the only way to
     /// tell an absent key from an explicit `null`): absent → migrate; an
@@ -808,8 +924,9 @@ impl Config {
     /// # Errors
     ///
     /// Soft-skips (`Ok`) on `NO_REPO` / `SEAL_KEY_UNAVAILABLE`; otherwise
-    /// propagates load/save errors.
+    /// propagates lock/load/save errors.
     pub async fn normalize_repo_config_crypto(&self) -> Result<(), Error> {
+        let _guard = ConfigLock::acquire(self.config_dir()).await?;
         let mut probe: serde_json::Value = match self.load_repo_config_as().await {
             Ok(v) => v,
             Err(e) if e.code == "NO_REPO" || e.code == "SEAL_KEY_UNAVAILABLE" => return Ok(()),
@@ -895,6 +1012,19 @@ impl Config {
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde skip_serializing_if needs &T
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// Whether a [`Config::update_repo_config`] mutation made a change that must
+/// be persisted, or the config is already in the desired state (no write).
+/// Writers with an idempotent no-op path (a duplicate trusted key, an
+/// unchanged crypto kind) report [`Self::Unchanged`] so the file is not
+/// rewritten.
+#[derive(Debug)]
+pub enum UpdateOutcome<T> {
+    /// Persist the mutated config after the closure returns.
+    Changed(T),
+    /// Skip the write entirely; the closure saw nothing to do.
+    Unchanged(T),
 }
 
 /// Repository configuration persisted to disk.
@@ -1673,6 +1803,137 @@ mod tests {
         cfg.load_repo_config()
             .await
             .expect_err("null crypto must fail the typed load");
+    }
+
+    /// R097: two concurrent RMW writers through `update_repo_config`, each
+    /// mutating a DIFFERENT field, must both land — the loser applies its
+    /// increment on the fresh in-lock snapshot instead of overwriting with a
+    /// stale pre-lock read. This is the exact lost-update #57 describes,
+    /// now serialized by the [`ConfigLock`].
+    #[tokio::test]
+    async fn update_repo_config_concurrent_writers_both_land() {
+        let (config, _dir) = create_config();
+        config
+            .save_repo_config("https://x/repo", &GitAuth::None, "/p")
+            .await
+            .unwrap();
+
+        let a = async {
+            config
+                .update_repo_config(|rc| {
+                    rc.pat = Some("pat-a".to_string());
+                    Ok(UpdateOutcome::Changed(()))
+                })
+                .await
+        };
+        let b = async {
+            config
+                .update_repo_config(|rc| {
+                    rc.commit_user_name = Some("User B".to_string());
+                    Ok(UpdateOutcome::Changed(()))
+                })
+                .await
+        };
+        let (ra, rb) = tokio::join!(a, b);
+        ra.expect("writer a");
+        rb.expect("writer b");
+
+        let rc = config.load_repo_config().await.unwrap();
+        assert_eq!(
+            rc.pat.as_deref(),
+            Some("pat-a"),
+            "writer a's field must land"
+        );
+        assert_eq!(
+            rc.commit_user_name.as_deref(),
+            Some("User B"),
+            "writer b's field must survive writer a's commit"
+        );
+    }
+
+    /// R097 error path: a closure that fails mid-update must leave the file
+    /// untouched, release the lock (next acquire succeeds immediately), and
+    /// propagate the error — never a dirty write or a stranded lock.
+    #[tokio::test]
+    async fn update_repo_config_closure_err_writes_nothing_and_releases() {
+        let (config, _dir) = create_config();
+        config
+            .save_repo_config("https://x/repo", &GitAuth::None, "/p")
+            .await
+            .unwrap();
+        let before = std::fs::read(config.repo_config_path()).unwrap();
+
+        let err = config
+            .update_repo_config(|_rc| -> Result<UpdateOutcome<()>, Error> {
+                Err(Error::new(ErrorCode::ConfigError, "reject"))
+            })
+            .await
+            .expect_err("closure error must propagate");
+        assert_eq!(err.code, "CONFIG_ERROR");
+
+        let after = std::fs::read(config.repo_config_path()).unwrap();
+        assert_eq!(before, after, "no write on closure error");
+        // Lock released: a follow-up update succeeds without contention.
+        config
+            .update_repo_config(|rc| {
+                rc.pat = Some("after-err".to_string());
+                Ok(UpdateOutcome::Changed(()))
+            })
+            .await
+            .expect("lock was released after the error path");
+    }
+
+    /// R097 `Unchanged`: a no-op mutation must not rewrite the file — the
+    /// byte-identical debounce `save_identity`'s crypto guard relies on.
+    #[tokio::test]
+    async fn update_repo_config_unchanged_leaves_file_untouched() {
+        let (config, _dir) = create_config();
+        config
+            .save_repo_config("https://x/repo", &GitAuth::None, "/p")
+            .await
+            .unwrap();
+        let before = std::fs::read(config.repo_config_path()).unwrap();
+
+        let out = config
+            .update_repo_config(|_rc| Ok(UpdateOutcome::Unchanged(42)))
+            .await
+            .unwrap();
+        assert_eq!(out, 42, "Unchanged still returns the closure's value");
+
+        let after = std::fs::read(config.repo_config_path()).unwrap();
+        assert_eq!(before, after, "Unchanged must not rewrite repo.json");
+    }
+
+    /// The startup sweep removes only STALE temps: a fresh in-flight temp
+    /// (inside the grace window) survives; an old one is deleted; non-temp
+    /// files (repo.json, the lockfile) are never touched.
+    #[tokio::test]
+    async fn sweep_tmp_files_only_removes_stale_temps() {
+        let dir = tempfile::tempdir().unwrap();
+        let stale = dir.path().join("repo.json.123.0.tmp");
+        let fresh = dir.path().join("app.json.456.7.tmp");
+        std::fs::write(&stale, b"old").unwrap();
+        std::fs::write(&fresh, b"new").unwrap();
+        std::fs::write(dir.path().join("repo.json"), b"cfg").unwrap();
+        std::fs::write(dir.path().join("gpm_config.lock"), b"").unwrap();
+        // Backdate the stale temp beyond the grace window.
+        let old_time = std::time::SystemTime::now() - std::time::Duration::from_mins(2);
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(old_time)
+            .unwrap();
+
+        sweep_tmp_files(dir.path());
+
+        assert!(!stale.exists(), "stale temp must be swept");
+        assert!(fresh.exists(), "in-flight temp must survive the sweep");
+        assert!(dir.path().join("repo.json").exists(), "config untouched");
+        assert!(
+            dir.path().join("gpm_config.lock").exists(),
+            "lockfile untouched"
+        );
     }
 
     #[test]

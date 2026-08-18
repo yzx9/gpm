@@ -76,6 +76,12 @@ pub enum ErrorCode {
     /// versa). The caller should skip-and-retry, not propagate as a hard
     /// failure.
     RepoBusy,
+    /// The `repo.json` write lock could not be acquired within its deadline —
+    /// another writer (foreground command, headless worker, or a second
+    /// desktop instance) held it too long. The caller should surface the
+    /// error to the user (retry the change); it is loud by design, never a
+    /// silent loss.
+    ConfigBusy,
     /// A gopass binary attachment was detected but its base64 body could not be
     /// decoded (corrupt or not actually base64).
     AttachmentInvalid,
@@ -132,6 +138,7 @@ impl Error {
                 ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
                 ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
                 ErrorCode::RepoBusy => "REPO_BUSY",
+                ErrorCode::ConfigBusy => "CONFIG_BUSY",
                 ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
                 ErrorCode::SecretInvalid => "SECRET_INVALID",
                 ErrorCode::AppLocked => "APP_LOCKED",
@@ -233,6 +240,7 @@ mod tests {
             ErrorCode::PluginIdentityNotSupported => "PLUGIN_IDENTITY_NOT_SUPPORTED",
             ErrorCode::BackendNotAvailable => "BACKEND_NOT_AVAILABLE",
             ErrorCode::RepoBusy => "REPO_BUSY",
+            ErrorCode::ConfigBusy => "CONFIG_BUSY",
             ErrorCode::AttachmentInvalid => "ATTACHMENT_INVALID",
             ErrorCode::SecretInvalid => "SECRET_INVALID",
             ErrorCode::AppLocked => "APP_LOCKED",
@@ -268,6 +276,8 @@ mod tests {
             ErrorCode::PluginUnavailable,
             ErrorCode::PluginIdentityNotSupported,
             ErrorCode::BackendNotAvailable,
+            ErrorCode::RepoBusy,
+            ErrorCode::ConfigBusy,
             ErrorCode::AttachmentInvalid,
             ErrorCode::SecretInvalid,
             ErrorCode::AppLocked,
@@ -311,6 +321,8 @@ mod tests {
             ErrorCode::PluginUnavailable,
             ErrorCode::PluginIdentityNotSupported,
             ErrorCode::BackendNotAvailable,
+            ErrorCode::RepoBusy,
+            ErrorCode::ConfigBusy,
             ErrorCode::AttachmentInvalid,
             ErrorCode::SecretInvalid,
             ErrorCode::AppLocked,

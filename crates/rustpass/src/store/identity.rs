@@ -5,6 +5,7 @@ use std::path::Path;
 use std::str;
 use std::sync::Arc;
 
+use crate::config::UpdateOutcome;
 use crate::crypto::{
     AgeBackend, BackendKind, CryptoBackend, GPG_RECIPIENTS_FILE, GpgBackend, RECIPIENTS_FILE,
     SecretExt,
@@ -55,13 +56,21 @@ impl Store {
     pub async fn migrate_seal(&self) -> Result<(), Error> {
         self.config.migrate_seal().await?;
         // Content migration (not just envelope): normalize a legacy absent
-        // `crypto` field to explicit "age". The repo_lock serializes this
-        // against the headless worker's `migrate_repo_seal` (both take it), but
-        // NOT against `save_repo_config_full` writers (save_identity / set_pat /
-        // add_trusted_key / authenticity), which don't take the lock — see the
-        // known-race note on `normalize_repo_config_crypto`. Accepted for now.
+        // `crypto` field to explicit "age". The migration itself takes the
+        // ConfigLock (see `normalize_repo_config_crypto`), so it serializes
+        // against every repo.json writer; this outer `repo_lock` additionally
+        // serializes the foreground vs headless-worker MIGRATION paths against
+        // each other (lock order: repo_lock → config_lock). #57.
         if self.config.repo_config_exists() {
-            let _repo_lock = self.repo_lock()?;
+            let _repo_lock = match self.repo_lock() {
+                Ok(g) => g,
+                // Contended (a sync holds it): the seal wraps above already
+                // succeeded, and normalize is idempotent — skip this round
+                // instead of failing the whole migration with a misleading
+                // "seal migration failed". The next launch/unlock retries.
+                Err(e) if e.code == "REPO_BUSY" => return Ok(()),
+                Err(e) => return Err(e),
+            };
             self.config.normalize_repo_config_crypto().await?;
         }
         Ok(())
@@ -77,12 +86,18 @@ impl Store {
     pub async fn migrate_repo_seal(&self) -> Result<(), Error> {
         self.config.migrate_repo_seal().await?;
         // Same content migration as migrate_seal; the headless worker also reads
-        // repo.json (the master key is auth-free, R064). The repo_lock
-        // serializes this against the foreground `migrate_seal`, but not against
-        // unlocked `save_repo_config_full` writers — see the known-race note on
-        // `normalize_repo_config_crypto`. Accepted for now.
+        // repo.json (the master key is auth-free, R064). Same locking: the
+        // ConfigLock serializes against all writers, the repo_lock against the
+        // foreground migration path. #57. REPO_BUSY (a foreground sync holds
+        // the lock) soft-skips the normalize — the pull below proceeds and the
+        // next worker tick retries, instead of burning this run's WorkManager
+        // attempt on a benign overlap.
         if self.config.repo_config_exists() {
-            let _repo_lock = self.repo_lock()?;
+            let _repo_lock = match self.repo_lock() {
+                Ok(g) => g,
+                Err(e) if e.code == "REPO_BUSY" => return Ok(()),
+                Err(e) => return Err(e),
+            };
             self.config.normalize_repo_config_crypto().await?;
         }
         Ok(())
@@ -356,14 +371,29 @@ impl Store {
         // identity. The kind persist + slot swap run only when a repo is
         // configured; the create/clone-first flow has no `repo.json` yet (its
         // later clone writes `crypto: Age`).
+        //
+        // The kind persist goes through the locked RMW entry (R097): the
+        // debounce check (`crypto != kind`) re-runs on the FRESH in-lock
+        // snapshot, and the field change applies as an increment on top of
+        // whatever concurrent writers committed — never a stale full-file
+        // rewrite. The membership/flip-guard reads above stay lock-free (they
+        // only gate validity; the write is authoritative).
         self.config
             .save_identity(identity_bytes, storage_passphrase)
             .await?;
-        if let Some(mut rc) = repo {
-            if rc.crypto != kind {
-                rc.crypto = kind;
-                self.config.save_repo_config_full(&rc).await?;
-            }
+        if repo.is_some() {
+            self.config
+                .update_repo_config(move |rc| {
+                    let changed = rc.crypto != kind;
+                    rc.crypto = kind;
+                    #[allow(clippy::if_not_else)] // Changed/Unchanged mirrors the write decision
+                    Ok(if changed {
+                        UpdateOutcome::Changed(())
+                    } else {
+                        UpdateOutcome::Unchanged(())
+                    })
+                })
+                .await?;
             self.resolve_and_set_crypto(kind);
         }
         Ok(())

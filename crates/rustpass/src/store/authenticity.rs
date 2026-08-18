@@ -5,7 +5,7 @@ use std::str;
 
 use tokio::task::spawn_blocking;
 
-use crate::config::{self, RepoConfig};
+use crate::config::{self, RepoConfig, UpdateOutcome};
 use crate::crypto::openpgp;
 use crate::error::{Error, ErrorCode};
 use crate::signing::{
@@ -43,16 +43,18 @@ impl Store {
     /// Returns [`ErrorCode::ConfigError`] if Enforce is requested with no
     /// trusted keys, or the config cannot be persisted.
     pub async fn set_verification_mode(&self, mode: VerifyMode) -> Result<VerifyMode, Error> {
-        let mut rc = self.config.load_repo_config().await?;
-        if mode == VerifyMode::Enforce && !rc.authenticity.has_any_trusted_key() {
-            return Err(Error::new(
-                ErrorCode::ConfigError,
-                "Add a trusted signing key before enabling Enforce.",
-            ));
-        }
-        rc.authenticity.mode = mode;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc.authenticity.mode)
+        self.config
+            .update_repo_config(|rc| {
+                if mode == VerifyMode::Enforce && !rc.authenticity.has_any_trusted_key() {
+                    return Err(Error::new(
+                        ErrorCode::ConfigError,
+                        "Add a trusted signing key before enabling Enforce.",
+                    ));
+                }
+                rc.authenticity.mode = mode;
+                Ok(UpdateOutcome::Changed(rc.authenticity.mode))
+            })
+            .await
     }
 
     /// Set the git commit author identity. `None` (or blank) for a field clears
@@ -95,11 +97,13 @@ impl Store {
         };
         let name = normalize(name)?;
         let email = normalize(email)?;
-        let mut rc = self.config.load_repo_config().await?;
-        rc.commit_user_name = name;
-        rc.commit_user_email = email;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
+        self.config
+            .update_repo_config(|rc| {
+                rc.commit_user_name.clone_from(&name);
+                rc.commit_user_email.clone_from(&email);
+                Ok(UpdateOutcome::Changed(rc.clone()))
+            })
+            .await
     }
 
     /// The default commit author identity, for UI display. Reads the shipped
@@ -126,28 +130,31 @@ impl Store {
         label: &str,
     ) -> Result<TrustedKey, Error> {
         let fingerprint = signing::fingerprint_of_public_key(public_key)?;
-
-        let mut rc = self.config.load_repo_config().await?;
-        if let Some(existing) = rc
-            .authenticity
-            .trusted_keys
-            .iter()
-            .find(|k| k.fingerprint == fingerprint)
-            .cloned()
-        {
-            return Ok(existing);
-        }
-
         let head = self.current_head_hash().await.unwrap_or_default();
-        let key = TrustedKey {
-            public_key: public_key.trim().to_string(),
-            fingerprint,
-            label: label.to_string(),
-            added_at_commit: head,
-        };
-        rc.authenticity.trusted_keys.push(key.clone());
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(key)
+
+        self.config
+            .update_repo_config(|rc| {
+                // Idempotent: an already-trusted fingerprint returns the
+                // existing entry WITHOUT a config write.
+                if let Some(existing) = rc
+                    .authenticity
+                    .trusted_keys
+                    .iter()
+                    .find(|k| k.fingerprint == fingerprint)
+                    .cloned()
+                {
+                    return Ok(UpdateOutcome::Unchanged(existing));
+                }
+                let key = TrustedKey {
+                    public_key: public_key.trim().to_string(),
+                    fingerprint,
+                    label: label.to_string(),
+                    added_at_commit: head,
+                };
+                rc.authenticity.trusted_keys.push(key.clone());
+                Ok(UpdateOutcome::Changed(key))
+            })
+            .await
     }
 
     /// Remove a trusted signing key by fingerprint. Removing the last trusted
@@ -158,14 +165,19 @@ impl Store {
     ///
     /// Returns an error if the config cannot be persisted.
     pub async fn remove_trusted_key(&self, fingerprint: &str) -> Result<(), Error> {
-        let mut rc = self.config.load_repo_config().await?;
-        rc.authenticity
-            .trusted_keys
-            .retain(|k| k.fingerprint != fingerprint);
-        if !rc.authenticity.has_any_trusted_key() && rc.authenticity.mode == VerifyMode::Enforce {
-            rc.authenticity.mode = VerifyMode::Audit;
-        }
-        self.config.save_repo_config_full(&rc).await
+        self.config
+            .update_repo_config(|rc| {
+                rc.authenticity
+                    .trusted_keys
+                    .retain(|k| k.fingerprint != fingerprint);
+                if !rc.authenticity.has_any_trusted_key()
+                    && rc.authenticity.mode == VerifyMode::Enforce
+                {
+                    rc.authenticity.mode = VerifyMode::Audit;
+                }
+                Ok(UpdateOutcome::Changed(()))
+            })
+            .await
     }
 
     /// Add a trusted GPG/OpenPGP public key (RFC 0009). Parses the armored
@@ -198,28 +210,31 @@ impl Store {
         }
         let key = openpgp::parse_armored_public_key(armored_public_key)?;
         let fingerprint = openpgp::primary_fingerprint(&key);
-
-        let mut rc = self.config.load_repo_config().await?;
-        if let Some(existing) = rc
-            .authenticity
-            .trusted_gpg_keys
-            .iter()
-            .find(|k| k.fingerprint == fingerprint)
-            .cloned()
-        {
-            return Ok(existing);
-        }
-
         let head = self.current_head_hash().await.unwrap_or_default();
-        let entry = TrustedGpgKey {
-            armored_public_key: armored_public_key.trim().to_string(),
-            fingerprint,
-            label: label.to_string(),
-            added_at_commit: head,
-        };
-        rc.authenticity.trusted_gpg_keys.push(entry.clone());
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(entry)
+
+        self.config
+            .update_repo_config(|rc| {
+                // Idempotent: an already-trusted fingerprint returns the
+                // existing entry WITHOUT a config write.
+                if let Some(existing) = rc
+                    .authenticity
+                    .trusted_gpg_keys
+                    .iter()
+                    .find(|k| k.fingerprint == fingerprint)
+                    .cloned()
+                {
+                    return Ok(UpdateOutcome::Unchanged(existing));
+                }
+                let entry = TrustedGpgKey {
+                    armored_public_key: armored_public_key.trim().to_string(),
+                    fingerprint,
+                    label: label.to_string(),
+                    added_at_commit: head,
+                };
+                rc.authenticity.trusted_gpg_keys.push(entry.clone());
+                Ok(UpdateOutcome::Changed(entry))
+            })
+            .await
     }
 
     /// Remove a trusted GPG key by primary fingerprint. Removing the last
@@ -230,14 +245,19 @@ impl Store {
     ///
     /// Returns an error if the config cannot be persisted.
     pub async fn remove_trusted_gpg_key(&self, fingerprint: &str) -> Result<(), Error> {
-        let mut rc = self.config.load_repo_config().await?;
-        rc.authenticity
-            .trusted_gpg_keys
-            .retain(|k| k.fingerprint != fingerprint);
-        if !rc.authenticity.has_any_trusted_key() && rc.authenticity.mode == VerifyMode::Enforce {
-            rc.authenticity.mode = VerifyMode::Audit;
-        }
-        self.config.save_repo_config_full(&rc).await
+        self.config
+            .update_repo_config(|rc| {
+                rc.authenticity
+                    .trusted_gpg_keys
+                    .retain(|k| k.fingerprint != fingerprint);
+                if !rc.authenticity.has_any_trusted_key()
+                    && rc.authenticity.mode == VerifyMode::Enforce
+                {
+                    rc.authenticity.mode = VerifyMode::Audit;
+                }
+                Ok(UpdateOutcome::Changed(()))
+            })
+            .await
     }
 
     /// The per-key parse warnings for the persisted trusted GPG keys — one
@@ -276,7 +296,7 @@ impl Store {
     /// opened, or the config cannot be persisted.
     pub async fn ignore_commit_issue(&self, commit: &str) -> Result<CommitSigInfo, Error> {
         let repo_path = self.repo_path().await?;
-        let mut rc = self.config.load_repo_config().await?;
+        let rc = self.config.load_repo_config().await?;
         let trusted = signing::TrustSet::from_config(&rc.authenticity);
         let ignored = rc.authenticity.ignored.clone();
 
@@ -305,12 +325,29 @@ impl Store {
                 // input — `is_ignored` matches on the full OID, so a short hash or
                 // revspec input would otherwise persist an entry that never matches
                 // future verification.
-                rc.authenticity.ignored.push(signing::IgnoredIssue {
-                    commit: info.hash.clone(),
-                    status: info.status.clone(),
-                    ignored_at_commit: head,
-                });
-                self.config.save_repo_config_full(&rc).await?;
+                let hash = info.hash.clone();
+                let status = info.status.clone();
+                self.config
+                    .update_repo_config(move |rc| {
+                        // Re-check idempotence on the FRESH in-lock snapshot —
+                        // a concurrent ignore of the same commit may have landed
+                        // between the outer read and here.
+                        let already = rc
+                            .authenticity
+                            .ignored
+                            .iter()
+                            .any(|i| i.commit == hash && i.status == status);
+                        if already {
+                            return Ok(UpdateOutcome::Unchanged(()));
+                        }
+                        rc.authenticity.ignored.push(signing::IgnoredIssue {
+                            commit: hash,
+                            status,
+                            ignored_at_commit: head,
+                        });
+                        Ok(UpdateOutcome::Changed(()))
+                    })
+                    .await?;
                 return Ok(CommitSigInfo {
                     ignored: true,
                     ..info

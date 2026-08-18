@@ -78,7 +78,10 @@ async function replaceToken() {
     toast.success(t("pat.replaceToast"));
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || t("pat.replaceFailed");
+    error.value =
+      appError?.code === "CONFIG_BUSY"
+        ? t("settings.auth.configBusy")
+        : appError?.message || t("pat.replaceFailed");
   } finally {
     replacing.value = false;
   }
@@ -98,7 +101,10 @@ async function clearToken() {
     toast.success(t("pat.clearToast"));
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || t("pat.clearFailed");
+    error.value =
+      appError?.code === "CONFIG_BUSY"
+        ? t("settings.auth.configBusy")
+        : appError?.message || t("pat.clearFailed");
   } finally {
     clearing.value = false;
   }

@@ -281,11 +281,15 @@ async fn m0002_save_failure_in_copy_branch_leaves_schema_and_retries() {
         AppConfigStore::new(dir.path()).await,
     );
 
-    // `write_app_json_raw` (via `save_atomic`) writes `app.tmp` then renames it
-    // over `app.json`, so a directory at the tmp path makes the write fail on
-    // every platform (no chmod). m0002 must propagate that Err instead of
-    // marking itself done.
-    std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
+    // `write_app_json_raw` (via `save_atomic`) writes a unique temp file into
+    // the config dir; a read-only config dir makes that temp write fail while
+    // reads (the schema peek) still succeed — the exact "save fails, state
+    // readable" shape under test. (Unix perms; gpm's test targets are
+    // Linux/macOS/Android.)
+    let perms = std::fs::metadata(dir.path()).unwrap().permissions();
+    let mut ro = perms.clone();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut ro, 0o555);
+    std::fs::set_permissions(dir.path(), ro).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,
@@ -295,7 +299,7 @@ async fn m0002_save_failure_in_copy_branch_leaves_schema_and_retries() {
 
     // Clear the block and retry — the engine re-enters m0002 (schema still < 2)
     // and completes both steps to the target.
-    std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
+    std::fs::set_permissions(dir.path(), perms).unwrap();
     run_app_migrations(&state).await;
     let reloaded = reload_at(dir.path(), &state.store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
@@ -316,7 +320,12 @@ async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
         AppConfigStore::new(dir.path()).await,
     );
 
-    std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
+    // Read-only config dir: temp write fails, reads still work (see the
+    // copy-branch test above).
+    let perms = std::fs::metadata(dir.path()).unwrap().permissions();
+    let mut ro = perms.clone();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut ro, 0o555);
+    std::fs::set_permissions(dir.path(), ro).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,
@@ -324,7 +333,7 @@ async fn m0002_save_failure_in_noop_branch_leaves_schema_and_retries() {
         "noop-branch save failure must not mark the migration done"
     );
 
-    std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
+    std::fs::set_permissions(dir.path(), perms).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,
@@ -1091,8 +1100,9 @@ async fn m0008_collapses_under_real_master_key() {
 }
 
 /// m0008 propagates a sealed-write failure as `Err` (the `?` contract): a dir at
-/// `app.tmp` blocks `save_atomic`'s temp write, schema stays below target, and a
-/// retry after clearing the block completes. Mirrors m0002's save-failure tests.
+/// the rename target `app.json` blocks `save_atomic`'s write, schema stays below
+/// target, and a retry after clearing the block completes. Mirrors m0002's
+/// save-failure tests.
 #[tokio::test]
 async fn m0008_write_failure_leaves_schema_and_retries() {
     let dir = tempfile::tempdir().unwrap();
@@ -1106,9 +1116,12 @@ async fn m0008_write_failure_leaves_schema_and_retries() {
     .await;
     let state = build_state(Arc::clone(&store), AppConfigStore::new(dir.path()).await);
 
-    // Block save_atomic's temp write (`app.tmp` is a dir ⇒ fs::write fails on
+    // Block the rename target (`app.json` is a dir ⇒ the atomic rename fails on
     // every platform). m0008 must propagate that Err instead of marking done.
-    std::fs::create_dir(dir.path().join("app.tmp")).unwrap();
+    // The sealed app.json content is replanted for the retry below.
+    let sealed_app = std::fs::read(dir.path().join("app.json")).ok();
+    let _ = std::fs::remove_file(dir.path().join("app.json"));
+    std::fs::create_dir(dir.path().join("app.json")).unwrap();
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,
@@ -1120,8 +1133,13 @@ async fn m0008_write_failure_leaves_schema_and_retries() {
         "pref.json survives a failed merged write"
     );
 
-    // Clear the block + retry — m0008 completes to target.
-    std::fs::remove_dir(dir.path().join("app.tmp")).unwrap();
+    // Clear the block + retry — m0008 completes to target. (The store above
+    // holds no master key, so app.json was plaintext and a fresh schema-7 seed
+    // is equivalent for the retry.)
+    std::fs::remove_dir(dir.path().join("app.json")).unwrap();
+    if let Some(bytes) = sealed_app {
+        std::fs::write(dir.path().join("app.json"), bytes).unwrap();
+    }
     run_app_migrations(&state).await;
     assert_eq!(
         reload_at(dir.path(), &state.store).await.schema_version,

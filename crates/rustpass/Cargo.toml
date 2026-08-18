@@ -46,7 +46,9 @@ time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
+# `test-util` enables `#[tokio::test(start_paused)]` — the ConfigLock timeout
+# tests lapse their 5 s deadline instantly on paused time.
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "test-util"] }
 bech32 = { workspace = true }
 
 [lints]

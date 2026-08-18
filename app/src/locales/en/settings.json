@@ -223,6 +223,7 @@
     "enforceHint": "Block pulls with unverified commits.",
     "enforceNeedsKey": "Add a trusted signing key before enabling Enforce (it would block every pull).",
     "setModeFailed": "Failed to set mode",
+    "configBusy": "Another process is saving settings right now — please try again in a moment.",
     "trustedKeys": "Trusted signing keys ({count})",
     "noTrustedKeys": "No trusted keys yet. Trust this repo's signer, paste a key, or import a GPG .asc file below.",
     "gpgWarning": "{count} trusted GPG key(s) failed to load — re-add or remove to restore verification.",

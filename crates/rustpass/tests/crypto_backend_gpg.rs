@@ -68,7 +68,7 @@ async fn gpg_store_decrypts_through_store_facade() {
     // Select the GPG backend + point the store at the repo (sealed repo.json on
     // Android; plaintext here with no master key).
     Config::new(config_dir.path().to_path_buf(), None)
-        .save_repo_config_full(&RepoConfig {
+        .save_repo_config_locked(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
             crypto: BackendKind::Gpg,
             ..Default::default()
@@ -123,7 +123,7 @@ async fn save_identity_persists_gpg_kind_from_none() {
     let store = Store::new(config_dir.path().to_path_buf(), None);
     // `crypto: None` — the state a fresh `clone_only_with` leaves behind.
     Config::new(config_dir.path().to_path_buf(), None)
-        .save_repo_config_full(&RepoConfig {
+        .save_repo_config_locked(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
             crypto: BackendKind::Age,
             ..Default::default()
@@ -161,7 +161,7 @@ async fn save_identity_refuses_gpg_flip_into_age_store() {
     let config_dir = tempfile::tempdir().unwrap();
     let store = Store::new(config_dir.path().to_path_buf(), None);
     Config::new(config_dir.path().to_path_buf(), None)
-        .save_repo_config_full(&RepoConfig {
+        .save_repo_config_locked(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
             crypto: BackendKind::Age,
             ..Default::default()
@@ -206,7 +206,7 @@ async fn save_identity_refuses_gpg_into_marker_only_age_store() {
     let config_dir = tempfile::tempdir().unwrap();
     let store = Store::new(config_dir.path().to_path_buf(), None);
     Config::new(config_dir.path().to_path_buf(), None)
-        .save_repo_config_full(&RepoConfig {
+        .save_repo_config_locked(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
             crypto: BackendKind::Age,
             ..Default::default()
@@ -253,7 +253,7 @@ async fn gpg_store_round_trips_a_written_secret() {
     let config_dir = tempfile::tempdir().unwrap();
     let store = Store::new(config_dir.path().to_path_buf(), None);
     Config::new(config_dir.path().to_path_buf(), None)
-        .save_repo_config_full(&RepoConfig {
+        .save_repo_config_locked(&RepoConfig {
             local_path: repo.path().to_string_lossy().to_string(),
             crypto: BackendKind::Gpg,
             ..Default::default()

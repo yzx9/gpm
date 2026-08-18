@@ -223,6 +223,7 @@
     "enforceHint": "阻止未验证提交的拉取。",
     "enforceNeedsKey": "启用 Enforce 前请先添加受信签名密钥（否则会阻止所有拉取）。",
     "setModeFailed": "设置模式失败",
+    "configBusy": "另一个进程正在保存设置，请稍后重试。",
     "trustedKeys": "受信签名密钥（{count}）",
     "noTrustedKeys": "暂无受信密钥。可在下方信任本仓库签名者、粘贴密钥或导入 GPG .asc 文件。",
     "gpgWarning": "{count} 个受信 GPG 密钥加载失败 —— 请重新添加或移除以恢复验证。",

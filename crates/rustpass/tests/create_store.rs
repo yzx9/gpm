@@ -298,10 +298,11 @@ mod tests {
         let config_dir = tempfile::tempdir().expect("failed to create config dir");
         let store = Store::new(config_dir.path().to_path_buf(), None);
 
-        // Sabotage the FINAL bootstrap step: `save_repo_config` writes its atomic
-        // temp to `repo.tmp`, so a directory there makes the persist fail AFTER
-        // git init + recipients write + the initial commit have already landed.
-        std::fs::create_dir(config_dir.path().join("repo.tmp")).unwrap();
+        // Sabotage the FINAL bootstrap step: `save_repo_config` takes the
+        // ConfigLock first, so a directory at the lockfile path makes the
+        // persist fail AFTER git init + recipients write + the initial commit
+        // have already landed.
+        std::fs::create_dir(config_dir.path().join("gpm_config.lock")).unwrap();
 
         let err = store
             .create_store(None, &GitAuth::None, &recipient)

@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use zeroize::Zeroizing;
 
 use crate::RepoLock;
-use crate::config::RepoConfig;
+use crate::config::{RepoConfig, UpdateOutcome};
 use crate::error::{Error, ErrorCode};
 use crate::signing::AuthenticityConfig;
 use crate::storage::{
@@ -676,10 +676,12 @@ impl Store {
             let t = s.trim().to_string();
             (!t.is_empty()).then_some(t)
         });
-        let mut rc = self.config.load_repo_config().await?;
-        rc.pat = pat;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
+        self.config
+            .update_repo_config(move |rc| {
+                rc.pat.clone_from(&pat);
+                Ok(UpdateOutcome::Changed(rc.clone()))
+            })
+            .await
     }
 
     /// Remove the stored SSH key + passphrase, clearing SSH auth. A stored PAT,
@@ -691,11 +693,13 @@ impl Store {
     ///
     /// Returns an error if the config cannot be loaded or persisted.
     pub async fn clear_ssh_key(&self) -> Result<RepoConfig, Error> {
-        let mut rc = self.config.load_repo_config().await?;
-        rc.ssh_key = None;
-        rc.ssh_passphrase = None;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
+        self.config
+            .update_repo_config(|rc| {
+                rc.ssh_key = None;
+                rc.ssh_passphrase = None;
+                Ok(UpdateOutcome::Changed(rc.clone()))
+            })
+            .await
     }
 
     /// Read-only auth probe: fetch `origin` into a throwaway ref (HEAD untouched)

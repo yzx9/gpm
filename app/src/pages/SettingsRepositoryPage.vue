@@ -110,7 +110,10 @@ async function onSaveCommitIdentity(): Promise<boolean> {
     return true;
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || t("settings.commit.saveFailed");
+    error.value =
+      appError?.code === "CONFIG_BUSY"
+        ? t("settings.auth.configBusy")
+        : appError?.message || t("settings.commit.saveFailed");
     return false;
   } finally {
     commitLoading.value = false;
@@ -190,6 +193,8 @@ async function onModeChange(mode: VerifyMode) {
       error.value = t("settings.auth.enforceNeedsKey");
       // Revert the radio to the current effective mode.
       authConfig.value.mode = authConfig.value.mode;
+    } else if (appError?.code === "CONFIG_BUSY") {
+      error.value = t("settings.auth.configBusy");
     } else {
       error.value = appError?.message || t("settings.auth.setModeFailed");
     }
@@ -216,7 +221,10 @@ async function onRemoveKey(fingerprint: string, kind: "ssh" | "gpg") {
     await loadAuthConfig();
   } catch (e) {
     const appError = e as AppError;
-    error.value = appError?.message || t("settings.auth.removeFailed");
+    error.value =
+      appError?.code === "CONFIG_BUSY"
+        ? t("settings.auth.configBusy")
+        : appError?.message || t("settings.auth.removeFailed");
   } finally {
     authLoading.value = false;
   }

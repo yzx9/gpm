@@ -35,6 +35,8 @@
 pub mod attachment;
 /// Configuration and identity persistence.
 pub mod config;
+/// Cross-process write lock for `repo.json` (serializes all RMW writers).
+pub mod config_lock;
 /// Age decryption backend.
 pub mod crypto;
 /// Password store entry type.
@@ -70,7 +72,8 @@ pub mod totp;
 
 // Re-export core types at crate root (gopass-aligned)
 pub use attachment::{Attachment, AttachmentMeta, has_attachment, metadata};
-pub use config::{Config, LockMode, RepoConfig};
+pub use config::{Config, LockMode, RepoConfig, UpdateOutcome};
+pub use config_lock::ConfigLock;
 pub use crypto::BackendKind;
 pub use entry::Entry;
 pub use error::{Error, ErrorCode};

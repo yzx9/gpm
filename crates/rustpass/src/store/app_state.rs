@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 
 use zeroize::Zeroizing;
 
-use crate::config::{LockMode, RepoConfig};
+use crate::config::{LockMode, RepoConfig, UpdateOutcome};
 use crate::error::Error;
 
 // Impl-split submodule: mod.rs is the shared scope for Store's split impl, so a
@@ -40,10 +40,14 @@ impl Store {
     ///
     /// Returns an error if `repo.json` cannot be read or written.
     pub async fn set_unlock_identity_with_app(&self, enabled: bool) -> Result<RepoConfig, Error> {
-        let mut rc = self.config.load_repo_config().await?;
-        rc.unlock_identity_with_app = enabled;
-        self.config.save_repo_config_full(&rc).await?;
-        Ok(rc)
+        // Return the in-lock post-mutation snapshot (not a post-unlock
+        // re-read), matching the other RMW writers' return contract.
+        self.config
+            .update_repo_config(|rc| {
+                rc.unlock_identity_with_app = enabled;
+                Ok(UpdateOutcome::Changed(rc.clone()))
+            })
+            .await
     }
 
     /// Seal the identity passphrase under the **vault key**, for the

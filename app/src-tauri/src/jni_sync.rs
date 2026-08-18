@@ -86,8 +86,8 @@ pub(crate) async fn run_headless_sync(
     // repo.json content rewrite). Kept before resolve_storage/pull by convention
     // (migrations before ops); a pull does not touch repo.json (it lives in the
     // config dir, not the git working tree), so there is no pull-vs-migration
-    // race — the real concurrency concern is cross-writer, noted on
-    // Config::normalize_repo_config_crypto.
+    // race. Cross-writer serialization is handled by the ConfigLock every
+    // repo.json writer takes (R097); see Config::normalize_repo_config_crypto.
     if let Err(e) = store.migrate_repo_seal().await {
         return BackgroundSyncResult::Error {
             message: e.to_string(),

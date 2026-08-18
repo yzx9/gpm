@@ -172,6 +172,53 @@ async fn set_pat_persists_trims_and_clears() {
     assert_eq!(rc.pat, None);
 }
 
+/// R097 / #57 regression: `save_identity`'s crypto-kind persist and a
+/// concurrent `set_pat` must BOTH land. Pre-lock these were two unlocked
+/// load→mutate→save RMWs racing each other — the identity save could clobber
+/// the PAT (or, the #57 worst case, the migration clobbering `crypto:"gpg"`
+/// back to `"age"` and bricking the store). Both now serialize through the
+/// ConfigLock: each applies its own field increment on the fresh in-lock
+/// snapshot.
+#[tokio::test]
+async fn save_identity_and_set_pat_concurrent_both_land() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = std::sync::Arc::new(Store::new(config_dir.path().to_path_buf(), None));
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    let store_for_pat = std::sync::Arc::clone(&store);
+    let (id_res, pat_res) = tokio::join!(
+        async { store.save_identity(&identity, None).await },
+        async {
+            store_for_pat
+                .set_pat(Some("ghp_concurrent".to_string()))
+                .await
+                .map(|_| ())
+        },
+    );
+    id_res.expect("save_identity under contention");
+    pat_res.expect("set_pat under contention");
+
+    let rc = store.config().await.expect("reload after both");
+    assert_eq!(
+        rc.pat.as_deref(),
+        Some("ghp_concurrent"),
+        "set_pat's field must survive the concurrent identity save"
+    );
+    // save_identity persisted nothing to crypto (age → age, debounced
+    // Unchanged) — but the PAT write must not have reverted anything either.
+    assert_eq!(rc.crypto, rustpass::BackendKind::Age);
+}
+
 /// `clear_ssh_key` clears BOTH the SSH key and its passphrase.
 #[tokio::test]
 async fn clear_ssh_key_clears_key_and_passphrase() {
