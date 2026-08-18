@@ -57,6 +57,19 @@ jobs:
             fi
           done
 
+      - name: Changelog link
+        id: changelog
+        run: |
+          URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/CHANGELOG.md"
+          HEADING=$(grep -m1 -F "## [${GITHUB_REF_NAME}]" CHANGELOG.md || true)
+          if [[ -n "$HEADING" ]]; then
+            # Anchor mirrors GitHub's heading slug: keep alphanumerics and
+            # hyphens, lowercase, spaces to hyphens ("## [v1.2.3] - 2026-08-18" -> v123---2026-08-18)
+            ANCHOR=$(printf '%s' "${HEADING#\#\# }" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 -' | tr ' ' '-')
+            URL="${URL}#${ANCHOR}"
+          fi
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -71,6 +84,8 @@ jobs:
             gpm-${{ steps.version.outputs.version }}-universal.apk
           body: |
             ## gpm ${{ steps.version.outputs.version }}
+
+            See the [changelog](${{ steps.changelog.outputs.url }}) for what changed in this release.
 
             ### Installation
             Download the appropriate APK for your device:
