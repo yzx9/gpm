@@ -131,7 +131,7 @@ format archives produced by GNU `ar` or LLVM's `llvm-ar`.
 ```nix
 shellHook = ''
   export PATH="${ndkBin}:$PATH"
-'' + lib.optionalString pkgs.stdenv.isDarwin ''
+'' + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
   export AR="${ndkBin}/llvm-ar"
   export TARGET_AR="${ndkBin}/llvm-ar"
   export RANLIB="${ndkBin}/llvm-ranlib"
@@ -144,8 +144,8 @@ Key details:
   the target-prefixed env var is insufficient
 - All three vars (`AR`, `TARGET_AR`, `RANLIB`) are needed — `RANLIB` rebuilds the symbol table in
   GNU format
-- Gated behind `pkgs.stdenv.isDarwin` — Linux hosts are unaffected because the system `ar` already
-  produces GNU-format archives
+- Gated behind `pkgs.stdenv.hostPlatform.isDarwin` — Linux hosts are unaffected because the system
+  `ar` already produces GNU-format archives
 
 **Files involved:** `flake.nix` (shellHook), `app/src-tauri/Cargo.toml` (`git2` with `vendored-openssl` +
 `vendored-libgit2`)

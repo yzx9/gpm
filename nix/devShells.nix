@@ -44,7 +44,7 @@ let
 
   ndkBin =
     "${androidComp.androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/llvm/prebuilt/"
-    + (if pkgs.stdenv.isDarwin then "darwin-x86_64" else "linux-x86_64")
+    + (if pkgs.stdenv.hostPlatform.isDarwin then "darwin-x86_64" else "linux-x86_64")
     + "/bin";
 
   # git pre-commit hooks, auto-installed into the local-dev shells (direnv
@@ -119,7 +119,7 @@ let
 
   # shellHook fragment: the desktop runtime on LD_LIBRARY_PATH (see above).
   # Shared by the Tauri-host-linking shells.
-  linuxDesktopLdHook = lib.optionalString pkgs.stdenv.isLinux ''
+  linuxDesktopLdHook = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath linuxDesktopRuntime}:$LD_LIBRARY_PATH"
   '';
 
@@ -185,7 +185,7 @@ let
         export PATH="${ndkBin}:$PATH"
       ''
       + args.shellHook
-      + lib.optionalString pkgs.stdenv.isDarwin ''
+      + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
         export AR="${ndkBin}/llvm-ar"
         export TARGET_AR="${ndkBin}/llvm-ar"
         export RANLIB="${ndkBin}/llvm-ranlib"
@@ -261,7 +261,7 @@ let
         # no separate pinentry (loopback mode).
         gnupg
       ]
-      ++ lib.optionals pkgs.stdenv.isLinux (
+      ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux (
         [
           pkg-config
         ]
