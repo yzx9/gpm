@@ -167,11 +167,7 @@ fn pull_off(
     callbacks: RemoteCallbacks<'_>,
     ext: SecretExt,
 ) -> Result<SyncOutcome, Error> {
-    let branch_name = repo
-        .head()?
-        .shorthand()
-        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot pull"))?
-        .to_string();
+    let branch_name = util::head_branch(repo, "pull")?;
     let pre_oid = repo.head().ok().and_then(|r| r.target());
 
     let temp_ref = format!("refs/gpm/pending/{branch_name}");
@@ -299,11 +295,7 @@ fn pull_verified(
 
     // The current branch HEAD sits on (e.g. "main"). gpm always operates on a
     // single default branch; a detached HEAD is unsupported.
-    let branch_name = repo
-        .head()?
-        .shorthand()
-        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot pull"))?
-        .to_string();
+    let branch_name = util::head_branch(repo, "pull")?;
 
     let pre_fetch_oid = repo.head().ok().and_then(|r| r.target());
 
@@ -409,11 +401,7 @@ pub(super) fn adopt_remote(
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
     transport::ensure_https_ca_for_origin(&repo)?;
 
-    let branch_name = repo
-        .head()?
-        .shorthand()
-        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot pull"))?
-        .to_string();
+    let branch_name = util::head_branch(&repo, "pull")?;
 
     let (_branch, temp_ref, fetched_oid) = transport::fetch_remote_into_temp(&repo, auth, cancel)?;
     let cleanup = || {
@@ -497,7 +485,7 @@ fn find_default_branch(repo: &Repository) -> Result<String, Error> {
 
     // Fallback: check what HEAD points to
     if let Ok(head) = repo.head()
-        && let Some(name) = head.shorthand()
+        && let Ok(name) = head.shorthand()
     {
         return Ok(name.to_string());
     }

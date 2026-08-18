@@ -521,8 +521,16 @@ impl StorageBackend for GitStorage {
             {
                 let r =
                     r.map_err(|e| Error::new(ErrorCode::StoreError, format!("reference: {e}")))?;
-                if let Some(name) = r.name()
-                    && (name.starts_with("refs/heads/") || name.starts_with("refs/tags/"))
+                // A non-UTF-8 ref name (out-of-band writes only) fails the
+                // bundle closed — silently skipping it would export a bundle
+                // that is missing a ref.
+                let name = r.name().map_err(|e| {
+                    Error::new(
+                        ErrorCode::StoreError,
+                        format!("reference name is not valid UTF-8: {}", e.message()),
+                    )
+                })?;
+                if (name.starts_with("refs/heads/") || name.starts_with("refs/tags/"))
                     && let Some(oid) = r.target()
                 {
                     refs.push((name.to_string(), oid));
@@ -947,5 +955,49 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, "NO_REPO");
+    }
+
+    /// A ref whose name is not valid UTF-8 (out-of-band writes only) must fail
+    /// the bundle closed rather than be silently dropped from the export.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_bundle_fails_closed_on_non_utf8_ref_name() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        use crate::storage::git::test_support::test_signature;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("entry.age"), b"ciphertext").unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let sig = test_signature();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("entry.age")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[])
+            .unwrap();
+        let branch = repo
+            .path()
+            .join("refs/heads")
+            .join(OsStr::from_bytes(b"ma\xffin"));
+        std::fs::write(&branch, format!("{head_oid}\n")).unwrap();
+        drop(tree);
+        drop(index);
+        drop(repo);
+
+        let storage = GitStorage::new(dir.path());
+        let err = storage
+            .create_bundle(&dir.path().join("repo.bundle"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "STORE_ERROR");
+        assert!(
+            err.message.contains("not valid UTF-8"),
+            "got: {}",
+            err.message
+        );
     }
 }

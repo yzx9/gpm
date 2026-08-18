@@ -613,8 +613,9 @@ pub fn commit_sig_info(
     let committer_time = commit.committer().when();
     let date = format_iso8601(committer_time.seconds(), committer_time.offset_minutes());
     let subject = commit
-        .summary()
-        .unwrap_or("")
+        .summary_bytes()
+        .map(String::from_utf8_lossy)
+        .unwrap_or_default()
         .trim()
         .lines()
         .next()
@@ -2011,6 +2012,37 @@ mod tests {
         );
         assert_eq!(info.status, CommitSigStatus::Unsigned);
         assert!(!info.ignored);
+    }
+
+    /// A hostile remote can carry non-UTF-8 commit bytes; the subject must
+    /// render lossy (U+FFFD) instead of collapsing to "" (the 0.20 behavior).
+    #[test]
+    fn commit_sig_info_subject_is_lossy_for_non_utf8_message() {
+        let (_dir, repo, head) = repo_with_initial_commit();
+        let odb = repo.odb().expect("odb");
+        let raw = odb.read(head).expect("read commit");
+        let raw = raw.data();
+        let sep = raw
+            .windows(2)
+            .position(|w| w == b"\n\n")
+            .expect("header/message separator");
+        let mut garbled = raw
+            .get(..sep + 2)
+            .expect("separator within commit")
+            .to_vec();
+        garbled.push(0xff); // invalid UTF-8 byte inside the subject
+        garbled.extend_from_slice(raw.get(sep + 2..).expect("separator within commit"));
+        let oid = odb
+            .write(git2::ObjectType::Commit, &garbled)
+            .expect("write garbled commit");
+
+        let info = commit_sig_info(&repo, oid, &fps(&[]), &[]).expect("info");
+        assert!(
+            info.subject.contains('\u{fffd}'),
+            "subject should be lossy-decoded: {:?}",
+            info.subject
+        );
+        assert!(!info.subject.is_empty());
     }
 
     // ── format helpers ────────────────────────────────────────────────────

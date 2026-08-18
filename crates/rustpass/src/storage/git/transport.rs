@@ -51,7 +51,7 @@ pub(super) fn ensure_https_ca_for_origin(repo: &Repository) -> Result<(), Error>
         let origin_is_https = repo
             .find_remote("origin")
             .ok()
-            .and_then(|r| r.url().map(|u| u.starts_with("https://")))
+            .and_then(|r| r.url().ok().map(|u| u.starts_with("https://")))
             .unwrap_or(false);
         if origin_is_https {
             ensure_https_ca_loaded()?;
@@ -354,11 +354,7 @@ pub(super) fn fetch_remote_into_temp(
     auth: &GitAuth,
     cancel: Option<&CancelToken>,
 ) -> Result<(String, String, git2::Oid), Error> {
-    let branch = repo
-        .head()?
-        .shorthand()
-        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot fetch"))?
-        .to_string();
+    let branch = super::util::head_branch(repo, "fetch")?;
 
     let temp_ref = format!("refs/gpm/probe/{branch}");
     let refspec = format!("+refs/heads/{branch}:{temp_ref}");
@@ -447,6 +443,32 @@ mod tests {
     use crate::storage::git::test_support::test_signature;
 
     use super::*;
+
+    /// git2 0.21 dropped `ssh`/`https` from its default feature set; without
+    /// the explicit Cargo.toml features libgit2 silently loses both transports
+    /// while every local-path test stays green. A refused loopback fetch
+    /// (port 9) proves the transport is compiled in: the failure must be
+    /// connect-level, never "unsupported URL protocol".
+    #[test]
+    fn ssh_and_https_transports_are_compiled_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        for url in ["ssh://git@127.0.0.1:9/x.git", "https://127.0.0.1:9/x.git"] {
+            repo.remote("origin", url).unwrap();
+            let no_refspecs: [&str; 0] = [];
+            let err = repo
+                .find_remote("origin")
+                .unwrap()
+                .fetch(&no_refspecs, None, None)
+                .expect_err("loopback fetch must fail");
+            let msg = err.message().to_lowercase();
+            assert!(
+                !msg.contains("unsupported") && !msg.contains("invalid url"),
+                "transport for {url} missing (git2 ssh/https features dropped?): {msg}"
+            );
+            repo.remote_delete("origin").unwrap();
+        }
+    }
 
     #[test]
     fn git_auth_none_debug() {

@@ -127,8 +127,9 @@ mod tests {
         assert_eq!(
             repo.find_remote("origin")
                 .expect("origin should be configured")
-                .url(),
-            Some(remote_url.as_str())
+                .url()
+                .unwrap(),
+            remote_url.as_str()
         );
 
         // ...but the remote has received NOTHING yet — no orphan recipient.

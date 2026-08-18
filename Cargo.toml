@@ -42,10 +42,14 @@ age = { version = "0.12", features = ["armor", "ssh", "plugin"] }
 # until native support lands. Drop it (and the macro annotations) once that ships.
 async-trait = "0.1"
 zeroize = { version = "1", features = ["derive", "serde"] }
-git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
+# `ssh`/`https` must be explicit: git2 0.21 dropped them from the default
+# feature set, and without them libgit2 loses the SSH/HTTPS transports.
+git2 = { version = "0.21", features = ["ssh", "https", "vendored-openssl", "vendored-libgit2"] }
 # For Android HTTPS CA loading (see `rustpass::git::ensure_https_ca_loaded`):
-# `libgit2-sys` for the `GIT_OPT_ADD_SSL_X509_CERT` call (already transitive via
-# git2), and the high-level `openssl` crate for PEM parsing. `openssl` depends
+# `libgit2-sys` for the `GIT_OPT_ADD_SSL_X509_CERT` call (transitive via git2 —
+# a future git2 bump that resolves a second libgit2-sys copy would silently
+# split the CA load from the fetch path), and the high-level `openssl` crate
+# for PEM parsing. `openssl` depends
 # on `openssl-sys` — which git2 already vendors — so no extra OpenSSL is built.
 libgit2-sys = "0.18"
 openssl = "0.10"
@@ -83,8 +87,8 @@ base64 = "0.23"
 bech32 = "0.11"
 # TOTP (RFC 6238) generation for entries that store a 2FA seed (gopass `pkg/otp`
 # analogue). `otpauth` parses otpauth:// URIs; `zeroize` wipes the seed on drop.
-# `qr` is deliberately off — unused, and it would pull `qrcode` + `image` and
-# bloat the Android build.
+# `qr` is deliberately off — unused, and it would pull `qrcodegen-image` (and
+# `image`) and bloat the Android build.
 totp-rs = { version = "6", default-features = false, features = [
   "otpauth",
   "zeroize",

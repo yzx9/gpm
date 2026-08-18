@@ -408,11 +408,7 @@ pub(super) fn keep_local_plan(
 pub(super) fn keep_local_advance(repo_path: &Path, fetched_oid: &str) -> Result<(), Error> {
     let repo = Repository::discover(repo_path)
         .map_err(|_| Error::new(ErrorCode::NoRepo, "No git repository found at path"))?;
-    let branch_name = repo
-        .head()?
-        .shorthand()
-        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot advance"))?
-        .to_string();
+    let branch_name = util::head_branch(&repo, "advance")?;
     let target = git2::Oid::from_str(fetched_oid)?;
     util::advance_branch(&repo, &branch_name, target)
 }

@@ -195,11 +195,7 @@ pub(super) fn push_current_branch(
         return Ok(());
     };
 
-    let branch = repo
-        .head()?
-        .shorthand()
-        .ok_or_else(|| Error::new(ErrorCode::PullFfFailed, "Detached HEAD; cannot push"))?
-        .to_string();
+    let branch = util::head_branch(repo, "push")?;
 
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     let mut opts = git2::PushOptions::new();
@@ -363,7 +359,7 @@ mod tests {
         let repo = Repository::open(dir.path()).unwrap();
         let oid = repo.head().unwrap().target().unwrap();
         let head_commit = repo.find_commit(oid).unwrap();
-        assert_eq!(head_commit.message(), Some(message));
+        assert_eq!(head_commit.message().unwrap(), message);
         assert_eq!(
             head_commit.parent_count(),
             0,
@@ -400,7 +396,7 @@ mod tests {
 
         let repo = Repository::open(dir.path()).unwrap();
         let remote = repo.find_remote("origin").expect("origin should exist");
-        assert_eq!(remote.name(), Some("origin"));
-        assert_eq!(remote.url(), Some("https://example.invalid/repo.git"));
+        assert_eq!(remote.name(), Ok(Some("origin")));
+        assert_eq!(remote.url().unwrap(), "https://example.invalid/repo.git");
     }
 }

@@ -38,8 +38,8 @@ fn author_of_head(repo_path: &Path) -> (Option<String>, Option<String>) {
     let commit = repo.find_commit(head).expect("find commit");
     let author = commit.author();
     (
-        author.name().map(String::from),
-        author.email().map(String::from),
+        author.name().ok().map(String::from),
+        author.email().ok().map(String::from),
     )
 }
 
