@@ -197,6 +197,12 @@ pub(crate) async fn create_secret<R: Runtime>(
 ) -> Result<WriteOutcome, Error> {
     log::info!("create: {name}");
     require_unlocked(&state)?;
+    // A004: gpm never creates new YAML secrets — a `---` document-marker
+    // line would land the entry read-only on its very next read
+    // (self-inflicted). Enforced once in `Store::set` on the FINAL persisted
+    // bytes, so it covers this raw-content path, template-rendered creates,
+    // presets, edits, and the keep-mine conflict replays alike; the frontend
+    // mirrors the rule with an inline validation message.
     let expected = ExpectedEntry {
         name: name.clone(),
         base_oid: String::new(),

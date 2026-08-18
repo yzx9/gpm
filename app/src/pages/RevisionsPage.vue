@@ -214,6 +214,13 @@ async function copyVersion() {
       toast.info(t("revisions.nonUtf8CopyBlocked"));
       return;
     }
+    if (result.password_empty) {
+      // The revision has no password line (e.g. a bare legacy-YAML document)
+      // — the backend skipped the clipboard write; don't claim "Copied" over
+      // whatever the clipboard still holds. Mirrors the branches above.
+      toast.info(t("revisions.emptyPasswordCopyBlocked"));
+      return;
+    }
     toast.success(
       t("revisions.copyToast", {
         date: formatRelativeTime(relativeNow.value, Date.parse(commit.date)),

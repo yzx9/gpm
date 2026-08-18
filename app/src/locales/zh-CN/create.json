@@ -26,6 +26,7 @@
   "firstLineHint": "内容的第一行会成为密码。",
   "content": "内容",
   "templateHint": "此位置应用了一个 .pass-template 模板——下方显示的内容即会被存储。",
+  "yamlMarkerBlocked": "以 '---' 开头的行属于旧版 gopass YAML 格式，gpm 只会只读显示——请删除 '---' 行以创建可编辑的条目",
   "genFailed": "无法生成密码",
   "presetsFailed": "无法加载预设",
   "saved": "✓ 已保存（提交 {commit}）",

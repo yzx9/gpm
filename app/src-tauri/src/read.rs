@@ -48,6 +48,11 @@ pub(crate) struct CopyResult {
     /// isn't valid UTF-8, so the UI can refuse the clipboard write and point
     /// the user at the gopass CLI instead. No secret data.
     pub(crate) password_non_utf8: bool,
+    /// A free byproduct of this decrypt: whether the password is empty (a bare
+    /// legacy-YAML document, A004 — its first line is the `---` marker), so the
+    /// UI can say "no password" instead of toasting success over an empty
+    /// clipboard. No secret data.
+    pub(crate) password_empty: bool,
 }
 
 /// Returned by `copy_totp`. Like [`CopyResult`] but distinguishes "copied a
@@ -64,11 +69,29 @@ pub(crate) struct TotpCopyResult {
 /// Why an entry's Edit affordance is disabled. A non-UTF-8 secret can't be
 /// safely round-tripped through a UTF-8 text editor — editing its lossy view
 /// and saving would corrupt the original bytes — so the UI edit-blocks it.
-/// Not secret.
+/// A legacy-YAML secret (A004) is edit-blocked because gpm would corrupt it on
+/// the write-back: it is read-only until edited in gopass (an in-app migration
+/// is Phase 2, A004). Not secret.
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum EditBlockReason {
     NonUtf8,
+    /// Wire string `legacyYaml` (serde camelCase). Pinned by test — an IPC
+    /// drift here silently disables the frontend hint.
+    LegacyYaml,
+}
+
+/// The edit-block reason for a parsed secret, with the documented priority
+/// (A004): a non-UTF-8 secret wins over legacy-YAML (both may be true; the
+/// stricter data-loss reason is the one the UI should explain).
+fn edit_block_reason(secret: &rustpass::Secret) -> Option<EditBlockReason> {
+    if !secret.is_utf8() {
+        Some(EditBlockReason::NonUtf8)
+    } else if secret.is_yaml() {
+        Some(EditBlockReason::LegacyYaml)
+    } else {
+        None
+    }
 }
 
 /// One `Key: Value` attribute (gopass AKV) crossing IPC for named-field display
@@ -236,9 +259,9 @@ pub(crate) fn clipboard_clear_plan(clear_secs: u64) -> (bool, u32) {
 /// Password never reaches the `WebView`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn copy_password(
+pub(crate) async fn copy_password<R: Runtime>(
     state: State<'_, AppState>,
-    app: AppHandle,
+    app: AppHandle<R>,
     entry_path: String,
     notify_text: Option<NotifyText>,
 ) -> Result<CopyResult, Error> {
@@ -252,11 +275,15 @@ pub(crate) async fn copy_password(
     // unlock prompt. `slide` is false — Copy keeps its plaintext footprint to the
     // clipboard auto-clear window (D8). Project the byproducts + the password
     // (None for attachments / non-UTF-8, which never reach the clipboard).
-    let (has_totp, has_attachment, password_non_utf8, password) =
+    let (has_totp, has_attachment, password_non_utf8, password_empty, password) =
         with_secret(&state, &app, &entry_path, false, |secret, _| {
             let has_attachment = rustpass::has_attachment(secret);
             let password_non_utf8 = !secret.password_is_utf8();
-            let password = if has_attachment || password_non_utf8 {
+            // A bare YAML doc's first line is the `---` marker — no password
+            // line exists. Treat "" as "no password" (A004): an empty
+            // clipboard write would be a fake success.
+            let password_empty = password_non_utf8 || secret.password_bytes().is_empty();
+            let password = if has_attachment || password_empty {
                 None
             } else {
                 Some(secret.password().to_string())
@@ -265,6 +292,7 @@ pub(crate) async fn copy_password(
                 rustpass::totp::has_totp(secret),
                 has_attachment,
                 password_non_utf8,
+                password_empty,
                 password,
             ))
         })
@@ -281,6 +309,7 @@ pub(crate) async fn copy_password(
             has_totp,
             has_attachment,
             password_non_utf8: false,
+            password_empty: false,
         });
     }
 
@@ -296,6 +325,21 @@ pub(crate) async fn copy_password(
             has_totp,
             has_attachment,
             password_non_utf8: true,
+            password_empty: false,
+        });
+    }
+
+    // An empty password (a bare legacy-YAML document, A004) is the same fake
+    // success — skip the clipboard write and tell the UI instead.
+    if password_empty {
+        return Ok(CopyResult {
+            success: true,
+            entry_name,
+            cleared_after_secs: 0,
+            has_totp,
+            has_attachment,
+            password_non_utf8: false,
+            password_empty: true,
         });
     }
 
@@ -318,6 +362,7 @@ pub(crate) async fn copy_password(
         has_totp,
         has_attachment,
         password_non_utf8: false,
+        password_empty: false,
     })
 }
 
@@ -528,14 +573,10 @@ pub(crate) async fn show_password_core<R: Runtime>(
             attributes: attr_view(secret),
             has_totp: rustpass::totp::has_totp(secret),
             // A non-UTF-8 secret can't be safely edited as text (the lossy view
-            // would be re-encrypted on save, corrupting it) — flag it so the UI
-            // edit-blocks. Attachments are base64 (valid UTF-8), so they don't trip
-            // this; they stay blocked via `attachment`.
-            edit_blocked: if secret.is_utf8() {
-                None
-            } else {
-                Some(EditBlockReason::NonUtf8)
-            },
+            // would be re-encrypted on save, corrupting it); a legacy-YAML
+            // secret is read-only (A004). Attachments are base64 (valid UTF-8,
+            // never YAML) — they stay blocked via `attachment`.
+            edit_blocked: edit_block_reason(secret),
             attachment,
             version: Some(oid.to_string()),
         })
@@ -649,11 +690,7 @@ pub(crate) async fn entry_probe<R: Runtime>(
         Ok(EntryProbe {
             has_totp: rustpass::totp::has_totp(secret),
             attachment: rustpass::metadata(secret),
-            edit_blocked: if secret.is_utf8() {
-                None
-            } else {
-                Some(EditBlockReason::NonUtf8)
-            },
+            edit_blocked: edit_block_reason(secret),
         })
     })
     .await

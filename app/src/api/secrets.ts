@@ -44,6 +44,10 @@ export interface CopyResult {
   /** Free byproduct of the decrypt: the password isn't valid UTF-8, so the
    *  backend skipped the clipboard write (copy it with the gopass CLI). */
   password_non_utf8: boolean;
+  /** Free byproduct of the decrypt: the password is empty (a bare legacy-YAML
+   *  document), so the backend skipped the clipboard write — there is nothing
+   *  to copy. */
+  password_empty: boolean;
 }
 
 /** Result of `copy_totp`: `copied` is `false` when the entry has no TOTP seed
@@ -60,9 +64,11 @@ export interface AttachmentMeta {
   size: number;
 }
 
-/** Why an entry's Edit affordance is disabled (e.g. `"nonUtf8"` — the secret
- *  holds non-UTF-8 bytes a text editor can't round-trip without corrupting). */
-export type EditBlockReason = "nonUtf8";
+/** Why an entry's Edit affordance is disabled: `"nonUtf8"` — the secret holds
+ *  non-UTF-8 bytes a text editor can't round-trip without corrupting;
+ *  `"legacyYaml"` — a legacy gopass YAML secret (a `---` line), which gpm
+ *  shows read-only rather than corrupt on write-back. */
+export type EditBlockReason = "nonUtf8" | "legacyYaml";
 
 /** One `Key: Value` attribute (gopass AKV) — mirrors `rustpass::Attribute` on the
  *  wire. Both halves are decrypted content. */

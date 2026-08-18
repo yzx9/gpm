@@ -218,6 +218,23 @@ const hasInvalidKey = computed(() =>
   ),
 );
 
+/** A004: gpm never writes YAML secrets — parts that would assemble to a
+ *  `---`-marked body land the entry read-only on its very next read (the
+ *  markdown horizontal-rule paste). Mirrors the backend's
+ *  `is_yaml_secret_content` rule (Store::set refuses it too, this is the
+ *  earlier inline hint): the password counts only as a bare `---` document;
+ *  later lines are markers when they start `---` but not `----` (PEM armor
+ *  stays editable, matching gopass's effective classification). */
+const hasYamlMarker = computed(() => {
+  const bareDoc = editPassword.value.trim() === "---";
+  const attrLines = editAttributes.value.map((a) => `${a.key}: ${a.value}`);
+  const bodyLines = editNotes.value.split("\n");
+  const markerLine = [...attrLines, ...bodyLines].some(
+    (line) => line.startsWith("---") && !line.startsWith("----"),
+  );
+  return bareDoc || markerLine;
+});
+
 /** Save is enabled only when the body has non-whitespace content and actually
  *  changed. age ciphertext is non-deterministic, so an unchanged Save would
  *  still make a spurious commit (block it); and an all-whitespace body would be
@@ -228,7 +245,8 @@ const canSave = computed(() => {
     saving.value ||
     isAttachment.value ||
     isNonUtf8.value ||
-    hasInvalidKey.value
+    hasInvalidKey.value ||
+    hasYamlMarker.value
   )
     return false;
   const p = currentParts.value;
@@ -273,6 +291,14 @@ async function loadBody() {
       // corruption; block at the source so the lossy view is never saved back.
       isNonUtf8.value = true;
       error.value = t("entry.nonUtf8EditDisabledHint");
+      return;
+    }
+    if (claimed.edit_blocked === "legacyYaml") {
+      // A legacy gopass YAML secret is read-only (A004): gpm would corrupt it
+      // on the canonical write-back. Block at the source — covers the detail
+      // page's pre-probe window and direct /edit deep-links alike.
+      isAttachment.value = true; // reuse the same "blocked editor" affordance
+      error.value = t("entry.legacyYamlEditDisabledHint");
       return;
     }
     editPassword.value = claimed.password ?? "";
@@ -381,6 +407,10 @@ function goBack() {
       <span v-if="decryptError" class="block text-xs opacity-80 mt-1">
         {{ t("entry.checkIdentityHint") }}
       </span>
+    </BaseAlert>
+
+    <BaseAlert v-if="hasYamlMarker" variant="warning" class="mb-4">
+      {{ t("entry.yamlMarkerBlocked") }}
     </BaseAlert>
 
     <div

@@ -50,6 +50,57 @@ describe("CreateCustomPage", () => {
     expect((save.element as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("Save is disabled with the YAML warning when content has a --- line (A004)", async () => {
+    // A `---`-prefixed line marks a legacy gopass YAML secret; gpm shows
+    // those read-only, so the create form blocks inline instead of letting
+    // the app create an entry it would immediately refuse to edit.
+    const w = mountWithApp(CreateCustomPage).wrapper;
+    await flushPromises();
+    await w.find('input[id="c-name"]').setValue("misc/foo");
+    await w.find('textarea[id="c-content"]').setValue("pw\n---\nk: v");
+    await flushPromises();
+
+    expect(w.text()).toContain("legacy gopass YAML secret");
+    const save = w
+      .findAll("button")
+      .find((b) => b.text().includes("Save secret"))!;
+    expect((save.element as HTMLButtonElement).disabled).toBe(true);
+    expect(invoke).not.toHaveBeenCalledWith("create_secret", expect.anything());
+
+    // Removing the marker re-enables the form.
+    await w.find('textarea[id="c-content"]').setValue("pw\nk: v");
+    await flushPromises();
+    expect((save.element as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("A bare --- document stays blocked; armor and ---password stay storable", async () => {
+    // Mirrors `is_yaml_secret_content`: the first line counts only as a bare
+    // `---` document (the password line is never a marker); PEM armor
+    // (`-----BEGIN`, starts `----`) and a password merely starting `---` are
+    // editable AKV content gopass itself round-trips.
+    const w = mountWithApp(CreateCustomPage).wrapper;
+    await flushPromises();
+    await w.find('input[id="c-name"]').setValue("misc/foo");
+    const save = w
+      .findAll("button")
+      .find((b) => b.text().includes("Save secret"))!;
+    const content = w.find('textarea[id="c-content"]');
+
+    await content.setValue("---\nk: v");
+    await flushPromises();
+    expect((save.element as HTMLButtonElement).disabled).toBe(true);
+
+    await content.setValue(
+      "pw\n-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----",
+    );
+    await flushPromises();
+    expect((save.element as HTMLButtonElement).disabled).toBe(false);
+
+    await content.setValue("---hunter2\nuser: alice");
+    await flushPromises();
+    expect((save.element as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("Save creates the secret and returns to entries", async () => {
     const w = mountWithApp(CreateCustomPage).wrapper;
     await flushPromises();

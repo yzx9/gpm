@@ -27,6 +27,12 @@ use crate::error::{Error, ErrorCode};
 /// [`Secret::password_bytes`] / [`Secret::body_bytes`] for byte-exact access.
 /// A non-UTF-8 secret is edit-blocked upstream so its lossy view is display-only
 /// and never written back. See ADR A005.
+///
+/// A secret carrying a `---` document-marker line is parsed as **legacy YAML**
+/// (A004): attributes are NOT split out of it, the whole post-password content
+/// (marker included) is the opaque body, and [`Secret::is_yaml`] marks it so the
+/// UI can edit-block it — gpm never writes a YAML secret back, which is what
+/// makes the edit-time YAML corruption impossible.
 pub struct Secret {
     password: Zeroizing<Vec<u8>>,
     /// Free-text notes only (gopass `Body()` parity): every line that contained
@@ -37,6 +43,9 @@ pub struct Secret {
     /// both are [`Zeroizing`]; the [`fmt::Debug`] impl redacts them — never
     /// derive it, or a stray log line leaks the pair.
     attributes: Vec<Attribute>,
+    /// Whether this secret was parsed via the legacy-YAML branch (A004). Not
+    /// secret.
+    yaml: bool,
 }
 
 /// One `Key: Value` line from a secret's attribute region (gopass AKV). Both
@@ -89,6 +98,7 @@ impl fmt::Debug for Secret {
                 "attributes",
                 &format!("{} [REDACTED]", self.attributes.len()),
             )
+            .field("yaml", &self.yaml)
             .finish()
     }
 }
@@ -206,9 +216,13 @@ impl Secret {
 
     /// Serialize back to the modern on-disk plaintext in canonical order:
     /// `password`, then each attribute as `key: value`, then the free-text body.
-    /// Byte-exact inverse of [`Secret::parse`] for secrets already in this order
-    /// (the common case); interleaved secrets canonicalize on round-trip, which
-    /// stays gopass-readable (gopass's reader is position-agnostic over `": "`).
+    /// Byte-exact inverse of [`Secret::parse`] **for the AKV/MIME-normalized
+    /// paths** (the common case); interleaved secrets canonicalize on
+    /// round-trip, which stays gopass-readable (gopass's reader is
+    /// position-agnostic over `": "`). YAML secrets are **read-only** (A004) —
+    /// they never reach this method through gpm's write path, and no
+    /// round-trip is promised for them (a bare `---` doc re-parsed through
+    /// [`Secret::from_parts`] would not reproduce the original bytes).
     #[must_use]
     pub fn to_bytes(&self) -> Zeroizing<Vec<u8>> {
         let pw = self.password.as_slice();
@@ -277,6 +291,7 @@ impl Secret {
             password: Zeroizing::new(password),
             attributes,
             body: Zeroizing::new(body),
+            yaml: false,
         })
     }
 
@@ -330,13 +345,46 @@ impl Secret {
         } else {
             None
         };
-        let (password, attributes, body) = legacy.unwrap_or_else(|| modern_split(&normalized));
+        let (password, attributes, body, yaml) = match legacy {
+            // MIME never carries a YAML block; it is fully handled above.
+            Some(parts) => {
+                let (pw, attrs, body) = parts;
+                (pw, attrs, body, false)
+            }
+            // ORDER INVARIANT (A004): when the MIME magic matched, YAML is
+            // never attempted — gopass's cascade short-circuits a malformed
+            // MIME header block (PermanentError) straight to ParseAKV
+            // (`secparse/parse.go`), skipping ParseYAML entirely, even if the
+            // body carries a `---` line.
+            None if first_line.trim_ascii() == LEGACY_MAGIC => {
+                let (pw, attrs, body) = modern_split(&normalized);
+                (pw, attrs, body, false)
+            }
+            None if is_bare_yaml_doc(first_line) || contains_yaml_marker(&normalized) => {
+                let (pw, body) = yaml_split(&normalized);
+                (pw, Vec::new(), body, true)
+            }
+            None => {
+                let (pw, attrs, body) = modern_split(&normalized);
+                (pw, attrs, body, false)
+            }
+        };
 
         Ok(Self {
             password,
             attributes,
             body: Zeroizing::new(body),
+            yaml,
         })
+    }
+
+    /// Whether this secret was parsed via the legacy-YAML branch (A004): a
+    /// `---` document-marker line is present, so the secret is read-only
+    /// (gpm never writes it back) and its fields are not exposed as AKV
+    /// attributes.
+    #[must_use]
+    pub fn is_yaml(&self) -> bool {
+        self.yaml
     }
 }
 
@@ -367,6 +415,85 @@ fn modern_split(normalized: &[u8]) -> (Zeroizing<Vec<u8>>, Vec<Attribute>, Vec<u
     let (pw, rest) = split_first_line(normalized);
     let (attrs, body) = split_attrs(&rest);
     (pw, attrs, body)
+}
+
+/// The gopass YAML document marker, as bytes.
+const YAML_MARKER: &[u8] = b"---";
+
+/// Whether the first line of a secret is a bare YAML document opener — the
+/// line, trimmed, IS the marker. gopass's `ParseYAML` reads the first line,
+/// `TrimSpace`s it, and treats `line == "---"` as "no password, the whole
+/// secret is one YAML document" (`pkg/gopass/secrets/yaml.go`) — so `---` and
+/// `--- ` both open a bare doc, while `---hunter2` is a password.
+fn is_bare_yaml_doc(first_line: &[u8]) -> bool {
+    first_line.trim_ascii() == YAML_MARKER
+}
+
+/// Whether one (CR-stripped) line is a YAML document-marker line: it starts
+/// with `---` (gopass's `Peek(3)` token) but NOT with `----`. gopass's peek
+/// matches PEM armor (`-----BEGIN …`) and `----` rules too, but its YAML
+/// *decode* then fails and the cascade falls back to AKV — so gopass's
+/// effective classification of armor is editable AKV, and excluding `----`+
+/// here mirrors the outcome rather than the token (pinned against the real
+/// binary in `gopass_interop_age.rs`). A `--- `-style marker (trailing space)
+/// matches, like gopass's token check.
+fn is_marker_line(line: &[u8]) -> bool {
+    line.starts_with(YAML_MARKER) && !line.starts_with(b"----")
+}
+
+/// Whether the (already-normalized) plaintext carries a YAML document-marker
+/// line after its password line. gopass consumes the first line as the
+/// password (bare-doc check first) and only then peeks for the marker
+/// (`pkg/gopass/secrets/yaml.go` parseBody), so the password line itself never
+/// counts — a password starting `---` stays AKV here exactly as in gopass.
+///
+/// Parser-free (A004: no YAML decode on the read path), so a marker-bearing
+/// body that is not valid YAML is still treated as YAML (read-only) —
+/// over-blocking a possible edit is safe where corrupting one is not. The
+/// write-path rule is the broader [`is_yaml_secret_content`].
+fn contains_yaml_marker(content: &[u8]) -> bool {
+    // Skip the first line (the password); a marker anywhere after it routes
+    // the secret to the YAML branch.
+    content
+        .split(|&b| b == b'\n')
+        .skip(1)
+        .any(|line| is_marker_line(line.strip_suffix(b"\r").unwrap_or(line)))
+}
+
+/// The write-path rule (A004): whether this content would parse as a
+/// legacy-YAML secret — a bare `---` first line OR a document-marker line
+/// after it. Every write path funnels through [`crate::Store::set`], which
+/// refuses such content, so gpm never persists a secret it would immediately
+/// show read-only. Accepts RAW (not yet CRLF-normalized) input.
+#[must_use]
+pub fn is_yaml_secret_content(content: &[u8]) -> bool {
+    let mut lines = content.split(|&b| b == b'\n');
+    let first = lines.next().unwrap_or(&[]);
+    is_bare_yaml_doc(first.strip_suffix(b"\r").unwrap_or(first))
+        || lines.any(|line| is_marker_line(line.strip_suffix(b"\r").unwrap_or(line)))
+}
+
+/// The legacy-YAML split (A004): the password is the first line — empty when
+/// the first line is itself the `---` marker (a bare YAML document, mirroring
+/// gopass `ParseYAML`, which `TrimSpace`s the line before the bare-doc
+/// comparison so `--- ` counts too) — and everything after it (marker
+/// included) is the opaque body. No attributes: gpm does not parse the YAML
+/// block, and never writes the secret back, so the edit-time corruption is
+/// impossible.
+fn yaml_split(normalized: &[u8]) -> (Zeroizing<Vec<u8>>, Vec<u8>) {
+    let (pw, rest) = split_first_line(normalized);
+    if is_bare_yaml_doc(pw.as_slice()) {
+        // Bare YAML document: no password line before the marker; the marker
+        // line itself stays in the body.
+        let mut body = pw.as_slice().to_vec();
+        if !rest.is_empty() {
+            body.push(b'\n');
+            body.extend_from_slice(&rest);
+        }
+        (Zeroizing::new(Vec::new()), body)
+    } else {
+        (pw, rest)
+    }
 }
 
 /// Partition the post-password bytes into (attributes, free-text body), gopass
@@ -1078,5 +1205,156 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.to_bytes().as_slice(), b"pw\na:b: v");
+    }
+
+    // ---- legacy YAML read-only branch (A004) ----
+
+    #[test]
+    fn parse_yaml_marker_line_marks_secret_readonly() {
+        // A `---` line routes the whole secret to the YAML branch: no attribute
+        // splitting (the block's `k: v` lines stay in the opaque body), password
+        // = first line, marker kept in the body.
+        let secret = Secret::parse(b"password\n---\notp: bar").unwrap();
+        assert!(secret.is_yaml());
+        assert_eq!(secret.password(), "password");
+        assert!(secret.attributes().is_empty());
+        assert_eq!(secret.body_bytes(), b"---\notp: bar");
+    }
+
+    #[test]
+    fn parse_yaml_bare_doc_first_line_marker_has_empty_password() {
+        // gopass ParseYAML: a first line that IS the marker is a bare YAML
+        // document — no password line precedes it. NOTE: this parse-level
+        // branch is reached only when some LATER line also carries a marker
+        // (a single `---` line is just a password-bearing secret whose body
+        // is empty); the bare-doc-yaml shape gopass writes always has YAML
+        // content after the marker.
+        let secret = Secret::parse(b"---\nusername: alice\nurl: example.com").unwrap();
+        assert!(secret.is_yaml());
+        assert_eq!(secret.password(), "");
+        assert_eq!(
+            secret.body_bytes(),
+            b"---\nusername: alice\nurl: example.com"
+        );
+    }
+
+    #[test]
+    fn parse_yaml_bare_doc_single_marker_only() {
+        // Marker-only file: still YAML, empty password, body = the marker.
+        let secret = Secret::parse(b"---").unwrap();
+        assert!(secret.is_yaml());
+        assert_eq!(secret.password(), "");
+        assert_eq!(secret.body_bytes(), b"---");
+    }
+
+    #[test]
+    fn parse_without_marker_stays_akv() {
+        // Pure AKV (with attributes and body) — unchanged behavior, is_yaml
+        // false, attributes split as before.
+        let secret = Secret::parse(b"pw\nmy notes\nuser: alice").unwrap();
+        assert!(!secret.is_yaml());
+        assert_eq!(secret.get("user"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "my notes");
+    }
+
+    #[test]
+    fn parse_pem_armor_body_is_editable_akv() {
+        // gopass's Peek(3) token matches PEM armor (`-----BEGIN …`), but its
+        // YAML decode then fails and the cascade falls back to AKV — gopass's
+        // effective classification of armor is editable AKV. gpm matches the
+        // outcome, not the token: armor lines start `----` and are excluded
+        // from the marker, so an armored key body stays a normal editable
+        // secret (and the write-path guard does not refuse key material).
+        let secret = Secret::parse(
+            b"pw\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----",
+        )
+        .unwrap();
+        assert!(!secret.is_yaml());
+        assert_eq!(secret.password(), "pw");
+        // The armor has no `": "` lines, so it is all free-text body.
+        assert!(secret.attributes().is_empty());
+        assert!(secret.body_bytes().starts_with(b"-----BEGIN"));
+    }
+
+    #[test]
+    fn parse_password_starting_with_marker_stays_akv() {
+        // gopass consumes the first line as the password before its marker
+        // peek, so a password that itself starts `---` is never a YAML
+        // marker — the secret stays AKV (gopass ParseYAML would read the
+        // password line, then find no marker in an empty body).
+        let secret = Secret::parse(b"---hunter2\nuser: alice").unwrap();
+        assert!(!secret.is_yaml());
+        assert_eq!(secret.password(), "---hunter2");
+        assert_eq!(secret.get("user"), Some(b"alice".as_slice()));
+    }
+
+    #[test]
+    fn parse_bare_doc_trailing_space_marker_is_bare() {
+        // gopass TrimSpaces the first line before the bare-doc comparison, so
+        // `--- ` (trailing space) is a bare YAML document with an empty
+        // password — not a secret whose password is the junk string "--- ".
+        let secret = Secret::parse(b"--- \nusername: alice").unwrap();
+        assert!(secret.is_yaml());
+        assert_eq!(secret.password(), "");
+        assert_eq!(secret.body_bytes(), b"--- \nusername: alice");
+    }
+
+    #[test]
+    fn parse_yaml_crlf_normalized_before_marker_match() {
+        // CRLF endings normalize to LF before detection, so a `---\r\n` line
+        // matches the marker (gopass reads CRLF YAML the same way).
+        let secret = Secret::parse(b"password\r\n---\r\notp: bar\r\n").unwrap();
+        assert!(secret.is_yaml());
+        assert_eq!(secret.body_bytes(), b"---\notp: bar");
+    }
+
+    #[test]
+    fn parse_yaml_trailing_space_marker_still_matches() {
+        // gopass Peek(3) only checks the first three bytes: `--- ` (trailing
+        // space) matches its token, so gpm matches it too — conservative
+        // read-only beats a possible corrupting edit.
+        let secret = Secret::parse(b"password\n--- \notp: bar").unwrap();
+        assert!(secret.is_yaml());
+    }
+
+    #[test]
+    fn parse_mime_with_yaml_marker_line_stays_akv() {
+        // ORDER INVARIANT: the `---` line (no colon) makes the MIME header
+        // block malformed; gopass's cascade then short-circuits PermanentError
+        // straight to ParseAKV — skipping ParseYAML — so gpm must not take the
+        // YAML branch either. Password = the magic line (the modern fallback),
+        // `username: alice` an attribute, `---` body text.
+        let secret =
+            Secret::parse(b"GOPASS-SECRET-1.0\nPassword: p\n---\nusername: alice").unwrap();
+        assert!(!secret.is_yaml());
+        assert_eq!(secret.password(), "GOPASS-SECRET-1.0");
+        assert_eq!(secret.get_ci("password"), Some(b"p".as_slice()));
+        assert_eq!(secret.get("username"), Some(b"alice".as_slice()));
+        assert_eq!(secret.body(), "---");
+    }
+
+    #[test]
+    fn from_parts_is_never_yaml() {
+        // The assembler builds AKV secrets only; a YAML secret never reaches
+        // the write path.
+        let s = Secret::from_parts(b"pw".to_vec(), vec![], b"notes".to_vec()).unwrap();
+        assert!(!s.is_yaml());
+    }
+
+    #[test]
+    fn contains_yaml_marker_direct() {
+        // The write-path guard reuses the same rule; pin its semantics.
+        assert!(contains_yaml_marker(b"pw\n---\nk: v"));
+        assert!(contains_yaml_marker(b"pw\n--- \nk: v"));
+        assert!(contains_yaml_marker(b"x\ny\n---\nlate marker"));
+        // first line skipped:
+        assert!(!contains_yaml_marker(b"---\nk: v"));
+        assert!(!contains_yaml_marker(b"---"));
+        assert!(!contains_yaml_marker(b"---hunter2\nuser: a"));
+        // armor and 4-dash rules are not markers:
+        assert!(!contains_yaml_marker(b"pw\n-----BEGIN X-----\n"));
+        assert!(!contains_yaml_marker(b"pw\n----\nk: v"));
+        assert!(!contains_yaml_marker(b"pw\nnotes\nk: v"));
+        assert!(!contains_yaml_marker(b""));
     }
 }

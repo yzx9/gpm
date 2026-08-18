@@ -1070,4 +1070,111 @@ done
             );
         }
     }
+
+    /// **YAML discriminator interop (A004):** secrets written by the real
+    /// `gopass` binary exercise gpm's `---` detection — the risky logic is the
+    /// discriminator, not the happy path. gpm must classify an exact `---` line
+    /// as legacy YAML (read-only, attributes NOT split out of the block) while
+    /// a PEM armor body (whose `-----BEGIN` lines also start with `---`) stays
+    /// a normal AKV secret, and a TOTP seed inside a gopass-written YAML block
+    /// must keep working (the body scan restores what attribute extraction used
+    /// to find by accident).
+    #[tokio::test]
+    async fn gpm_classifies_gopass_written_yaml_secrets() {
+        if !gopass_present() {
+            eprintln!("skipping gopass interop test: `gopass` not on PATH");
+            return;
+        }
+
+        let (identity, recipient) = generate_test_keypair();
+        let (home, store_dir) = provision_gopass_store(&recipient);
+
+        gopass_insert(home.path(), "yaml/exact", "pw\n---\notp: bar");
+        // gopass's own Peek(3) detection treats a `--- ` (trailing space) line
+        // as the marker too — pin that gpm agrees (conservative read-only).
+        gopass_insert(home.path(), "yaml/trailing", "pw\n--- \notp: bar");
+        // A PEM body has `-----BEGIN`/`-----END` lines: gopass's Peek(3) token
+        // matches them, but its YAML decode then FAILS and the cascade falls
+        // back to AKV — gopass's effective classification of armor is editable
+        // AKV. gpm excludes `----`+ lines from the marker to match the OUTCOME,
+        // so armored key material stays a normal editable secret.
+        gopass_insert(
+            home.path(),
+            "yaml/pem-body",
+            "pw\n-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----",
+        );
+        // A bare document: gopass's ParseYAML reads the first line, TrimSpaces
+        // it, and `line == "---"` means no password — the whole secret is one
+        // YAML document.
+        gopass_insert(home.path(), "yaml/bare", "---\nusername: alice");
+        // A MIME-magic secret with a `---` line in the header block: gopass's
+        // cascade short-circuits the malformed MIME (PermanentError) straight
+        // to ParseAKV, SKIPPING ParseYAML — the order invariant gpm mirrors.
+        gopass_insert(
+            home.path(),
+            "yaml/mime-magic",
+            "GOPASS-SECRET-1.0\nPassword: p\n---\nusername: alice",
+        );
+        // A TOTP seed inside the YAML block must keep working (A004 body scan).
+        gopass_insert(
+            home.path(),
+            "yaml/totp",
+            "pw\n---\ntotp: KRSXG5CTMVRXEZLUKN2XAZLSKNSWG4TFOQ",
+        );
+
+        commit_worktree(home.path(), &store_dir);
+
+        let config_dir = tempfile::tempdir().unwrap();
+        let store = Store::new(config_dir.path().to_path_buf(), None);
+        store
+            .configure(store_dir.to_str().unwrap(), &GitAuth::None, &identity, None)
+            .await
+            .expect("gpm clones the gopass store");
+
+        // Exact `---`: YAML — read-only, no attributes split out of the block.
+        let secret = store.get("yaml/exact").await.expect("get exact");
+        assert!(secret.is_yaml(), "exact --- line is legacy YAML");
+        assert_eq!(secret.password(), "pw");
+        assert!(
+            secret.attributes().is_empty(),
+            "no AKV attrs from the block"
+        );
+        assert_eq!(secret.body_bytes(), b"---\notp: bar");
+
+        // `--- ` (trailing space): same Peek(3) token, same classification.
+        let secret = store.get("yaml/trailing").await.expect("get trailing");
+        assert!(secret.is_yaml(), "--- with trailing space is legacy YAML");
+
+        // PEM body: gopass's YAML decode fails on armor and the cascade falls
+        // back to AKV — gpm matches that effective outcome (armor starts
+        // `----`, excluded from the marker): an editable AKV secret whose
+        // armor lines have no `": "` separators, so they are all free body.
+        let secret = store.get("yaml/pem-body").await.expect("get pem-body");
+        assert!(!secret.is_yaml(), "PEM armor is NOT a YAML marker case");
+        assert!(secret.attributes().is_empty());
+        assert_eq!(secret.password(), "pw");
+        assert!(secret.body_bytes().starts_with(b"-----BEGIN"));
+
+        // Bare document: no password line precedes the marker.
+        let secret = store.get("yaml/bare").await.expect("get bare");
+        assert!(secret.is_yaml());
+        assert_eq!(secret.password(), "");
+
+        // MIME magic + `---`: the PermanentError short-circuit keeps this an
+        // AKV secret (password = the magic line), never the YAML branch.
+        let secret = store.get("yaml/mime-magic").await.expect("get mime-magic");
+        assert!(
+            !secret.is_yaml(),
+            "malformed-MIME + `---` must short-circuit to AKV, skipping YAML"
+        );
+
+        // TOTP in the YAML block: the body scan keeps the seed working — the
+        // pre-A004 accidental attribute extraction must not regress.
+        let secret = store.get("yaml/totp").await.expect("get totp");
+        assert!(secret.is_yaml());
+        assert!(
+            rustpass::totp::has_totp(&secret),
+            "TOTP seed inside a gopass YAML block stays detectable"
+        );
+    }
 }

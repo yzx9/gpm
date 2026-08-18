@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Saving two settings in quick succession (for example updating your access token right as a background sync finishes) could **silently drop one of the changes** — the later save was built on an out-of-date copy of the configuration file and overwrote the earlier one. Repository settings are now written under a lock that serializes every writer (app, background sync, and a second desktop instance alike), so concurrent changes all land; if a write ever can't acquire the lock in time it now shows an error instead of losing data.
+- Secrets stored in the **legacy gopass YAML format** (a `---` line) no longer risk corruption when opened in gpm. They are now shown **read-only** — the password can still be copied and 2FA codes still work — because saving would rewrite them into a form gopass misreads. Edit these entries with the gopass CLI. gpm also refuses to save content with a `---` marker line in any form (create, edit, templates), so no entry can strand itself read-only. PEM-encrypted key material (`-----BEGIN …` lines) remains a normal editable secret, matching gopass.
 
 ## [v0.19.1] - 2026-08-18
 

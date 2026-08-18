@@ -130,7 +130,9 @@ pub(crate) fn sweep_tmp_files(config_dir: &Path) {
         // Only stale temps: modified before the grace cutoff. An unreadable
         // mtime keeps the file (fail-safe, never sweeps live data).
         let Ok(meta) = entry.metadata() else { continue };
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         if modified < cutoff {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -1723,8 +1725,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = crate::seal::generate_master_key().unwrap();
         std::fs::create_dir_all(dir.path()).unwrap();
-        // Legacy repo.json: no `crypto` field (a pre-typed-BackendKind age store).
-        let legacy = r#"{"url":"https://x/repo","local_path":"/p"}"#;
+        // Legacy repo.json: no `crypto` field (a pre-typed-BackendKind age
+        // store), carrying an unknown forward-compat field a NEWER gpm may
+        // have written — the in-place Value mutation must preserve it.
+        let legacy = r#"{"url":"https://x/repo","local_path":"/p","future_field":42}"#;
         std::fs::write(dir.path().join("repo.json"), legacy).unwrap();
         let cfg = Config::new(dir.path().to_path_buf(), Some(key));
         cfg.migrate_seal().await.unwrap(); // seal the plaintext, as production would
@@ -1744,6 +1748,9 @@ mod tests {
             after.get("crypto").and_then(serde_json::Value::as_str),
             Some("age")
         );
+        // The unknown field survives the rewrite (forward-compat claim pinned:
+        // a future refactor to a typed round-trip would silently drop it).
+        assert_eq!(after.get("future_field"), Some(&serde_json::json!(42)));
         assert_eq!(
             cfg.load_repo_config().await.unwrap().crypto,
             crypto::BackendKind::Age

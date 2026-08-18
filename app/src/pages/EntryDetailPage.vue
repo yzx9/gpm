@@ -342,6 +342,11 @@ async function showPassword() {
     showTotp.value = claimed.has_totp;
     showAttachment.value = claimed.attachment !== null;
     attachmentMeta.value = claimed.attachment;
+    // Refresh the probe-derived affordance from the decrypted truth: a
+    // mount-time probe miss (identity was locked) or a sync that changed the
+    // entry (e.g. a YAML→AKV edit by a teammate) would otherwise leave Edit
+    // stuck disabled — or enabled — until the page remounts.
+    editBlockedReason.value = claimed.edit_blocked;
   } catch (e) {
     if (isAuthCancelled(e)) return;
     const appError = e as AppError;
@@ -373,6 +378,12 @@ async function copyPassword() {
       // Backend skipped the clipboard write: the password has non-UTF-8 bytes
       // that can't go on the (UTF-8) clipboard and can't be shown or edited.
       toast.info(t("entry.nonUtf8CopyBlocked"));
+      return;
+    }
+    if (result.password_empty) {
+      // Backend skipped the clipboard write: a bare legacy-YAML document has
+      // no password line — nothing to copy, don't toast a fake success.
+      toast.info(t("entry.emptyPasswordCopyBlocked"));
       return;
     }
     toast.success(
@@ -665,7 +676,9 @@ function handleKeydown(e: KeyboardEvent) {
         {{
           editBlockedReason === "nonUtf8"
             ? t("entry.nonUtf8EditDisabledHint")
-            : t("entry.attachmentEditDisabledHint")
+            : editBlockedReason === "legacyYaml"
+              ? t("entry.legacyYamlEditDisabledHint")
+              : t("entry.attachmentEditDisabledHint")
         }}
       </p>
 

@@ -19,6 +19,7 @@
   "copyFailed": "Failed to copy",
   "copyBlocked": "This version was a binary attachment, so there's no password to copy.",
   "nonUtf8CopyBlocked": "This version's password has non-UTF-8 bytes and can't be copied — copy it with the gopass CLI.",
+  "emptyPasswordCopyBlocked": "This version has no password to copy — nothing was copied.",
   "clearsIn": "Auto-clears in {secs}s",
   "pastBanner": "Past version · {date} · {hash}",
   "pastBannerSub": "not your current value",

@@ -53,20 +53,39 @@ impl fmt::Debug for Otp {
 /// malformed, references an unsupported OTP type / encoder / algorithm, or
 /// carries an out-of-range parameter. Messages never contain the seed or URI.
 pub fn extract(secret: &Secret) -> Result<Option<Otp>, Error> {
+    // A legacy-YAML secret (A004) has no attributes — its `k: v` lines stay in
+    // the opaque body — so scan the body lines for the same `otpauth:`/`totp:`
+    // candidates the attribute lookups would have found. Line-level byte
+    // matching only; the YAML block itself is never parsed.
+    let (otpauth, totp): (Option<String>, Option<String>) = if secret.is_yaml() {
+        (
+            yaml_body_value(secret.body_bytes(), "otpauth"),
+            yaml_body_value(secret.body_bytes(), "totp"),
+        )
+    } else {
+        (
+            secret
+                .attribute_str("otpauth")
+                .map(str::trim)
+                .map(str::to_string),
+            secret
+                .attribute_str("totp")
+                .map(str::trim)
+                .map(str::to_string),
+        )
+    };
     // 1 & 2: an otpauth:// URI — as a key value, then as a standalone body line.
-    if let Some(uri) = secret
-        .attribute_str("otpauth")
-        .map(str::trim)
-        .or_else(|| first_otpauth_line(secret.body_bytes()))
+    if let Some(uri) =
+        otpauth.or_else(|| first_otpauth_line(secret.body_bytes()).map(str::to_string))
     {
-        return Ok(Some(from_uri(uri)?));
+        return Ok(Some(from_uri(uri.as_str())?));
     }
     // 3: a bare base32 secret under `totp:`. (`hotp:` is HOTP — not matched.)
-    if let Some(secret_str) = secret.attribute_str("totp").map(str::trim) {
+    if let Some(secret_str) = totp {
         if secret_str.is_empty() {
             return Err(Error::new(ErrorCode::StoreError, "TOTP seed is empty"));
         }
-        return Ok(Some(from_bare_secret(secret_str)?));
+        return Ok(Some(from_bare_secret(secret_str.as_str())?));
     }
     Ok(None)
 }
@@ -178,6 +197,28 @@ fn first_otpauth_line(body: &[u8]) -> Option<&str> {
     body.split(|&b| b == b'\n').find_map(|line| {
         let s = std::str::from_utf8(line.trim_ascii()).ok()?;
         s.starts_with("otpauth://").then_some(s)
+    })
+}
+
+/// The value of the first TOP-LEVEL `key: value` body line. Only used for
+/// legacy-YAML secrets, whose `k: v` lines live in the body instead of the
+/// attribute region — this restores the TOTP detection those secrets had
+/// before the YAML branch stopped attribute splitting. Two constraints keep
+/// it at parity with both the old attribute split and gopass `Get`: the key
+/// sits at column 0 (an indented key belongs to a nested mapping gopass's
+/// top-level lookup does not read), and a space follows the colon (so a bare
+/// `otpauth://…` line is left for [`first_otpauth_line`] instead of being
+/// mangled by the scheme's own colon).
+fn yaml_body_value(body: &[u8], key: &str) -> Option<String> {
+    let prefix = format!("{key}: ");
+    body.split(|&b| b == b'\n').find_map(|line| {
+        let s = std::str::from_utf8(line).ok()?;
+        if s.starts_with([' ', '\t']) {
+            return None;
+        }
+        s.strip_prefix(prefix.as_str())
+            .map(str::trim)
+            .map(str::to_string)
     })
 }
 
@@ -450,5 +491,87 @@ mod tests {
         let s = format!("{otp:?}");
         assert!(s.contains("[REDACTED]"));
         assert!(!s.contains(SECRET));
+    }
+
+    // ---- TOTP inside a legacy-YAML block (A004 keeps detection working) ----
+
+    /// Generate at a fixed timestamp so two secrets parsed from different
+    /// shapes can be compared on the code they produce, not on Otp identity.
+    fn code_now(secret: &Secret) -> String {
+        let otp = extract(secret).unwrap().unwrap();
+        generate_at(&otp, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn yaml_secret_totp_bare_seed_is_extracted() {
+        // Pre-A004 the `totp:` line was (accidentally) lifted into attributes;
+        // the YAML branch keeps it in the body, so the body scan must find it
+        // and produce the same code as the AKV shape.
+        let yaml = sec(&format!("pw\n---\ntotp: {SECRET}"));
+        assert!(yaml.is_yaml());
+        let akv = sec(&format!("pw\ntotp: {SECRET}"));
+        assert!(!akv.is_yaml());
+        assert_eq!(code_now(&yaml), code_now(&akv));
+        assert!(has_totp(&yaml));
+    }
+
+    #[test]
+    fn yaml_secret_otpauth_uri_is_extracted() {
+        let uri = format!("otpauth://totp/x?secret={SECRET}");
+        let yaml = sec(&format!("pw\n---\notpauth: {uri}"));
+        assert!(yaml.is_yaml());
+        let akv = sec(&format!("pw\notpauth: {uri}"));
+        assert!(!akv.is_yaml());
+        assert_eq!(code_now(&yaml), code_now(&akv));
+        assert!(has_totp(&yaml));
+    }
+
+    #[test]
+    fn yaml_secret_without_seed_has_no_totp() {
+        // A plain YAML block carries no 2FA intent — no candidates, no probe.
+        let secret = sec("pw\n---\nusername: alice");
+        assert!(secret.is_yaml());
+        assert!(matches!(extract(&secret), Ok(None)));
+        assert!(!has_totp(&secret));
+    }
+
+    #[test]
+    fn yaml_secret_malformed_seed_still_signals_intent() {
+        // HOTP inside a YAML block: `Err`, so the affordance stays visible —
+        // same contract as the AKV path. (An `otpauth:`-prefixed value that is
+        // itself a hotp URI errors in from_uri.)
+        let secret = sec(&format!(
+            "pw\n---\notpauth: otpauth://hotp/x?secret={SECRET}&counter=1"
+        ));
+        assert!(secret.is_yaml());
+        assert!(has_totp(&secret));
+    }
+
+    #[test]
+    fn yaml_secret_bare_otpauth_line_still_works() {
+        // A bare `otpauth://…` line in a YAML body must fall through to the
+        // whole-line scan (`otpauth: ` with its scheme colon is NOT a `k: v`
+        // separator) — pre-A004 the AKV split found this line and produced a
+        // code; mangling it to `//totp/…` would regress that to a parse error.
+        let uri = format!("otpauth://totp/x?secret={SECRET}");
+        let yaml = sec(&format!("pw\n---\nusername: alice\n{uri}"));
+        assert!(yaml.is_yaml());
+        let akv = sec(&format!("pw\nusername: alice\n{uri}"));
+        assert!(!akv.is_yaml());
+        assert_eq!(code_now(&yaml), code_now(&akv));
+    }
+
+    #[test]
+    fn yaml_secret_indented_totp_key_not_matched() {
+        // An indented `totp:` is a NESTED mapping key gopass's top-level
+        // `Get("totp")` does not read — and pre-A004 the attribute split
+        // (key = bytes before `": "`, untrimmed) did not match it either. It
+        // must not surface a nested (possibly different service's) seed.
+        let secret = sec(&format!("pw\n---\nlogin:\n  totp: {SECRET}"));
+        assert!(secret.is_yaml());
+        assert!(matches!(extract(&secret), Ok(None)));
+        assert!(!has_totp(&secret));
     }
 }

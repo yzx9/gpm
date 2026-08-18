@@ -211,3 +211,104 @@ async fn soft_wipe_entry_cache_clears_the_cache() {
         "soft_wipe_entry_cache emptied the cache"
     );
 }
+
+// ---- legacy-YAML read-only branch (A004) ----
+
+/// The IPC wire strings of `EditBlockReason` — an IPC drift here silently
+/// disables the frontend hint (same drift class the `nonUtf8` pin guards
+/// against), pinned by serializing through serde JSON.
+#[test]
+fn edit_block_reason_wire_strings() {
+    let json = serde_json::to_string(&read::EditBlockReason::LegacyYaml).unwrap();
+    assert_eq!(json, "\"legacyYaml\"");
+    let json = serde_json::to_string(&read::EditBlockReason::NonUtf8).unwrap();
+    assert_eq!(json, "\"nonUtf8\"");
+}
+
+/// A `---`-bearing secret shows with `edit_blocked == LegacyYaml` (and its
+/// `k: v` lines are NOT surfaced as attributes — the block is opaque body).
+#[tokio::test]
+async fn show_password_core_marks_yaml_secret_edit_blocked() {
+    let (state, _guard) = make_unlocked_state(&[("y.age", b"pw\n---\notp: bar")]).await;
+    let app = mock_app(state);
+    let app_state = app.state::<AppState>();
+
+    let content = read::show_password_core(&app_state, app.handle(), "y.age")
+        .await
+        .expect("show");
+    assert_eq!(&*content.password, "pw");
+    // The YAML block stays one opaque body; no attribute rows.
+    assert!(content.attributes.is_empty());
+    assert_eq!(&*content.notes, "---\notp: bar");
+    assert_eq!(
+        content.edit_blocked,
+        Some(read::EditBlockReason::LegacyYaml)
+    );
+}
+
+/// The probe reports the same read-only verdict for the list/detail affordances.
+#[tokio::test]
+async fn entry_probe_marks_yaml_secret_edit_blocked() {
+    let (state, _guard) = make_unlocked_state(&[("y.age", b"pw\n---\nk: v")]).await;
+    let app = mock_app(state);
+
+    let probe = read::entry_probe(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        "y.age".into(),
+    )
+    .await
+    .expect("probe")
+    .expect("unlocked");
+    assert_eq!(probe.edit_blocked, Some(read::EditBlockReason::LegacyYaml));
+}
+
+/// A non-UTF-8 YAML secret reports the stricter `NonUtf8` reason (both flags are
+/// true; the data-loss reason wins — documented priority).
+#[tokio::test]
+async fn non_utf8_wins_over_legacy_yaml() {
+    let (state, _guard) = make_unlocked_state(&[("y.age", b"\xff\xfe\n---\nk: v")]).await;
+    let app = mock_app(state);
+
+    let probe = read::entry_probe(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        "y.age".into(),
+    )
+    .await
+    .expect("probe")
+    .expect("unlocked");
+    assert_eq!(probe.edit_blocked, Some(read::EditBlockReason::NonUtf8));
+}
+
+/// A bare YAML doc (first line `---`) has no password: `show_password_core`
+/// reports the empty password, and `copy_password` refuses the clipboard write
+/// (`password_empty` byproduct) instead of a fake success over an empty
+/// clipboard.
+#[tokio::test]
+async fn bare_yaml_doc_copy_reports_empty_password() {
+    let (state, _guard) = make_unlocked_state(&[("y.age", b"---\nk: v")]).await;
+    let app = mock_app(state);
+    let app_state = app.state::<AppState>();
+
+    let content = read::show_password_core(&app_state, app.handle(), "y.age")
+        .await
+        .expect("show");
+    assert_eq!(&*content.password, "");
+    assert_eq!(
+        content.edit_blocked,
+        Some(read::EditBlockReason::LegacyYaml)
+    );
+
+    let result = read::copy_password(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        "y.age".into(),
+        None,
+    )
+    .await
+    .expect("copy");
+    assert!(result.password_empty);
+    assert!(!result.password_non_utf8);
+    assert_eq!(result.cleared_after_secs, 0, "no clipboard clear scheduled");
+}

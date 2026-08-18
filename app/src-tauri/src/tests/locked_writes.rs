@@ -184,3 +184,89 @@ async fn gate_transparent_when_unlocked() {
         Err(e) => assert_ne!(e.code, "APP_LOCKED", "gate must not fire when unlocked"),
     }
 }
+
+/// A004: gpm never writes YAML secrets. Content carrying a YAML document
+/// marker is refused by `Store::set` on the FINAL persisted bytes — the same
+/// choke point every write path funnels through (create, edit, resolve), so
+/// this also covers template-rendered and preset bodies the raw-content
+/// checks can't see.
+#[tokio::test]
+async fn create_secret_refuses_yaml_marker_content() {
+    let (state, _store) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    for content in [
+        "pw\n---\nusername: alice", // classic YAML layout
+        "pw\n--- trailing\nk: v",   // marker token, same rule
+        "---\nk: v",                // bare doc as the whole content
+    ] {
+        let err = crate::write::create_secret(
+            app.state::<AppState>(),
+            app.handle().clone(),
+            "test/yaml".into(),
+            content.into(),
+        )
+        .await
+        .expect_err("a --- line must be refused at create");
+        assert_eq!(err.code, "SECRET_INVALID", "content: {content:?}");
+    }
+}
+
+/// The write-path rule mirrors gopass's effective classification, so
+/// PEM-armored key material (`-----BEGIN …` starts `----`, excluded from the
+/// marker) and a password that merely starts `---` stay storable, editable
+/// AKV secrets.
+#[tokio::test]
+async fn create_secret_accepts_armor_and_leading_dash_password() {
+    let (state, _store) = make_unlocked_state(&[]).await;
+    let app = mock_app(state);
+    for content in [
+        "pw\n-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----",
+        "---hunter2\nuser: alice",
+    ] {
+        let result = crate::write::create_secret(
+            app.state::<AppState>(),
+            app.handle().clone(),
+            "test/plain".into(),
+            content.into(),
+        )
+        .await;
+        match result {
+            Ok(_) => {}
+            Err(e) => assert_ne!(
+                e.code, "SECRET_INVALID",
+                "armor / leading-dash password must stay storable: {content:?}"
+            ),
+        }
+    }
+}
+
+/// The same guard on the edit path: a `---` line typed into the free-text
+/// body of an existing entry must be refused — saving it would type-flip the
+/// entry read-only on its very next read (the markdown horizontal-rule paste
+/// case the create guard alone would miss).
+#[tokio::test]
+async fn edit_secret_refuses_yaml_marker_body() {
+    let (state, _store) = make_unlocked_state(&[("edit/entry.age", b"pw\nuser: alice")]).await;
+    let app = mock_app(state);
+    let err = crate::write::edit_secret(
+        app.state::<AppState>(),
+        app.handle().clone(),
+        "edit/entry".into(),
+        parts_with_body("a note\n---\nmore note"),
+        None,
+    )
+    .await
+    .expect_err("a --- line in the edit body must be refused");
+    assert_eq!(err.code, "SECRET_INVALID");
+}
+
+/// Edit parts with a password, no attributes, and the given free-text body
+/// (built via serde — the fields are private to `write`).
+fn parts_with_body(body: &str) -> SecretParts {
+    serde_json::from_value(serde_json::json!({
+        "password": "pw",
+        "attributes": [],
+        "body": body,
+    }))
+    .expect("SecretParts deserializes")
+}

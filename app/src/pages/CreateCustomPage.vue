@@ -149,9 +149,26 @@ async function refreshPreview() {
   }
 }
 
+/** A004: gpm never creates YAML secrets — content the read path would
+ *  classify as legacy YAML lands read-only on its very next read. Mirrors the
+ *  backend's `is_yaml_secret_content`: the first line counts only as a bare
+ *  `---` document (the password line is never a marker — gopass consumes it
+ *  before peeking), a marker line after it starts `---` but NOT `----` (PEM
+ *  armor is an editable AKV body in gopass's effective classification), so
+ *  the form blocks before the round-trip error. */
+const hasYamlMarker = computed(() => {
+  const lines = customContent.value.split("\n");
+  const bareDoc = (lines[0] ?? "").trim() === "---";
+  const markerLine = lines
+    .slice(1)
+    .some((line) => line.startsWith("---") && !line.startsWith("----"));
+  return bareDoc || markerLine;
+});
+
 const canSubmit = computed(
   () =>
     !submitting.value &&
+    !hasYamlMarker.value &&
     customName.value.trim() !== "" &&
     customContent.value.trim() !== "",
 );
@@ -265,6 +282,9 @@ onBeforeUnmount(() => {
       </div>
       <BaseAlert v-if="hasTemplate" variant="info">
         {{ t("create.templateHint") }}
+      </BaseAlert>
+      <BaseAlert v-if="hasYamlMarker" variant="warning">
+        {{ t("create.yamlMarkerBlocked") }}
       </BaseAlert>
       <pre v-if="preview" class="preview">{{ preview }}</pre>
       <div class="flex gap-3">

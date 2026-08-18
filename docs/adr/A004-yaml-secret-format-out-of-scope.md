@@ -21,7 +21,7 @@ path (unlike MIME, which gets a one-way `fromMime` conversion via fsck).
 
 **It stopped being safe with R069's attribute region.** `split_attrs` extracts
 every `": "` line as an attribute, position-agnostic — including `k: v` lines
-*inside a YAML block*. Combined with `to_bytes`'s canonical reorder (password →
+_inside a YAML block_. Combined with `to_bytes`'s canonical reorder (password →
 attributes → body), an edit through gpm rewrites a YAML secret into a shape
 gopass re-reads with a different type and with YAML fields demoted to body text
 — silent corruption on edit.
@@ -50,25 +50,33 @@ YAML stays out of scope for structured access — no parsed YAML display, no YAM
 fields, no YAML write path — and is handled as **read-only display + opt-in,
 lossless-only migration**:
 
-1. **Detection (read path, parser-free).** A secret containing a line beginning
-   with `---` is treated as YAML. A strict byte check — no YAML decode on the
-   read path.
+1. **Detection (read path, parser-free).** A secret is treated as YAML when its
+   first line, trimmed, IS the `---` marker (a bare YAML document — gopass
+   `TrimSpace`s the line before the same comparison), or any line **after** the
+   password line starts `---` but not `----`. gopass's `Peek(3)` token matches
+   PEM armor (`-----BEGIN …`) too, but its YAML decode then fails and the
+   cascade falls back to AKV — excluding `----`+ lines matches gopass's
+   _effective_ classification, so armored key material stays an editable,
+   storable AKV secret. No YAML decode on the read path.
 2. **Read-only display.** A detected YAML secret is shown read-only via a new
    `EditBlockReason` mirroring the existing `NonUtf8` path. The password — the
    first line, unless the first line is itself `---` (a bare YAML document) —
    remains copyable through `copy_password`; the rest is an opaque text view.
-   gpm never writes a YAML secret back, so the edit-time corruption is
+   gpm never writes a YAML secret back — the write paths refuse marker content
+   at the `Store::set` choke point, covering custom/preset/template creates,
+   edits, and keep-mine conflict replays — so the edit-time corruption is
    impossible.
-3. **Migration (user-initiated; the only place a YAML parser runs).** A
-   migrate-to-AKV action parses the `---` block. If the **entire** YAML is a
-   flat map of string→string scalars — no nesting, no arrays, no non-string
-   scalars (numbers/bools/null), the only subset that converts without loss —
-   it is rewritten in place as AKV (attributes from the flat pairs, the password
-   preserved). Any nesting, array, or non-string scalar **aborts** the migration
-   (all-or-nothing per secret) with a prompt to edit the secret in gopass
-   instead. The parser must be YAML **1.2** (bare `0123` stays a string, not
-   octal) and must be matched on node variants — never coerced — so non-strings
-   are rejected rather than silently mangled.
+3. **Migration (user-initiated; the only place a YAML parser runs; Phase 2 —
+   not yet shipped, lands on a follow-up branch).** A migrate-to-AKV action
+   parses the `---` block. If the **entire** YAML is a flat map of
+   string→string scalars — no nesting, no arrays, no non-string scalars
+   (numbers/bools/null), the only subset that converts without loss — it is
+   rewritten in place as AKV (attributes from the flat pairs, the password
+   preserved). Any nesting, array, or non-string scalar **aborts** the
+   migration (all-or-nothing per secret) with a prompt to edit the secret in
+   gopass instead. The parser must be YAML **1.2** (bare `0123` stays a string,
+   not octal) and must be matched on node variants — never coerced — so
+   non-strings are rejected rather than silently mangled.
 
 The YAML parser is a **migration-only dependency** (a maintained MIT/Apache
 YAML 1.2 crate), never on the read path.
@@ -77,15 +85,23 @@ YAML 1.2 crate), never on the read path.
 
 - **The edit-time YAML corruption is eliminated** by removing the edit path for
   YAML, not by repairing the write path.
-- **A YAML crate becomes a gpm dependency**, confined to the migration command.
+- **A YAML crate becomes a gpm dependency** when Phase 2 lands, confined to the
+  migration command.
 - **Rich YAML — the common real-world case — cannot migrate.** Such secrets stay
   read-only with a prompt pointing the user to gopass. Intentional: lossy
   migration would silently mangle data, and gpm declines to model YAML
   structure.
-- **Known cosmetic divergence.** Strict `---` detection treats a small set of
-  `---`-bearing non-YAML secrets as read-only where gopass treats them as
-  editable AKV. Recoverable (edit in gopass), and self-diagnoses at migration
-  time when the parser finds no valid YAML mapping.
+- **Known cosmetic divergence.** Detection is a byte check, not a YAML decode,
+  so a `---`-marker line whose block is not actually a YAML mapping (e.g. a
+  markdown `---` divider pasted into notes) is treated as read-only where
+  gopass's decode failure would fall back to editable AKV. Over-blocking an
+  edit is safe where corrupting one is not; recoverable (edit in gopass); and
+  it self-diagnoses at Phase-2 migration time when the parser finds no valid
+  YAML mapping. One instance is documented as accepted: a contrived secret
+  whose YAML block carries a `Content-Transfer-Encoding: base64` line loses
+  its (previously accidental) attachment detection, so the base64 wall shows
+  in the notes — a UX blemish, not a password leak, for a combination gopass
+  never produces.
 - If structured YAML display ever becomes a real requirement, the answer remains
   "not a full YAML parser on the read path" — revisit this ADR only then.
 

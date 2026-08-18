@@ -235,6 +235,7 @@ pub(crate) async fn copy_revision(
             has_totp,
             has_attachment,
             password_non_utf8: false,
+            password_empty: false,
         });
     }
 
@@ -249,6 +250,22 @@ pub(crate) async fn copy_revision(
             has_totp,
             has_attachment,
             password_non_utf8: true,
+            password_empty: false,
+        });
+    }
+
+    // An empty password (a bare legacy-YAML document, A004) is a fake success
+    // over an empty clipboard — skip the write and tell the UI, mirroring
+    // copy_password.
+    if secret.password_bytes().is_empty() {
+        return Ok(CopyResult {
+            success: true,
+            entry_name,
+            cleared_after_secs: 0,
+            has_totp,
+            has_attachment,
+            password_non_utf8: false,
+            password_empty: true,
         });
     }
 
@@ -266,5 +283,6 @@ pub(crate) async fn copy_revision(
         has_totp,
         has_attachment,
         password_non_utf8: false,
+        password_empty: false,
     })
 }

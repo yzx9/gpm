@@ -925,4 +925,54 @@ describe("EntryDetailPage", () => {
       expect(wrapper.find("[role='alert']").exists()).toBe(false);
     });
   });
+
+  describe("legacy YAML (A004)", () => {
+    it("shows the empty-password info toast for a bare YAML document", async () => {
+      // Backend skipped the clipboard write (no password line in the secret);
+      // the UI must say so instead of crowning an empty copy with "Copied!".
+      vi.mocked(invoke).mockResolvedValue({
+        entry_name: "prod",
+        cleared_after_secs: 0,
+        has_totp: false,
+        has_attachment: false,
+        password_non_utf8: false,
+        password_empty: true,
+      });
+      const { wrapper, toast } = mountWithApp(EntryDetailPage);
+      await wrapper
+        .find('button[aria-label="Copy password to clipboard"]')
+        .trigger("click");
+      await flushPromises();
+
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("no password")),
+      ).toBe(true);
+      expect(
+        toast.toasts.value.some((t) => t.message.includes("✓ Copied")),
+      ).toBe(false);
+    });
+
+    it("shows the legacy-YAML edit hint and disables Edit", async () => {
+      // mount: entry_probe reports edit_blocked legacyYaml; the Edit button
+      // must render disabled with the YAML-specific hint (not the attachment
+      // or non-UTF-8 hint).
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === "entry_probe")
+          return Promise.resolve({
+            has_totp: false,
+            attachment: null,
+            edit_blocked: "legacyYaml",
+          });
+        if (cmd === "entry_oid") return Promise.resolve(null);
+        return Promise.resolve(undefined);
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const edit = wrapper.find('button[aria-label^="Edit"]');
+      expect(edit.exists()).toBe(true);
+      expect(edit.attributes("disabled")).toBeDefined();
+      expect(wrapper.text()).toContain("legacy gopass YAML secret");
+    });
+  });
 });

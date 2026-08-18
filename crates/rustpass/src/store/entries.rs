@@ -8,7 +8,7 @@ use std::str;
 use tokio::task::spawn_blocking;
 
 use crate::error::{Error, ErrorCode};
-use crate::secret::Secret;
+use crate::secret::{Secret, is_yaml_secret_content};
 use crate::signing;
 use crate::storage::git::passfile_rel;
 use crate::storage::{CommitKind, RepoFiles};
@@ -148,11 +148,18 @@ impl Store {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidEntryName` for a malformed name, `InvalidIdentity` if no
-    /// usable recipient (and our own key) can be derived, or a git error if
-    /// staging or committing fails.
+    /// Returns `InvalidEntryName` for a malformed name, `SecretInvalid` when
+    /// the final plaintext carries a YAML document-marker line (A004: gpm
+    /// never writes YAML secrets — every write path funnels through here, so
+    /// the guard covers custom/preset/template creates, edits, and the
+    /// keep-mine conflict replays alike), `InvalidIdentity` if no usable
+    /// recipient (and our own key) can be derived, or a git error if staging
+    /// or committing fails.
     pub async fn set(&self, name: &str, plaintext: &[u8]) -> Result<WriteResult, Error> {
         validate_secret_name(name)?;
+        if is_yaml_secret_content(plaintext) {
+            return Err(yaml_marker_refusal());
+        }
         let rcs = self.rcs_ctx().await?;
         let passfile = self.encrypt_and_write(name, plaintext).await?;
         let head = self
@@ -492,6 +499,18 @@ fn validate_secret_name(name: &str) -> Result<(), Error> {
 /// Build an `InvalidEntryName` error (keeps call sites terse).
 fn invalid_name(message: &str) -> Error {
     Error::new(ErrorCode::InvalidEntryName, message)
+}
+
+/// The A004 write refusal: gpm shows legacy-YAML secrets read-only, so it
+/// never persists one — a saved `---` marker line would land the entry
+/// read-only on its very next read (self-inflicted). No user content is
+/// echoed into the message.
+fn yaml_marker_refusal() -> Error {
+    Error::new(
+        ErrorCode::SecretInvalid,
+        "YAML-style secrets (a '---' line) are a legacy gopass format gpm shows \
+         read-only; remove the '---' line to save",
+    )
 }
 
 #[cfg(test)]

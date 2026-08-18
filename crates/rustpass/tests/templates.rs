@@ -83,6 +83,20 @@ async fn create_without_template_is_verbatim() {
     assert_eq!(secret.get("note"), Some(b"hi".as_slice()));
 }
 
+/// A template that RENDERS a `---` marker line must be refused (A004): the
+/// guard sits on the final persisted bytes (`Store::set`), not the raw
+/// content, so marker-free input cannot produce a secret gpm would show
+/// read-only on the next read.
+#[tokio::test]
+async fn create_refuses_template_rendered_yaml_marker() {
+    let (_bare, _cfg, store) = templated_store(Some("{{ .Content }}\n---\nuser: wizard")).await;
+    let err = store
+        .create("sites/example", b"pw")
+        .await
+        .expect_err("a template-rendered --- line must be refused");
+    assert_eq!(err.code, "SECRET_INVALID");
+}
+
 /// Template variables `.Name`, `.Path`, `.Dir` resolve to the entry's parts.
 #[tokio::test]
 async fn create_template_resolves_name_path_dir() {

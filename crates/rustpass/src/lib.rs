@@ -80,7 +80,7 @@ pub use error::{Error, ErrorCode};
 pub use generator::{GenerateMode, GenerateOptions, generate_password};
 pub use recipient::{IdentityInfo, KeyType, Recipient};
 pub use repo_lock::RepoLock;
-pub use secret::{Attribute, Secret};
+pub use secret::{Attribute, Secret, is_yaml_secret_content};
 pub use signing::{
     AuthenticityConfig, CommitSigInfo, CommitSigPage, CommitSigStatus, IgnoredIssue, RevisionPage,
     TrustedGpgKey, TrustedKey, VerifyMode, fingerprint_of_public_key,
