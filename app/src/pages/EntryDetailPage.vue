@@ -86,9 +86,10 @@ const { viewClearSecs } = useSecuritySettings();
 let revealToken = 0;
 useWipeOnLeave(() => {
   revealToken++;
-  // R086: wipe the entry-view cache on leave/switch (popstate / unmount / hard
-  // lock) so the just-left entry's decrypted content does not linger in backend
-  // memory. Best-effort + idempotent — must not throw (useWipeOnLeave contract).
+  // R086: wipe the entry-view cache on leave/switch (popstate / unmount /
+  // either lock) so the just-left entry's decrypted content does not linger in
+  // backend memory. Best-effort + idempotent — must not throw (useWipeOnLeave
+  // contract).
   void wipeEntryCache(entryPath).catch(() => {});
 });
 const loading = ref(false);

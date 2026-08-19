@@ -64,7 +64,8 @@
     "unlockFailed": "Unlock failed",
     "keyInvalidatedNotice": "All fingerprints were removed, so gpm can no longer unlock your app key. Clear gpm's app data from Android Settings (or uninstall and reinstall) to set it up again.",
     "biometricUnavailable": "Biometric unlock isn't available right now. Try again in a moment.",
-    "diagnostics": "Export diagnostics"
+    "diagnostics": "Export diagnostics",
+    "draftsCleared": "Locking cleared your unsaved changes"
   },
   "passphraseField": {
     "label": "Passphrase",

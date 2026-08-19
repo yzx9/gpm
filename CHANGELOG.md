@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Saving two settings in quick succession (for example updating your access token right as a background sync finishes) could **silently drop one of the changes** — the later save was built on an out-of-date copy of the configuration file and overwrote the earlier one. Repository settings are now written under a lock that serializes every writer (app, background sync, and a second desktop instance alike), so concurrent changes all land; if a write ever can't acquire the lock in time it now shows an error instead of losing data.
 - Secrets stored in the **legacy gopass YAML format** (a `---` line) no longer risk corruption when opened in gpm. They are now shown **read-only** — the password can still be copied and 2FA codes still work — because saving would rewrite them into a form gopass misreads. Edit these entries with the gopass CLI. gpm also refuses to save content with a `---` marker line in any form (create, edit, templates), so no entry can strand itself read-only. PEM-encrypted key material (`-----BEGIN …` lines) remains a normal editable secret, matching gopass.
 
+### Security
+
+- **Locking now clears what was on screen.** A lock — a re-lock after inactivity or returning from the background past your re-lock window, or the identity auto-lock — hid the app behind the lock screen but left the current screen's contents in place behind it: a revealed password, a half-typed passphrase, or unsaved edits in the create/edit forms. Those are now wiped the moment the lock engages. Unsaved edits never survive a lock; if a lock cleared any of yours, a notice appears the next time you unlock and stays until you dismiss it, so an emptied form is never a surprise. A sync-conflict dialog left open when the lock hit is likewise dismissed without applying anything, and an action still waiting for authentication when the lock hit is cancelled instead of silently resuming after you unlock (just tap it again).
+
 ## [v0.19.1] - 2026-08-18
 
 ## [v0.19.0] - 2026-08-12

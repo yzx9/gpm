@@ -216,9 +216,10 @@ const identityCoupled = computed(
 );
 
 /** Wipe every in-DOM secret: the typed passphrase-modal inputs and their
- *  confirm echo. Idempotent — fires on a hard lock, browser back, and unmount.
- *  Also releases the modal's screen-capture claim (closePassphraseModal is the
- *  other dismiss path; this covers a hard lock while the modal is open). */
+ *  confirm echo. Idempotent — fires on either lock (identity hard lock or
+ *  app-gate re-lock), browser back, and unmount. Also releases the modal's
+ *  screen-capture claim (closePassphraseModal is the other dismiss path; this
+ *  covers a lock while the modal is open). */
 function wipeSecrets() {
   ppCurrent.value = "";
   ppNew.value = "";
@@ -229,7 +230,7 @@ function wipeSecrets() {
 }
 
 // The unlock modal keeps this page mounted on auto-lock, so unmount alone can't
-// guarantee a wipe — clear on a hard lock, on browser back, and on unmount.
+// guarantee a wipe — clear on either lock, on browser back, and on unmount.
 useWipeOnLeave(wipeSecrets);
 
 async function loadConfig() {

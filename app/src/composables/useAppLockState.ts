@@ -13,7 +13,9 @@ import {
 } from "@/api";
 import {
   computed,
+  getCurrentScope,
   inject,
+  onScopeDispose,
   ref,
   type ComputedRef,
   type InjectionKey,
@@ -53,6 +55,14 @@ export interface AppLockStore {
   readonly appReady: Readonly<Ref<boolean>>;
   /** Reflect backend gate state, arm the listener, watch for resume. Idempotent. */
   init: () => Promise<void>;
+  /** Register a callback for the gate's unlock→locked edge — the gate mirror of
+   *  identity's `onLock`, so eager-secret wipers can subscribe to both locks.
+   *  Auto-removed on scope dispose. @returns an unsubscribe. */
+  onAppLock: (cb: () => void) => () => void;
+  /** Drive a gate state transition (public for tests; mirrors `setLocked`).
+   *  Prefer this over firing the mocked `app-lock-state` listener — index-based
+   *  handler capture drifts as a page's subscriptions grow. */
+  setAppLocked: (locked: boolean, reason?: AppLockReason | null) => void;
   /** Mark a biometric app-unlock in flight (loop guard for the resume re-lock). */
   setUnlockInFlight: (inFlight: boolean) => void;
   /** Tear down: drop the resume listener + Tauri subscription. A no-op for the
@@ -109,6 +119,9 @@ export function createAppLockStore(
 
   let initialized = el;
   let unlisten: UnlistenFn | null = null;
+  /// Gate lock-edge callbacks (`onAppLock`) — fired on the unlock→locked
+  /// transition only, mirroring `useLockState.onLock`'s listener set.
+  const appLockListeners = new Set<() => void>();
   /// Unlisten handle for the authoritative resume signal (`subscribeAppResume`),
   /// torn down in `dispose()`. `disposed` closes the async-registration race: a
   /// late-resolving handle is released instead of leaking onto a disposed store.
@@ -159,6 +172,44 @@ export function createAppLockStore(
     if (wasLocked && !locked) {
       lastUnlockAt = Date.now();
     }
+    // Fire the gate-lock clearers on the unlock→locked edge, after the ref flip
+    // (same synchronous turn — mirrors `useLockState.setLocked`). The cold-start
+    // reconcile also lands here (false→locked); harmless: wipers are idempotent
+    // and a freshly mounted page holds nothing. Locked→locked emits never fire
+    // (the backend doesn't emit them, and the edge check drops them anyway).
+    if (locked && !wasLocked) {
+      for (const cb of [...appLockListeners]) {
+        try {
+          cb();
+        } catch {
+          // A clearer must never block the others.
+        }
+      }
+    }
+  }
+
+  /**
+   * Register a callback for the gate's unlock→locked edge (idle re-lock, resume
+   * re-lock, cold-start reconcile). The gate mirror of identity's `onLock` —
+   * eager-secret wipers subscribe to both so a gate re-lock also clears in-DOM
+   * secrets (issue #20). Safe to call outside a scope (tests); then only the
+   * returned fn removes it.
+   *
+   * @returns an unsubscribe function
+   */
+  function onAppLock(cb: () => void): () => void {
+    appLockListeners.add(cb);
+    if (getCurrentScope()) {
+      onScopeDispose(() => appLockListeners.delete(cb));
+    }
+    return () => {
+      appLockListeners.delete(cb);
+    };
+  }
+
+  /** Test driver: same path as the backend event (see the interface doc). */
+  function setAppLocked(locked: boolean, reason: AppLockReason | null = null) {
+    onAppLockEvent({ enabled: appLockEnabled.value, locked, reason });
   }
 
   /**
@@ -187,6 +238,7 @@ export function createAppLockStore(
     unlisten = null;
     resumeUnlisten?.();
     resumeUnlisten = null;
+    appLockListeners.clear();
   }
 
   return {
@@ -195,6 +247,8 @@ export function createAppLockStore(
     shouldAutoPrompt,
     appReady,
     init,
+    onAppLock,
+    setAppLocked,
     setUnlockInFlight,
     dispose,
   };

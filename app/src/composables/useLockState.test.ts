@@ -355,6 +355,35 @@ describe("useLockState", () => {
     await expect(p).rejects.toMatchObject({ code: AUTH_CANCELLED });
   });
 
+  it("a hard lock cancels parked per-op auth callers (setLocked → cancelAuth)", async () => {
+    // Realistic Immediate-mode sequence: init against an unlocked backend
+    // (arms the listener + unlocks), then the post-op soft wipe leaves
+    // locked=false / identityCached=false → runWithAuth parks → the identity
+    // hard lock is a real false→true edge. (The {unlocked:true} seed skips
+    // init's subscription; the fail-closed default never leaves the locked
+    // state, where setLocked(true) early-returns — no edge.)
+    vi.mocked(invoke).mockResolvedValue({
+      configured: true,
+      encrypted: true,
+      unlocked: true,
+      identity_type: "x25519",
+    });
+    await s.init();
+    const handler = vi.mocked(listen).mock.calls[0][1] as (e: {
+      payload: { locked: boolean; soft?: boolean };
+    }) => void;
+    handler({ payload: { locked: true, soft: true } }); // post-op soft wipe
+
+    const op = vi.fn();
+    const parked = s.runWithAuth(op);
+    await Promise.resolve(); // let ensureUnlocked raise the overlay and park
+
+    s.setLocked(true); // hard-lock edge → cancelAuth rejects parked callers
+
+    await expect(parked).rejects.toMatchObject({ code: AUTH_CANCELLED });
+    expect(op).not.toHaveBeenCalled();
+  });
+
   it("a fresh hard lock re-shows a dismissed overlay", () => {
     s.setLocked(false);
     s.setLocked(true);

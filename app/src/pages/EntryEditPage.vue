@@ -235,11 +235,23 @@ const hasYamlMarker = computed(() => {
   return bareDoc || markerLine;
 });
 
-/** Save is enabled only when the body has non-whitespace content and actually
- *  changed. age ciphertext is non-deterministic, so an unchanged Save would
- *  still make a spurious commit (block it); and an all-whitespace body would be
- *  rejected by `Secret::parse` on the next read, bricking the secret (block it).
- *  The trim is on the GATE only — the saved body stays untrimmed (lossless). */
+/** The editor's dirty predicate — has effectively-non-empty content AND differs
+ *  from the loaded baseline. age ciphertext is non-deterministic, so an
+ *  unchanged Save would still make a spurious commit (block it); an
+ *  effectively-empty secret would be rejected by `Secret::parse` on the next
+ *  read, bricking it (block it). The trim is on the GATE only — the saved parts
+ *  stay untrimmed (lossless). Shared by the Save gate (`canSave`) and the lock
+ *  path's drafts-notice mark (`exitEdit`), so the two can never diverge. */
+function hasUnsavedParts(): boolean {
+  const p = currentParts.value;
+  const hasContent =
+    p.password.trim() !== "" ||
+    p.body.trim() !== "" ||
+    p.attributes.some((a) => a.key.trim() !== "" || a.value.trim() !== "");
+  return hasContent && !partsEqual(p, loadedParts.value);
+}
+
+/** Save is enabled only when the editor holds unsaved (dirty) parts. */
 const canSave = computed(() => {
   if (
     saving.value ||
@@ -249,16 +261,7 @@ const canSave = computed(() => {
     hasYamlMarker.value
   )
     return false;
-  const p = currentParts.value;
-  // age ciphertext is non-deterministic, so an unchanged Save would still make a
-  // spurious commit (block it); an effectively-empty secret would be rejected by
-  // `Secret::parse` on the next read, bricking it (block it). The trim is on the
-  // GATE only — the saved parts stay untrimmed (lossless).
-  const hasContent =
-    p.password.trim() !== "" ||
-    p.body.trim() !== "" ||
-    p.attributes.some((a) => a.key.trim() !== "" || a.value.trim() !== "");
-  return hasContent && !partsEqual(p, loadedParts.value);
+  return hasUnsavedParts();
 });
 
 async function loadBody() {
@@ -320,17 +323,23 @@ async function loadBody() {
   }
 }
 
-function exitEdit() {
+/** Returns whether the editor held unsaved edits (`hasUnsavedParts` — merely
+ *  opening an entry clears loaded plaintext but loses no user content, so the
+ *  lock path only marks the drafts notice when this is true). */
+function exitEdit(): boolean {
+  const hadEdits = hasUnsavedParts();
   editPassword.value = "";
   editNotes.value = "";
   editAttributes.value = [];
   loadedParts.value = { password: "", attributes: [], body: "" };
   baseOid.value = null;
+  return hadEdits;
 }
 
-// Wipe the working plaintext on browser back, unmount, and hard lock so it
-// doesn't survive behind a wiped identity. (useDivergence clears its own
-// modal state on lock.)
+// Wipe the working plaintext on browser back, unmount, and either lock (a
+// gate re-lock's mask covers this page without unmounting it) so it doesn't
+// survive behind a wiped identity. (useDivergence clears its own modal state
+// on lock.)
 useWipeOnLeave(exitEdit);
 
 async function onSave() {

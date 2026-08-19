@@ -21,6 +21,7 @@ import {
   createForegroundSyncStore,
   createLockActivity,
   useAppLockState,
+  useDraftsClearedToast,
   useLockState,
   usePlatform,
   useSecureScreen,
@@ -33,6 +34,7 @@ const {
   ready,
   init,
   dismissOverlay,
+  cancelAuth,
   identityCached,
   shouldAutoPromptBiometric,
 } = useLockState();
@@ -74,6 +76,15 @@ const {
 } = useSecureScreen();
 const { initPlatform } = usePlatform();
 const { t } = useI18n();
+// Post-unlock "cleared your unsaved changes" toast — owns its own unlock-edge
+// watches (see the composable); armed once here.
+useDraftsClearedToast();
+// Central gate-edge kill for parked per-op auths: the gate store can't reach
+// the identity lock, so the composition root wires the edge here. A parked
+// `runWithAuth` frame would otherwise resume after unlock into a page the
+// lock already cleared (callers swallow AUTH_CANCELLED). The identity
+// hard-lock edge cancels centrally inside `useLockState.setLocked`.
+useAppLockState().onAppLock(cancelAuth);
 
 // Both credential overlays — the identity UnlockModal (`overlayUp`) and the
 // app-launch AppLockOverlay (`appLocked`) — must force FLAG_SECURE on whenever

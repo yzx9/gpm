@@ -202,12 +202,17 @@ async function onSave() {
 }
 
 // The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
-// (or generated) secret the moment the identity locks, and cancel in-flight gens.
-function wipeFields() {
+// (or generated) secret the moment either lock fires, and cancel in-flight
+// gens. Returns whether a draft was actually lost, so the lock path marks the
+// drafts notice for the post-unlock toast — value-based, because loadPreset
+// pre-seeds every field key with "" (a merely opened page holds nothing).
+function wipeFields(): boolean {
   generateToken++;
   generating.value = false;
   revealed.value = {};
+  const hadDraft = Object.values(fields.value).some((v) => v !== "");
   fields.value = {};
+  return hadDraft;
 }
 useWipeOnLeave(wipeFields);
 </script>

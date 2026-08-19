@@ -196,4 +196,42 @@ describe("CreatePresetPage", () => {
     expect(w.find("[role='alert']").exists()).toBe(true);
     expect(w.find("[role='status']").exists()).toBe(false);
   });
+
+  // ── Gate re-lock (issue #20): the mask does not unmount the page ────────
+
+  it("a gate re-lock wipes a filled form and marks the drafts notice", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "list_create_presets") return Promise.resolve([preset()]);
+      return Promise.resolve(undefined);
+    });
+    const m = mountWithApp(CreatePresetPage);
+    await flushPromises();
+    await m.wrapper.find('input[id="f-name"]').setValue("github");
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(
+      (m.wrapper.find('input[id="f-name"]').element as HTMLInputElement).value,
+    ).toBe("");
+    expect(m.draftsNotice.consume()).toBe(true); // draft lost → toast fires
+  });
+
+  it("a gate re-lock on a just-opened page does not mark the notice (fields are pre-seeded empty)", async () => {
+    // loadPreset pre-seeds every field key with "" and generation is
+    // per-field user-tapped — a merely opened page holds no user content, so
+    // the value-based predicate keeps the post-unlock toast silent (mirrors
+    // the merely-opened editor case).
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "list_create_presets") return Promise.resolve([preset()]);
+      return Promise.resolve(undefined);
+    });
+    const m = mountWithApp(CreatePresetPage);
+    await flushPromises();
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(m.draftsNotice.consume()).toBe(false);
+  });
 });

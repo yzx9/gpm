@@ -13,6 +13,7 @@ import {
   createAppLockStore,
   createBackHandlerRegistry,
   createDialog,
+  createDraftsNotice,
   createLockState,
   createPlatform,
   createScrollLockController,
@@ -20,6 +21,7 @@ import {
   createSecuritySettings,
   createToast,
   DIALOG_KEY,
+  DRAFTS_NOTICE_KEY,
   LOCK_KEY,
   PLATFORM_KEY,
   SCROLL_LOCK_KEY,
@@ -50,6 +52,7 @@ installConsoleCapture();
 // only resolves inside a component setup.
 const lockState = createLockState();
 const appLockStore = createAppLockStore();
+const draftsNotice = createDraftsNotice();
 const secureScreenState = createSecureScreen();
 const platformState = createPlatform();
 const securitySettingsState = createSecuritySettings();
@@ -228,6 +231,7 @@ void (async () => {
   installFrontendLogger(app);
   app.provide(LOCK_KEY, lockState);
   app.provide(APP_LOCK_KEY, appLockStore);
+  app.provide(DRAFTS_NOTICE_KEY, draftsNotice);
   app.provide(SECURE_SCREEN_KEY, secureScreenState);
   app.provide(PLATFORM_KEY, platformState);
   app.provide(SECURITY_SETTINGS_KEY, securitySettingsState);

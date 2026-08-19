@@ -218,10 +218,13 @@ async function onSave() {
 }
 
 // The unlock modal keeps this page mounted on auto-lock, so wipe any half-typed
-// secret the moment the identity locks.
-function wipeCustom() {
+// secret the moment either lock fires. Returns whether a draft was actually
+// lost, so the lock path marks the drafts notice for the post-unlock toast.
+function wipeCustom(): boolean {
+  const hadDraft = customName.value !== "" || customContent.value !== "";
   customName.value = "";
   customContent.value = "";
+  return hadDraft;
 }
 useWipeOnLeave(wipeCustom);
 

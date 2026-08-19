@@ -178,4 +178,96 @@ describe("useAppLockState", () => {
     fireResume();
     expect(invoke).not.toHaveBeenCalledWith("app_lock");
   });
+
+  // ── onAppLock: the gate lock-edge signal for the eager-secret wipers ──────
+  // (issue #20 — a gate re-lock raises the mask but does not unmount the page
+  // underneath; the wipers subscribe to this edge to clear in-DOM secrets.)
+
+  /** Resolve the `app-lock-state` handler captured on the mocked `listen`. */
+  function gateHandler() {
+    const call = vi
+      .mocked(listen)
+      .mock.calls.find((c) => c[0] === "app-lock-state");
+    expect(call).toBeDefined();
+    return call?.[1] as (e: {
+      payload: { enabled: boolean; locked: boolean; reason?: string | null };
+    }) => void;
+  }
+
+  it("onAppLock fires on the unlock→locked edge, not on unlock or locked→locked", async () => {
+    vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: false });
+    await s.init();
+    const cb = vi.fn();
+    const off = s.onAppLock(cb);
+
+    gateHandler()({ payload: { enabled: true, locked: true, reason: "idle" } });
+    expect(cb).toHaveBeenCalledTimes(1);
+    gateHandler()({
+      payload: { enabled: true, locked: true, reason: "return" },
+    });
+    expect(cb).toHaveBeenCalledTimes(1); // locked→locked: no re-fire
+    gateHandler()({ payload: { enabled: true, locked: false } });
+    expect(cb).toHaveBeenCalledTimes(1); // unlock edge: no fire
+    off();
+  });
+
+  it("onAppLock fires once on the cold-start reconcile into a locked gate", async () => {
+    // The store starts unlocked by default; init() reconciling to locked:true
+    // is an unlock→locked edge and fires — harmless (wipers are idempotent,
+    // fresh pages hold nothing), pinned here so the behavior is deliberate.
+    const cb = vi.fn();
+    s.onAppLock(cb);
+    vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: true });
+    await s.init();
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("one clearer throwing does not block the others (per-cb try/catch)", async () => {
+    vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: false });
+    await s.init();
+    const boom = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const ok = vi.fn();
+    s.onAppLock(boom);
+    s.onAppLock(ok);
+    gateHandler()({ payload: { enabled: true, locked: true, reason: "idle" } });
+    expect(boom).toHaveBeenCalledTimes(1);
+    expect(ok).toHaveBeenCalledTimes(1);
+  });
+
+  it("onAppLock unsubscribe stops delivery", async () => {
+    vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: false });
+    await s.init();
+    const cb = vi.fn();
+    const off = s.onAppLock(cb);
+    off();
+    gateHandler()({ payload: { enabled: true, locked: true, reason: "idle" } });
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("dispose() drops the onAppLock listeners (no cross-instance leak)", async () => {
+    vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: false });
+    await s.init();
+    const cb = vi.fn();
+    s.onAppLock(cb);
+    s.dispose();
+    gateHandler()({ payload: { enabled: true, locked: true, reason: "idle" } });
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("setAppLocked drives the same path as the backend event (test driver)", async () => {
+    vi.mocked(invoke).mockResolvedValue({ enabled: true, locked: false });
+    await s.init();
+    const cb = vi.fn();
+    s.onAppLock(cb);
+
+    s.setAppLocked(true, "idle");
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(s.appLocked.value).toBe(true);
+    expect(s.shouldAutoPrompt.value).toBe(false); // reason recorded too
+
+    s.setAppLocked(false);
+    expect(cb).toHaveBeenCalledTimes(1); // unlock edge: no fire
+  });
 });

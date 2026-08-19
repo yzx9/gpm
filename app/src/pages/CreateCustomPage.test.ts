@@ -203,4 +203,37 @@ describe("CreateCustomPage", () => {
     expect(w.find("[role='alert']").exists()).toBe(true);
     expect(w.find("[role='status']").exists()).toBe(false);
   });
+
+  // ── Gate re-lock (issue #20): the mask does not unmount the page ────────
+
+  it("a gate re-lock wipes a filled form and marks the drafts notice", async () => {
+    const m = mountWithApp(CreateCustomPage);
+    await flushPromises();
+    await m.wrapper.find('input[id="c-name"]').setValue("misc/foo");
+    await m.wrapper.find('textarea[id="c-content"]').setValue("hunter2");
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(
+      (m.wrapper.find('input[id="c-name"]').element as HTMLInputElement).value,
+    ).toBe("");
+    expect(
+      (
+        m.wrapper.find('textarea[id="c-content"]')
+          .element as HTMLTextAreaElement
+      ).value,
+    ).toBe("");
+    expect(m.draftsNotice.consume()).toBe(true); // draft lost → toast fires
+  });
+
+  it("a gate re-lock on an empty form does not mark the notice", async () => {
+    const m = mountWithApp(CreateCustomPage);
+    await flushPromises();
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(m.draftsNotice.consume()).toBe(false); // nothing was lost
+  });
 });

@@ -1072,4 +1072,30 @@ describe("SettingsIdentityPage", () => {
       expect(invoke).toHaveBeenCalledWith("get_config");
     });
   });
+
+  // ── Gate re-lock (issue #20): the mask does not unmount the page ────────
+
+  it("a gate re-lock closes the passphrase modal and wipes the typed values, without marking the drafts notice", async () => {
+    // F3B: the closed modal IS the explanation — wipeSecrets returns void, so
+    // no post-unlock toast for this page (deliberate; see the issue #20
+    // review).
+    const m = mountWithApp(SettingsIdentityPage);
+    await flushPromises();
+
+    const setBtn = m.wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Set Passphrase"));
+    await setBtn!.trigger("click");
+    await flushPromises();
+    await m.wrapper.find("#pp-new").setValue("secret");
+    expect(m.wrapper.find('[role="dialog"]').exists()).toBe(true);
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    // Fields wiped + modal closed by wipeSecrets itself.
+    expect(m.wrapper.find('[role="dialog"]').exists()).toBe(false);
+    // …but no draft-loss notice (F3B).
+    expect(m.draftsNotice.consume()).toBe(false);
+  });
 });

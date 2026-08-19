@@ -3,9 +3,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import {
+  APP_LOCK_KEY,
+  createAppLockStore,
+  createDraftsNotice,
   createLockState,
   createSecureScreen,
   createSecuritySettings,
+  DRAFTS_NOTICE_KEY,
   LOCK_KEY,
   SECURE_SCREEN_KEY,
   SECURITY_SETTINGS_KEY,
@@ -39,6 +43,8 @@ describe("useSecretReveal", () => {
       () => useSecretReveal(),
       (app) => {
         app.provide(LOCK_KEY, createLockState({ unlocked: true }));
+        app.provide(APP_LOCK_KEY, createAppLockStore());
+        app.provide(DRAFTS_NOTICE_KEY, createDraftsNotice());
         app.provide(SECURE_SCREEN_KEY, createSecureScreen({ available }));
         app.provide(SECURITY_SETTINGS_KEY, createSecuritySettings());
       },

@@ -3,10 +3,15 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import {
+  APP_LOCK_KEY,
   BACK_HANDLER_KEY,
+  createAppLockStore,
   createBackHandlerRegistry,
+  createLockState,
   createScrollLockController,
+  LOCK_KEY,
   SCROLL_LOCK_KEY,
+  useAppLockState,
 } from "@/composables";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -16,6 +21,7 @@ import {
   type ComponentMountingOptions,
 } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defineComponent } from "vue";
 import UnlockModal from "./UnlockModal.vue";
 
 // UnlockModal mounts a BaseModalShell, which locks the document scroller on
@@ -429,5 +435,75 @@ describe("UnlockModal", () => {
       .find((b) => b.text().includes("Reset all data"));
     expect(resetBtn).toBeUndefined();
     expect(invoke).not.toHaveBeenCalledWith("reset_config");
+  });
+
+  // ── Gate re-lock (issue #20) ────────────────────────────────────────────
+  // The modal has NO direct gate wiring (deliberately — see the review of
+  // issue #20): every gate re-lock unmounts it via App.vue's
+  // `v-if="… && !appLocked"`, and the useWipeOnLeave unmount hook wipes the
+  // typed passphrase. These pin that the unmount path IS the clear.
+
+  it("a gate re-lock unmounts the modal (the !appLocked v-if) and the unmount wipe clears the typed passphrase", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce("unavailable") // is_biometric_available
+      .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+    const appLock = createAppLockStore();
+    // A faithful slice of App.vue's gate condition.
+    const Host = defineComponent({
+      components: { UnlockModal },
+      setup() {
+        const { appLocked } = useAppLockState();
+        return { appLocked };
+      },
+      template: `<UnlockModal v-if="!appLocked" />`,
+    });
+    const wrapper = mount(Host, {
+      global: {
+        provide: {
+          [APP_LOCK_KEY]: appLock,
+          [SCROLL_LOCK_KEY]: createScrollLockController(),
+          [BACK_HANDLER_KEY]: backHandler,
+        },
+      },
+    });
+    await flushPromises();
+
+    await wrapper.find('input[type="password"]').setValue("topsecret");
+    appLock.setAppLocked(true, "idle"); // gate re-lock → v-if unmounts
+    await flushPromises();
+
+    // Unmounted — the unmount wipe cleared the passphrase with it. A stale
+    // input (value still bound, element detached) would keep the secret in
+    // the detached DOM; the element must be GONE.
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false);
+  });
+
+  it("an identity hard lock does NOT wipe the typed passphrase (lock:false — this modal IS the identity lock UI)", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce("unavailable") // is_biometric_available
+      .mockResolvedValueOnce(false); // is_biometric_unlock_enabled
+    const lock = createLockState({ unlocked: true });
+    const wrapper = mount(UnlockModal, {
+      global: {
+        provide: {
+          [LOCK_KEY]: lock,
+          [SCROLL_LOCK_KEY]: createScrollLockController(),
+          [BACK_HANDLER_KEY]: backHandler,
+        },
+      },
+    });
+    await flushPromises();
+
+    const input = () =>
+      wrapper.find('input[type="password"]').element as HTMLInputElement;
+    await wrapper.find('input[type="password"]').setValue("topsecret");
+
+    // lock:false: a hard identity lock event must not clear the field the
+    // user is typing INTO the unlock flow. If this ever flips (e.g. someone
+    // re-wires the modal to onLock/onAnyLock), reconsider together with the
+    // gate-unmount test above.
+    lock.setLocked(true);
+    await flushPromises();
+    expect(input().value).toBe("topsecret");
   });
 });

@@ -268,6 +268,12 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
       // A fresh hard lock re-shows the overlay even if the user had dismissed
       // a previous one.
       overlayDismissed.value = false;
+      // A hard lock also cancels any parked per-op auth: the suspended
+      // `runWithAuth` frames would otherwise resume after the unlock into a
+      // page the lock already cleared (callers swallow AUTH_CANCELLED). The
+      // gate re-lock mirrors this centrally in App.vue — the gate store cannot
+      // reach this one.
+      cancelAuth();
       for (const cb of [...listeners]) {
         try {
           cb();

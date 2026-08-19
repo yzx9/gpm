@@ -136,6 +136,7 @@ async function onCopyRow(pw: string) {
 useWipeOnLeave(() => {
   generateToken++;
   generating.value = false;
+  const hadBatch = generated.value.length > 0;
   generated.value = [];
   // Drop the claim with the batch so a re-generate after a lock re-acquires
   // (and FLAG_SECURE doesn't stay up on an empty result list).
@@ -143,6 +144,9 @@ useWipeOnLeave(() => {
     releaseSecure();
     secured = false;
   }
+  // An unsaved generated batch is user content lost to the lock — report it
+  // so the post-unlock toast fires.
+  return hadBatch;
 });
 </script>
 

@@ -250,4 +250,35 @@ describe("GeneratePasswordPage", () => {
     await wrapper.find('button[aria-label="Back"]').trigger("click");
     expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
+
+  // ── Gate re-lock (issue #20): the mask does not unmount the page ────────
+
+  it("a gate re-lock clears the batch and marks the drafts notice (unsaved passwords lost)", async () => {
+    vi.mocked(invoke).mockImplementation(((cmd: string) => {
+      if (cmd === "generate_password_batch")
+        return Promise.resolve(["a", "b", "c"]);
+      return Promise.resolve(undefined);
+    }) as typeof invoke);
+    const m = mountWithApp(GeneratePasswordPage);
+    await flushPromises();
+    await m.wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(m.wrapper.findAll(".result-row")).toHaveLength(3);
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(m.wrapper.findAll(".result-row")).toHaveLength(0);
+    expect(m.draftsNotice.consume()).toBe(true); // batch lost → toast fires
+  });
+
+  it("a gate re-lock with no generated batch does not mark the notice", async () => {
+    const m = mountWithApp(GeneratePasswordPage);
+    await flushPromises();
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(m.draftsNotice.consume()).toBe(false); // nothing was lost
+  });
 });

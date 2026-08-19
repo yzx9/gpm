@@ -136,10 +136,10 @@ async function copyText(text: string) {
   }
 }
 
-// Wipe any revealed private key on a hard identity lock, on browser back, and on
-// unmount — matching the other secret pages (useWipeOnLeave covers all three,
-// including the lock the old onLock wired). The unlock modal can keep this page
-// mounted on auto-lock, so unmount alone can't guarantee a wipe.
+// Wipe any revealed private key on either lock (identity hard lock or app-gate
+// re-lock), on browser back, and on unmount — matching the other secret pages.
+// The unlock modal can keep this page mounted on auto-lock, so unmount alone
+// can't guarantee a wipe.
 useWipeOnLeave(hidePrivate);
 </script>
 

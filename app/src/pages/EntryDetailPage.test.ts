@@ -557,6 +557,31 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).not.toContain("s3cret");
     });
 
+    it("clears sensitive data on a gate re-lock (the mask does not unmount the page)", async () => {
+      vi.mocked(invoke).mockResolvedValue({
+        password: "s3cret",
+        notes: "notes",
+        has_totp: false,
+        attachment: null,
+      });
+      const m = mountWithApp(EntryDetailPage);
+      await m.wrapper
+        .find('button[aria-label="Show password"]')
+        .trigger("click");
+      await flushPromises();
+
+      // Password is in the DOM
+      expect(m.wrapper.text()).toContain("s3cret");
+
+      // A gate re-lock raises the mask but keeps the page mounted — the
+      // shared wiper must fire on the gate edge too (issue #20's headline
+      // scenario: a revealed password behind the app-lock mask).
+      m.appLock.setAppLocked(true, "idle");
+      await flushPromises();
+
+      expect(m.wrapper.text()).not.toContain("s3cret");
+    });
+
     it("handles ESC key to go back", async () => {
       vi.mocked(invoke).mockResolvedValue({
         password: "s3cret",

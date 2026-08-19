@@ -39,6 +39,7 @@ import {
   isAuthCancelled,
   useAppLockState,
   useCommitSignature,
+  useLockSignals,
   useLockState,
   usePullToRefresh,
   useRelativeTime,
@@ -131,6 +132,16 @@ const blockIssues = ref<CommitSigInfo[] | null>(null);
 const divergence = ref<SyncDivergence | null>(null);
 const resolving = ref(false);
 const divergeError = ref("");
+
+// Either lock dismisses a pending sync divergence — a resolve over a locked
+// page is meaningless (no deferred wipe exists in the sync context, so unlike
+// useDivergence's cancel there is nothing to release). A parked keep-mine
+// resolve is cancelled centrally at the lock edge (App.vue wires the gate,
+// `useLockState.setLocked` the identity hard lock).
+useLockSignals().onAnyLock(() => {
+  divergence.value = null;
+  divergeError.value = "";
+});
 
 /** The indicator badge for the current authenticity state. `tone` drives the
  * lamp color via BaseButton's link variant (success / warn / muted). */

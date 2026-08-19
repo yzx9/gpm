@@ -286,4 +286,37 @@ describe("EntryEditPage", () => {
     expect(w.find("[role='alert']").exists()).toBe(true);
     expect(w.find("[role='status']").exists()).toBe(false);
   });
+
+  // ── Gate re-lock (issue #20): the mask does not unmount the page ────────
+
+  it("a gate re-lock wipes a dirty editor and marks the drafts notice", async () => {
+    const m = mountWithApp(EntryEditPage);
+    await flushPromises();
+    await m.wrapper.find('input[id="e-password"]').setValue("newpass");
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(
+      (m.wrapper.find('input[id="e-password"]').element as HTMLInputElement)
+        .value,
+    ).toBe("");
+    expect(m.draftsNotice.consume()).toBe(true); // real edits lost → toast fires
+  });
+
+  it("a gate re-lock on a merely-opened (unedited) editor clears the fields but does NOT mark the notice", async () => {
+    const m = mountWithApp(EntryEditPage);
+    await flushPromises(); // loads "s3cret" + "note line", zero user edits
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(
+      (m.wrapper.find('input[id="e-password"]').element as HTMLInputElement)
+        .value,
+    ).toBe("");
+    // No user content lost — the precise dirty predicate (partsEqual) must
+    // keep the post-unlock toast silent for a merely-opened editor.
+    expect(m.draftsNotice.consume()).toBe(false);
+  });
 });

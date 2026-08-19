@@ -64,7 +64,8 @@
     "unlockFailed": "解锁失败",
     "keyInvalidatedNotice": "所有指纹已被移除，因此 gpm 无法再解锁你的应用密钥。请在 Android 设置中清除 gpm 的应用数据（或卸载后重新安装）以重新配置。",
     "biometricUnavailable": "生物识别解锁暂时不可用，请稍后再试。",
-    "diagnostics": "导出诊断信息"
+    "diagnostics": "导出诊断信息",
+    "draftsCleared": "锁定已清除未保存的修改"
   },
   "passphraseField": {
     "label": "口令",

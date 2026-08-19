@@ -12,6 +12,7 @@ import {
 } from "@/api";
 import { ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useLockSignals } from "./useLockSignals";
 import { isAuthCancelled, useLockState } from "./useLockState";
 
 /**
@@ -28,7 +29,7 @@ import { isAuthCancelled, useLockState } from "./useLockState";
  * `PULL_FF_FAILED` branch. The caller decides the page-specific aftermath
  * (toast wording + where to navigate) via `onResolved` / `onPullFfFailed`.
  *
- * `onLock` clears the divergence payload on a hard lock (it is not a WebView
+ * `onAnyLock` clears the divergence payload on either lock (it is not a WebView
  * secret, but a pending resolve over a locked page is meaningless). The caller
  * wipes its own draft/plaintext separately (e.g. via `useWipeOnLeave`).
  *
@@ -55,7 +56,7 @@ export function useDivergence(opts: {
   resolveDivergence: (choice: DivergenceChoice) => Promise<void>;
   cancelDivergence: () => void;
 } {
-  const { onLock, runWithAuth } = useLockState();
+  const { cancelAuth, runWithAuth } = useLockState();
   const { t } = useI18n();
   const discardOnCancel = opts.discardOnCancel ?? true;
 
@@ -63,11 +64,16 @@ export function useDivergence(opts: {
   const resolving = ref(false);
   const divergeError = ref("");
 
-  // A hard lock during a pending resolve dismisses the modal. (Soft wipes
-  // deliberately don't fire onLock — a mid-resolve UI surviving one is fine.)
-  onLock(() => {
+  // A lock during a pending resolve dismisses the modal AND cancels a parked
+  // keep-mine resolve: `runWithAuth` parks it awaiting unlock, and the parked
+  // frame would otherwise resume (and publish) after the lock window with the
+  // modal already gone. `cancelAuth` rejects parked callers with
+  // AUTH_CANCELLED (swallowed in resolveDivergence). (Soft wipes fire neither
+  // lock signal — a mid-resolve UI surviving one is fine.)
+  useLockSignals().onAnyLock(() => {
     divergence.value = null;
     divergeError.value = "";
+    cancelAuth();
   });
 
   function openDivergence(preview: SyncDivergence) {

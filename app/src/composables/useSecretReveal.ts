@@ -12,7 +12,8 @@ import { useWipeOnLeave } from "./useWipeOnLeave";
  * Reveal sensitive content (a decrypted secret) under the app's secure-reveal
  * contract: auto-clear after the configured view-clear seconds (Never ⇒ stays
  * until manual hide / lock / unmount), plus the shared `useWipeOnLeave`
- * lifecycle (wipe on browser back, unmount, and a _hard_ identity lock).
+ * lifecycle (wipe on browser back, unmount, and either lock — the identity
+ * hard lock or the app-gate re-lock).
  *
  * R031 — this composable owns the screen-capture-protection claim for the
  * revealed secret. `reveal()` accepts a {@link Claimed} value — which only
@@ -22,9 +23,9 @@ import { useWipeOnLeave } from "./useWipeOnLeave";
  * on back/lock/unmount too. Used by the entry detail view.
  *
  * The auto-clear duration comes from the shared security-settings cache, so a
- * settings change reschedules an in-flight reveal live. `onLock` fires only on a
- * hard lock — a soft wipe (no-cache mode, post-op) deliberately leaves a
- * revealed password on screen.
+ * settings change reschedules an in-flight reveal live. The lock signals fire
+ * only on lock edges — a soft wipe (no-cache mode, post-op) deliberately
+ * leaves a revealed password on screen.
  *
  * Must be called during a component's `setup()`.
  */
@@ -67,7 +68,7 @@ export function useSecretReveal() {
 
   /** (Re)arm the auto-clear timer from the current setting. `0` (Never) arms no
    *  timer — the reveal stays until `clear()` (manual hide, unmount, back, or a
-   *  hard lock). */
+   *  lock). */
   function armAutoClear() {
     if (autoHideTimer) {
       clearTimeout(autoHideTimer);

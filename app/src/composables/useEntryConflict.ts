@@ -13,6 +13,7 @@ import {
 } from "@/api";
 import { onBeforeUnmount, ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useLockSignals } from "./useLockSignals";
 import { isAuthCancelled, useLockState } from "./useLockState";
 
 /** A `WriteOutcome` `entry_conflict` payload (the `kind` tag stripped by the
@@ -36,9 +37,10 @@ export interface EntryConflictPayload {
  * routes to `onPullFfFailed`; `AUTH_CANCELLED` is swallowed. The caller decides
  * the aftermath (toast wording + navigation) via `onResolved`/`onPullFfFailed`.
  *
- * `onLock` clears a pending conflict on a hard lock. Cancel reuses
- * `discardDivergence` to release the deferred identity-cache wipe the edit save
- * skipped — abandoning the modal must not strand the cached key.
+ * `onAnyLock` clears a pending conflict on either lock (and cancels a parked
+ * keep-mine resolve). Cancel reuses `discardDivergence` to release the deferred
+ * identity-cache wipe the edit save skipped — abandoning the modal must not
+ * strand the cached key.
  *
  * Must be called during a component's `setup()` (uses `useLockState`, `useI18n`).
  */
@@ -71,7 +73,7 @@ export function useEntryConflict(opts: {
   resolveConflict: (choice: EntryConflictChoice) => Promise<void>;
   cancelConflict: () => void;
 } {
-  const { onLock, runWithAuth } = useLockState();
+  const { cancelAuth, runWithAuth } = useLockState();
   const { t } = useI18n();
 
   const conflict = ref<EntryConflictPayload | null>(null);
@@ -80,21 +82,27 @@ export function useEntryConflict(opts: {
   /** The edited parts captured on open, re-sent on a keep-mine edit resolve. */
   let pendingParts: SecretParts | null = null;
 
-  // A hard lock during a pending resolve dismisses the modal (mirrors useDivergence).
-  // Also drop the captured plaintext — the page wipes its own refs, but this closure
-  // holds a second copy that must not survive the lock or a route-away unmount
-  // (secret hygiene). `onLock` covers the hard-lock event; the unmount hook
-  // below covers a navigation away while the modal is open, where the modal's own
-  // `cancelConflict` (which also nulls `pendingParts`) never fires.
-  onLock(() => {
+  // A lock during a pending resolve dismisses the modal (mirrors useDivergence)
+  // and cancels a parked keep-mine resolve: `resolveConflict` captures `parts`
+  // into its frame BEFORE `runWithAuth` parks it, so nulling `pendingParts`
+  // alone leaves the plaintext riding the suspended frame through the lock
+  // window — and the resolve would resume (and publish) after unlock with the
+  // modal already gone. `cancelAuth` rejects the parked caller with
+  // AUTH_CANCELLED (swallowed in resolveConflict), dropping the frame for GC.
+  // Also drop the captured plaintext — the page wipes its own refs, but this
+  // closure holds a second copy that must not survive the lock (secret
+  // hygiene).
+  useLockSignals().onAnyLock(() => {
     conflict.value = null;
     conflictError.value = "";
     pendingParts = null;
+    cancelAuth();
   });
-  // `onLock` fires only on a hard-lock event — `useLockState.onLock` uses
-  // `onScopeDispose` to unregister the listener, not to invoke it — so it does NOT
-  // cover a page unmount. Null the captured plaintext on unmount too, mirroring the
-  // page's own `useWipeOnLeave` (the unmount window of the lock fix).
+  // The lock signals fire only on lock events — their registries use
+  // `onScopeDispose` to unregister the listener, not to invoke it — so they do
+  // NOT cover a page unmount. Null the captured plaintext on unmount too,
+  // mirroring the page's own `useWipeOnLeave` (the unmount window of the lock
+  // fix).
   onBeforeUnmount(() => {
     pendingParts = null;
   });

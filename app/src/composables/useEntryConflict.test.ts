@@ -9,6 +9,7 @@ import {
 } from "@/composables/useEntryConflict";
 import { mountWithApp } from "@/test/appTestUtils";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { enableAutoUnmount, flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
@@ -56,7 +57,7 @@ describe("useEntryConflict", () => {
     vi.clearAllMocks();
   });
 
-  function mountConflict() {
+  function mountConflict(opts?: { unlocked?: boolean }) {
     const onResolved = vi.fn();
     const onPullFfFailed = vi.fn();
     const onAuthenticityBlocked = vi.fn();
@@ -72,10 +73,13 @@ describe("useEntryConflict", () => {
         return () => null;
       },
     });
-    const { wrapper, lock } = mountWithApp(Host);
+    const { wrapper, lock, appLock } = mountWithApp(Host, {
+      unlocked: opts?.unlocked,
+    });
     return {
       wrapper,
       lock,
+      appLock,
       handle,
       onResolved,
       onPullFfFailed,
@@ -228,6 +232,112 @@ describe("useEntryConflict", () => {
       expectedRemoteOid: PAYLOAD.remote_tip,
       name: PAYLOAD.name,
     });
+  });
+
+  it("gate re-lock wipes pendingParts — a subsequent keep_mine edit sends content:null (onAnyLock)", async () => {
+    // The gate-driven sibling of the hard-lock test above: a gate re-lock
+    // fires onAnyLock, which must clear the conflict AND the captured
+    // plaintext (issue #20 — the gate mask covers the page but does not
+    // unmount it).
+    vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
+    const { appLock, lock, handle } = mountConflict();
+    handle.openConflict(PAYLOAD, PARTS);
+    await flushPromises();
+
+    appLock.setAppLocked(true, "idle");
+    await flushPromises();
+    expect(handle.conflict.value).toBeNull();
+
+    // Re-cache the identity so runWithAuth runs instead of parking, then
+    // re-raise the conflict WITHOUT recapturing parts (mirrors the onLock
+    // test) — a surviving pendingParts would send PARTS, not null.
+    lock.setLocked(false);
+    await flushPromises();
+    handle.conflict.value = PAYLOAD;
+    await flushPromises();
+
+    await handle.resolveConflict("keep_mine");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("resolve_entry_conflict", {
+      parts: null,
+      op: "edit",
+      choice: "keep_mine",
+      expectedRemoteOid: PAYLOAD.remote_tip,
+      name: PAYLOAD.name,
+    });
+  });
+
+  it("gate re-lock cancels a parked keep-mine resolve — AUTH_CANCELLED swallowed, no publish", async () => {
+    // Pins the parked-frame fix: resolveConflict captures `parts` into its
+    // local frame BEFORE runWithAuth parks it (identity uncached), so a gate
+    // lock must cancelAuth the parked caller — otherwise the frame rides the
+    // lock window holding the plaintext and silently publishes after unlock
+    // with the modal already gone.
+    vi.mocked(invoke).mockResolvedValue(PULL_RESULT);
+    // unlocked:false → identity NOT cached → runWithAuth parks.
+    const { appLock, handle } = mountConflict({ unlocked: false });
+    handle.openConflict(PAYLOAD, PARTS);
+    await flushPromises();
+
+    const parked = handle.resolveConflict("keep_mine");
+    await flushPromises();
+
+    appLock.setAppLocked(true, "idle"); // gate lock → cancelAuth rejects parked
+    await parked; // must resolve (cancelled), not reject
+    await flushPromises();
+
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.filter((c) => c[0] === "resolve_entry_conflict"),
+    ).toHaveLength(0);
+    expect(handle.conflict.value).toBeNull();
+    expect(handle.resolving.value).toBe(false);
+    expect(handle.conflictError.value).toBe("");
+  });
+
+  it("an identity hard lock cancels a parked keep-mine resolve too (onAnyLock's other half)", async () => {
+    // The identity-edge sibling of the gate test above, in its realistic
+    // Immediate-mode sequence: unlocked session, identity soft-wiped post-op
+    // (parking the resolve), then the hard lock — a real false→true edge that
+    // both fires onAnyLock and (centrally, in useLockState) cancels parked
+    // auths. ({unlocked:false} mounts start already-locked, where setLocked
+    // early-returns — no edge.)
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_auth_state")
+        return Promise.resolve({
+          configured: true,
+          encrypted: true,
+          unlocked: true,
+          identity_type: "x25519",
+        });
+      return Promise.resolve(PULL_RESULT);
+    });
+    const { lock, handle } = mountConflict({ unlocked: false });
+    await lock.init(); // arms the listener + unlocks (mocked auth above)
+    const handler = vi
+      .mocked(listen)
+      .mock.calls.find((c) => c[0] === "identity-lock-state")?.[1] as (e: {
+      payload: { locked: boolean; soft?: boolean };
+    }) => void;
+    handler({ payload: { locked: true, soft: true } }); // post-op soft wipe
+
+    handle.openConflict(PAYLOAD, PARTS);
+    await flushPromises();
+    const parked = handle.resolveConflict("keep_mine");
+    await flushPromises();
+
+    lock.setLocked(true); // identity hard-lock edge
+    await parked; // resolves (cancelled), not rejects
+    await flushPromises();
+
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.filter((c) => c[0] === "resolve_entry_conflict"),
+    ).toHaveLength(0);
+    expect(handle.resolving.value).toBe(false);
   });
 
   it("an authenticity-blocked resolve routes to onAuthenticityBlocked, not onResolved (no false 'saved')", async () => {

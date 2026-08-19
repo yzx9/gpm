@@ -13,6 +13,7 @@ import {
   createAppLockStore,
   createBackHandlerRegistry,
   createDialog,
+  createDraftsNotice,
   createLockState,
   createPlatform,
   createScrollLockController,
@@ -20,6 +21,7 @@ import {
   createSecuritySettings,
   createToast,
   DIALOG_KEY,
+  DRAFTS_NOTICE_KEY,
   LOCK_KEY,
   PLATFORM_KEY,
   SCROLL_LOCK_KEY,
@@ -84,6 +86,7 @@ export function mountWithApp<C extends Component>(
 ) {
   const lock = createLockState({ unlocked: opts.unlocked !== false });
   const appLock = createAppLockStore();
+  const draftsNotice = createDraftsNotice();
   const secureScreen = createSecureScreen({
     available: opts.secureAvailable !== false,
   });
@@ -107,6 +110,7 @@ export function mountWithApp<C extends Component>(
         ...opts.mountOpts?.global?.provide,
         [LOCK_KEY]: lock,
         [APP_LOCK_KEY]: appLock,
+        [DRAFTS_NOTICE_KEY]: draftsNotice,
         [SECURE_SCREEN_KEY]: secureScreen,
         [PLATFORM_KEY]: platform,
         [SECURITY_SETTINGS_KEY]: securitySettings,
@@ -122,6 +126,7 @@ export function mountWithApp<C extends Component>(
     wrapper,
     lock,
     appLock,
+    draftsNotice,
     secureScreen,
     platform,
     securitySettings,

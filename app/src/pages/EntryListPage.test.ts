@@ -782,6 +782,32 @@ describe("EntryListPage", () => {
       ).toBe(true);
     });
 
+    it("a gate re-lock dismisses the sync divergence modal (either lock)", async () => {
+      when("sync_repo", {
+        kind: "diverged",
+        local_ahead: 2,
+        remote_ahead: 1,
+        remote_tip: "deadbeefdeadbeef",
+        local_only_entries: ["local-only"],
+        modified_entries: ["shared"],
+        other_changed_files: ["notes.txt"],
+      });
+      const m = mountWithApp(EntryListPage);
+      await flushPromises();
+      await (
+        m.wrapper.vm as unknown as { syncRepo: () => Promise<void> }
+      ).syncRepo();
+      await flushPromises();
+      expect(m.wrapper.text()).toContain("Local and remote have diverged");
+
+      // The sync-context modal stays inline (no useDivergence), but either
+      // lock must dismiss it — a resolve over a locked page is meaningless.
+      m.appLock.setAppLocked(true, "idle");
+      await flushPromises();
+
+      expect(m.wrapper.text()).not.toContain("Local and remote have diverged");
+    });
+
     it("cancel button calls cancel_git for an in-flight sync", async () => {
       when("list_entries", page(sampleEntries));
       // sync_repo never resolves → pulling stays true → the Cancel button stays
