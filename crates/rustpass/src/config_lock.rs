@@ -17,7 +17,7 @@
 //! background sync should yield to the foreground; config writes are tiny
 //! must-succeed user actions, so this lock WAITS up to a deadline and only
 //! then reports [`ErrorCode::ConfigBusy`]. That difference is also why
-//! acquisition is async — `try_lock_exclusive` is non-blocking, and the
+//! acquisition is async — `File::try_lock` is non-blocking, and the
 //! retry sleeps on `tokio::time::sleep`, never `thread::sleep`: the
 //! headless worker runs a single-threaded runtime where a sync busy-wait
 //! would starve its own deadline timers.
@@ -34,11 +34,9 @@
 //! **Lock order:** `repo_lock` → `config_lock`, never reversed. The
 //! migration paths already take them in this order.
 
-use std::io;
+use std::fs::TryLockError;
 use std::path::Path;
 use std::time::Duration;
-
-use fs2::FileExt;
 
 use crate::error::{Error, ErrorCode};
 
@@ -84,9 +82,9 @@ impl ConfigLock {
         // syscalls; the wait parks the task, not the thread.
         let deadline = tokio::time::Instant::now() + CONFIG_LOCK_DEADLINE;
         loop {
-            match file.try_lock_exclusive() {
+            match file.try_lock() {
                 Ok(()) => return Ok(Self { file: Some(file) }),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(TryLockError::WouldBlock) => {
                     if tokio::time::Instant::now() >= deadline {
                         return Err(Error::new(
                             ErrorCode::ConfigBusy,
@@ -95,7 +93,9 @@ impl ConfigLock {
                     }
                     tokio::time::sleep(Duration::from_millis(CONFIG_LOCK_RETRY_SLEEP_MS)).await;
                 }
-                Err(e) => return Err(Error::new(ErrorCode::IoError, format!("config lock: {e}"))),
+                Err(TryLockError::Error(e)) => {
+                    return Err(Error::new(ErrorCode::IoError, format!("config lock: {e}")));
+                }
             }
         }
     }
@@ -104,8 +104,8 @@ impl ConfigLock {
 impl Drop for ConfigLock {
     fn drop(&mut self) {
         // Explicit unlock, then drop the fd. On Unix closing the fd releases
-        // the flock anyway; the explicit unlock is belt-and-suspenders and
-        // matches fs2's recommended pattern (mirrors RepoLock).
+        // the flock anyway; the explicit unlock is belt-and-suspenders
+        // (mirrors RepoLock).
         if let Some(file) = self.file.take() {
             let _ = file.unlock();
         }

@@ -11,17 +11,16 @@
 //! next to the repo (`<config_dir>/gpm_sync.lock`) so the two instances — and
 //! two processes — can't race the git index.
 //!
-//! `try_lock_exclusive` is non-blocking: on contention the caller receives an
+//! `File::try_lock` is non-blocking: on contention the caller receives an
 //! [`Error`](crate::Error) with code `REPO_BUSY` and skips (best-effort sync).
 //! The lock is held by the OS on the open file description, so it is released
 //! on drop AND automatically if the process dies — no stale-lockfile problem
 //! (the empty lockfile may persist on disk harmlessly; it carries no data).
 
+use std::fs::TryLockError;
 use std::path::Path;
+use std::thread;
 use std::time::Duration;
-use std::{io, thread};
-
-use fs2::FileExt;
 
 use crate::error::{Error, ErrorCode};
 
@@ -70,14 +69,16 @@ impl RepoLock {
         // fine; the total bound (~100 ms) is negligible next to the sync's own
         // 30 s deadline.
         for attempt in 0..=REPO_LOCK_RETRIES {
-            match file.try_lock_exclusive() {
+            match file.try_lock() {
                 Ok(()) => return Ok(Self { file: Some(file) }),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(TryLockError::WouldBlock) => {
                     if attempt < REPO_LOCK_RETRIES {
                         thread::sleep(Duration::from_millis(REPO_LOCK_RETRY_SLEEP_MS));
                     }
                 }
-                Err(e) => return Err(Error::new(ErrorCode::IoError, format!("repo lock: {e}"))),
+                Err(TryLockError::Error(e)) => {
+                    return Err(Error::new(ErrorCode::IoError, format!("repo lock: {e}")));
+                }
             }
         }
         Err(Error::new(
@@ -90,8 +91,7 @@ impl RepoLock {
 impl Drop for RepoLock {
     fn drop(&mut self) {
         // Explicit unlock, then drop the fd. On Unix closing the fd releases
-        // the flock anyway; the explicit unlock is belt-and-suspenders and
-        // matches fs2's recommended pattern.
+        // the flock anyway; the explicit unlock is belt-and-suspenders.
         if let Some(file) = self.file.take() {
             let _ = file.unlock();
         }
