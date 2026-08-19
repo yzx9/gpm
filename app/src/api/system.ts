@@ -259,9 +259,11 @@ export async function setBackgroundSync(
 }
 
 /** Cached update-probe result (RFC R090). `available` lights the About-page dot
- *  + the Update link; `unacknowledged` additionally lights the Settings-entry
- *  dot (the About-page dot ignores the ack). Read from the plaintext cache — no
- *  network. Mirrors the backend `UpdateStatus`. */
+ *  and drives the version dialog's download view; `unacknowledged` additionally
+ *  lights the Settings-entry dot (the About-page dot ignores the ack). Read
+ *  from the plaintext cache — no network; see {@link checkUpdateNow} for the
+ *  fresh-probe counterpart. Mirrors the backend `UpdateStatus` (wire-pinned by
+ *  a serde test there). */
 export interface UpdateStatus {
   /** A newer stable release exists than the built-in version. */
   available: boolean;
@@ -291,6 +293,14 @@ export async function acknowledgeUpdate(): Promise<void> {
  *  Returns the updated config. */
 export async function setUpdateCheck(enabled: boolean): Promise<AppConfig> {
   return invoke<AppConfig>("set_update_check", { enabled });
+}
+
+/** Manual update check (About-page version dialog). Unlike `getUpdateStatus`
+ *  this hits GitHub now: it bypasses the ≤1/day throttle and ignores the
+ *  update-check pref (the user pressed the button), and it REJECTS on failure
+ *  so the dialog can say "check failed" instead of a stale "up to date". */
+export async function checkUpdateNow(): Promise<UpdateStatus> {
+  return invoke<UpdateStatus>("check_update_now");
 }
 
 /** Take-once: whether a background sync left a divergence / authenticity-block
@@ -326,11 +336,7 @@ export async function screenSecureAvailable(): Promise<boolean> {
  * serialization test to pin these exact wire strings.
  */
 export type RuntimePlatform =
-  | "android"
-  | "linux"
-  | "macos"
-  | "windows"
-  | "unknown";
+  "android" | "linux" | "macos" | "windows" | "unknown";
 
 /**
  * General platform fact for UI gating (distinct from {@link screenSecureAvailable},

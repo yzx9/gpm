@@ -21,7 +21,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
-import pkg from "../../package.json";
+import { version } from "@/version";
 
 const router = useRouter();
 const { t } = useI18n();
@@ -29,7 +29,6 @@ const { t } = useI18n();
 // The hub is a pure navigation menu — each category's own page holds the
 // detail, so a one-line summary here only added clutter. About's summary is
 // the installed version (a constant, no load).
-const version = pkg.version;
 
 // RFC R090: a red dot on the About entry signals an unacknowledged newer
 // release. Decorative — the About page carries the labeled Update action.

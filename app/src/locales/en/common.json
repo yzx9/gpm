@@ -9,7 +9,8 @@
     "clear": "Clear",
     "export": "Export",
     "remove": "Remove",
-    "disable": "Disable"
+    "disable": "Disable",
+    "retry": "Retry"
   },
   "toggle": {
     "on": "On",

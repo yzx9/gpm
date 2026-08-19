@@ -10,7 +10,6 @@
     "version": "版本",
     "repoLink": "源代码",
     "updateAvailable": "有可用更新",
-    "updateLink": "更新",
     "designGoalsTitle": "设计目标",
     "builtWithTitle": "构建于",
     "goals": {
@@ -21,11 +20,25 @@
       "securityFirst": "秘密永不进入 WebView；主密钥在每次操作后被立即擦除"
     }
   },
-  "updateCheck": {
-    "title": "更新",
-    "legend": "检查更新",
-    "hint": "启动时检查是否有新版本（每天一次）。不会发送任何账号或个人数据。",
-    "setFailed": "无法保存更新检查设置。"
+  "updateDialog": {
+    "title": "版本与更新",
+    "updateTitle": "发现新版本",
+    "updateBody": "有新的稳定版本可以下载。",
+    "latest": "最新：",
+    "current": "当前：",
+    "upToDateTitle": "已是最新版本",
+    "upToDateBody": "{version} 已是最新的稳定版本。",
+    "offTitle": "自动检查已关闭",
+    "offBody": "gpm 不会在启动时检查新版本，你可以随时手动检查。无论是否开启，都不会发送任何账号或个人数据。",
+    "checkNow": "手动检查更新",
+    "checking": "正在检查更新…",
+    "failedTitle": "无法检查更新",
+    "failedBody": "请检查网络连接后重试。",
+    "goToDownload": "前往下载页面",
+    "gotIt": "知道了",
+    "enable": "启用自动检查",
+    "disable": "关闭自动检查",
+    "toggleFailed": "无法保存更新检查设置。"
   },
   "ack": {
     "intro": "gpm 站在这些开源项目的肩膀上。",

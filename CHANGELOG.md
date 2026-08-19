@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Page titles (About, Security, SSH key, Access token, History, Revisions, Logs, Add key) no longer show a leading icon — all screens now share the same plain title style.
+- The **About** screen now stays focused on what gpm is: the **Updates on/off switch is gone**, and tapping the **version number** opens a small version dialog instead. When a newer release is available it offers the **download page**; when automatic checks are off it offers a one-tap **manual check** (a failed check now says so, instead of quietly showing "up to date"); and the automatic-check setting lives in that same dialog as a small link, so it's still one tap away without occupying the page.
 
 ### Fixed
 

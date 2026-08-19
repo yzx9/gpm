@@ -710,6 +710,7 @@ pub fn run() {
             update_check::get_update_status,
             update_check::acknowledge_update,
             update_check::set_update_check,
+            update_check::check_update_now,
             // logging: in-app diagnostics viewer + the verbose (Debug) toggle.
             // The level is applied at startup via effective_log_filter in
             // init_state; `set_verbose` re-applies it within a session.

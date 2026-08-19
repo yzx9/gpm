@@ -10,7 +10,6 @@
     "version": "Version",
     "repoLink": "Source code",
     "updateAvailable": "Update available",
-    "updateLink": "Update",
     "designGoalsTitle": "Design goals",
     "builtWithTitle": "Built with",
     "goals": {
@@ -21,11 +20,25 @@
       "securityFirst": "secrets never reach the WebView; the master key is wiped after every operation"
     }
   },
-  "updateCheck": {
-    "title": "Updates",
-    "legend": "Check for updates",
-    "hint": "Check for a newer release on startup (once a day). No account or personal data is sent.",
-    "setFailed": "Couldn't save the update-check setting."
+  "updateDialog": {
+    "title": "Version and updates",
+    "updateTitle": "Update available",
+    "updateBody": "A newer stable release is available for download.",
+    "latest": "Latest:",
+    "current": "Current:",
+    "upToDateTitle": "Up to date",
+    "upToDateBody": "{version} is the latest stable release.",
+    "offTitle": "Automatic checks are off",
+    "offBody": "gpm won't check for newer releases on startup. You can always check manually. Either way, no account or personal data is ever sent.",
+    "checkNow": "Check for updates",
+    "checking": "Checking for updates…",
+    "failedTitle": "Couldn't check for updates",
+    "failedBody": "Check your connection and try again.",
+    "goToDownload": "Go to download page",
+    "gotIt": "Got it",
+    "enable": "Turn on automatic checks",
+    "disable": "Turn off automatic checks",
+    "toggleFailed": "Couldn't save the update-check setting."
   },
   "ack": {
     "intro": "gpm stands on the shoulders of these open-source projects.",

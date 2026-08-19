@@ -9,7 +9,8 @@
     "clear": "清除",
     "export": "导出",
     "remove": "移除",
-    "disable": "禁用"
+    "disable": "禁用",
+    "retry": "重试"
   },
   "toggle": {
     "on": "开",
