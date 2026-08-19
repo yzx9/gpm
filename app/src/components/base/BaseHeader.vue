@@ -12,12 +12,11 @@
 // stack via `navBack` — the same logic every page used to hand-roll — so back
 // *behavior* is unified alongside back *placement*.
 //
-// Title is intentionally NOT forced into one style: the common "icon + label"
-// title renders from `title`/`titleIcon` props, while pages with custom title
-// chrome (text-lg, truncating entry names) pass their own <h1> via `#title`,
-// which overrides the prop.
+// Title is intentionally NOT forced into one style: the common plain-label
+// title renders from the `title` prop, while pages with custom title chrome
+// (text-lg, truncating entry names) pass their own <h1> via `#title`, which
+// overrides the prop. Titles carry no icon anywhere in the app.
 import { navBack } from "@/utils/nav";
-import type { LucideIcon } from "@lucide/vue";
 import { ArrowLeft } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
@@ -35,10 +34,8 @@ const props = withDefaults(
     backFallback?: RouteLocationRaw;
     /** Bottom margin: "sm" (mb-4, root + history) or "md" (mb-6, default). */
     spacing?: "sm" | "md";
-    /** Canonical "icon + label" title. Rendered as <h1>; overridden by #title. */
+    /** Canonical plain-label title. Rendered as <h1>; overridden by #title. */
     title?: string;
-    /** Leading icon for the `title` prop. */
-    titleIcon?: LucideIcon;
   }>(),
   { spacing: "md" },
 );
@@ -84,8 +81,7 @@ function onBack() {
           <BaseIcon :icon="ArrowLeft" />
         </BaseButton>
         <slot name="title">
-          <h1 v-if="title" class="text-xl flex items-center gap-1">
-            <BaseIcon v-if="titleIcon" :icon="titleIcon" :size="24" />
+          <h1 v-if="title" class="text-xl">
             {{ title }}
           </h1>
         </slot>

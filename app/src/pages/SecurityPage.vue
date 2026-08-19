@@ -18,7 +18,6 @@ import {
   Fingerprint,
   Lock,
   ShieldAlert,
-  ShieldCheck,
   Smartphone,
   Timer,
 } from "@lucide/vue";
@@ -50,7 +49,6 @@ const SECURITY_DOC_URL =
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('security.title')"
-      :title-icon="ShieldCheck"
       spacing="sm"
     />
 

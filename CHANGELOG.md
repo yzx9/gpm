@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Page titles (About, Security, SSH key, Access token, History, Revisions, Logs, Add key) no longer show a leading icon — all screens now share the same plain title style.
+
 ### Fixed
 
 - Saving two settings in quick succession (for example updating your access token right as a background sync finishes) could **silently drop one of the changes** — the later save was built on an out-of-date copy of the configuration file and overwrote the earlier one. Repository settings are now written under a lock that serializes every writer (app, background sync, and a second desktop instance alike), so concurrent changes all land; if a write ever can't acquire the lock in time it now shows an error instead of losing data.

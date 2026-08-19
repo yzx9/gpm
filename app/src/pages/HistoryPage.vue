@@ -24,7 +24,6 @@ import {
 } from "@/composables";
 import {
   GitCommitHorizontal,
-  History,
   RefreshCw,
   Settings,
   TriangleAlert,
@@ -196,7 +195,6 @@ onBeforeUnmount(() => {
       :back-fallback="{ name: 'entries' }"
       spacing="sm"
       :title="t('history.title')"
-      :title-icon="History"
     >
       <template #actions>
         <BaseButton

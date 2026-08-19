@@ -12,7 +12,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { useDiagnosticsExport, useDialog, useToast } from "@/composables";
-import { Bug, Download, RefreshCw, ScrollText, Trash2 } from "@lucide/vue";
+import { Bug, Download, RefreshCw, Trash2 } from "@lucide/vue";
 import { listen } from "@tauri-apps/api/event";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -215,11 +215,7 @@ async function onClear() {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settings' }"
-      :title="t('log.title')"
-      :title-icon="ScrollText"
-    />
+    <BaseHeader :back-fallback="{ name: 'settings' }" :title="t('log.title')" />
 
     <BaseCard as="section" class="mb-4">
       <div class="flex flex-col gap-2">

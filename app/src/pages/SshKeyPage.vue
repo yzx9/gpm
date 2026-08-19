@@ -20,7 +20,7 @@ import {
   useToast,
   useWipeOnLeave,
 } from "@/composables";
-import { Copy, KeyRound, LockOpen, Trash2, TriangleAlert } from "@lucide/vue";
+import { Copy, LockOpen, Trash2, TriangleAlert } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -148,7 +148,6 @@ useWipeOnLeave(hidePrivate);
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('sshKey.title')"
-      :title-icon="KeyRound"
     />
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">{{

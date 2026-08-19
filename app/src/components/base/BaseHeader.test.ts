@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { navBack } from "@/utils/nav";
-import { Settings } from "@lucide/vue";
 import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import BaseHeader from "./BaseHeader.vue";
@@ -83,15 +82,7 @@ describe("BaseHeader", () => {
     expect(h1.text()).toBe("Settings");
   });
 
-  it("renders the titleIcon inside the title when provided", () => {
-    const wrapper = mount(BaseHeader, {
-      props: { title: "Settings", titleIcon: Settings },
-    });
-    // Lucide renders an <svg>; it only appears when titleIcon is set.
-    expect(wrapper.find("h1 svg").exists()).toBe(true);
-  });
-
-  it("omits the title icon when titleIcon is not provided", () => {
+  it("renders the title without an icon (titles are plain labels app-wide)", () => {
     const wrapper = mount(BaseHeader, { props: { title: "Settings" } });
     expect(wrapper.find("h1 svg").exists()).toBe(false);
   });

@@ -8,7 +8,6 @@ import LicensesSection from "@/components/about/LicensesSection.vue";
 import OverviewSection from "@/components/about/OverviewSection.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import { Info } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -40,7 +39,6 @@ function onTabChange(v: Tab) {
     <BaseHeader
       :back-fallback="{ name: 'settings' }"
       :title="t('about.title')"
-      :title-icon="Info"
       spacing="sm"
     />
 

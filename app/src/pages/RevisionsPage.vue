@@ -278,7 +278,6 @@ onBeforeUnmount(() => {
       :back-fallback="{ name: 'entry', params: { pathMatch } }"
       spacing="sm"
       :title="t('revisions.title')"
-      :title-icon="History"
     >
       <template #actions>
         <BaseButton

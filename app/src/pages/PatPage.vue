@@ -12,7 +12,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { useDialog, useToast } from "@/composables";
-import { KeyRound, Trash2 } from "@lucide/vue";
+import { Trash2 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -116,7 +116,6 @@ async function clearToken() {
     <BaseHeader
       :back-fallback="{ name: 'settingsRepository' }"
       :title="t('pat.title')"
-      :title-icon="KeyRound"
     />
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">{{

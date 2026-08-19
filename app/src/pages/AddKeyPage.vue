@@ -11,7 +11,6 @@ import BaseInput from "@/components/base/BaseInput.vue";
 import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import { useToast } from "@/composables";
 import { navBack } from "@/utils/nav";
-import { Plus } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter, type RouteLocationRaw } from "vue-router";
@@ -59,11 +58,7 @@ function goBack() {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="BACK_FALLBACK"
-      :title="t('addKey.title')"
-      :title-icon="Plus"
-    />
+    <BaseHeader :back-fallback="BACK_FALLBACK" :title="t('addKey.title')" />
 
     <BaseAlert v-if="error" variant="danger" class="mb-4">{{
       error
