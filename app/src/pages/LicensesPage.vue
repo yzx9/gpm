@@ -3,6 +3,8 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
+// The searchable open-source license inventory. Carries no secret content, so
+// (like About) the route is not marked secure.
 import type { LicensePackage } from "@/components/about/data";
 import {
   fetchLicenses,
@@ -12,6 +14,7 @@ import {
 import PackageRow from "@/components/about/PackageRow.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
@@ -32,7 +35,7 @@ const query = ref("");
 // Expansion is driven by reactive Sets rather than native <details> so that a
 // closed group's packages — and an unopened package's license text — never
 // enter the DOM. With hundreds of entries that each carry a multi-KB license,
-// this is what keeps the tab light: only the open group's rows and only the
+// this is what keeps the page light: only the open group's rows and only the
 // expanded package's text are ever rendered.
 const expandedGroups = ref(new Set<string>());
 const expandedPkgs = ref(new Set<string>());
@@ -88,104 +91,112 @@ function togglePkg(p: LicensePackage) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-3">
-    <!-- Search + summary -->
-    <div class="search-bar">
-      <BaseIcon :icon="Search" :size="16" class="search-icon" />
-      <BaseInput
-        v-model="query"
-        type="search"
-        class="search-input"
-        :placeholder="t('about.licenses.searchPlaceholder')"
-        :aria-label="t('about.licenses.searchAria')"
-      />
-    </div>
+  <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
+    <BaseHeader
+      :back-fallback="{ name: 'settings' }"
+      :title="t('about.licensesTitle')"
+      spacing="sm"
+    />
 
-    <div v-if="loading" class="state-row">
-      <BaseSpinner /><span class="text-sm text-muted">{{
-        t("about.licenses.loading")
-      }}</span>
-    </div>
+    <div class="flex flex-col gap-3">
+      <!-- Search + summary -->
+      <div class="search-bar">
+        <BaseIcon :icon="Search" :size="16" class="search-icon" />
+        <BaseInput
+          v-model="query"
+          type="search"
+          class="search-input"
+          :placeholder="t('about.licenses.searchPlaceholder')"
+          :aria-label="t('about.licenses.searchAria')"
+        />
+      </div>
 
-    <BaseAlert v-else-if="failed" variant="danger">
-      {{ t("about.licenses.loadFailed") }}
-    </BaseAlert>
+      <div v-if="loading" class="state-row">
+        <BaseSpinner /><span class="text-sm text-muted">{{
+          t("about.licenses.loading")
+        }}</span>
+      </div>
 
-    <BaseAlert v-else-if="total === 0" variant="danger">
-      {{ t("about.licenses.empty") }}
-    </BaseAlert>
-
-    <template v-else>
-      <p class="summary text-sm">
-        <strong>{{ t("about.licenses.summary", { count: total }) }}</strong>
-        <span class="text-muted">
-          {{
-            t("about.licenses.summaryEco", {
-              rust: rustCount,
-              npm: npmCount,
-            })
-          }}
-        </span>
-      </p>
-
-      <BaseAlert
-        v-if="degraded"
-        variant="warning"
-        class="flex items-start gap-2"
-      >
-        <BaseIcon :icon="TriangleAlert" :size="16" class="shrink-0 mt-0.5" />
-        <span>{{ t("about.licenses.degradedNotice") }}</span>
+      <BaseAlert v-else-if="failed" variant="danger">
+        {{ t("about.licenses.loadFailed") }}
       </BaseAlert>
 
-      <!-- Grouped view -->
-      <div v-if="!searching" class="flex flex-col gap-2">
-        <section v-for="group in groups" :key="group.license" class="group">
-          <BaseButton
-            variant="action"
-            class="group-head"
-            :aria-expanded="expandedGroups.has(group.license)"
-            @click="toggleGroup(group.license)"
-          >
-            <BaseIcon
-              :icon="
-                expandedGroups.has(group.license) ? ChevronDown : ChevronRight
-              "
-              :size="16"
-            />
-            <span class="group-license">{{ group.license }}</span>
-            <span class="group-count">{{
-              t("about.licenses.packageCount", group.count)
-            }}</span>
-          </BaseButton>
-          <ul v-if="expandedGroups.has(group.license)" class="pkg-list">
+      <BaseAlert v-else-if="total === 0" variant="danger">
+        {{ t("about.licenses.empty") }}
+      </BaseAlert>
+
+      <template v-else>
+        <p class="summary text-sm">
+          <strong>{{ t("about.licenses.summary", { count: total }) }}</strong>
+          <span class="text-muted">
+            {{
+              t("about.licenses.summaryEco", {
+                rust: rustCount,
+                npm: npmCount,
+              })
+            }}
+          </span>
+        </p>
+
+        <BaseAlert
+          v-if="degraded"
+          variant="warning"
+          class="flex items-start gap-2"
+        >
+          <BaseIcon :icon="TriangleAlert" :size="16" class="shrink-0 mt-0.5" />
+          <span>{{ t("about.licenses.degradedNotice") }}</span>
+        </BaseAlert>
+
+        <!-- Grouped view -->
+        <div v-if="!searching" class="flex flex-col gap-2">
+          <section v-for="group in groups" :key="group.license" class="group">
+            <BaseButton
+              variant="action"
+              class="group-head"
+              :aria-expanded="expandedGroups.has(group.license)"
+              @click="toggleGroup(group.license)"
+            >
+              <BaseIcon
+                :icon="
+                  expandedGroups.has(group.license) ? ChevronDown : ChevronRight
+                "
+                :size="16"
+              />
+              <span class="group-license">{{ group.license }}</span>
+              <span class="group-count">{{
+                t("about.licenses.packageCount", group.count)
+              }}</span>
+            </BaseButton>
+            <ul v-if="expandedGroups.has(group.license)" class="pkg-list">
+              <PackageRow
+                v-for="p in group.packages"
+                :key="pkgKey(p)"
+                :pkg="p"
+                :expanded="expandedPkgs.has(pkgKey(p))"
+                @toggle="togglePkg(p)"
+              />
+            </ul>
+          </section>
+        </div>
+
+        <!-- Search results (flat) -->
+        <div v-else class="flex flex-col gap-2">
+          <p v-if="results.length === 0" class="text-sm text-muted">
+            {{ t("about.licenses.noResults", { query: trimmedQuery }) }}
+          </p>
+          <ul v-else class="pkg-list">
             <PackageRow
-              v-for="p in group.packages"
+              v-for="p in results"
               :key="pkgKey(p)"
               :pkg="p"
               :expanded="expandedPkgs.has(pkgKey(p))"
               @toggle="togglePkg(p)"
             />
           </ul>
-        </section>
-      </div>
-
-      <!-- Search results (flat) -->
-      <div v-else class="flex flex-col gap-2">
-        <p v-if="results.length === 0" class="text-sm text-muted">
-          {{ t("about.licenses.noResults", { query: trimmedQuery }) }}
-        </p>
-        <ul v-else class="pkg-list">
-          <PackageRow
-            v-for="p in results"
-            :key="pkgKey(p)"
-            :pkg="p"
-            :expanded="expandedPkgs.has(pkgKey(p))"
-            @toggle="togglePkg(p)"
-          />
-        </ul>
-      </div>
-    </template>
-  </div>
+        </div>
+      </template>
+    </div>
+  </main>
 </template>
 
 <style scoped>
@@ -222,8 +233,7 @@ function togglePkg(p: LicensePackage) {
 }
 /* Card of bordered action pills (group-head + each PackageRow). Padded and
    gapped so each pill's own border doesn't sit against the card border or the
-   next pill — the old flush row separators are gone now that every row carries
-   its border via BaseButton's `action` variant. */
+   next pill. */
 .group {
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-md);

@@ -67,7 +67,26 @@ describe("SettingsPage (hub)", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll(".hub-row")).toHaveLength(7);
+    expect(wrapper.findAll(".hub-row")).toHaveLength(9);
+  });
+
+  it("splits the rows into config and information cards", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const cards = wrapper.findAll("section.hub");
+    expect(cards).toHaveLength(2);
+    // Card 1 — configuring the app.
+    expect(cards[0]!.findAll(".hub-row")).toHaveLength(3);
+    // Card 2 — information & diagnostics (Logs/Security/Permissions/About/
+    // Acknowledgements/Licenses).
+    expect(cards[1]!.findAll(".hub-row")).toHaveLength(6);
+    // The grouping is programmatic, not just visual (WCAG 1.3.1): each
+    // section landmark carries its localized group name.
+    expect(cards[0]!.attributes("aria-label")).toBe("Configure the app");
+    expect(cards[1]!.attributes("aria-label")).toBe(
+      "Information & diagnostics",
+    );
   });
 
   it("navigates into a category on row click", async () => {
@@ -84,8 +103,8 @@ describe("SettingsPage (hub)", () => {
     await wrapper.findAll(".hub-row")[2]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsRepository" });
 
-    // The 4th row is the diagnostics log viewer — leads the docs group
-    // (Logs/Security/Permissions/About) below the settings categories.
+    // The 4th row is the diagnostics log viewer — leads the information card
+    // below the settings categories.
     await wrapper.findAll(".hub-row")[3]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "log" });
 
@@ -97,9 +116,17 @@ describe("SettingsPage (hub)", () => {
     await wrapper.findAll(".hub-row")[5]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsPermissions" });
 
-    // The 7th row is About (overview/licenses; no secret content).
+    // The 7th row is About (overview; no secret content).
     await wrapper.findAll(".hub-row")[6]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "about" });
+
+    // The 8th row is Acknowledgements.
+    await wrapper.findAll(".hub-row")[7]!.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({ name: "settingsAcknowledgements" });
+
+    // The 9th row is Licenses (the auto-scanned inventory).
+    await wrapper.findAll(".hub-row")[8]!.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({ name: "settingsLicenses" });
   });
 
   it("navigates back to entries when Back is clicked", async () => {

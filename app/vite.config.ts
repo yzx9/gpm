@@ -24,7 +24,7 @@ export default defineConfig(async () => ({
     tailwindcss(),
     // Regenerate the open-source license inventory (public/licenses.json) at
     // dev/build start. Staleness-aware; failures are swallowed (the Licenses
-    // tab renders a degraded-state notice when the file is missing/empty).
+    // page renders a degraded-state notice when the file is missing/empty).
     licensesPlugin(),
     // Precompile every locale JSON bundle at build time so the runtime message
     // compiler doesn't ship to the WebView. (`legacy: false` is set on

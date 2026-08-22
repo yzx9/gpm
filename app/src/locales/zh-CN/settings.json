@@ -7,7 +7,13 @@
     "security": "安全",
     "permissions": "权限与数据",
     "about": "关于",
+    "acknowledgements": "致谢",
+    "licenses": "开源许可",
     "logs": "日志"
+  },
+  "groups": {
+    "configure": "应用配置",
+    "information": "信息与诊断"
   },
   "language": {
     "title": "显示语言",

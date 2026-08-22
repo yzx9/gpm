@@ -7,7 +7,13 @@
     "security": "Security",
     "permissions": "Permissions & data",
     "about": "About",
+    "acknowledgements": "Acknowledgements",
+    "licenses": "Licenses",
     "logs": "Logs"
+  },
+  "groups": {
+    "configure": "Configure the app",
+    "information": "Information & diagnostics"
   },
   "language": {
     "title": "Display Language",

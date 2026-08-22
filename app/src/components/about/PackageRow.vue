@@ -5,7 +5,7 @@
 <!-- One expandable dependency row. Shared by the grouped and flat (search)
      views so the row layout, aria, and license-text reveal live in one place.
      The license text is rendered only while expanded (v-if), so closed rows
-     never pay for it — the tab's primary scale control. -->
+     never pay for it — the page's primary scale control. -->
 
 <script setup lang="ts">
 import type { LicensePackage } from "@/components/about/data";

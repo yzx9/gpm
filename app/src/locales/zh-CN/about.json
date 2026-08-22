@@ -1,10 +1,7 @@
 {
   "title": "关于",
-  "tabs": {
-    "overview": "概览",
-    "acknowledgements": "致谢",
-    "licenses": "开源许可"
-  },
+  "acknowledgementsTitle": "致谢",
+  "licensesTitle": "开源许可",
   "overview": {
     "tagline": "一个 Android 优先、仅使用 age 加密的 gopass 密码客户端。",
     "version": "版本",

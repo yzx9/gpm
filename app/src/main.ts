@@ -38,6 +38,7 @@ import {
 } from "./i18n";
 import { installConsoleCapture, installFrontendLogger } from "./log-capture";
 import { installRouteGuards } from "./router-guards";
+import { routes } from "./routes";
 import { reconcileThemeFromBackend } from "./theme";
 
 // Arm console→backend capture FIRST, before any other module runs side effects
@@ -61,149 +62,8 @@ const dialogState = createDialog();
 const scrollLock = createScrollLockController();
 const backHandlerRegistry = createBackHandlerRegistry();
 
-// Screen-capture protection (FLAG_SECURE) is component-level (R031): each
-// secret-bearing component acquires a claim while its secret is on screen (see
-// `useSecureClaim`), so routes carry no `secure` flag and every navigation can
-// animate — the secure↔capturable boundary no longer freezes the transition.
-//
-// Route components are lazy so each page's JS chunk (and its message bundle,
-// loaded by the `beforeEach` guard) loads on demand — keeping the initial
-// payload small.
-const routes = [
-  { path: "/", redirect: "/entries" },
-  {
-    path: "/setup",
-    name: "setup",
-    component: () => import("./pages/SetupPage.vue"),
-  },
-  {
-    path: "/entries",
-    name: "entries",
-    component: () => import("./pages/EntryListPage.vue"),
-  },
-  {
-    path: "/create",
-    name: "create",
-    component: () => import("./pages/CreatePage.vue"),
-  },
-  {
-    path: "/create/preset/:presetId",
-    name: "createPreset",
-    component: () => import("./pages/CreatePresetPage.vue"),
-  },
-  {
-    path: "/create/custom",
-    name: "createCustom",
-    component: () => import("./pages/CreateCustomPage.vue"),
-  },
-  {
-    path: "/generate",
-    name: "generate",
-    component: () => import("./pages/GeneratePasswordPage.vue"),
-  },
-  {
-    path: "/entry/:pathMatch(.*)",
-    name: "entry",
-    component: () => import("./pages/EntryDetailPage.vue"),
-    props: true,
-  },
-  {
-    path: "/revisions/:pathMatch(.*)",
-    name: "revisions",
-    component: () => import("./pages/RevisionsPage.vue"),
-    props: true,
-  },
-  {
-    path: "/edit/:pathMatch(.*)",
-    name: "entryEdit",
-    component: () => import("./pages/EntryEditPage.vue"),
-    props: true,
-  },
-  {
-    path: "/settings",
-    name: "settings",
-    component: () => import("./pages/SettingsPage.vue"),
-    // `bundle` is redundant for the hub (name === "settings" already loads the
-    // bundle) but is set on the hub + its sub-pages for uniformity. The sibling
-    // `sshKey`/`addKey` routes intentionally keep their own namespaces (those
-    // pages read `sshKey.*`/`addKey.*`, not `settings.*`).
-    meta: { bundle: "settings" },
-  },
-  {
-    path: "/settings/general",
-    name: "settingsGeneral",
-    component: () => import("./pages/SettingsGeneralPage.vue"),
-    meta: { bundle: "settings" },
-  },
-  {
-    path: "/settings/identity",
-    name: "settingsIdentity",
-    component: () => import("./pages/SettingsIdentityPage.vue"),
-    meta: { bundle: "settings" },
-  },
-  {
-    path: "/settings/repository",
-    name: "settingsRepository",
-    component: () => import("./pages/SettingsRepositoryPage.vue"),
-    meta: { bundle: "settings" },
-  },
-  {
-    path: "/settings/ssh-key",
-    name: "sshKey",
-    component: () => import("./pages/SshKeyPage.vue"),
-  },
-  {
-    path: "/settings/pat",
-    name: "pat",
-    component: () => import("./pages/PatPage.vue"),
-  },
-  {
-    path: "/settings/add-key",
-    name: "addKey",
-    component: () => import("./pages/AddKeyPage.vue"),
-  },
-  {
-    path: "/history",
-    name: "history",
-    component: () => import("./pages/HistoryPage.vue"),
-  },
-  // About: overview, acknowledgements, and the auto-scanned license tree. Carries
-  // no secret content, so it is NOT marked secure (capturable, like the entry
-  // list / history). Reached via Settings (see SettingsPage) once that page
-  // surfaces the entry; the route exists independently so it's testable now.
-  {
-    path: "/about",
-    name: "about",
-    component: () => import("./pages/AboutPage.vue"),
-  },
-  // Diagnostics log viewer. Standalone namespace like About — the log
-  // is a self-contained viewer, not a settings category. NOT marked secure: the
-  // log surfaces only entry names, which (like the entry list) carry no secret.
-  {
-    path: "/settings/log",
-    name: "log",
-    component: () => import("./pages/LogViewerPage.vue"),
-  },
-  // Security: plain-language summary of how gpm protects secrets. Carries no
-  // secret content, so NOT marked secure (capturable, like About). Reached via
-  // the Settings hub; the `security` locale namespace auto-loads by route name.
-  {
-    path: "/security",
-    name: "security",
-    component: () => import("./pages/SecurityPage.vue"),
-  },
-  // Permissions & data: what gpm accesses (notifications, biometrics, clipboard,
-  // network, files), why, and a deep-link to system settings for the ones Android
-  // suppresses after two denials. Carries no secret, so NOT marked secure
-  // (capturable, like Security). The `permissions` locale namespace auto-loads
-  // via meta.bundle.
-  {
-    path: "/settings/permissions",
-    name: "settingsPermissions",
-    component: () => import("./pages/SettingsPermissionsPage.vue"),
-    meta: { bundle: "permissions" },
-  },
-];
+// The route table lives in ./routes; routes.test.ts pins its i18n-bundle
+// wiring.
 
 const router = createRouter({
   history: createWebHashHistory(),

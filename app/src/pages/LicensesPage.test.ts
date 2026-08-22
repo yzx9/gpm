@@ -6,7 +6,23 @@ import { __resetLicensesCacheForTests } from "@/components/about/data";
 import { mountWithApp } from "@/test/appTestUtils";
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import LicensesSection from "./LicensesSection.vue";
+import LicensesPage from "./LicensesPage.vue";
+
+const { mockReplace } = vi.hoisted(() => ({ mockReplace: vi.fn() }));
+
+vi.mock("vue-router", () => ({
+  createRouter: vi.fn(),
+  createWebHashHistory: vi.fn(),
+  onBeforeRouteLeave: vi.fn(),
+  useRouter: () => ({ push: vi.fn(), replace: mockReplace, back: vi.fn() }),
+  useRoute: () => ({
+    params: {},
+    query: {},
+    name: "",
+    path: "/",
+    fullPath: "/",
+  }),
+}));
 
 // Designed so the two license groups have DIFFERENT counts — that makes the
 // group sort (count desc) deterministic instead of relying on alphabetical
@@ -71,9 +87,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("LicensesSection", () => {
+describe("LicensesPage", () => {
+  function mountPage() {
+    return mountWithApp(LicensesPage).wrapper;
+  }
+
+  it("renders the title and the search box", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.find("h1").text()).toBe("Licenses");
+    expect(wrapper.find('input[type="search"]').exists()).toBe(true);
+  });
+
+  it("navigates back to the Settings hub when Back is clicked", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.find('button[aria-label="Back"]').trigger("click");
+
+    // navBack falls back to replace when there is no history to pop.
+    expect(mockReplace).toHaveBeenCalledWith({ name: "settings" });
+  });
+
   it("renders the summary counts after loading", async () => {
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     // Assert on the summary element specifically — version strings elsewhere
     // also contain digits, so a whole-text check would give false confidence.
@@ -84,7 +121,7 @@ describe("LicensesSection", () => {
   });
 
   it("groups packages by license (collapsed by default)", async () => {
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     // Two distinct license groups.
     const heads = wrapper.findAll(".group-head");
@@ -97,7 +134,7 @@ describe("LicensesSection", () => {
   });
 
   it("expands a group to reveal its packages, then a package to reveal text", async () => {
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     // Open the first group (MIT OR Apache-2.0: serde, age, vue).
     await wrapper.findAll(".group-head")[0].trigger("click");
@@ -113,7 +150,7 @@ describe("LicensesSection", () => {
   });
 
   it("search switches to a flat filtered list", async () => {
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     // Groups present before searching.
     expect(wrapper.findAll(".group-head").length).toBe(2);
@@ -136,7 +173,7 @@ describe("LicensesSection", () => {
   });
 
   it("shows the no-results message for an unmatched query", async () => {
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     await wrapper.find('input[type="search"]').setValue("does-not-exist");
     await flushPromises();
@@ -147,7 +184,7 @@ describe("LicensesSection", () => {
   it("shows the degraded notice when the inventory is incomplete", async () => {
     __resetLicensesCacheForTests();
     mockFetchOk({ ...sample, complete: false, note: "incomplete" });
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.text()).toContain("incomplete");
   });
@@ -155,7 +192,7 @@ describe("LicensesSection", () => {
   it("shows the empty alert when the inventory is complete but has 0 packages", async () => {
     __resetLicensesCacheForTests();
     mockFetchOk({ ...sample, packages: [], ecosystems: {} });
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.text()).toContain("No license data available.");
     // Not the failure alert, and no summary.
@@ -171,7 +208,7 @@ describe("LicensesSection", () => {
       "fetch",
       vi.fn().mockResolvedValue({ ok: false, status: 500 }),
     );
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.text()).toContain("Couldn't load the license inventory.");
     expect(wrapper.find(".summary").exists()).toBe(false);
@@ -187,7 +224,7 @@ describe("LicensesSection", () => {
       ),
     };
     mockFetchOk(noText);
-    const { wrapper } = mountWithApp(LicensesSection);
+    const wrapper = mountPage();
     await flushPromises();
     await wrapper.findAll(".group-head")[0].trigger("click");
     const serdeRow = wrapper

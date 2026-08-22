@@ -11,11 +11,11 @@
 //
 // Failure policy:
 //  - serve (dev): warn and keep going — a missing file just shows the Licenses
-//    tab's degraded notice, and the next server start retries.
+//    page's degraded notice, and the next server start retries.
 //  - build (release): rethrow on a generator EXCEPTION (e.g. can't write the
 //    file). Note this does NOT fire when cargo is absent: generateLicenses
 //    swallows a cargo failure and writes a degraded (complete:false) doc, which
-//    ships with the tab's "incomplete" notice. That's academic in practice — a
+//    ships with the page's "incomplete" notice. That's academic in practice — a
 //    real `tauri build` compiles the Rust backend, so cargo metadata succeeds.
 
 import { generateLicenses } from "./gen-licenses.mjs";

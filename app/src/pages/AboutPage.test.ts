@@ -2,39 +2,52 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import { __resetLicensesCacheForTests } from "@/components/about/data";
 import { mountWithApp } from "@/test/appTestUtils";
+import { invoke } from "@tauri-apps/api/core";
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import pkg from "../../package.json";
 import AboutPage from "./AboutPage.vue";
 
-beforeEach(() => {
-  __resetLicensesCacheForTests();
-  // Licenses tab fetches on mount; stub a minimal valid response.
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          generatedAt: null,
-          complete: true,
-          note: "",
-          ecosystems: {},
-          packages: [],
-        }),
-    }),
-  );
-});
+vi.mock("@tauri-apps/api/core");
+vi.mock("@/utils/open-external", () => ({
+  openExternal: vi.fn().mockResolvedValue(undefined),
+}));
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+const RELEASES_URL = "https://github.com/yzx9/gpm/releases/latest";
+// Resolve after import so the module mock above is in place.
+const { openExternal } = await import("@/utils/open-external");
 
-describe("AboutPage", () => {
-  it("defaults to the Overview tab", async () => {
-    const { wrapper } = mountWithApp(AboutPage);
+describe("AboutPage (RFC R090 update check)", () => {
+  // Per-command overrides; `get_update_status` is driven per test.
+  const overrides: Record<string, unknown> = {};
+
+  function installMock() {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_app_config") return Promise.resolve({});
+      if (cmd === "acknowledge_update") return Promise.resolve();
+      if (cmd === "set_update_check") return Promise.resolve({});
+      if (cmd in overrides) return Promise.resolve(overrides[cmd]);
+      return Promise.resolve(undefined);
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const k of Object.keys(overrides)) delete overrides[k];
+    installMock();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mountPage() {
+    return mountWithApp(AboutPage).wrapper;
+  }
+
+  it("renders the overview content", async () => {
+    const wrapper = mountPage();
     await flushPromises();
     // Overview identity card: the app name (first <h2>) and the version.
     expect(wrapper.find("h2").text()).toContain("gpm");
@@ -42,31 +55,112 @@ describe("AboutPage", () => {
     expect(wrapper.text()).toContain("Design goals");
   });
 
-  it("switches to the Licenses tab", async () => {
-    const { wrapper } = mountWithApp(AboutPage);
-    await flushPromises();
-    // Overview is up first; the search box is not yet present.
-    expect(wrapper.find('input[type="search"]').exists()).toBe(false);
-
-    // Select the 3rd pill (Licenses) by firing `change` on its radio directly
-    // — deterministic vs. relying on jsdom label→control activation.
-    const radios = wrapper.findAll('input[name="about-tabs"]');
-    await radios[2].trigger("change");
+  it("renders no update dot when up to date", async () => {
+    overrides.get_update_status = {
+      available: false,
+      unacknowledged: false,
+      latest_version: null,
+    };
+    const wrapper = mountPage();
     await flushPromises();
 
-    // Licenses tab renders its search input.
-    expect(wrapper.find('input[type="search"]').exists()).toBe(true);
+    expect(wrapper.find(".update-dot").exists()).toBe(false);
+    // The version entry stays a quiet button even with nothing to show.
+    expect(wrapper.find(".version-btn").exists()).toBe(true);
   });
 
-  it("switches to the Acknowledgements tab", async () => {
-    const { wrapper } = mountWithApp(AboutPage);
+  it("lights the dot and routes the version tap to the release page", async () => {
+    overrides.get_update_status = {
+      available: true,
+      unacknowledged: true,
+      latest_version: "v0.19.0",
+    };
+    const wrapper = mountPage();
     await flushPromises();
-    const radios = wrapper.findAll('input[name="about-tabs"]');
-    await radios[1].trigger("change");
+
+    expect(wrapper.find(".update-dot").exists()).toBe(true);
+    // No standalone update link on the page anymore — the dialog owns it.
+    expect(wrapper.find(".update-link").exists()).toBe(false);
+
+    // Version tap opens the dialog; its primary action opens the release page.
+    await wrapper.find(".version-btn").trigger("click");
     await flushPromises();
-    // gopass is the first/primary acknowledgement.
-    expect(wrapper.text()).toContain("gopass");
-    // a11y: external ack links announce they open a new window (WCAG G201).
-    expect(wrapper.text()).toContain("opens in a new window");
+    const primary = wrapper.findAll(".dialog-actions button")[0]!;
+    expect(primary.text()).toBe("Go to download page");
+    await primary.trigger("click");
+    await flushPromises();
+
+    expect(openExternal).toHaveBeenCalledWith(RELEASES_URL);
+  });
+
+  it("keeps the About-page dot lit even after the update is acknowledged", async () => {
+    // `unacknowledged: false` but `available: true`: the About-page dot ignores
+    // the ack (RFC R090) — only the Settings-entry dot falls quiet.
+    overrides.get_update_status = {
+      available: true,
+      unacknowledged: false,
+      latest_version: "v0.19.0",
+    };
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find(".update-dot").exists()).toBe(true);
+    // Nothing unacknowledged ⇒ no ack call this visit.
+    expect(invoke).not.toHaveBeenCalledWith("acknowledge_update");
+  });
+
+  it("acknowledges the release on mount when it is unacknowledged", async () => {
+    overrides.get_update_status = {
+      available: true,
+      unacknowledged: true,
+      latest_version: "v0.19.0",
+    };
+    mountPage();
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("acknowledge_update");
+  });
+
+  it("toggles the update-check pref from the version dialog's footer link", async () => {
+    overrides.get_update_status = {
+      available: false,
+      unacknowledged: false,
+      latest_version: "v0.19.0",
+    };
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.find(".version-btn").trigger("click");
+    await flushPromises();
+    await wrapper.find(".pref-link").trigger("click");
+    await flushPromises();
+
+    // get_app_config returns {} ⇒ the pref reads as default-on, so the link
+    // offers to disable it.
+    expect(invoke).toHaveBeenCalledWith("set_update_check", { enabled: false });
+  });
+
+  it("re-reads the cached status when the dialog closes", async () => {
+    overrides.get_update_status = {
+      available: false,
+      unacknowledged: false,
+      latest_version: "v0.19.0",
+    };
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.find(".version-btn").trigger("click");
+    await flushPromises();
+    // Cancel closes; the dot source is refreshed so a manual probe made inside
+    // the dialog is reflected without remounting the page.
+    await wrapper.findAll(".dialog-actions button")[1]!.trigger("click");
+    await flushPromises();
+
+    const calls = vi
+      .mocked(invoke)
+      .mock.calls.filter(
+        (call: [string, ...unknown[]]) => call[0] === "get_update_status",
+      );
+    expect(calls.length).toBeGreaterThanOrEqual(2);
   });
 });

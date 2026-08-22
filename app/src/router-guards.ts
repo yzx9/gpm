@@ -31,12 +31,15 @@ export function installRouteGuards(router: Router): void {
     }
 
     // Load the arriving route's message bundle for the current locale, alongside
-    // the (lazy) component chunk. Fire-and-forget — a late bundle just re-renders
-    // with `fallbackLocale` covering the gap. Never throws (loadBundle swallows a
-    // missing bundle), so it can't block or abort the navigation. The namespace
-    // defaults to the route name; a route may override it via `meta.bundle` when
-    // its strings live under a different namespace (e.g. the settings sub-pages
-    // share the `settings` bundle).
+    // the (lazy) component chunk. Fire-and-forget — the page renders with
+    // whatever is loaded and re-renders once the bundle merges. Until then the
+    // not-yet-loaded namespace's keys may briefly show raw (fallbackLocale
+    // covers a *missing translation*, not a not-yet-loaded namespace — for
+    // locale==fallbackLocale there is nothing to fall back to). Never throws
+    // (loadBundle swallows a missing bundle), so it can't block or abort the
+    // navigation. The namespace defaults to the route name; a route may
+    // override it via `meta.bundle` when its strings live under a different
+    // namespace (e.g. the settings sub-pages share the `settings` bundle).
     const ns =
       (typeof to.meta?.bundle === "string" && to.meta.bundle) || to.name;
     if (typeof ns === "string") {
