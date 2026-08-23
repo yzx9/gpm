@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.2] - 2026-08-23
+
 ### Changed
 
 - **Settings** now groups its entries into two cards — one for configuring the app (**General**, **Lock & Identity**, **Repository**) and one for information and diagnostics (**Logs**, **Security**, **Permissions**, **About**). The **About** screen drops its tabs: **Acknowledgements** and **Licenses** are now their own entries directly on the Settings screen, so each opens in one tap instead of hiding behind About.
@@ -523,7 +525,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.19.2...HEAD
+[v0.19.2]: https://github.com/yzx9/gpm/compare/v0.19.1...v0.19.2
 [v0.19.1]: https://github.com/yzx9/gpm/compare/v0.19.0...v0.19.1
 [v0.19.0]: https://github.com/yzx9/gpm/compare/v0.18.1...v0.19.0
 [v0.18.1]: https://github.com/yzx9/gpm/compare/v0.18.0...v0.18.1
