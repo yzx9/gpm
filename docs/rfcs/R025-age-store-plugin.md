@@ -3,6 +3,7 @@
 **Priority:** P3
 **Status:** Deprecated
 **Phase:** Future
+**Revision:** 1
 
 > **Deprecated.** Reassessed and set aside as active future work. The technical premise holds — the engine
 > is genuinely a pure library with no Tauri/platform coupling, so "becoming plugin-ready" is documentation,

@@ -1,7 +1,7 @@
 ---
 pm: <name>
 created: YYYY-MM-DD
-version: 1.0.0
+revision: 1
 scope: <kebab-token> # Conventional-Commit scope for this feature domain
 ---
 
@@ -22,6 +22,9 @@ The `scope:` frontmatter field is this feature's Conventional-Commit scope token
 short, stable, lowercase kebab-case (e.g. the `007-app-lock` spec uses `lock`). The
 commit-msg hook reads it live, so `feat(<token>): ...` is allowed as soon as this spec
 lands; see CONTRIBUTING.md -> Commit Conventions for the full scope rules.
+
+The `revision:` frontmatter is a plain integer — bump it by 1 on each substantive content
+change (typos and formatting don't count); it carries no compatibility semantics.
 
 Only `prd.md` is required. `design.md` / `security.md` / `research.md` are optional
 companions — see 000-template/README.md. Delete this comment when filling it in.

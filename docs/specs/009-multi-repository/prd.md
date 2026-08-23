@@ -1,7 +1,7 @@
 ---
 pm: Zexin Yuan
 created: 2026-08-06
-version: 1.0.0
+revision: 1
 scope: repo
 ---
 
