@@ -1,9 +1,9 @@
 # Android autofill (Autofill Framework)
 
 **Priority:** P1
-**Status:** Draft
-**Phase:** Future
-**Revision:** 1
+**Status:** Accepted
+**Phase:** Now
+**Revision:** 2
 
 ## What
 
@@ -33,8 +33,8 @@ transits the clipboard) is in the PRD. The RFC-level question is why the feature
 was excluded at launch and why that no longer holds: A001 deferred autofill on
 the grounds that the store, the at-rest sealing, the app-lock biometric gate, and
 the local-plugin pattern all needed to exist first. They do now, so this RFC
-re-evaluates that exclusion and records the shape a service would take — without
-yet committing to build it.
+re-evaluates that exclusion and records the shape the service takes — and the
+build is now committed as the minimal MVP below.
 
 ## Context
 
@@ -60,9 +60,10 @@ reuses that same bootstrap, so basic store reachability is no longer the open
 question. What remains open — and is still prototype-gated — is the half the
 worker never exercises: reaching the **biometric identity unlock** (the vault
 key) from a cold service process, since the worker is pull-only and reads only
-the auth-free master key. It is resolved by a minimal prototype before any
-matching or UI is built: prove that a fill returned from a service-launched
-surface actually lands in the target fields after a cold start. If it cannot
+the auth-free master key. It is resolved by the first milestone of the committed
+build: prove that a fill returned from a service-launched surface actually lands
+in the target fields after a cold start, with the vault key unsealed by a
+BiometricPrompt hosted on that surface. If it cannot
 reach the unlocked identity, the design pivots — toward a service-side bootstrap
 that does not depend on the main activity (the deferred identity-agent, R042), or
 a native picker — before the rest is invested in. The field-id plumbing the OS
@@ -80,6 +81,57 @@ mechanisms themselves (path-primary for web, a learned encrypted map for native
 apps, body-`url:` mining, Public-Suffix-List-aware domains, a pre-unlock picker
 for multiple matches) are specified in the PRD; this RFC only records why the
 path is the key rather than a built index.
+
+## The minimal MVP (committed scope)
+
+The first build is not the throwaway skeleton the original effort sketch
+described — it is the MVP pulled forward, cut to the minimum a user can actually
+fill a password with, and it ships straight to release (the service is inert
+until the user enables it in the system autofill settings; there is no in-app
+entry point). The prototype gate survives as the first hard-stop milestone
+inside the build; if it fails, the design pivots as above.
+
+- **Native fill surface, not the reused WebView UI.** The PRD sketched reusing
+  001's unlock/search UI ("no new search screen is built"). That does not
+  survive contact with the platform: a second Tauri-hosted activity is not
+  viable (Tauri's `PluginManager` is a process-wide singleton bound to one
+  activity, and the mobile runtime bootstraps a single WebView), and relaunching
+  the singleTask launcher `MainActivity` in a fill mode leaves no clean way to
+  hand the fill result back to the OS. The fill surface is therefore a dedicated
+  plain (non-Tauri) activity in the app source set. This supersedes the PRD's
+  reuse decision; the deviation and the follow-up plan are recorded in a
+  follow-up RFC once the MVP ships — the PRD itself is not amended.
+- **Unlock once per process.** The first pick in a cold fill surface runs the
+  STRONG BiometricPrompt over the real vault key and unseals the real identity;
+  the identity is then cached for the process lifetime, and later fills in the
+  same process skip the prompt. This is a deliberate relaxation of the
+  immediate-wipe per-fill default the threat model describes — the accepted v0
+  trade-off, with per-fill re-lock / idle TTL deferred to the security-balance
+  pass. The cache also does not wipe on an explicit in-app re-lock in the MVP
+  (there is no lock signal reaching the fill surface); closing that gap is the
+  top candidate of the follow-up RFC.
+- **No matching.** Every fill goes through the full entry list — unsorted
+  paths, plus a substring type-to-filter. Sorting, recents, path/domain
+  matching, and the learned app→entry map all remain future phases.
+- **Fill values follow gopass semantics:** password = the secret's first line;
+  username = the body `login:` field (then `username:`), falling back to the
+  entry path's last segment; a password-only field gets only the password.
+- **The service callback stays trivial.** `onFillRequest` does a hint scan and
+  returns one auth-required dataset — zero store access, zero precondition
+  checks — so it can never block or crash the OS's fill dispatch. Precondition
+  failures (store not set up; App Lock on with no enrolled biometrics; a
+  passphrase-locked identity without auto-unlock) surface as empty states in
+  the activity. App Lock off is NOT a failure mode: the identity is
+  master-sealed there, and fills work without any prompt.
+- **Platform floor.** The Autofill Framework is API 26+ while the app's minSdk
+  is 24; the service code is guarded accordingly and simply inert on 24/25 (the
+  OS never binds it there).
+- **Verification.** The provider cannot fill its own package, so the repo
+  carries a minimal standalone target app (`tools/autofill-target`, two
+  hint-declared fields; its README documents the build) as the deterministic
+  device-smoke target. Automated coverage follows the R077 pattern: host tests
+  for the headless Rust cores, JVM tests for the Kotlin logic (hint-scan
+  classification, fill-value mapping, JSON contract round-trip, unlock cache).
 
 ## Alternatives considered
 
@@ -111,18 +163,15 @@ path is the key rather than a built index.
 
 ## Effort
 
-Medium-large, and prototype-gated. The first step is a minimal prototype that
-proves a fill returned from a service-launched surface lands in the target fields
-after a cold start — the go/no-go for the whole feature, and small (a service
-skeleton in the app source set and a hard-coded fill, no store, no biometric, no
-search). Past that gate, the MVP — the service, the auth-required suggestion that
-launches the fill-mode search-and-pick, and the fill-back into the target fields
-— is ~1-2 weeks (human), since it leans almost entirely on existing unlock,
-search, and store plumbing and the R077 headless bootstrap. The learned
-association index (encrypted at rest), the path/body matching, and the inline
-phase add ~3-5 days plus a phase. The cold-process reachability question
-dominates the risk; the human cost dominates the effort. ~30 min (CC) to scaffold
-the service skeleton in the app source set and the manifest `<service>` entry.
+Medium. The committed scope is the minimal MVP above, with the cold-process
+biometric reachability as the first hard-stop milestone inside the build rather
+than a separate pre-commitment prototype. It leans almost entirely on existing
+unlock, store, and R077-bootstrap plumbing, so the earlier ~1-2 week (human) MVP
+estimate shrinks by the matching and search-quality work it now excludes; the
+native fill activity and the two headless Rust entry points (list, decrypt) are
+the main new surface. The learned association index (encrypted at rest), the
+path/body matching, and the inline phase remain future (~3-5 days plus a phase
+when taken). The cold-process reachability still dominates the risk.
 
 ## Depends on / Supersedes
 
@@ -133,7 +182,8 @@ store reachability is inherited rather than re-proven (only the biometric
 identity unlock from a cold service process is still prototype-gated). Relates to
 `0042-identity-agent`: an autofill service is the clearest second consumer of
 unlocked-identity state outside the main activity — the pressure that RFC
-anticipates and defers — and if the prototype shows the service cannot reach the
+anticipates and defers (the MVP's process-lifetime identity cache is the first,
+smallest step in that direction) — and if the milestone shows the service cannot reach the
 unlocked identity from a cold process, it forces the agent extraction 0042 parks.
 Builds on the at-rest AEAD sealing and app-launch biometric gate (their own RFCs
 shipped and were removed); the "new local plugin" framing an earlier draft of
