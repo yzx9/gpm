@@ -58,4 +58,4 @@ Viewing a past secret revision (the shipped secret-revisions feature, formerly R
 
 ## Depends on / Supersedes
 
-None — independent of other RFCs. (R004 was previously listed as a dependency, on the assumption it would establish the identity type system first; R004 is now scoped to git-credential rotation only and touches no identity work, so the two are independent.)
+None — independent of other RFCs. (Connection editing was previously listed as a dependency — R004, now deprecated and superseded by `R098` — on the assumption it would establish the identity type system first; it is scoped to git credentials only and touches no identity work, so the two are independent.)

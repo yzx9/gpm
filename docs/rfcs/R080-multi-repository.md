@@ -145,6 +145,9 @@ per-repository locks, caches, and keys are essentially free from the existing de
   that model intact.
 - Related to `R005` (multi-identity) — orthogonal axes: multi-repository is vault-level
   isolation, multi-identity is role-level within one repository.
+- Related to `R098` (vault connection editing) — credential rotation and same-repo URL edits
+  are connection-level operations on one repository, layered on the per-vault Settings surface
+  this design introduces.
 - The repository export/import RFC (`R078`) becomes a third "add vault" source under this
   design.
 - Exporting **every vault in one backup artifact** is a future capability this design unlocks
