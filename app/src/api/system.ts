@@ -344,7 +344,11 @@ export async function screenSecureAvailable(): Promise<boolean> {
  * serialization test to pin these exact wire strings.
  */
 export type RuntimePlatform =
-  "android" | "linux" | "macos" | "windows" | "unknown";
+  | "android"
+  | "linux"
+  | "macos"
+  | "windows"
+  | "unknown";
 
 /**
  * General platform fact for UI gating (distinct from {@link screenSecureAvailable},

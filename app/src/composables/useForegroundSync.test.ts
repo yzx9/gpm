@@ -334,7 +334,11 @@ describe("useForegroundSync", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "get_app_config")
-        return { autosync: true, repositories: ["test-repo"], last_active: "test-repo" };
+        return {
+          autosync: true,
+          repositories: ["test-repo"],
+          last_active: "test-repo",
+        };
       if (cmd === "background_sync") throw new Error("net down");
       return undefined;
     });
@@ -362,7 +366,11 @@ describe("useForegroundSync", () => {
     let call = 0;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "get_app_config")
-        return { autosync: true, repositories: ["test-repo"], last_active: "test-repo" };
+        return {
+          autosync: true,
+          repositories: ["test-repo"],
+          last_active: "test-repo",
+        };
       if (cmd === "background_sync")
         return call++ === 0 ? DIVERGED : FF_CHANGED;
       return undefined;

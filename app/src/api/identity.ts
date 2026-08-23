@@ -57,7 +57,9 @@ export async function generateSshKey(
 }
 
 /** Read the identity's SSH public key (for display / copy to the remote). */
-export async function getSshPublicKey(repoId: string): Promise<SshPublicKeyResult> {
+export async function getSshPublicKey(
+  repoId: string,
+): Promise<SshPublicKeyResult> {
   return invoke<SshPublicKeyResult>("get_ssh_public_key", { repoId });
 }
 

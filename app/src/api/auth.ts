@@ -28,7 +28,10 @@ export async function getAuthState(): Promise<AuthState> {
  * {@link AppError} (`WRONG_PASSPHRASE` etc.) on failure; resolves once the
  * identity cache is populated.
  */
-export async function unlock(repoId: string, passphrase: string): Promise<void> {
+export async function unlock(
+  repoId: string,
+  passphrase: string,
+): Promise<void> {
   await invoke("unlock", { repoId, passphrase });
 }
 

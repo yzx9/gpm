@@ -81,7 +81,10 @@ export async function importTrustedGpgKeyFile(
   repoId: string,
   label: string,
 ): Promise<TrustedGpgKey> {
-  return invoke<TrustedGpgKey>("import_trusted_gpg_key_file", { repoId, label });
+  return invoke<TrustedGpgKey>("import_trusted_gpg_key_file", {
+    repoId,
+    label,
+  });
 }
 
 /** Remove a trusted signing key by fingerprint. */
@@ -148,5 +151,9 @@ export async function listCommitSignatures(
   offset: number,
   limit: number,
 ): Promise<CommitPage> {
-  return invoke<CommitPage>("list_commit_signatures", { repoId, offset, limit });
+  return invoke<CommitPage>("list_commit_signatures", {
+    repoId,
+    offset,
+    limit,
+  });
 }

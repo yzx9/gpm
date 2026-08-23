@@ -335,7 +335,11 @@ async function onPassphraseSubmit() {
         (await getConfig()).unlock_identity_with_app ?? false;
       toast.success(t("settings.passphrase.changedToast"));
     } else if (mode === "enable-biometric") {
-      await enableBiometricUnlock(repoId, ppCurrent.value, identityEnrollPrompt());
+      await enableBiometricUnlock(
+        repoId,
+        ppCurrent.value,
+        identityEnrollPrompt(),
+      );
       biometricEnabled.value = true;
       toast.success(t("settings.biometric.enabledToast"));
     } else {
