@@ -1,4 +1,16 @@
 <resources>
     <string name="app_name">gpm</string>
     <string name="main_activity_title">gpm</string>
+    <string name="fill_activity_title">gpm</string>
+    <string name="autofill_dataset_label">gpm</string>
+    <string name="fill_filter_hint">Filter</string>
+    <string name="fill_empty_not_set_up">gpm is not set up yet. Open the app to finish setting up your store.</string>
+    <string name="fill_empty_no_repo">No repository yet. Open the app to add one.</string>
+    <string name="fill_empty_open_app">The store isn\'t ready. Open the app once, then try again.</string>
+    <string name="fill_empty_mid_migrate">gpm is finishing an update. Open the app once, then try again.</string>
+    <string name="fill_empty_no_entries">No entries yet.</string>
+    <string name="fill_empty_passphrase">This store needs a passphrase that isn\'t saved for automatic unlock. Open gpm to unlock it, then try again.</string>
+    <string name="fill_empty_app_locked">Unlock could not be completed. Open gpm and try again.</string>
+    <string name="fill_empty_no_biometrics">No fingerprint or face unlock is available. Re-enroll biometrics, or open gpm to adjust App Lock.</string>
+    <string name="fill_error_generic">Something went wrong. Try again.</string>
 </resources>

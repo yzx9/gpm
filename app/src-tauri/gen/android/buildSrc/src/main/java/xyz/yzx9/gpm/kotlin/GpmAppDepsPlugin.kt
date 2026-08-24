@@ -29,7 +29,13 @@ open class GpmAppDepsPlugin : Plugin<Project> {
             val deps = project.dependencies
             // WorkManager: the app-owned SyncWorker extends CoroutineWorker.
             deps.add("implementation", "androidx.work:work-runtime-ktx:2.9.0")
-            // Robolectric JVM tests for the app source set (HeadlessBootstrap).
+            // Autofill (R056): FillAuthActivity hosts the STRONG BiometricPrompt
+            // (same version the keystore plugin pins) + lifecycleScope for the
+            // headless JNI calls.
+            deps.add("implementation", "androidx.biometric:biometric:1.1.0")
+            deps.add("implementation", "androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
+            // Robolectric JVM tests for the app source set (HeadlessBootstrap,
+            // the autofill components).
             deps.add("testImplementation", "org.robolectric:robolectric:4.14.1")
             deps.add("testImplementation", "androidx.test:core:1.6.1")
             deps.add("testImplementation", "junit:junit:4.13.2")

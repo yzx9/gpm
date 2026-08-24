@@ -14,11 +14,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rustpass::{Store, SyncOutcome};
+use rustpass::SyncOutcome;
 use serde::Serialize;
 
-use crate::app_config::{AppConfigStore, PeekOutcome};
-use crate::migrations::APP_CONFIG_SCHEMA_VERSION;
+use crate::app_config::AppConfigStore;
 
 /// The result crossed back to `Kotlin` as JSON, then mapped to a `WorkManager`
 /// `Result` (`ok`/`skipped` → `Result.success()`, `error` → `retry`/`failure`).
@@ -57,43 +56,22 @@ pub(crate) async fn run_headless_sync(
     config_dir: PathBuf,
     master_key_b64: String,
 ) -> BackgroundSyncResult {
-    // R074: the auth-free key must be decoded FIRST — cadence + autosync now
-    // live in the sealed merged app.json, which is unreadable without it. The
-    // key arrives base64-encoded (the Rust↔Keystore IPC shape). Missing ⇒ the
-    // store isn't set up yet (R064: the auth-free master is permanent, so its
-    // absence is never "App Lock on") — skip, don't error.
-    let Some(master_key) = crate::decode_master_key(&master_key_b64) else {
-        return BackgroundSyncResult::Skipped { reason: "no_key" };
-    };
-
-    let app_cfg = AppConfigStore::new(&config_dir).await;
-    // The device facade (rooted at config_dir) reads the sealed merged
-    // `app.json` (cadence + autosync + the registry). The per-repo facades for
-    // the pull fan-out are built inside `sync_registered_repositories`.
-    let device = Arc::new(Store::new(config_dir.clone(), Some(master_key)));
-    // R064: the worker is pull-only — auth-free master only, never the vault
-    // key. Drop the vault_seal bridge so no identity key sits in worker memory.
-    device.set_vault_key(None);
-    app_cfg.set_store(Arc::clone(&device));
-    // Schema gate (D2): a separate-process WorkManager fire can land mid-m0010,
-    // when the repo files are half-moved and the registry is already non-empty.
-    // Skip (never error) until the schema settles to current. Absent/Corrupt
-    // fall through — an unconfigured app skips at the cadence gate anyway.
-    if matches!(
-        app_cfg.peek_schema_version().await,
-        PeekOutcome::Version(v) if v < APP_CONFIG_SCHEMA_VERSION
-    ) {
-        return BackgroundSyncResult::Skipped {
-            reason: "mid_migrate",
+    // Shared headless gate chain (key decode → device facade → schema gate →
+    // config reload); see `headless::app_context` for the R074/R064/D2
+    // rationale behind the order.
+    let (master_key, app_cfg) =
+        match crate::headless::app_context(&config_dir, &master_key_b64).await {
+            crate::headless::HeadlessGates::Skipped(reason) => {
+                return BackgroundSyncResult::Skipped { reason };
+            }
+            crate::headless::HeadlessGates::Error { message } => {
+                return BackgroundSyncResult::Error { message };
+            }
+            crate::headless::HeadlessGates::Ready {
+                master_key,
+                app_cfg,
+            } => (master_key, app_cfg),
         };
-    }
-    // Load the sealed merged config so the gates below read the persisted
-    // cadence + autosync (not cold-start defaults).
-    if let Err(e) = app_cfg.reload().await {
-        return BackgroundSyncResult::Error {
-            message: e.to_string(),
-        };
-    }
     // Cadence gate.
     if app_cfg.background_sync().is_off() {
         return BackgroundSyncResult::Skipped { reason: "disabled" };

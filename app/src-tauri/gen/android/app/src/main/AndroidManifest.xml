@@ -33,5 +33,29 @@
             android:name="android.support.FILE_PROVIDER_PATHS"
             android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- R056 autofill: the OS binds this when the user picks gpm as the
+             system autofill service (system settings only — no in-app entry).
+             Deliberately no android.autofill meta-data (optional compat-mode/
+             locales configuration, added when inline/locales need it). -->
+        <service
+            android:name=".GpmAutofillService"
+            android:exported="true"
+            android:label="@string/autofill_dataset_label"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+        </service>
+
+        <!-- The native fill surface: launched only by the service's dataset
+             auth intent, never directly. -->
+        <activity
+            android:name=".FillAuthActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:label="@string/fill_activity_title"
+            android:noHistory="true"
+            android:theme="@style/Theme.gpm" />
     </application>
 </manifest>

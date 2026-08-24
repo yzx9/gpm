@@ -91,7 +91,10 @@ fn encrypt_to_recipient(plaintext: &[u8], recipient_str: &str) -> Vec<u8> {
 /// Build a bare git repo (acts as the remote) seeded with `entries` encrypted to
 /// the test recipient. Mirrors `rustpass`'s `create_test_git_repo` but we only
 /// need the bare side — `Store::configure` clones it into the config dir.
-fn create_bare_repo(entries: &[(&str, &[u8])], recipient_str: &str) -> tempfile::TempDir {
+pub(super) fn create_bare_repo(
+    entries: &[(&str, &[u8])],
+    recipient_str: &str,
+) -> tempfile::TempDir {
     let work_dir = tempfile::tempdir().unwrap();
     let bare_dir = tempfile::tempdir().unwrap();
 

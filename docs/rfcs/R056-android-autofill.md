@@ -101,10 +101,12 @@ inside the build; if it fails, the design pivots as above.
   plain (non-Tauri) activity in the app source set. This supersedes the PRD's
   reuse decision; the deviation and the follow-up plan are recorded in a
   follow-up RFC once the MVP ships — the PRD itself is not amended.
-- **Unlock once per process.** The first pick in a cold fill surface runs the
-  STRONG BiometricPrompt over the real vault key and unseals the real identity;
-  the identity is then cached for the process lifetime, and later fills in the
-  same process skip the prompt. This is a deliberate relaxation of the
+- **Unlock once per process, gating the list.** The first entry into a cold
+  fill surface (App Lock on) runs the STRONG BiometricPrompt over the real
+  vault key BEFORE the entry list loads — entry names are store metadata and
+  sit behind the same wall as the in-app list; the key is then cached for the
+  process lifetime, and later fills in the same process skip the prompt. This
+  is a deliberate relaxation of the
   immediate-wipe per-fill default the threat model describes — the accepted v0
   trade-off, with per-fill re-lock / idle TTL deferred to the security-balance
   pass. The cache also does not wipe on an explicit in-app re-lock in the MVP

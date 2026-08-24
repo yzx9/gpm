@@ -25,3 +25,8 @@
 # name. HeadlessBootstrap is reached through the call graph from
 # SyncWorker.doWork, so it needs no explicit keep.
 -keep class xyz.yzx9.gpm.SyncWorker { *; }
+
+# R056: AutofillBridge's external funs are resolved by JNI symbol name (the
+# service/activity are manifest-referenced, so AGP's manifest keeps cover
+# them).
+-keep class xyz.yzx9.gpm.AutofillBridge { *; }
