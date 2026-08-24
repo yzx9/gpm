@@ -14,7 +14,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@lucide/vue": "^1.31.0",
+    "@lucide/vue": "^1.33.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2",
     "@tauri-apps/plugin-notification": "^2.3.3",
@@ -24,7 +24,7 @@
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
-    "@intlify/unplugin-vue-i18n": "^11.2.4",
+    "@intlify/unplugin-vue-i18n": "^11.2.5",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^6.0.8",
@@ -32,9 +32,9 @@
     "jsdom": "^30.0.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10",
-    "vue-tsc": "^3.3.9"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11",
+    "vue-tsc": "^3.3.10"
   },
   "engines": {
     "node": ">=22"
