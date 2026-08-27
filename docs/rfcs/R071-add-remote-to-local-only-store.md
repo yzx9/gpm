@@ -8,8 +8,8 @@ Let a store that was created (or cloned) without a remote gain one later, from *
 Repository**. Today the repo connection (URL + credentials) is fixed at setup; a local-only store
 has no in-product path to add `origin`, so the only way to start syncing is to wipe and re-clone —
 which loses any local-only commits. This RFC adds that path as the no-remote → remote slice of vault
-connection editing (R098), which scopes itself to editing an existing connection and does not
-contemplate this transition.
+connection editing, which scopes itself to editing an existing connection and does not contemplate
+this transition.
 
 Serves `docs/specs/005-git-storage` (the repo-connection lifecycle: setup / reconfigure).
 
@@ -76,11 +76,11 @@ and ideally badge the local-only state so the no-op sync stops looking like succ
 
 ## Alternatives considered
 
-- **Fold into R098 (broader connection editing) and skip a separate RFC.** R098 is scoped to editing
-  an _existing_ connection — rotating credentials, re-pointing the same repository — not _adding_
-  the first remote to a local-only store; it omits the empty-remote first-publish gotcha, which is
-  the load-bearing detail here. A focused RFC captures that; R098 owns change-credentials and
-  same-repository URL changes once a connection exists.
+- **Fold into a broader connection-editing RFC and skip a separate one.** Connection editing is
+  scoped to editing an _existing_ connection — rotating credentials (shipped), re-pointing the same
+  repository (`R099`) — not _adding_ the first remote to a local-only store; it omits the
+  empty-remote first-publish gotcha, which is the load-bearing detail here. A focused RFC captures
+  that; `R099` owns same-repository URL changes once a connection exists.
 - **Keep "wipe and re-clone" as the only path (status quo).** Rejected — it loses local-only
   commits, and the create flow already proves the pieces (record remote + push-only publish) work
   standalone.
@@ -111,8 +111,8 @@ parts — sync gating, divergence resolve, the sealed-config mutation pattern �
 
 ## Depends on / Supersedes
 
-- Serves `005-git-storage` (repo-connection lifecycle). Adjacent to `R098` (vault connection
-  editing), which owns credential rotation and same-repo URL changes once a connection exists; this
+- Serves `005-git-storage` (repo-connection lifecycle). Adjacent to `R099` (vault URL editing),
+  which owns same-repo URL changes once a connection exists; credential rotation has shipped. This
   RFC keeps the no-remote → has-remote transition.
 - Side effect on `R061` (background sync begins targeting the new remote).
 - Inherits the remaining cancellation blind spot from `R034` (the bulk-upload window of a first push

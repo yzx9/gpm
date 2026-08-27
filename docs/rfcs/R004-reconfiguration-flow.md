@@ -2,14 +2,13 @@
 
 **Priority:** P2 **Status:** Deprecated **Phase:** Future **Revision:** 2
 
-> **Deprecated — superseded by `R098-vault-connection-editing`.** The premise went stale after this
-> RFC was written: the PAT slice — the headline case — shipped with the PAT management page
-> (probe-then-swap exactly as specified here); the repo-URL slice was deferred to multi-repository,
-> which now exists as `R080` and expresses "different repository" as remove + re-add (same-repo
-> transport changes land in R098); and the identity slice had already moved to `R005`. The one part
-> left unimplemented — SSH key + passphrase rotation in place — is re-scoped, in the
-> multi-repository frame, in R098. The analysis below is retained as the record; its "only lever
-> today" description predates the PAT page.
+> **Deprecated — superseded by shipped work and `R099`.** The premise went stale after this RFC was
+> written: the PAT slice — the headline case — shipped with the PAT management page (probe-then-swap
+> exactly as specified here); SSH key + passphrase rotation in place shipped as the SSH-key page's
+> replace flow; the repo-URL slice is scoped in `R099` (multi-repository, which now exists as
+> `R080`, expresses "different repository" as remove + re-add); and the identity slice had already
+> moved to `R005`. The analysis below is retained as the record; its "only lever today" description
+> predates the PAT page.
 
 ## What
 

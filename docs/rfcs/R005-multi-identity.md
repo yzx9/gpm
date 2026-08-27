@@ -85,6 +85,6 @@ identity stays unreadable. (From R027 decision 2.)
 ## Depends on / Supersedes
 
 None — independent of other RFCs. (Connection editing was previously listed as a dependency — R004,
-now deprecated and superseded by `R098` — on the assumption it would establish the identity type
-system first; it is scoped to git credentials only and touches no identity work, so the two are
-independent.)
+now deprecated with its slices shipped or re-scoped in `R099` — on the assumption it would establish
+the identity type system first; it is scoped to git connection concerns only and touches no identity
+work, so the two are independent.)
