@@ -123,4 +123,47 @@ describe("PatPage", () => {
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("set_pat", { pat: null });
   });
+
+  it("a CONFIG_BUSY save maps to the config-busy message", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_config") return Promise.resolve(maskedConfig);
+      if (cmd === "set_pat")
+        return Promise.reject({
+          code: "CONFIG_BUSY",
+          message: "config is busy",
+        });
+      return Promise.resolve(undefined);
+    });
+    const w = mountWithApp(PatPage).wrapper;
+    await flushPromises();
+    await w.find("#new-pat").setValue("ghp_newtokenvalue");
+    await w
+      .findAll("button")
+      .find((b) => b.text().includes("Replace token"))!
+      .trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("please try again in a moment");
+  });
+
+  it("a gate re-lock wipes the staged token and marks the drafts notice", async () => {
+    const m = mountWithApp(PatPage);
+    await flushPromises();
+    await m.wrapper.find("#new-pat").setValue("ghp_stagedtoken");
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect((m.wrapper.find("#new-pat").element as HTMLInputElement).value).toBe("");
+    expect(m.draftsNotice.consume()).toBe(true); // staged token lost → toast fires
+  });
+
+  it("a gate re-lock on an untouched form does NOT mark the notice", async () => {
+    const m = mountWithApp(PatPage);
+    await flushPromises();
+
+    m.appLock.setAppLocked(true, "idle");
+    await flushPromises();
+
+    expect(m.draftsNotice.consume()).toBe(false);
+  });
 });

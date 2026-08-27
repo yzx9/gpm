@@ -16,6 +16,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   your identity. Removing a key and later adding one back works from the same screen (the repository
   settings entry now routes SSH remotes there), and the form clears itself whenever the app locks.
 
+### Security
+
+- **A half-typed access token no longer survives a lock.** The access-token page's replace field
+  kept its contents behind the lock screen; it now clears the moment the app locks — and if a draft
+  was actually lost, the same post-unlock notice other forms show appears there too.
+
 ## [v0.20.1] - 2026-10-26
 
 ## [v0.20.0] - 2026-08-28

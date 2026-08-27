@@ -11,7 +11,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import { useDialog, useToast } from "@/composables";
+import { useDialog, useToast, useWipeOnLeave } from "@/composables";
 import { Trash2 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -33,6 +33,16 @@ const clearing = ref(false);
 const hasToken = computed(() => !!config.value?.pat);
 const busy = computed(() => verifying.value || replacing.value || clearing.value);
 const canReplace = computed(() => newPat.value.trim().length > 0 && !busy.value);
+
+// Wipe the staged token on either lock (identity hard lock or app-gate
+// re-lock), on browser back, and on unmount — a half-typed credential must
+// not survive a lock. Returns whether a draft was dropped, for the
+// post-unlock "drafts cleared" toast.
+useWipeOnLeave(() => {
+  const dirty = newPat.value !== "";
+  newPat.value = "";
+  return dirty;
+});
 
 onMounted(loadConfig);
 
