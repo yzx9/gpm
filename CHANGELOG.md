@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.20.0] - 2026-08-28
+
 ### Added
 
 - **Android autofill.** gpm can now fill logins for you: enable it as the autofill provider in your device's system settings (search for _autofill_ in Settings), then focus a login field in any app and pick the gpm suggestion. When App Lock is on, the first use asks for your fingerprint before the list appears; a plain picker then lists every entry with a type-to-filter box, and the username and password are filled straight into the app's fields — nothing touches the clipboard. Further uses in the same session skip the fingerprint. Matching, sorting, and saving offered credentials come later; for now the picker always shows the full list, and it fills fields that properly declare themselves as username/password fields.
@@ -533,7 +535,8 @@ In this initial release, we have implement a read-only age-only gopass password 
 - Pull-to-refresh to sync with remote repository
 - Android APK signing and per-architecture release builds
 
-[Unreleased]: https://github.com/yzx9/gpm/compare/v0.19.2...HEAD
+[Unreleased]: https://github.com/yzx9/gpm/compare/v0.20.0...HEAD
+[v0.20.0]: https://github.com/yzx9/gpm/compare/v0.19.2...v0.20.0
 [v0.19.2]: https://github.com/yzx9/gpm/compare/v0.19.1...v0.19.2
 [v0.19.1]: https://github.com/yzx9/gpm/compare/v0.19.0...v0.19.1
 [v0.19.0]: https://github.com/yzx9/gpm/compare/v0.18.1...v0.19.0
