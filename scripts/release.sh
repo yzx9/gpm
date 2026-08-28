@@ -29,6 +29,12 @@ NEW_VERSION="$1"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+CURRENT_BRANCH="$(git branch --show-current)"
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "error: releases must be cut from main (currently on '${CURRENT_BRANCH:-detached HEAD}')" >&2
+  exit 1
+fi
+
 CURRENT_VERSION=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$ROOT/app/src-tauri/tauri.conf.json")
 if [[ -z "$CURRENT_VERSION" ]]; then
   echo "error: could not read current version from app/src-tauri/tauri.conf.json" >&2
