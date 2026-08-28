@@ -13,7 +13,8 @@
   },
   "groups": {
     "configure": "Configure the app",
-    "information": "Information & diagnostics"
+    "information": "Information & diagnostics",
+    "about": "About the app"
   },
   "language": {
     "title": "Display Language",

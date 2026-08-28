@@ -13,7 +13,8 @@
   },
   "groups": {
     "configure": "应用配置",
-    "information": "信息与诊断"
+    "information": "信息与诊断",
+    "about": "关于应用"
   },
   "language": {
     "title": "显示语言",

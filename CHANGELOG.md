@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Android autofill.** gpm can now fill logins for you: enable it as the autofill provider in your device's system settings (search for _autofill_ in Settings), then focus a login field in any app and pick the gpm suggestion. When App Lock is on, the first use asks for your fingerprint before the list appears; a plain picker then lists every entry with a type-to-filter box, and the username and password are filled straight into the app's fields — nothing touches the clipboard. Further uses in the same session skip the fingerprint. Matching, sorting, and saving offered credentials come later; for now the picker always shows the full list, and it fills fields that properly declare themselves as username/password fields.
 
+### Changed
+
+- **Settings** now groups its entries into three cards — one for configuring the app (**General**, **Lock & Identity**, **Repository**), one for information and diagnostics (**Logs**, **Security**, **Permissions & data**), and one for about-the-app reference (**Acknowledgements**, **Licenses**) — with the **About** entry as the very last item on the screen.
+
 ## [v0.19.2] - 2026-08-23
 
 ### Changed

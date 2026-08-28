@@ -70,23 +70,26 @@ describe("SettingsPage (hub)", () => {
     expect(wrapper.findAll(".hub-row")).toHaveLength(9);
   });
 
-  it("splits the rows into config and information cards", async () => {
+  it("splits the rows into three cards", async () => {
     const wrapper = mountPage();
     await flushPromises();
 
     const cards = wrapper.findAll("section.hub");
-    expect(cards).toHaveLength(2);
+    expect(cards).toHaveLength(3);
     // Card 1 — configuring the app.
     expect(cards[0]!.findAll(".hub-row")).toHaveLength(3);
-    // Card 2 — information & diagnostics (Logs/Security/Permissions/About/
-    // Acknowledgements/Licenses).
-    expect(cards[1]!.findAll(".hub-row")).toHaveLength(6);
+    // Card 2 — information & diagnostics (Logs/Security/Permissions).
+    expect(cards[1]!.findAll(".hub-row")).toHaveLength(3);
+    // Card 3 — about the app (Acknowledgements/Licenses/About), with About
+    // as the last row of the page.
+    expect(cards[2]!.findAll(".hub-row")).toHaveLength(3);
     // The grouping is programmatic, not just visual (WCAG 1.3.1): each
     // section landmark carries its localized group name.
     expect(cards[0]!.attributes("aria-label")).toBe("Configure the app");
     expect(cards[1]!.attributes("aria-label")).toBe(
       "Information & diagnostics",
     );
+    expect(cards[2]!.attributes("aria-label")).toBe("About the app");
   });
 
   it("navigates into a category on row click", async () => {
@@ -116,17 +119,17 @@ describe("SettingsPage (hub)", () => {
     await wrapper.findAll(".hub-row")[5]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsPermissions" });
 
-    // The 7th row is About (overview; no secret content).
+    // The 7th row is Acknowledgements.
     await wrapper.findAll(".hub-row")[6]!.trigger("click");
-    expect(mockPush).toHaveBeenCalledWith({ name: "about" });
-
-    // The 8th row is Acknowledgements.
-    await wrapper.findAll(".hub-row")[7]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsAcknowledgements" });
 
-    // The 9th row is Licenses (the auto-scanned inventory).
-    await wrapper.findAll(".hub-row")[8]!.trigger("click");
+    // The 8th row is Licenses (the auto-scanned inventory).
+    await wrapper.findAll(".hub-row")[7]!.trigger("click");
     expect(mockPush).toHaveBeenCalledWith({ name: "settingsLicenses" });
+
+    // The 9th row is About (overview; the very bottom of the page).
+    await wrapper.findAll(".hub-row")[8]!.trigger("click");
+    expect(mockPush).toHaveBeenCalledWith({ name: "about" });
   });
 
   it("navigates back to entries when Back is clicked", async () => {
@@ -150,7 +153,7 @@ describe("SettingsPage (hub)", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    const aboutRow = wrapper.findAll(".hub-row")[6]!;
+    const aboutRow = wrapper.findAll(".hub-row")[8]!;
     expect(aboutRow.find(".update-dot").exists()).toBe(true);
   });
 
@@ -163,7 +166,7 @@ describe("SettingsPage (hub)", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll(".hub-row")[6]!.find(".update-dot").exists()).toBe(
+    expect(wrapper.findAll(".hub-row")[8]!.find(".update-dot").exists()).toBe(
       false,
     );
   });

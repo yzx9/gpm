@@ -56,13 +56,13 @@ onMounted(async () => {
       :title="t('settings.title')"
     />
 
-    <!-- Two cards, split by what the rows *do*: configuring the app vs
-         everything else (information / diagnostics / legal reference). The
-         test is the page's subject, not whether it carries incidental
-         actions — Logs has clear/export and About has the update-check
-         entry, yet neither configures gpm. Deliberately no visible text
-         headers; each section's aria-label carries the grouping
-         programmatically (WCAG 1.3.1) so the split isn't visual-only. -->
+    <!-- Three cards, split by what the rows *do*: configuring the app,
+         information & diagnostics, and about-the-app reference. The test is
+         the page's subject, not whether it carries incidental actions —
+         Logs has clear/export and About has the update-check entry, yet
+         neither configures gpm. Deliberately no visible text headers; each
+         section's aria-label carries the grouping programmatically
+         (WCAG 1.3.1) so the split isn't visual-only. -->
     <div class="flex flex-col gap-4">
       <!-- Card 1 — configuring the app: rows that change how gpm behaves. -->
       <BaseCard
@@ -114,8 +114,8 @@ onMounted(async () => {
       </BaseCard>
 
       <!-- Card 2 — information & diagnostics: nothing here configures gpm;
-           these pages describe the app, its state, or its provenance, closing
-           with the About / Acknowledgements / Licenses triple. -->
+           these pages describe the app, its state, or its runtime
+           context. -->
       <BaseCard
         as="section"
         class="hub"
@@ -173,30 +173,18 @@ onMounted(async () => {
           <span class="hub-title">{{ t("settings.hub.permissions") }}</span>
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>
+      </BaseCard>
 
-        <!-- About: the overview (what gpm is) plus the version/update entry.
-             Carries no secret content (not a settings category), so it sits in
-             the information card; acknowledgements and licenses follow as
-             sibling rows. Its summary value is the installed version. -->
-        <div
-          class="hub-row"
-          tabindex="0"
-          role="button"
-          :aria-label="`${t('settings.hub.about')} — ${version}`"
-          @click="router.push({ name: 'about' })"
-          @keydown.enter="router.push({ name: 'about' })"
-          @keydown.space.prevent="router.push({ name: 'about' })"
-        >
-          <BaseIcon :icon="Info" :size="20" class="text-muted" />
-          <span class="hub-title">{{ t("settings.hub.about") }}</span>
-          <span v-if="showAboutDot" class="update-dot" aria-hidden="true" />
-          <span class="hub-value">{{ version }}</span>
-          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
-        </div>
-
+      <!-- Card 3 — about the app: the overview plus provenance/legal
+           reference, with the About row itself as the very bottom of the
+           page. -->
+      <BaseCard
+        as="section"
+        class="hub"
+        :aria-label="t('settings.groups.about')"
+      >
         <!-- Acknowledgements: the projects gpm builds on. Reference
-             material, part of the About triple that closes the information
-             card. -->
+             material, part of the About triple that closes the page. -->
         <div
           class="hub-row"
           tabindex="0"
@@ -216,7 +204,7 @@ onMounted(async () => {
         </div>
 
         <!-- Licenses: the auto-scanned open-source license inventory,
-             closing the About triple. -->
+             part of the About triple. -->
         <div
           class="hub-row"
           tabindex="0"
@@ -228,6 +216,25 @@ onMounted(async () => {
         >
           <BaseIcon :icon="Scale" :size="20" class="text-muted" />
           <span class="hub-title">{{ t("settings.hub.licenses") }}</span>
+          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
+        </div>
+
+        <!-- About: the overview (what gpm is) plus the version/update entry,
+             the final row of the page. Its summary value is the installed
+             version. -->
+        <div
+          class="hub-row"
+          tabindex="0"
+          role="button"
+          :aria-label="`${t('settings.hub.about')} — ${version}`"
+          @click="router.push({ name: 'about' })"
+          @keydown.enter="router.push({ name: 'about' })"
+          @keydown.space.prevent="router.push({ name: 'about' })"
+        >
+          <BaseIcon :icon="Info" :size="20" class="text-muted" />
+          <span class="hub-title">{{ t("settings.hub.about") }}</span>
+          <span v-if="showAboutDot" class="update-dot" aria-hidden="true" />
+          <span class="hub-value">{{ version }}</span>
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>
       </BaseCard>
