@@ -11,6 +11,7 @@ use crate::RepoLock;
 use crate::config::{RepoConfig, UpdateOutcome};
 use crate::error::{Error, ErrorCode};
 use crate::signing::AuthenticityConfig;
+use crate::ssh;
 use crate::storage::{
     CancelSlot, CancelToken, GitAuth, KeepLocalOutcome, KeepLocalPlan, ProgressSender, RepoFiles,
     StorageCtx,
@@ -702,20 +703,52 @@ impl Store {
             .await
     }
 
+    /// Replace the stored SSH private key + optional passphrase (rotation;
+    /// clearing stays [`clear_ssh_key`](Self::clear_ssh_key)). The pair is
+    /// validated locally (parse + passphrase match) and the remote URL must
+    /// classify as SSH — a stored SSH key takes precedence over a PAT, so
+    /// saving one on an HTTPS repo would silently break sync.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::SshKeyInvalid`] if the key is blank/unparseable or the
+    /// URL is not an SSH URL, [`ErrorCode::WrongPassphrase`] if an encrypted
+    /// key's passphrase does not match; otherwise config load/save errors.
+    pub async fn set_ssh_key(
+        &self,
+        ssh_key: String,
+        ssh_passphrase: Option<String>,
+    ) -> Result<RepoConfig, Error> {
+        let (key, passphrase) =
+            normalize_ssh_credential(&ssh_key, ssh_passphrase.as_deref()).await?;
+        self.config
+            .update_repo_config(move |rc| {
+                if !is_ssh_url(&rc.url) {
+                    return Err(Error::new(
+                        ErrorCode::SshKeyInvalid,
+                        "An SSH key requires an SSH remote URL",
+                    ));
+                }
+                rc.ssh_key = Some(key);
+                rc.ssh_passphrase = passphrase;
+                Ok(UpdateOutcome::Changed(rc.clone()))
+            })
+            .await
+    }
+
     /// Read-only auth probe: fetch `origin` into a throwaway ref (HEAD untouched)
-    /// using `pat` to prove the credential works, without persisting it. Used to
-    /// validate a PAT before saving it. Authenticity policy is irrelevant here
-    /// (nothing is checked out), so a default policy is used.
+    /// using `auth` to prove the credential works, without persisting it. Shared
+    /// by the PAT and SSH candidate-validation probes. Authenticity policy is
+    /// irrelevant here (nothing is checked out), so a default policy is used.
     ///
     /// # Errors
     ///
     /// [`ErrorCode::CloneFailed`] on an auth failure, [`ErrorCode::NetworkError`]
     /// on a network problem.
-    pub async fn verify_pat(&self, pat: String, cancel: Option<CancelToken>) -> Result<(), Error> {
+    async fn probe_auth(&self, auth: GitAuth, cancel: Option<CancelToken>) -> Result<(), Error> {
         // Load the repo config so a no-repo state surfaces here (the backend owns
         // its root now; the loaded config is otherwise unused).
         let _rc = self.config.load_repo_config().await?;
-        let auth = GitAuth::Pat(pat);
         let policy = AuthenticityConfig::default();
         let ctx = StorageCtx {
             auth: &auth,
@@ -724,5 +757,118 @@ impl Store {
             commit_email: None,
         };
         self.storage()?.verify_auth(&ctx, cancel).await
+    }
+
+    /// Read-only auth probe for a candidate PAT: proves the token works
+    /// before it is saved (see [`probe_auth`](Self::probe_auth)).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::CloneFailed`] on an auth failure, [`ErrorCode::NetworkError`]
+    /// on a network problem.
+    pub async fn verify_pat(&self, pat: String, cancel: Option<CancelToken>) -> Result<(), Error> {
+        self.probe_auth(GitAuth::Pat(pat), cancel).await
+    }
+
+    /// Read-only auth probe for a candidate SSH key + optional passphrase.
+    /// The pair is validated locally first (parse + passphrase match — a
+    /// `file://` remote's probe ignores credentials, so the local check is
+    /// the only guard there), then proven against the remote without
+    /// persisting anything.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::SshKeyInvalid`] or [`ErrorCode::WrongPassphrase`] from the
+    /// local pair validation; [`ErrorCode::CloneFailed`] on an auth failure,
+    /// [`ErrorCode::NetworkError`] on a network problem.
+    pub async fn verify_ssh_key(
+        &self,
+        ssh_key: String,
+        ssh_passphrase: Option<String>,
+        cancel: Option<CancelToken>,
+    ) -> Result<(), Error> {
+        let (key, passphrase) =
+            normalize_ssh_credential(&ssh_key, ssh_passphrase.as_deref()).await?;
+        self.probe_auth(GitAuth::from_ssh(&key, passphrase.as_deref()), cancel)
+            .await
+    }
+}
+
+/// Normalize a candidate SSH credential pair for persistence/probing: trim
+/// the key (a paste's surrounding whitespace is incidental), reject a blank
+/// key, and validate the pair locally via [`ssh::to_unencrypted_pem`] (parse
+/// and passphrase match; the decrypted form is discarded, the original PEM
+/// is what gets persisted). The passphrase is an opaque secret — kept
+/// byte-verbatim, never rewritten (a trim would make a key whose real
+/// passphrase carries surrounding whitespace forever unverifiable);
+/// whitespace-only counts as absent. Shared by `set_ssh_key` and
+/// `verify_ssh_key` so the probe exercises exactly what would be persisted.
+/// An unencrypted key ignores the passphrase; an encrypted key with a wrong
+/// or missing one fails here, before any network round-trip.
+async fn normalize_ssh_credential(
+    ssh_key: &str,
+    ssh_passphrase: Option<&str>,
+) -> Result<(String, Option<String>), Error> {
+    let key = ssh_key.trim().to_string();
+    if key.is_empty() {
+        return Err(Error::new(
+            ErrorCode::SshKeyInvalid,
+            "SSH key must not be empty",
+        ));
+    }
+    // Validated and persisted as the same verbatim value.
+    let passphrase = ssh_passphrase
+        .filter(|pw| !pw.trim().is_empty())
+        .map(str::to_string);
+    // The pair check runs the bcrypt KDF — blocking work, off the async
+    // worker (same convention as the identity unlock path). The parse-only
+    // encryption probe picks WHICH single check runs: an encrypted key goes
+    // straight to the passphrase attempt (no doomed empty-passphrase KDF),
+    // and an unencrypted key skips the KDF entirely — the given passphrase
+    // is dead data there and must not be persisted.
+    let key_for_kdf = key.clone();
+    let pw_for_kdf = passphrase.clone().unwrap_or_default();
+    let unencrypted = tokio::task::spawn_blocking(move || -> Result<bool, Error> {
+        if ssh::is_encrypted(&key_for_kdf)? {
+            ssh::to_unencrypted_pem(&key_for_kdf, &pw_for_kdf).map(|_| false)
+        } else {
+            Ok(true)
+        }
+    })
+    .await??;
+    Ok((key, if unencrypted { None } else { passphrase }))
+}
+
+/// Classify a git remote URL as SSH-reachable: `ssh://…` (case-insensitive)
+/// or scheme-less scp-style `user@host:path`. A scheme-qualified URL of any
+/// other kind (`https://`, `git://`, `rsync://`…) never qualifies. Mirrors
+/// the frontend `isSshUrl` helper (`app/src/components/setup/url.ts`) so the
+/// backend guard and the UI gating agree on the same set of URLs.
+fn is_ssh_url(url: &str) -> bool {
+    let url = url.trim();
+    let lower = url.to_ascii_lowercase();
+    if lower.contains("://") {
+        return lower.starts_with("ssh://");
+    }
+    url.contains('@') && url.contains(':')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_ssh_url_classification() {
+        assert!(is_ssh_url("ssh://git@host/owner/repo.git"));
+        assert!(is_ssh_url("SSH://GIT@HOST/owner/repo.git"));
+        assert!(is_ssh_url("git@github.com:owner/repo.git"));
+        assert!(!is_ssh_url("https://github.com/owner/repo.git"));
+        assert!(!is_ssh_url("HTTPS://user@host/owner/repo.git"));
+        assert!(!is_ssh_url("http://host/owner/repo.git"));
+        assert!(!is_ssh_url("git://git@host/owner/repo.git"));
+        assert!(!is_ssh_url("rsync://user@host/owner/repo.git"));
+        assert!(!is_ssh_url("/local/path/repo.git"));
+        assert!(!is_ssh_url("host:owner/repo.git"));
+        assert!(!is_ssh_url(""));
     }
 }

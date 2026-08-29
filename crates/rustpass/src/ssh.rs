@@ -172,6 +172,25 @@ pub fn to_unencrypted_pem(pem: &str, passphrase: &str) -> Result<Zeroizing<Strin
     })
 }
 
+/// Whether the OpenSSH private key is passphrase-encrypted. A parse-only
+/// probe (no KDF work), so callers can branch before paying the bcrypt cost
+/// of [`to_unencrypted_pem`] — e.g. avoid a doomed empty-passphrase attempt
+/// on an encrypted key.
+///
+/// # Errors
+///
+/// Returns `SshKeyInvalid` if the key cannot be parsed.
+pub fn is_encrypted(pem: &str) -> Result<bool, Error> {
+    PrivateKey::from_openssh(pem.trim())
+        .map(|k| k.is_encrypted())
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::SshKeyInvalid,
+                format!("Cannot parse SSH private key: {e}"),
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
@@ -207,6 +226,15 @@ mod tests {
             pair.public_key.starts_with("ssh-ed25519 "),
             "public key should be extractable from encrypted key"
         );
+    }
+
+    #[test]
+    fn is_encrypted_reflects_key_encryption() {
+        let plain = generate_keypair(None).expect("generation should succeed");
+        assert!(!is_encrypted(&plain.private_key).expect("plain key parses"));
+        let enc = generate_keypair(Some("test-password")).expect("generation should succeed");
+        assert!(is_encrypted(&enc.private_key).expect("encrypted key parses"));
+        assert!(is_encrypted("not a key").is_err(), "garbage must not parse");
     }
 
     #[test]

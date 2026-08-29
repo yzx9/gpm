@@ -278,6 +278,293 @@ async fn verify_pat_ok_on_reachable_remote() {
         .expect("verify_pat should succeed against the cloned origin");
 }
 
+/// Re-seed the configured repo's remote URL. The fixture configures against
+/// a local bare path (no SSH classification), so `set_ssh_key` tests flip the
+/// URL through the public full-write delegate first.
+async fn seed_repo_url(store: &Store, url: &str) {
+    let mut rc = store.config().await.expect("config");
+    rc.url = url.to_string();
+    store.save_repo_config_locked(&rc).await.expect("seed url");
+}
+
+/// `set_ssh_key` persists a validated pair — the key trimmed, the passphrase
+/// byte-verbatim (an opaque secret is never rewritten) — and replaces a prior
+/// pair as one unit.
+#[tokio::test]
+async fn set_ssh_key_persists_and_replaces() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+    seed_repo_url(&store, "git@example.com:owner/repo.git").await;
+
+    let (pem, _public) = generate_ssh_test_keypair(" pass ");
+    // The stored key is the trimmed paste (the fixture PEM ends with \n);
+    // the passphrase round-trips verbatim, surrounding whitespace included.
+    let stored = pem.trim();
+    let rc = store
+        .set_ssh_key(format!("  {pem}  "), Some(" pass ".to_string()))
+        .await
+        .expect("set_ssh_key");
+    assert_eq!(rc.ssh_key.as_deref(), Some(stored));
+    assert_eq!(rc.ssh_passphrase.as_deref(), Some(" pass "));
+    let rc = store.config().await.expect("reload");
+    assert_eq!(rc.ssh_key.as_deref(), Some(stored));
+    assert_eq!(rc.ssh_passphrase.as_deref(), Some(" pass "));
+
+    // A second pair replaces the first as one unit — the old key AND its
+    // passphrase are both gone.
+    let pair2 = rustpass::ssh::generate_keypair(None).expect("keygen");
+    let pem2 = pair2.private_key.to_string();
+    let rc = store
+        .set_ssh_key(pem2.clone(), None)
+        .await
+        .expect("set_ssh_key rotate");
+    assert_eq!(rc.ssh_key.as_deref(), Some(pem2.trim()));
+    assert_eq!(rc.ssh_passphrase, None);
+}
+
+/// A whitespace-only passphrase is stored as `None`.
+#[tokio::test]
+async fn set_ssh_key_blank_passphrase_becomes_none() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+    seed_repo_url(&store, "git@example.com:owner/repo.git").await;
+
+    let pair = rustpass::ssh::generate_keypair(None).expect("keygen");
+    let rc = store
+        .set_ssh_key(pair.private_key.to_string(), Some("   ".to_string()))
+        .await
+        .expect("set_ssh_key");
+    assert!(rc.ssh_key.is_some());
+    assert_eq!(rc.ssh_passphrase, None);
+}
+
+/// A passphrase supplied for an UNENCRYPTED key is dead data (the KDF check
+/// ignores it) — it must not be persisted.
+#[tokio::test]
+async fn set_ssh_key_drops_passphrase_for_unencrypted_key() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+    seed_repo_url(&store, "git@example.com:owner/repo.git").await;
+
+    let pair = rustpass::ssh::generate_keypair(None).expect("keygen");
+    let rc = store
+        .set_ssh_key(pair.private_key.to_string(), Some("dead-data".to_string()))
+        .await
+        .expect("set_ssh_key");
+    assert!(rc.ssh_key.is_some());
+    assert_eq!(
+        rc.ssh_passphrase, None,
+        "an unencrypted key must not persist a passphrase"
+    );
+}
+
+/// Invalid candidates are rejected with nothing persisted: a blank key, an
+/// unparseable key (the `file://` probe ignores credentials, so the local
+/// parse is the only guard there), and a wrong passphrase for an encrypted
+/// key. A previously stored pair survives every rejection.
+#[tokio::test]
+async fn set_ssh_key_rejects_invalid_candidates() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+    seed_repo_url(&store, "git@example.com:owner/repo.git").await;
+
+    let (pem, _public) = generate_ssh_test_keypair("pass");
+    store
+        .set_ssh_key(pem.clone(), Some("pass".to_string()))
+        .await
+        .expect("store initial pair");
+
+    let err = store
+        .set_ssh_key("   ".to_string(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "SSH_KEY_INVALID");
+    let err = store
+        .set_ssh_key("not a key".to_string(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "SSH_KEY_INVALID");
+    let err = store
+        .set_ssh_key(pem.clone(), Some("wrong".to_string()))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "WRONG_PASSPHRASE");
+
+    let rc = store.config().await.expect("reload");
+    assert_eq!(rc.ssh_key.as_deref(), Some(pem.trim()));
+    assert_eq!(rc.ssh_passphrase.as_deref(), Some("pass"));
+}
+
+/// An SSH key only lands on an SSH-classified URL: the fixture's local path
+/// and an HTTPS URL are both rejected with nothing persisted.
+#[tokio::test]
+async fn set_ssh_key_requires_ssh_url() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    let pair = rustpass::ssh::generate_keypair(None).expect("keygen");
+    let pem = pair.private_key.to_string();
+
+    // The fixture's local-path URL does not classify as SSH.
+    let err = store.set_ssh_key(pem.clone(), None).await.unwrap_err();
+    assert_eq!(err.code, "SSH_KEY_INVALID");
+    // Neither does an HTTPS URL.
+    seed_repo_url(&store, "https://github.com/owner/repo.git").await;
+    let err = store.set_ssh_key(pem.clone(), None).await.unwrap_err();
+    assert_eq!(err.code, "SSH_KEY_INVALID");
+
+    let rc = store.config().await.expect("reload");
+    assert_eq!(rc.ssh_key, None, "nothing persisted on rejection");
+}
+
+/// `verify_ssh_key` probes the remote with a throwaway fetch and returns
+/// `Ok` on a reachable repo. The credential is ignored for a local-path
+/// remote, so a valid encrypted pair exercises the happy path (local pair
+/// validation included, temp-ref cleanup included).
+#[tokio::test]
+async fn verify_ssh_key_ok_on_reachable_remote() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    let (pem, _public) = generate_ssh_test_keypair("pass");
+    store
+        .verify_ssh_key(pem, Some("pass".to_string()), None)
+        .await
+        .expect("verify_ssh_key should succeed against the cloned origin");
+}
+
+/// `verify_ssh_key` rejects an unparseable key locally, before any network
+/// round-trip.
+#[tokio::test]
+async fn verify_ssh_key_rejects_garbage_before_network() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = Store::new(config_dir.path().to_path_buf(), None);
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+
+    let err = store
+        .verify_ssh_key("not a key".to_string(), None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "SSH_KEY_INVALID");
+}
+
+/// R097 sibling for the SSH setter: `save_identity` and a concurrent
+/// `set_ssh_key` must both land through the ConfigLock RMW.
+#[tokio::test]
+async fn set_ssh_key_and_save_identity_concurrent_both_land() {
+    let (identity, recipient) = generate_test_keypair();
+    let (bare_dir, _clone_dir) = create_test_git_repo(vec![], &recipient);
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+    let store = std::sync::Arc::new(Store::new(config_dir.path().to_path_buf(), None));
+    store
+        .configure(
+            bare_dir.path().to_str().expect("valid utf-8"),
+            &GitAuth::None,
+            &identity,
+            None,
+        )
+        .await
+        .expect("configure should succeed");
+    seed_repo_url(&store, "git@example.com:owner/repo.git").await;
+
+    let (pem, _public) = generate_ssh_test_keypair("pass");
+    let store_for_key = std::sync::Arc::clone(&store);
+    let (id_res, key_res) = tokio::join!(
+        async { store.save_identity(&identity, None).await },
+        async {
+            store_for_key
+                .set_ssh_key(pem.clone(), Some("pass".to_string()))
+                .await
+                .map(|_| ())
+        },
+    );
+    id_res.expect("save_identity under contention");
+    key_res.expect("set_ssh_key under contention");
+
+    let rc = store.config().await.expect("reload after both");
+    assert_eq!(
+        rc.ssh_key.as_deref(),
+        Some(pem.trim()),
+        "set_ssh_key's field must survive the concurrent identity save"
+    );
+}
+
 /// `set_commit_identity` rejects characters that corrupt a commit's
 /// `Name <email>` line (newlines, `<`, `>`, control bytes) and persists
 /// nothing on rejection.
