@@ -172,5 +172,22 @@
   },
   "relativeTime": {
     "justNow": "刚刚"
+  },
+  "sshKeyFields": {
+    "tabPasteKey": "粘贴密钥",
+    "tabGenerateKey": "生成密钥",
+    "sshKeyLabel": "SSH 私钥",
+    "sshKeyPlaceholder": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+    "sshKeyHint": "粘贴你的 SSH 私钥（OpenSSH 或 PEM 格式）",
+    "sshPassphraseLabel": "SSH 密钥口令",
+    "sshPassphrasePlaceholder": "可选 — 密钥已加密时填写",
+    "genPassphraseLabel": "密钥口令（可选）",
+    "genPassphrasePlaceholder": "可选 — 用于加密生成的密钥",
+    "genButton": "生成 SSH 密钥",
+    "genButtonLoading": "生成中...",
+    "publicKeyLabel": "公钥",
+    "publicKeyCopy": "复制",
+    "publicKeyHint": "将此公钥添加到你的 Git 提供商（例如 GitHub → Settings → SSH keys）",
+    "errKeyGen": "密钥生成失败"
   }
 }

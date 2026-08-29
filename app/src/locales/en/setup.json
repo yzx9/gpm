@@ -12,22 +12,7 @@
     "repoUrlHint": "HTTPS or SSH (e.g. git{'@'}github.com:user/repo.git)",
     "patLabel": "Personal Access Token",
     "patPlaceholder": "Optional — for private repos",
-    "patHint": "HTTPS PAT for git authentication. Leave empty for public repos.",
-    "tabPasteKey": "Paste Key",
-    "tabGenerateKey": "Generate Key",
-    "sshKeyLabel": "SSH Private Key",
-    "sshKeyPlaceholder": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
-    "sshKeyHint": "Paste your SSH private key (OpenSSH or PEM format)",
-    "sshPassphraseLabel": "SSH Key Passphrase",
-    "sshPassphrasePlaceholder": "Optional — if key is encrypted",
-    "genPassphraseLabel": "Key Passphrase (optional)",
-    "genPassphrasePlaceholder": "Optional — encrypt the generated key",
-    "genButton": "Generate SSH Key",
-    "genButtonLoading": "Generating...",
-    "publicKeyLabel": "Public Key",
-    "publicKeyCopy": "Copy",
-    "publicKeyHint": "Add this public key to your Git provider (e.g. GitHub → Settings → SSH keys)",
-    "errKeyGen": "Key generation failed"
+    "patHint": "HTTPS PAT for git authentication. Leave empty for public repos."
   },
   "clone": {
     "advancedSummary": "Advanced Settings",
