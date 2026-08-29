@@ -56,7 +56,8 @@
     "noneHint": "No git credentials are set. Pulls from a public repository still work; pushing requires a personal access token or SSH key.",
     "managePat": "Manage token",
     "setUpPat": "Set up token",
-    "alsoPat": "A personal access token is also stored."
+    "alsoPat": "A personal access token is also stored.",
+    "setUpSsh": "Set up SSH key"
   },
   "commit": {
     "title": "Commit Identity",

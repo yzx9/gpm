@@ -24,6 +24,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
+import { isSshUrl } from "@/components/setup/url";
 import { useActiveRepo, useDialog, useRepoExport, useToast, Z } from "@/composables";
 import { Download, FileUp, History, KeyRound, Plus } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
@@ -62,6 +63,10 @@ const alsoStored = computed<"pat" | null>(() => {
   if (authMethod.value === "ssh" && c.pat) return "pat";
   return null;
 });
+/** The remote URL is SSH-reachable — an SSH key can only authenticate an SSH
+ * transport (and would take precedence over a PAT), so the card's no-method
+ * entry routes by URL: SSH setup for ssh remotes, PAT setup otherwise. */
+const isSshRemote = computed(() => isSshUrl(config.value?.url ?? ""));
 
 // ── Commit identity state ────────────────────────────────────────────────
 const commitName = ref("");
@@ -476,6 +481,16 @@ onMounted(() => {
               <BaseIcon :icon="KeyRound" />
               {{ t("settings.gitAuth.managePat") }}
             </BaseButton>
+            <!-- No credential yet: route by transport — an SSH remote gets SSH
+                 setup (a PAT cannot authenticate it), HTTPS gets PAT setup. -->
+            <BaseButton
+              v-else-if="isSshRemote"
+              variant="action"
+              @click="router.push({ name: 'sshKey' })"
+            >
+              <BaseIcon :icon="KeyRound" />
+              {{ t("settings.gitAuth.setUpSsh") }}
+            </BaseButton>
             <BaseButton v-else variant="action" @click="router.push({ name: 'pat' })">
               <BaseIcon :icon="KeyRound" /> {{ t("settings.gitAuth.setUpPat") }}
             </BaseButton>
@@ -487,6 +502,15 @@ onMounted(() => {
               @click="router.push({ name: 'pat' })"
             >
               {{ t("settings.gitAuth.managePat") }}
+            </BaseButton>
+            <!-- PAT active over an SSH remote: offer the SSH-key path too (a
+                 PAT cannot authenticate the SSH transport). -->
+            <BaseButton
+              v-if="authMethod === 'pat' && isSshRemote"
+              variant="secondary"
+              @click="router.push({ name: 'sshKey' })"
+            >
+              {{ t("settings.ssh.manage") }}
             </BaseButton>
           </div>
         </BaseCard>

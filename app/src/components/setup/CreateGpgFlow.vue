@@ -19,6 +19,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import { resolveActiveRepoId, useWipeOnLeave } from "@/composables";
+import { optionalPassphrase } from "@/utils/passphrase";
 import { CircleCheck, FileText, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -170,7 +171,7 @@ async function onCreate() {
         hasRemote ? repoUrl.value.trim() : null,
         hasRemote && !isSshUrl.value ? pat.value || null : null,
         hasRemote && isSshUrl.value ? sshKey.value : null,
-        hasRemote && isSshUrl.value ? sshPassphrase.value || null : null,
+        hasRemote && isSshUrl.value ? optionalPassphrase(sshPassphrase.value) : null,
       );
 
       // GPG stores the S2K-locked armor byte-unchanged — no seal passphrase

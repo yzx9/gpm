@@ -176,6 +176,46 @@ describe("CreateGpgFlow", () => {
     expectNoKeyArmorCrossedIPC();
   });
 
+  it("sends SSH auth for an SSH remote URL (passphrase verbatim)", async () => {
+    mockInvoke({
+      pick_identity_file: () => ({
+        key_type: "gpg",
+        encrypted: true,
+        filename: "secret.asc",
+        recipient: "0xCAFEBABE12345678",
+        user_id: "Jordan <jordan@example.com>",
+        fingerprint: "ABCD0123456789ABCDEF0123456789ABCDEF0123",
+        is_recipient: null,
+      }),
+      verify_picked_identity: () => ({ recipient: "0xCAFEBABE12345678" }),
+      is_configured: () => false,
+      create_gpg_store: (args) => {
+        expect(args).toEqual({
+          repoUrl: "git@github.com:user/repo.git",
+          pat: null,
+          sshKey: "push-auth-key",
+          // An opaque secret crosses byte-verbatim — a trim would re-key a
+          // credential whose real passphrase carries whitespace.
+          sshPassphrase: " pw ",
+        });
+        return undefined;
+      },
+      complete_setup_from_file: () => undefined,
+      push_repo: () => undefined,
+    });
+
+    const wrapper = mount(CreateGpgFlow);
+    await flushPromises();
+    await importAndVerify(wrapper);
+    await wrapper.find('input[id="repo-url"]').setValue("git@github.com:user/repo.git");
+    await wrapper.find('textarea[id="ssh-key"]').setValue("push-auth-key");
+    await wrapper.find('input[id="ssh-passphrase"]').setValue(" pw ");
+    await submit(wrapper);
+
+    expect(wrapper.emitted("done")).toHaveLength(1);
+    expectNoKeyArmorCrossedIPC();
+  });
+
   // ── validation ─────────────────────────────────────────────────────────
 
   it("requires a GPG key before creating", async () => {

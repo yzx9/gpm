@@ -248,7 +248,7 @@ describe("CreateFlow", () => {
     expectNoSecretCrossedIPC();
   });
 
-  it("sends SSH auth for an SSH remote URL", async () => {
+  it("sends SSH auth for an SSH remote URL (passphrase verbatim)", async () => {
     mockInvoke({
       generate_identity: () => "age1r",
       create_store: (args) => {
@@ -257,7 +257,9 @@ describe("CreateFlow", () => {
           repoUrl: "git@github.com:user/repo.git",
           pat: null,
           sshKey: "push-auth-key",
-          sshPassphrase: null,
+          // An opaque secret crosses byte-verbatim — a trim would re-key a
+          // credential whose real passphrase carries whitespace.
+          sshPassphrase: " pw ",
         });
         return undefined;
       },
@@ -270,6 +272,7 @@ describe("CreateFlow", () => {
     await clickButton(wrapper, "Generate identity");
     await wrapper.find('input[id="repo-url"]').setValue("git@github.com:user/repo.git");
     await wrapper.find('textarea[id="ssh-key"]').setValue("push-auth-key");
+    await wrapper.find('input[id="ssh-passphrase"]').setValue(" pw ");
     await submit(wrapper);
 
     expect(invoke).toHaveBeenCalledWith("push_repo", {

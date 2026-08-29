@@ -3,15 +3,26 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
-import { clearSshKey, exportSshPrivateKey, getSshPublicKey, type AppError } from "@/api";
+import {
+  clearSshKey,
+  exportSshPrivateKey,
+  getConfig,
+  getSshPublicKey,
+  setSshKey,
+  verifySshAuth,
+  type AppError,
+} from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
+import { isSshUrl as isSshRepoUrl } from "@/components/setup/url";
+import SshKeyFields from "@/components/SshKeyFields.vue";
 import { useActiveRepo, useDialog, useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
+import { optionalPassphrase } from "@/utils/passphrase";
 import { Copy, LockOpen, Trash2, TriangleAlert } from "@lucide/vue";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -36,7 +47,52 @@ const noKey = ref(false);
 // lock / unmount (onScopeDispose backs up the unmount path).
 const { withClaim, release: releaseSecure } = useSecureClaim();
 
-onMounted(loadPublicKey);
+// Replace/add form state. Gated on an SSH remote URL below — an SSH key
+// cannot authenticate HTTPS, and a stored key takes precedence over a PAT,
+// so offering it on an HTTPS repo would guide the user into a broken sync.
+// Reads the sealed config URL; sync resolves origin from the clone's git
+// config. The two cannot diverge until URL editing exists (R099 owns that
+// dual write).
+const repoUrl = ref("");
+const newKey = ref("");
+const newPassphrase = ref("");
+const verifying = ref(false);
+const replacing = ref(false);
+const sshFields = ref<InstanceType<typeof SshKeyFields> | null>(null);
+const canRotate = computed(() => isSshRepoUrl(repoUrl.value));
+const busy = computed(
+  () => exporting.value || removing.value || verifying.value || replacing.value,
+);
+const canReplace = computed(() => newKey.value.trim().length > 0 && !busy.value);
+
+// Replace-form draft claim: the pasted/generated private key renders in the
+// form itself, so hold a screen-capture claim while the draft is non-empty
+// and drop it once the form empties (saved, cleared, or wiped on lock/leave
+// — all of which write the refs this watches). Best-effort, unlike the
+// export path's fail-closed abort: a failed acquire can't un-render the
+// user's own typing.
+const { acquire: acquireFormClaim, release: releaseFormClaim } = useSecureClaim();
+let formClaimHeld = false;
+watch([newKey, newPassphrase], ([key, passphrase]) => {
+  const dirty = key !== "" || passphrase !== "";
+  if (dirty === formClaimHeld) return;
+  formClaimHeld = dirty;
+  if (dirty) {
+    void acquireFormClaim().then((ok) => {
+      // The draft may have cleared while the acquire was in flight — drop
+      // the late claim instead of stranding FLAG_SECURE (release no-ops
+      // when nothing was actually acquired).
+      if (!ok || !formClaimHeld) releaseFormClaim();
+    });
+  } else {
+    releaseFormClaim();
+  }
+});
+
+onMounted(() => {
+  void loadPublicKey();
+  void loadRepoUrl();
+});
 
 async function loadPublicKey() {
   loading.value = true;
@@ -56,6 +112,68 @@ async function loadPublicKey() {
     error.value = appError?.message || t("sshKey.publicFailed");
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadRepoUrl() {
+  try {
+    const config = await getConfig();
+    repoUrl.value = config.url;
+  } catch (e) {
+    // A failed load surfaces as the page error and leaves the replace section
+    // hidden (an empty URL classifies as non-SSH) — the public-key half of
+    // the page still works.
+    const appError = e as AppError;
+    error.value = appError?.message || t("sshKey.loadFailed");
+  }
+}
+
+async function replaceKey() {
+  const key = newKey.value.trim();
+  if (!key || busy.value) return;
+  error.value = "";
+  const passphrase = optionalPassphrase(newPassphrase.value);
+  // Resolve the target repository once and reuse it for both halves —
+  // two independent currentId() calls could straddle an active-repo switch.
+  let repoId: string;
+  try {
+    repoId = await activeRepo.currentId();
+  } catch (e) {
+    const appError = e as AppError;
+    error.value = appError?.message || t("sshKey.replaceFailed");
+    return;
+  }
+  verifying.value = true;
+  try {
+    // Probe the candidate pair against the remote before saving it — refuse
+    // to replace a working key with one that can't authenticate.
+    await verifySshAuth(repoId, key, passphrase);
+  } catch (e) {
+    verifying.value = false;
+    const appError = e as AppError;
+    error.value = appError?.message
+      ? `${t("sshKey.verifyFailed")} ${appError.message}`
+      : t("sshKey.verifyFailed");
+    return;
+  }
+  verifying.value = false;
+  replacing.value = true;
+  try {
+    await setSshKey(repoId, key, passphrase);
+    newKey.value = "";
+    newPassphrase.value = "";
+    sshFields.value?.reset();
+    toast.success(t("sshKey.replacedToast"));
+    // Refresh the public half (and clear noKey when this was an add).
+    await loadPublicKey();
+  } catch (e) {
+    const appError = e as AppError;
+    error.value =
+      appError?.code === "CONFIG_BUSY"
+        ? t("settings.auth.configBusy")
+        : appError?.message || t("sshKey.replaceFailed");
+  } finally {
+    replacing.value = false;
   }
 }
 
@@ -97,7 +215,10 @@ async function removeKey() {
   removing.value = true;
   error.value = "";
   try {
-    await clearSshKey();
+    // Explicit target, matching replaceKey — remove and replace on one page
+    // must not silently diverge onto different repositories.
+    const repoId = await activeRepo.currentId();
+    await clearSshKey(repoId);
     toast.success(t("sshKey.removedToast"));
     // The key is gone — return to the settings card, which re-derives the active
     // method (a stored PAT becomes active, else None).
@@ -129,11 +250,22 @@ async function copyText(text: string) {
   }
 }
 
-// Wipe any revealed private key on either lock (identity hard lock or app-gate
-// re-lock), on browser back, and on unmount — matching the other secret pages.
-// The unlock modal can keep this page mounted on auto-lock, so unmount alone
-// can't guarantee a wipe.
-useWipeOnLeave(hidePrivate);
+// Wipe any revealed private key and the replace-form drafts on either lock
+// (identity hard lock or app-gate re-lock), on browser back, and on unmount —
+// matching the other secret pages. The unlock modal can keep this page mounted
+// on auto-lock, so unmount alone can't guarantee a wipe. Returns whether
+// user-authored drafts were dropped, for the post-unlock "drafts cleared"
+// toast.
+function wipeSensitive(): boolean {
+  hidePrivate();
+  const dirty = newKey.value !== "" || newPassphrase.value !== "";
+  newKey.value = "";
+  newPassphrase.value = "";
+  sshFields.value?.reset();
+  return dirty;
+}
+
+useWipeOnLeave(wipeSensitive);
 </script>
 
 <template>
@@ -202,6 +334,28 @@ useWipeOnLeave(hidePrivate);
         </BaseButton>
       </section>
     </template>
+
+    <!-- Replace / add key — outside the noKey wrapper so it doubles as the
+         re-add path after a removal. SSH remote URLs only (see canRotate). -->
+    <section v-if="canRotate" class="mt-6">
+      <h2 class="text-sm font-medium mb-2">{{ t("sshKey.replaceLabel") }}</h2>
+      <SshKeyFields
+        ref="sshFields"
+        v-model:ssh-key="newKey"
+        v-model:ssh-passphrase="newPassphrase"
+        v-model:error="error"
+        :disabled="busy"
+      />
+      <BaseButton
+        variant="action"
+        class="mt-2"
+        :loading="verifying || replacing"
+        :disabled="!canReplace"
+        @click="replaceKey"
+      >
+        {{ verifying ? t("sshKey.verifying") : noKey ? t("sshKey.add") : t("sshKey.replace") }}
+      </BaseButton>
+    </section>
   </main>
 </template>
 

@@ -20,6 +20,7 @@ import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import { resolveActiveRepoId, useWipeOnLeave } from "@/composables";
+import { optionalPassphrase } from "@/utils/passphrase";
 import { CircleCheck, KeyRound } from "@lucide/vue";
 import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -213,7 +214,7 @@ async function onCreate() {
         hasRemote ? repoUrl.value.trim() : null,
         hasRemote && !isSshUrl.value ? pat.value || null : null,
         hasRemote && isSshUrl.value ? sshKey.value : null,
-        hasRemote && isSshUrl.value ? sshPassphrase.value || null : null,
+        hasRemote && isSshUrl.value ? optionalPassphrase(sshPassphrase.value) : null,
       );
 
       // The identity was staged in backend state at generate time; this consumes

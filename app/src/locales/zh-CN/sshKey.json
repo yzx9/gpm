@@ -12,5 +12,13 @@
   "remove": "移除密钥",
   "removeConfirm": "移除已存储的 SSH 密钥？如果同时存储了个人访问令牌，它将变为当前认证方式；否则同步将需要新的凭据。",
   "removedToast": "SSH 密钥已移除",
-  "removeFailed": "移除 SSH 密钥失败"
+  "removeFailed": "移除 SSH 密钥失败",
+  "loadFailed": "加载仓库配置失败",
+  "replaceLabel": "替换 / 添加密钥",
+  "add": "添加密钥",
+  "replace": "替换密钥",
+  "verifying": "验证中…",
+  "verifyFailed": "无法在远端验证新密钥。",
+  "replaceFailed": "替换密钥失败。",
+  "replacedToast": "SSH 密钥已替换"
 }

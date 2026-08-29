@@ -18,6 +18,7 @@ import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import { useToast } from "@/composables";
+import { optionalPassphrase } from "@/utils/passphrase";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import RepoAuthFields from "./RepoAuthFields.vue";
@@ -151,7 +152,7 @@ async function onClone() {
       repoUrl.value,
       isSshUrl.value ? null : pat.value || null,
       isSshUrl.value ? sshKey.value : null,
-      isSshUrl.value ? sshPassphrase.value || null : null,
+      isSshUrl.value ? optionalPassphrase(sshPassphrase.value) : null,
     );
     // Persist a custom commit identity if the user set one under Advanced.
     // Best-effort: a failure must not block the (already-cloned) setup.

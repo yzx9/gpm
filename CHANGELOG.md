@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **SSH key rotation.** The SSH key screen can now **replace** a stored key in place: paste a new
+  private key (with its passphrase) or generate a fresh keypair right there. The new key is checked
+  against your git server before anything is saved, so a mistyped, malformed, or revoked key is
+  rejected on the spot and the old one stays in place — no re-setup, no re-clone, no re-entering
+  your identity. Removing a key and later adding one back works from the same screen (the repository
+  settings entry now routes SSH remotes there), and the form clears itself whenever the app locks.
+
 ## [v0.20.1] - 2026-10-26
 
 ## [v0.20.0] - 2026-08-28

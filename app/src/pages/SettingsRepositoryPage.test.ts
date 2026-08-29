@@ -176,6 +176,43 @@ describe("SettingsRepositoryPage", () => {
       expect(mockPush).toHaveBeenCalledWith({ name: "pat" });
     });
 
+    it("routes the No-credentials state on an SSH remote to the SSH key page", async () => {
+      // An SSH remote cannot authenticate with a PAT — the setup entry must
+      // offer the SSH key, not the dead-end token path.
+      when("get_config", {
+        ...sshConfig,
+        ssh_key: null,
+        ssh_passphrase: null,
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const btn = wrapper.findAll("button").find((b) => b.text().includes("Set up SSH key"));
+      expect(btn).toBeDefined();
+      await btn!.trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "sshKey" });
+    });
+
+    it("offers the SSH key page when a PAT is active over an SSH remote", async () => {
+      when("get_config", {
+        ...sshConfig,
+        ssh_key: null,
+        ssh_passphrase: null,
+        pat: "ghp_token123",
+      });
+      const wrapper = mountPage();
+      await flushPromises();
+
+      const btn = wrapper.findAll("button").find((b) => b.text().includes("Manage SSH Key"));
+      expect(btn).toBeDefined();
+      await btn!.trigger("click");
+      await flushPromises();
+
+      expect(mockPush).toHaveBeenCalledWith({ name: "sshKey" });
+    });
+
     it("surfaces a dormant PAT when both credentials are stored", async () => {
       // SSH takes precedence (active); a stored PAT is dormant but visible.
       when("get_config", {

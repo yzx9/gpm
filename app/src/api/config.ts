@@ -44,9 +44,40 @@ export async function setPat(pat: string | null): Promise<RepoConfig> {
   return invoke<RepoConfig>("set_pat", { pat });
 }
 
-/** Remove the stored SSH key + passphrase; a stored PAT then becomes active. */
-export async function clearSshKey(): Promise<RepoConfig> {
-  return invoke<RepoConfig>("clear_ssh_key");
+/**
+ * Remove the stored SSH key + passphrase; a stored PAT then becomes active.
+ * Explicitly addresses the repository (multi-repository stance).
+ */
+export async function clearSshKey(repoId: string): Promise<RepoConfig> {
+  return invoke<RepoConfig>("clear_ssh_key", { repoId });
+}
+
+/**
+ * Replace the stored SSH private key + optional passphrase (rotation; clearing
+ * stays {@link clearSshKey}). Returns the updated config — the credential
+ * fields are masked by the backend, so the key never echoes back. Explicitly
+ * addresses the repository (multi-repository stance).
+ */
+export async function setSshKey(
+  repoId: string,
+  sshKey: string,
+  sshPassphrase: string | null,
+): Promise<RepoConfig> {
+  return invoke<RepoConfig>("set_ssh_key", { repoId, sshKey, sshPassphrase });
+}
+
+/**
+ * Validate a candidate SSH key + optional passphrase against the remote before
+ * saving them: the same read-only throwaway-ref probe as
+ * {@link verifyGitAuth}, plus a local parse + passphrase check (so an invalid
+ * pair is rejected without contacting the host).
+ */
+export async function verifySshAuth(
+  repoId: string,
+  sshKey: string,
+  sshPassphrase: string | null,
+): Promise<void> {
+  await invoke("verify_ssh_auth", { repoId, sshKey, sshPassphrase });
 }
 
 /**

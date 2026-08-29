@@ -15,6 +15,7 @@ use crate::identity::{
     LockEventReason, emit_lock_state, refresh_security_cache, reset_gate_idle_timer,
     reset_lock_timer,
 };
+use crate::registry::RepoId;
 
 /// IPC-safe projection of [`RepoConfig`] with credential fields masked, so the
 /// full PAT / SSH private key / passphrase never reach the `WebView`. The mask is
@@ -191,14 +192,37 @@ pub(crate) async fn set_pat(
 }
 
 /// Remove the stored SSH key + passphrase. A stored PAT, if any, becomes the
-/// active auth method. Returns the updated repo config (masked).
+/// active auth method. Explicit repo addressing per the multi-repository
+/// stance. Returns the updated repo config (masked).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) async fn clear_ssh_key(state: State<'_, AppState>) -> Result<RepoConfigPublic, Error> {
+pub(crate) async fn clear_ssh_key(
+    state: State<'_, AppState>,
+    repo_id: RepoId,
+) -> Result<RepoConfigPublic, Error> {
     log::info!("config: clear-ssh-key");
     state
-        .active_repo()?
+        .repo(&repo_id)?
         .clear_ssh_key()
+        .await
+        .map(RepoConfigPublic::from)
+}
+
+/// Replace the stored SSH private key + optional passphrase (rotation;
+/// clearing stays `clear_ssh_key`). Explicit repo addressing per the
+/// multi-repository stance. Returns the updated repo config (masked).
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_ssh_key(
+    state: State<'_, AppState>,
+    repo_id: RepoId,
+    ssh_key: String,
+    ssh_passphrase: Option<String>,
+) -> Result<RepoConfigPublic, Error> {
+    log::info!("config: set-ssh-key");
+    state
+        .repo(&repo_id)?
+        .set_ssh_key(ssh_key, ssh_passphrase)
         .await
         .map(RepoConfigPublic::from)
 }
@@ -221,6 +245,31 @@ pub(crate) async fn verify_git_auth(
         // cancellable. The guard disarms when the future drops.
         let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
         store.verify_pat(pat, Some(cancel)).await
+    })
+    .await
+}
+
+/// Validate a candidate SSH key + optional passphrase against the remote
+/// before saving them (same read-only throwaway-ref probe as `verify_git_auth`).
+/// The pair is also validated locally, so an unparseable key or a wrong
+/// passphrase is rejected without contacting the host. Explicit repo
+/// addressing per the multi-repository stance.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn verify_ssh_auth(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    repo_id: RepoId,
+    ssh_key: String,
+    ssh_passphrase: Option<String>,
+) -> Result<(), Error> {
+    log::info!("config: verify-ssh-auth");
+    let store = state.repo(&repo_id)?;
+    crate::git::run_cancellable(&state, app, move |cancel, _tx, slot| async move {
+        let _guard = crate::git::SlotGuard::arm(slot, cancel.clone());
+        store
+            .verify_ssh_key(ssh_key, ssh_passphrase, Some(cancel))
+            .await
     })
     .await
 }

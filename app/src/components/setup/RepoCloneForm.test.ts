@@ -103,3 +103,33 @@ describe("RepoCloneForm — cancel", () => {
     expect(toast.toasts.value[0]!.message).toContain("cancel pipe broke");
   });
 });
+
+describe("RepoCloneForm — argument mapping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("clones an SSH remote with the passphrase verbatim (an opaque secret is never rewritten)", async () => {
+    mockInvoke({ clone_repo: () => undefined });
+
+    const { wrapper } = mountWithApp(RepoCloneForm, {
+      mountOpts: {
+        props: {
+          repoUrl: "git@github.com:user/repo.git",
+          pat: "",
+          sshKey: "clone-auth-key",
+          sshPassphrase: " pw ",
+        },
+      },
+    });
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("clone_repo", {
+      repoUrl: "git@github.com:user/repo.git",
+      pat: null,
+      sshKey: "clone-auth-key",
+      sshPassphrase: " pw ",
+    });
+  });
+});

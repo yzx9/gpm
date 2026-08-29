@@ -8,13 +8,16 @@
  * truncate keys identically (previously duplicated across the setup components).
  */
 
-/** Is `url` an SSH git remote (`ssh://…` or `user@host:path`), vs HTTPS? */
+/** Is `url` an SSH git remote (`ssh://…` or `user@host:path`), vs HTTPS?
+ * Scheme-qualified URLs of any other kind (`https://`, `git://`, `rsync://`…,
+ * case-insensitive) never qualify. Mirrors the Rust `is_ssh_url` guard. */
 export function isSshUrl(url: string): boolean {
   const trimmed = url.trim();
-  return (
-    trimmed.startsWith("ssh://") ||
-    (trimmed.includes("@") && trimmed.includes(":") && !trimmed.startsWith("http"))
-  );
+  const lower = trimmed.toLowerCase();
+  if (lower.includes("://")) {
+    return lower.startsWith("ssh://");
+  }
+  return trimmed.includes("@") && trimmed.includes(":");
 }
 
 /** Truncate a long key for display, keeping a recognizable head + tail. */

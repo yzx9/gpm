@@ -12,5 +12,13 @@
   "remove": "Remove Key",
   "removeConfirm": "Remove the stored SSH key? If a personal access token is also stored it becomes the active method; otherwise syncing will need new credentials.",
   "removedToast": "SSH key removed",
-  "removeFailed": "Failed to remove SSH key"
+  "removeFailed": "Failed to remove SSH key",
+  "loadFailed": "Failed to load the repository config",
+  "replaceLabel": "Replace / add key",
+  "add": "Add key",
+  "replace": "Replace key",
+  "verifying": "Verifying…",
+  "verifyFailed": "Could not verify the new key against the remote.",
+  "replaceFailed": "Replacing the key failed.",
+  "replacedToast": "SSH key replaced"
 }
