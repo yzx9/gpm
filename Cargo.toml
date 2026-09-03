@@ -73,7 +73,7 @@ ssh-key = { version = "0.6", features = [
 pgp = "0.20"
 # RNG + SmallVec for rpgp's key-generation and MessageBuilder paths (builder
 # methods take `&mut impl CryptoRng`; preferred-algorithm lists are SmallVec).
-rand = "0.8"
+rand = "0.10"
 smallvec = "1"
 # At-rest AEAD for local private files (repo.json, identity). AES-256-GCM gives
 # confidentiality + integrity in one op with a random symmetric master key.

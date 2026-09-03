@@ -119,7 +119,7 @@ dependencies = [
  "num-traits",
  "p256",
  "pin-project",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rsa",
  "rust-embed",
  "scrypt",
@@ -146,7 +146,7 @@ dependencies = [
  "hpke",
  "io_tee",
  "nom",
- "rand 0.8.6",
+ "rand 0.8.8",
  "secrecy",
  "sha2 0.10.9",
  "tempfile",
@@ -3647,7 +3647,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
  "serde",
  "smallvec",
  "zeroize",
@@ -4229,7 +4229,7 @@ dependencies = [
  "p256",
  "p384",
  "p521",
- "rand 0.8.6",
+ "rand 0.8.8",
  "replace_with",
  "ripemd",
  "rsa",
@@ -4681,9 +4681,9 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -5118,7 +5118,7 @@ dependencies = [
  "nucleo-matcher",
  "openssl",
  "pgp",
- "rand 0.8.6",
+ "rand 0.10.2",
  "serde",
  "serde_json",
  "smallvec",
