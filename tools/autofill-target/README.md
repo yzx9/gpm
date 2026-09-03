@@ -24,7 +24,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 1. Enable gpm as the system autofill service (debug build):
    `adb shell settings put secure selected_autofill_service \
-   xyz.yzx9.gpm.debug/xyz.yzx9.gpm.GpmAutofillService`
+xyz.yzx9.gpm.debug/xyz.yzx9.gpm.GpmAutofillService`
 2. Cold-start gpm's process (`adb shell am force-stop xyz.yzx9.gpm.debug`),
    open Autofill Target, and tap the **Username** field.
 3. Expect one "gpm" row in the OS autofill dropdown → tap → the gpm fill
