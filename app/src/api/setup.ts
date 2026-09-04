@@ -21,12 +21,7 @@ export type CreateIdentityKind = "age" | "ssh";
 
 /** A crypto/identity key type (mirrors Rust `KeyType`, including `"gpg"`). */
 export type KeyType =
-  | "x25519"
-  | "ssh_ed25519"
-  | "ssh_rsa"
-  | "plugin"
-  | "post_quantum"
-  | "gpg";
+  "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum" | "gpg";
 
 /** A public recipient the store encrypts to (from `list_recipients`). */
 export interface RecipientInfo {

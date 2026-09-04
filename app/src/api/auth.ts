@@ -57,12 +57,7 @@ export async function bumpIdleTimer(): Promise<void> {
  *  the auto-prompt; every other value keeps it (the user is present, or no
  *  overlay is up to prompt). Mirrors the backend `LockEventReason` enum. */
 export type IdentityLockReason =
-  | "manual"
-  | "idle"
-  | "setup"
-  | "unlock"
-  | "soft-wipe"
-  | "reset";
+  "manual" | "idle" | "setup" | "unlock" | "soft-wipe" | "reset";
 
 /** Payload of the `identity-lock-state` event: the backend's identity-cache
  *  lock snapshot. `locked` = the decrypted identity is NOT cached (the next
