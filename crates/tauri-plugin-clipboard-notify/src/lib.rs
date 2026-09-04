@@ -310,18 +310,18 @@ impl<R: Runtime> ClipboardNotify<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> ClipboardNotify<R> {
     /// Inert: always reports enabled so the frontend never prompts on desktop.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn are_enabled(&self) -> bool {
         true
     }
     /// Inert: always reports granted on desktop.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn request_permission(&self) -> bool {
         true
     }
     /// Inert: nothing to open on desktop; reports `true` so a (never-shown on
     /// desktop) row never toasts a spurious failure.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn open_notification_settings(&self) -> bool {
         true
     }
@@ -332,7 +332,7 @@ impl<R: Runtime> ClipboardNotify<R> {
     #[expect(clippy::unused_async)]
     pub async fn dismiss(&self) {}
     /// Inert: reports no manual clear on desktop.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn consume_manual_clear_flag(&self) -> bool {
         false
     }

@@ -160,7 +160,7 @@ impl<R: Runtime> DeviceInfoHandle<R> {
     /// # Errors
     ///
     /// Inert stub: always returns `Ok`; never errors.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn read(&self) -> Result<DeviceInfo, DeviceInfoError> {
         Ok(DeviceInfo {
             manufacturer: None,

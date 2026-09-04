@@ -441,6 +441,7 @@ mod tests {
     }
 
     impl KvKeystore for MockKeystore {
+        #[expect(clippy::unused_async_trait_impl)]
         async fn alias_state(&self, alias: &str, prefs: &str) -> Result<AliasState, KeystoreError> {
             self.alias_states
                 .lock()
@@ -455,6 +456,7 @@ mod tests {
                 .unwrap_or_else(|| *self.alias_state_ret.lock().unwrap());
             Ok(s)
         }
+        #[expect(clippy::unused_async_trait_impl)]
         async fn delete(&self, alias: &str, prefs: &str) -> Result<(), KeystoreError> {
             self.deletes
                 .lock()
@@ -462,6 +464,7 @@ mod tests {
                 .push((alias.to_string(), prefs.to_string()));
             Ok(())
         }
+        #[expect(clippy::unused_async_trait_impl)]
         async fn store(
             &self,
             value: &[u8],
@@ -478,6 +481,7 @@ mod tests {
             ));
             Ok(())
         }
+        #[expect(clippy::unused_async_trait_impl)]
         async fn retrieve(
             &self,
             alias: &str,

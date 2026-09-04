@@ -509,14 +509,14 @@ impl<R: Runtime> Keystore<R> {
     /// # Errors
     ///
     /// Inert stub: always returns `Ok`; never errors.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn is_biometric_available(&self) -> Result<BiometricState, KeystoreError> {
         Ok(BiometricState::Unavailable)
     }
 
     /// Inert: nothing to open on desktop; reports `true` so a (never-shown on
     /// desktop) row never toasts a spurious failure.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn open_security_settings(&self) -> bool {
         true
     }
@@ -526,7 +526,7 @@ impl<R: Runtime> Keystore<R> {
     /// # Errors
     ///
     /// Inert stub: always returns `Ok`; never errors.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn alias_state(
         &self,
         _alias: &str,
@@ -543,7 +543,7 @@ impl<R: Runtime> Keystore<R> {
     /// # Errors
     ///
     /// Inert stub: always returns `Ok(false)`; never errors.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn has_stored(&self, _alias: &str, _prefs: &str) -> Result<bool, KeystoreError> {
         Ok(false)
     }
@@ -553,7 +553,7 @@ impl<R: Runtime> Keystore<R> {
     /// # Errors
     ///
     /// Inert stub: always returns `Ok`; never errors.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn delete(&self, _alias: &str, _prefs: &str) -> Result<(), KeystoreError> {
         Ok(())
     }
@@ -563,7 +563,7 @@ impl<R: Runtime> Keystore<R> {
     /// # Errors
     ///
     /// Always returns [`KeystoreError::unavailable`] off-Android.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn store(
         &self,
         _value: &[u8],
@@ -580,7 +580,7 @@ impl<R: Runtime> Keystore<R> {
     /// # Errors
     ///
     /// Always returns [`KeystoreError::unavailable`] off-Android.
-    #[expect(clippy::unused_async)]
+    #[expect(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn retrieve(
         &self,
         _alias: &str,
