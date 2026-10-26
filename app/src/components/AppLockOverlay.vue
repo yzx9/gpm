@@ -18,6 +18,10 @@ import BaseModalShell from "./base/BaseModalShell.vue";
 
 const { setUnlockInFlight, shouldAutoPrompt } = useAppLockState();
 const { exporting, runExport } = useDiagnosticsExport();
+// The z:Z.gate access lives here, not in the template: vue-tsc 3.3.12+ false-errors
+// on properties of imported objects read inside template function expressions
+// (vuejs/language-tools#6237).
+const exportDiagnostics = () => runExport({ z: Z.gate });
 
 const { t } = useI18n();
 
@@ -168,8 +172,8 @@ onUnmounted(() => {
     <div class="lock-foot">
       <!-- Discreet, subordinate to Unlock: a muted text link. Disabled while a
            biometric prompt is in flight (loading) so the in-WebView confirm
-           never stacks under the system BiometricPrompt. runExport passes
-           z:Z.gate so its confirm/toast surface above this opaque gate. -->
+           never stacks under the system BiometricPrompt. exportDiagnostics
+           passes z:Z.gate so its confirm/toast surface above this opaque gate. -->
       <BaseButton
         variant="link"
         tone="muted"
@@ -177,7 +181,7 @@ onUnmounted(() => {
         :loading="exporting"
         :disabled="loading"
         :aria-label="t('common.appLock.diagnostics')"
-        @click="() => runExport({ z: Z.gate })"
+        @click="exportDiagnostics"
       >
         {{ t("common.appLock.diagnostics") }}
       </BaseButton>
