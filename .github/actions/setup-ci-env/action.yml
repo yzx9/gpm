@@ -1,5 +1,5 @@
 name: Setup CI environment
-description: "Sets up the Nix-based CI environment with optional rust, pnpm, and Gradle caches."
+description: "Sets up the Nix-based CI environment with optional rust, npm, and Gradle caches."
 
 inputs:
   rust_cache:
@@ -7,8 +7,8 @@ inputs:
     required: false
     default: "false"
 
-  pnpm_cache:
-    description: Whether to enable pnpm cache
+  npm_cache:
+    description: Whether to enable npm cache
     required: false
     default: "false"
 
@@ -67,14 +67,14 @@ runs:
         restore-keys: |
           sccache-${{ runner.os }}-${{ github.job }}-
 
-    - name: Cache pnpm store
-      if: inputs.pnpm_cache == 'true'
+    - name: Cache npm
+      if: inputs.npm_cache == 'true'
       uses: actions/cache@v4
       with:
-        path: ~/.local/share/pnpm/store
-        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        path: ~/.npm
+        key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
         restore-keys: |
-          pnpm-store-${{ runner.os }}-
+          npm-${{ runner.os }}-
 
     - name: Cache Gradle
       if: inputs.java_cache == 'true'

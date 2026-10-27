@@ -3,5 +3,5 @@ app/src/api/generated/
 app/src-tauri/gen/android/
 app/dist/
 Cargo.lock
-pnpm-lock.yaml
+package-lock.json
 crates/rustpass/data/cacert.pem

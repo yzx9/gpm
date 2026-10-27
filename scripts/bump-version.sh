@@ -75,8 +75,9 @@ fi
 # 2. Sync Cargo.lock
 cd "$ROOT" && cargo check 2>&1
 
-# 3. package.json — also syncs pnpm-lock.yaml if needed
-cd "$ROOT/app" && pnpm version --no-git-checks --no-git-tag-version "$NEW_VERSION"
+# 3. package.json — also syncs package-lock.json if needed. --package-lock-only
+# rewrites the lock without installing (no node_modules churn, no build scripts).
+cd "$ROOT/app" && npm version --package-lock-only --no-git-tag-version "$NEW_VERSION"
 
 # 4. src-tauri/tauri.conf.json
 "${_sed_i[@]}" "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" \

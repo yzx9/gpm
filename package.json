@@ -2,12 +2,13 @@
   "name": "gpm-monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.25.0",
+  "workspaces": [
+    "app"
+  ],
   "scripts": {
-    "dev": "pnpm -C app dev",
-    "build": "pnpm -C app build",
-    "test": "pnpm -C app test",
-    "tauri": "pnpm -C app tauri",
+    "dev": "npm run dev -w app",
+    "build": "npm run build -w app",
+    "test": "npm run test -w app",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check ."
   },
@@ -16,9 +17,13 @@
     "prettier-plugin-organize-imports": "^4.3.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24.11",
+    "npm": ">=11.18"
   },
   "dependencies": {
     "prettier-plugin-compact-markdown-table": "^0.1.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
   }
 }

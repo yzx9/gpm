@@ -61,8 +61,8 @@ let
       ensure-node-deps = {
         enable = true;
         name = "ensure-node-deps";
-        description = "pnpm install if node_modules is missing (prettier plugins live there)";
-        entry = "${lib.getExe pkgs.bash} -c '[ -d node_modules ] || ${lib.getExe pkgs.pnpm} install'";
+        description = "npm install if node_modules is missing (prettier plugins live there)";
+        entry = "${lib.getExe pkgs.bash} -c '[ -d node_modules ] || ${pkgs.nodejs_26}/bin/npm install'";
         pass_filenames = false;
         always_run = true;
         language = "system";
@@ -237,9 +237,8 @@ let
         # Rust
         sccache
 
-        # Frontend
-        nodejs
-        pnpm
+        # Frontend (npm ships inside nodejs)
+        nodejs_26
 
         # Utils
         just
