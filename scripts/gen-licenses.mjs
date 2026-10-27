@@ -18,8 +18,9 @@
 //                  gpm's own crates and are excluded (acknowledged separately).
 //  - npm packages: the full transitive closure of the root `dependencies` AND
 //                  `devDependencies`, resolved via Node's own module resolver
-//                  (createRequire) so pnpm's symlink layout is honored. Dev
-//                  tooling (vite/vitest/tailwind) is included even though it
+//                  (createRequire) so the linked install layout (node_modules
+//                  symlinks into .store) is honored. Dev tooling
+//                  (vite/vitest/tailwind) is included even though it
 //                  never ships in the Tauri bundle — see the policy note below.
 //
 // Not yet covered: Android Gradle dependencies (androidx, Kotlin stdlib, …)
@@ -209,7 +210,7 @@ function scanRustFromLock(root) {
 //           (no GPL/AGPL/LGPL-only npm packages), attribution is cheap, and
 //           matching the Rust convention keeps the page honest about every
 //           tool the project relies on. Sub-package devDependencies aren't
-//           walked — pnpm doesn't install them, so resolution would just
+//           walked — npm doesn't install them, so resolution would just
 //           noisily fail. A peer-only tool the project uses (prettier, via
 //           prettier-plugin-organize-imports) is added as an explicit root
 //           devDep so the BFS can reach it.
@@ -249,8 +250,9 @@ function npmEntry(pj, dir) {
 }
 
 /** Resolve `<name>`'s package.json reachable from `fromDir` (a package
- *  directory), honoring pnpm's symlink layout via Node's own resolver. Returns
- *  the path or null if the package isn't installed/resolvable.
+ *  directory), honoring the linked install's symlink layout via Node's own
+ *  resolver. Returns the path or null if the package isn't
+ *  installed/resolvable.
  *
  *  Two strategies: first try the `<name>/package.json` subpath (fast path for
  *  packages without a restrictive `exports` map). If that throws — modern
@@ -291,7 +293,7 @@ export function scanNpm(root) {
   const packages = [];
   // Seed from BOTH the runtime and dev dependency sets — see the policy note
   // above for why dev tooling is included despite not shipping. Sub-package
-  // recursion stays `dependencies`-only (pnpm doesn't install nested
+  // recursion stays `dependencies`-only (npm doesn't install nested
   // devDependencies), so dev tooling's own runtime deps are seeded here and
   // followed normally below. Queue holds [depName, fromDir]; root deps resolve
   // from the repo root.
@@ -311,7 +313,7 @@ export function scanNpm(root) {
     seen.add(key);
     packages.push(npmEntry(pj, dir));
     // Enqueue this package's own runtime dependencies, resolved from ITS
-    // directory so pnpm's per-package node_modules is used.
+    // directory so the package's own node_modules links are used.
     for (const child of Object.keys(pj.dependencies ?? {})) {
       queue.push([child, dir]);
     }
@@ -359,14 +361,14 @@ export function generateLicenses(opts = {}) {
   const out = resolve(opts.out ?? join(frontendDir, "public", "licenses.json"));
   // Skip work when fresh unless forced: the inventory is a pure function of
   // Cargo.lock + package.json + the installed node_modules, so regenerate only
-  // when any of those is newer than the output. (pnpm-lock.yaml is included so
-  // a transitive-only bump — which may not move the top-level node_modules dir
-  // mtime — still invalidates the cache.)
+  // when any of those is newer than the output. (package-lock.json is included
+  // so a transitive-only bump — which may not move the top-level node_modules
+  // dir mtime — still invalidates the cache.)
   if (!opts.force && existsSync(out)) {
     const outMtime = statSync(out).mtimeMs;
     const sources = [
       [root, "Cargo.lock"],
-      [root, "pnpm-lock.yaml"],
+      [root, "package-lock.json"],
       [frontendDir, "package.json"],
       [frontendDir, "node_modules"],
     ];

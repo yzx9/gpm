@@ -6,7 +6,7 @@
 |-|-|
 |App framework|Tauri v2|
 |Backend|Rust (age, git2, ssh-key, zeroize, walkdir)|
-|Frontend|Vue 3 + TypeScript + Vite + pnpm|
+|Frontend|Vue 3 + TypeScript + Vite + npm|
 |Crypto|[age](https://github.com/str4d/rage) (Rust reference implementation)|
 |Clipboard|tauri-plugin-clipboard-manager|
 |Safe-area|tauri-plugin-safe-area (local Tauri plugin)|
@@ -33,7 +33,7 @@ direnv allow
 ```
 
 On first run, Nix builds the dev shell (this may take a few minutes). Once done, `just`, `cargo`,
-`pnpm`, and the full Android toolchain will be in your PATH.
+`npm`, and the full Android toolchain will be in your PATH.
 
 <details>
 <summary><strong>Without Nix (manual setup)</strong></summary>
@@ -47,8 +47,7 @@ You'll need to install these yourself:
 
 **Frontend tooling**
 
-- [Node.js](https://nodejs.org/)
-- [pnpm](https://pnpm.io/)
+- [Node.js](https://nodejs.org/) ≥ 24.11 (npm ≥ 11.18 ships inside)
 
 **Android & JDK**
 
@@ -59,14 +58,14 @@ You'll need to install these yourself:
 **Utilities**
 
 - [just](https://github.com/casey/just) — task runner (`cargo install just`)
-- [prettier](https://prettier.io/) — code formatter (`pnpm add -g prettier`)
+- [prettier](https://prettier.io/) — code formatter (`npm install -g prettier`)
 
 </details>
 
 ### Install frontend dependencies
 
 ```bash
-pnpm install
+npm install
 ```
 
 ### Verify everything works
@@ -102,10 +101,10 @@ manually.
 
 Android builds require launcher icons in `app/src-tauri/gen/android/app/src/main/res/mipmap-*/`, which
 are not tracked in git (they are regenerated on each build). If you use `just`, this is handled
-automatically. If you run `pnpm -C app tauri android build` directly, generate icons first:
+automatically. If you run `npm run tauri -w app -- android build` directly, generate icons first:
 
 ```bash
-pnpm -C app tauri icon assets/app-icon.png
+npm run tauri -w app -- icon assets/app-icon.png
 ```
 
 </details>

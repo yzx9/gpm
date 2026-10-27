@@ -9,9 +9,9 @@ import { resolve } from "node:path";
 import { scanNpmAll } from "../../../../scripts/gen-licenses.mjs";
 
 // scanNpmAll covers BOTH workspace packages: the frontend app (app/, where
-// vitest runs via `pnpm -C app test`) and the workspace root (where the
+// vitest runs via `npm run test -w app`) and the workspace root (where the
 // formatting toolchain — prettier + prettier-plugin-organize-imports — lives as
-// devDeps). Needs a real node_modules — `pnpm install` first in a fresh worktree
+// devDeps). Needs a real node_modules — `npm install` first in a fresh worktree
 // (the whole FE suite already requires it).
 // @ts-expect-error process is a nodejs global (project ships no @types/node)
 const appDir = process.cwd();

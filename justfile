@@ -9,7 +9,7 @@ test-be: gen-icons
 # Run frontend unit tests
 [group('test')]
 test-fe:
-  pnpm -C app test
+  npm run test -w app
 
 # Run every local Android plugin's Robolectric/JVM unit tests via the aggregated
 # `testPlugins` gradle task. Skipped unless tauri.settings.gradle exists; fails if
@@ -42,7 +42,7 @@ test: test-be test-fe test-plugin
 # Clippy + vue-tsc type check + locale key check + codegen freshness
 lint: gen-icons check-i18n check-codegen-fresh
   cargo clippy --all-targets --all-features -- -D warnings
-  pnpm -C app exec vue-tsc --noEmit
+  npm exec -w app -- vue-tsc --noEmit
 
 # Regenerate the checked-in TS mirrors of the Rust IPC enums from their single
 # source (R085). Run after changing a participating enum, then commit the result.
@@ -81,27 +81,27 @@ refresh-ca:
 
 # Desktop dev server with hot reload
 dev: gen-icons
-  pnpm -C app tauri dev
+  npm run tauri -w app -- dev
 
 # Build debug APK (optional: specify arch e.g. aarch64, armv7, i686, x86_64; builds universal if omitted)
 [group('android')]
 android-debug target='': gen-icons
   @if [ -z "{{ target }}" ]; then \
-    pnpm -C app tauri android build --debug; \
+    npm run tauri -w app -- android build --debug; \
   else \
-    pnpm -C app tauri android build --debug -t "{{ target }}"; \
+    npm run tauri -w app -- android build --debug -t "{{ target }}"; \
   fi
 
 # Build release APKs (per-arch + universal, signed if keystore.properties exists)
 [group('android')]
 android-release: gen-icons
-  pnpm -C app tauri android build --apk --split-per-abi
-  pnpm -C app tauri android build --apk
+  npm run tauri -w app -- android build --apk --split-per-abi
+  npm run tauri -w app -- android build --apk
 
 # Android dev server (requires connected device or emulator)
 [group('android')]
 android-dev: gen-icons
-  pnpm -C app tauri android dev
+  npm run tauri -w app -- android dev
 
 # Install debug APK to connected device (auto-detects arch, or specify e.g. aarch64)
 [group('android')]
@@ -116,9 +116,9 @@ android-install target='': gen-icons
       *)           T="aarch64" ;; \
     esac; \
     echo "Detected ABI: $${ABI:-unknown}, target: $$T"; \
-    pnpm -C app tauri android build --debug -t "$$T"; \
+    npm run tauri -w app -- android build --debug -t "$$T"; \
   else \
-    pnpm -C app tauri android build --debug -t "{{ target }}"; \
+    npm run tauri -w app -- android build --debug -t "{{ target }}"; \
   fi
   adb install app/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 

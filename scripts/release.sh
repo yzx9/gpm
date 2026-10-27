@@ -78,7 +78,7 @@ fi
 # bump-version.sh's own format / same-version guards.
 "$ROOT/scripts/bump-version.sh" -f "$NEW_VERSION"
 
-git add Cargo.toml Cargo.lock app/package.json app/src-tauri/tauri.conf.json CHANGELOG.md
+git add Cargo.toml Cargo.lock package-lock.json app/package.json app/src-tauri/tauri.conf.json CHANGELOG.md
 git commit -m "build: release v$NEW_VERSION"
 git tag "v$NEW_VERSION" -m "build: release v$NEW_VERSION"
 
