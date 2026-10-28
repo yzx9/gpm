@@ -474,13 +474,13 @@ The dark theme is not an inversion of the light theme.
 
 Both themes preserve the same role system:
 
-|Role|Light Theme|Dark Theme|
-|-|-|-|
-|Seal / identity|Dark cinnabar|Lifted cinnabar|
-|Action / activation|Deep celadon|Light celadon|
-|Canvas|Warm paper|Ink-black|
-|Main text|Near-black|Soft white|
-|Surfaces|Warm white|Layered charcoal-green|
+| Role                | Light Theme   | Dark Theme             |
+| ------------------- | ------------- | ---------------------- |
+| Seal / identity     | Dark cinnabar | Lifted cinnabar        |
+| Action / activation | Deep celadon  | Light celadon          |
+| Canvas              | Warm paper    | Ink-black              |
+| Main text           | Near-black    | Soft white             |
+| Surfaces            | Warm white    | Layered charcoal-green |
 
 The hue relationship remains recognizable, but luminance is adjusted for contrast and comfort.
 

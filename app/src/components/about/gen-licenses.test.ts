@@ -9,10 +9,9 @@ import { resolve } from "node:path";
 import { scanNpmAll } from "../../../../scripts/gen-licenses.mjs";
 
 // scanNpmAll covers BOTH workspace packages: the frontend app (app/, where
-// vitest runs via `npm run test -w app`) and the workspace root (where the
-// formatting toolchain — prettier + prettier-plugin-organize-imports — lives as
-// devDeps). Needs a real node_modules — `npm install` first in a fresh worktree
-// (the whole FE suite already requires it).
+// vitest runs via `npm run test -w app`) and the workspace root. Needs a real
+// node_modules — `npm install` first in a fresh worktree (the whole FE suite
+// already requires it).
 // @ts-expect-error process is a nodejs global (project ships no @types/node)
 const appDir = process.cwd();
 const root = resolve(appDir, ".."); // workspace root
@@ -27,12 +26,8 @@ beforeAll(() => {
 describe("gen-licenses scanNpm", () => {
   it("attributes dev tooling from both the workspace root and the app", () => {
     const names = pkgs.map((p) => p.name);
-    // scanNpmAll seeds from BOTH dependencies and devDependencies across both
-    // workspace packages, so build/test tooling is attributed despite not
-    // shipping. prettier lives at the workspace ROOT (not under app/) — a
-    // peerDep of prettier-plugin-organize-imports that the BFS never walks, so
-    // it must be seeded as a direct root devDep; scanning the root keeps it in
-    // the inventory.
+    // scanNpmAll seeds from BOTH dependencies and devDependencies, so build/test
+    // tooling is attributed despite not shipping.
     for (const dep of [
       "vite",
       "vitest",
@@ -40,7 +35,6 @@ describe("gen-licenses scanNpm", () => {
       "typescript",
       "vue-tsc",
       "tailwindcss",
-      "prettier",
     ])
       expect(names).toContain(dep);
     // Runtime deps still present (regression guard on the existing behavior):

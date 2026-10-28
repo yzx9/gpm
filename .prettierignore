@@ -1,7 +1,0 @@
-.agents/skills/
-app/src/api/generated/
-app/src-tauri/gen/android/
-app/dist/
-Cargo.lock
-package-lock.json
-crates/rustpass/data/cacert.pem

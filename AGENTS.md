@@ -9,7 +9,7 @@ New stores are age-only; existing GPG stores are opened and used as-is (no in-ap
 ```bash
 just test  # Run all tests (backend + frontend + plugin)
 just lint  # Clippy -D warnings + vue-tsc --noEmit
-just fmt   # rustfmt + prettier
+just fmt   # rustfmt + oxfmt
 just dev   # Desktop dev server with hot reload
 just android-debug  # Build debug APK
 just android-dev    # Android dev server (requires device/emulator)

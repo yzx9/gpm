@@ -44,7 +44,12 @@ async-trait = "0.1"
 zeroize = { version = "1", features = ["derive", "serde"] }
 # `ssh`/`https` must be explicit: git2 0.21 dropped them from the default
 # feature set, and without them libgit2 loses the SSH/HTTPS transports.
-git2 = { version = "0.21", features = ["ssh", "https", "vendored-openssl", "vendored-libgit2"] }
+git2 = { version = "0.21", features = [
+  "ssh",
+  "https",
+  "vendored-openssl",
+  "vendored-libgit2",
+] }
 # For Android HTTPS CA loading (see `rustpass::git::ensure_https_ca_loaded`):
 # `libgit2-sys` for the `GIT_OPT_ADD_SSL_X509_CERT` call (transitive via git2 —
 # a future git2 bump that resolves a second libgit2-sys copy would silently

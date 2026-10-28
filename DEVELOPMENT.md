@@ -2,14 +2,14 @@
 
 ## Tech Stack
 
-|Layer|Technology|
-|-|-|
-|App framework|Tauri v2|
-|Backend|Rust (age, git2, ssh-key, zeroize, walkdir)|
-|Frontend|Vue 3 + TypeScript + Vite + npm|
-|Crypto|[age](https://github.com/str4d/rage) (Rust reference implementation)|
-|Clipboard|tauri-plugin-clipboard-manager|
-|Safe-area|tauri-plugin-safe-area (local Tauri plugin)|
+| Layer         | Technology                                                           |
+| ------------- | -------------------------------------------------------------------- |
+| App framework | Tauri v2                                                             |
+| Backend       | Rust (age, git2, ssh-key, zeroize, walkdir)                          |
+| Frontend      | Vue 3 + TypeScript + Vite + npm                                      |
+| Crypto        | [age](https://github.com/str4d/rage) (Rust reference implementation) |
+| Clipboard     | tauri-plugin-clipboard-manager                                       |
+| Safe-area     | tauri-plugin-safe-area (local Tauri plugin)                          |
 
 ## Setup
 
@@ -58,7 +58,7 @@ You'll need to install these yourself:
 **Utilities**
 
 - [just](https://github.com/casey/just) — task runner (`cargo install just`)
-- [prettier](https://prettier.io/) — code formatter (`npm install -g prettier`)
+- [oxfmt](https://oxc.rs/docs/guide/usage/formatter) — code formatter (in the Nix dev shell)
 
 </details>
 
@@ -84,7 +84,7 @@ just test              # Run all tests (backend + frontend)
 just test-be           # Run backend (Rust) tests only
 just test-fe           # Run frontend unit tests only
 just lint              # Clippy -D warnings + vue-tsc --noEmit
-just fmt               # rustfmt + prettier
+just fmt               # rustfmt + oxfmt
 just dev               # Desktop dev server with hot reload
 just android-debug     # Build debug APK
 just android-release   # Build release APK (signed if keystore.properties exists)

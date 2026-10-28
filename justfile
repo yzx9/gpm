@@ -63,13 +63,13 @@ check-i18n:
 # Format Rust + Vue + Nix code
 fmt:
   cargo fmt
-  prettier --write .
+  oxfmt --write .
   nixfmt $(git ls-files '*.nix')
 
 # Check formatting without writing (parity with the nix pre-commit hooks)
 fmt-check:
   cargo fmt --check
-  prettier --check .
+  oxfmt --check .
   nixfmt --check $(git ls-files '*.nix')
 
 # Refresh the embedded Mozilla CA bundle (crates/rustpass/data/cacert.pem) that backs

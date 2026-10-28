@@ -29,14 +29,10 @@ jobs:
 
       - name: Setup CI environment
         uses: ./.github/actions/setup-ci-env
-        with:
-          npm_cache: true
 
       - name: Check frontend formatting
         shell: nix develop .#ci-lite --accept-flake-config --command sh -e {0}
-        run: |
-          npm ci
-          prettier --check .
+        run: oxfmt --check .
 
   nix:
     runs-on: ubuntu-latest

@@ -56,22 +56,27 @@ let
     # repo root = parent of nix/; keeps the module parameter-free beyond pkgs/system/inputs.
     src = ./..;
     hooks = {
-      # prettier resolves its plugins from repo node_modules. So install once
-      # before any formatter runs when node_modules is absent.
-      ensure-node-deps = {
-        enable = true;
-        name = "ensure-node-deps";
-        description = "npm install if node_modules is missing (prettier plugins live there)";
-        entry = "${lib.getExe pkgs.bash} -c '[ -d node_modules ] || ${pkgs.nodejs_26}/bin/npm install'";
-        pass_filenames = false;
-        always_run = true;
-        language = "system";
-        stages = [ "pre-commit" ];
-      };
-
       nixfmt.enable = true;
 
-      prettier.enable = true;
+      # The module default only matches js/ts files; oxfmt covers the same
+      # surface prettier did (vue/md/json/yaml/css/html included), so widen
+      # the staged-file filter to all of it.
+      oxfmt = {
+        enable = true;
+        types_or = [
+          "javascript"
+          "jsx"
+          "ts"
+          "tsx"
+          "vue"
+          "json"
+          "yaml"
+          "css"
+          "html"
+          "markdown"
+          "toml"
+        ];
+      };
 
       # Per-file rustfmt (edition 2024) — formats only staged .rs files.
       # `cargo fmt` would reformat the whole workspace and drag unrelated
@@ -243,7 +248,7 @@ let
         # Utils
         just
         nixfmt
-        prettier
+        oxfmt
 
         # Cross-tool crypto interop: decrypt a gpm-created .age with the bare
         # `age` CLI (independent of rustpass's own decrypt path).

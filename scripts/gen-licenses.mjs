@@ -211,9 +211,7 @@ function scanRustFromLock(root) {
 //           matching the Rust convention keeps the page honest about every
 //           tool the project relies on. Sub-package devDependencies aren't
 //           walked — npm doesn't install them, so resolution would just
-//           noisily fail. A peer-only tool the project uses (prettier, via
-//           prettier-plugin-organize-imports) is added as an explicit root
-//           devDep so the BFS can reach it.
+//           noisily fail.
 
 /** Read a package.json as JSON, or null on any failure. */
 function readPackageJson(path) {
@@ -322,11 +320,9 @@ export function scanNpm(root) {
 }
 
 /** Scan the npm dependency trees of every workspace package — the workspace
- *  root (formatting toolchain: prettier + its plugin) AND the frontend app —
- *  and dedupe by name@version. Scanning both keeps root-only dev tooling in the
- *  attribution inventory alongside the app's deps: prettier is a peerDep of
- *  prettier-plugin-organize-imports, which the per-package BFS never walks, so
- *  it must be seeded as a direct root devDep (see scanNpm). */
+ *  root AND the frontend app — and dedupe by name@version. Scanning both keeps
+ *  any future root-only dev tooling in the attribution inventory alongside the
+ *  app's deps (root-only deps aren't reached by the app's own BFS). */
 export function scanNpmAll(root, frontendDir) {
   const seen = new Set();
   const packages = [];
