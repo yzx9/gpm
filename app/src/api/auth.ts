@@ -28,10 +28,7 @@ export async function getAuthState(): Promise<AuthState> {
  * {@link AppError} (`WRONG_PASSPHRASE` etc.) on failure; resolves once the
  * identity cache is populated.
  */
-export async function unlock(
-  repoId: string,
-  passphrase: string,
-): Promise<void> {
+export async function unlock(repoId: string, passphrase: string): Promise<void> {
   await invoke("unlock", { repoId, passphrase });
 }
 
@@ -56,13 +53,7 @@ export async function bumpIdleTimer(): Promise<void> {
  *  this: `"idle"` (the idle timer fired; the user likely stepped away) suppresses
  *  the auto-prompt; every other value keeps it (the user is present, or no
  *  overlay is up to prompt). Mirrors the backend `LockEventReason` enum. */
-export type IdentityLockReason =
-  | "manual"
-  | "idle"
-  | "setup"
-  | "unlock"
-  | "soft-wipe"
-  | "reset";
+export type IdentityLockReason = "manual" | "idle" | "setup" | "unlock" | "soft-wipe" | "reset";
 
 /** Payload of the `identity-lock-state` event: the backend's identity-cache
  *  lock snapshot. `locked` = the decrypted identity is NOT cached (the next

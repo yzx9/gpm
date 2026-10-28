@@ -20,7 +20,10 @@ cp -r docs/specs/000-template docs/specs/<NNN>-<slug>
 
 ## Rules of thumb
 
-- **Only `prd.md` is required.** Add companions only when the feature needs them; don't create empty placeholders.
-- **PRD = requirements, not implementation.** How it's built → read the code/git. Keep "current state" to a few sentences.
-- **Living vs snapshot:** `prd.md` / `security.md` stay equal to reality; `design.md` / `research.md` / `mockups/` are frozen once written.
+- **Only `prd.md` is required.** Add companions only when the feature needs them; don't create empty
+  placeholders.
+- **PRD = requirements, not implementation.** How it's built → read the code/git. Keep "current
+  state" to a few sentences.
+- **Living vs snapshot:** `prd.md` / `security.md` stay equal to reality; `design.md` /
+  `research.md` / `mockups/` are frozen once written.
 - Named personas (Jordan / Casey) are defined in `docs/personas.md`.

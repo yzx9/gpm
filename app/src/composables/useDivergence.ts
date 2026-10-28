@@ -98,9 +98,7 @@ export function useDivergence(opts: {
     divergence.value = null;
     divergeError.value = "";
     if (discardOnCancel && openRepoId)
-      void openRepoId
-        .then((repoId) => discardDivergence(repoId))
-        .catch(() => {});
+      void openRepoId.then((repoId) => discardDivergence(repoId)).catch(() => {});
   }
 
   async function resolveDivergence(choice: DivergenceChoice) {
@@ -112,9 +110,7 @@ export function useDivergence(opts: {
       const repoId = await activeRepo.currentId();
       const result: PullResult =
         choice === "keep_mine"
-          ? await runWithAuth(() =>
-              resolveSyncDivergence(repoId, expectedRemoteOid, choice),
-            )
+          ? await runWithAuth(() => resolveSyncDivergence(repoId, expectedRemoteOid, choice))
           : await resolveSyncDivergence(repoId, expectedRemoteOid, choice);
       divergence.value = null;
       opts.onResolved(result, choice);

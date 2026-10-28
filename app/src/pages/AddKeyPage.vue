@@ -29,9 +29,7 @@ const newKeyLabel = ref("");
 const saving = ref(false);
 const error = ref("");
 
-const canSave = computed(
-  () => !saving.value && newPublicKey.value.trim() !== "",
-);
+const canSave = computed(() => !saving.value && newPublicKey.value.trim() !== "");
 
 async function onSave() {
   if (!canSave.value) return;
@@ -39,11 +37,7 @@ async function onSave() {
   error.value = "";
   try {
     const repoId = await activeRepo.currentId();
-    await addTrustedSigningKey(
-      repoId,
-      newPublicKey.value.trim(),
-      newKeyLabel.value.trim(),
-    );
+    await addTrustedSigningKey(repoId, newPublicKey.value.trim(), newKeyLabel.value.trim());
     toast.success(t("addKey.addedToast"));
     navBack(router, BACK_FALLBACK);
   } catch (e) {
@@ -63,9 +57,7 @@ function goBack() {
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
     <BaseHeader :back-fallback="BACK_FALLBACK" :title="t('addKey.title')" />
 
-    <BaseAlert v-if="error" variant="danger" class="mb-4">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert v-if="error" variant="danger" class="mb-4">{{ error }}</BaseAlert>
 
     <form class="flex flex-col gap-4" @submit.prevent="onSave">
       <div class="flex flex-col gap-1">
@@ -77,11 +69,7 @@ function goBack() {
         />
       </div>
       <div class="flex flex-col gap-1">
-        <BaseInput
-          v-model="newKeyLabel"
-          type="text"
-          :placeholder="t('addKey.labelPlaceholder')"
-        />
+        <BaseInput v-model="newKeyLabel" type="text" :placeholder="t('addKey.labelPlaceholder')" />
       </div>
       <div class="flex gap-2">
         <BaseButton

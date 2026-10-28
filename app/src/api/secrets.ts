@@ -249,10 +249,7 @@ export async function copyTotp(
 /** One-shot **cache-only** probe (never triggers an unlock): returns both the
  *  2FA-presence signal and attachment metadata from a single decrypt, or `null`
  *  when the identity is not currently cached. Never returns secret data. */
-export async function entryProbe(
-  repoId: string,
-  entryPath: string,
-): Promise<EntryProbe | null> {
+export async function entryProbe(repoId: string, entryPath: string): Promise<EntryProbe | null> {
   return invoke<EntryProbe | null>("entry_probe", { repoId, entryPath });
 }
 
@@ -271,20 +268,14 @@ export async function exportAttachment(
 }
 
 /** Decrypt + return the entry's content for in-app reveal. */
-export async function showPassword(
-  repoId: string,
-  entryPath: string,
-): Promise<SensitiveContent> {
+export async function showPassword(repoId: string, entryPath: string): Promise<SensitiveContent> {
   return invoke<SensitiveContent>("show_password", { repoId, entryPath });
 }
 
 /** Blob oid (base version) of `entry` at HEAD, or `null` if absent — the R026
  *  base-version capture for a base-version-aware delete (fetched on the detail
  *  page mount so a delete-without-reveal is still protected). Non-secret. */
-export async function entryOid(
-  repoId: string,
-  entryPath: string,
-): Promise<string | null> {
+export async function entryOid(repoId: string, entryPath: string): Promise<string | null> {
   return invoke<string | null>("entry_oid", { repoId, entryPath });
 }
 
@@ -361,10 +352,7 @@ export async function listCreatePresets(): Promise<CreatePreset[]> {
 }
 
 /** Whether a gopass location-based template exists for `name`. */
-export async function lookupTemplate(
-  repoId: string,
-  name: string,
-): Promise<string | null> {
+export async function lookupTemplate(repoId: string, name: string): Promise<string | null> {
   return invoke<string | null>("lookup_template", { repoId, name });
 }
 

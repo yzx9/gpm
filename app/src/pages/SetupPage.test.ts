@@ -125,9 +125,7 @@ describe("SetupPage", () => {
       await fillStep1(wrapper, { repoUrl: "" });
       await submitStep1(wrapper);
 
-      expect(wrapper.find("[role='alert']").text()).toBe(
-        "Repository URL is required",
-      );
+      expect(wrapper.find("[role='alert']").text()).toBe("Repository URL is required");
       expect(invoke).not.toHaveBeenCalledWith("clone_repo", expect.anything());
     });
 
@@ -181,10 +179,7 @@ describe("SetupPage", () => {
       await fillStep1(wrapper, { pat: "" });
       await submitStep1(wrapper);
 
-      expect(invoke).toHaveBeenCalledWith(
-        "clone_repo",
-        expect.objectContaining({ pat: null }),
-      );
+      expect(invoke).toHaveBeenCalledWith("clone_repo", expect.objectContaining({ pat: null }));
     });
 
     it("advances to step 2 on success", async () => {
@@ -206,9 +201,7 @@ describe("SetupPage", () => {
       await flushPromises();
       await fillStep1(wrapper, { repoUrl: "https://github.com/user/repo.git" });
       await wrapper.find('input[id="su-commit-name"]').setValue("Alice");
-      await wrapper
-        .find('input[id="su-commit-email"]')
-        .setValue("alice@example.com");
+      await wrapper.find('input[id="su-commit-email"]').setValue("alice@example.com");
       await submitStep1(wrapper);
 
       expect(invoke).toHaveBeenCalledWith("set_commit_identity", {
@@ -223,10 +216,7 @@ describe("SetupPage", () => {
       await fillStep1(wrapper, { repoUrl: "https://github.com/user/repo.git" });
       await submitStep1(wrapper);
 
-      expect(invoke).not.toHaveBeenCalledWith(
-        "set_commit_identity",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("set_commit_identity", expect.anything());
     });
 
     it("displays error from clone failure", async () => {
@@ -286,9 +276,7 @@ describe("SetupPage", () => {
     it("shows message when no recipients found", async () => {
       const wrapper = await mountAtStep2([]);
 
-      expect(wrapper.text()).toContain(
-        "fresh repository with no recipients yet",
-      );
+      expect(wrapper.text()).toContain("fresh repository with no recipients yet");
     });
 
     it("on Android, warns a plugin-recipient store is read-only here", async () => {
@@ -345,26 +333,18 @@ describe("SetupPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1XYZ");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1XYZ");
       await flushPromises(); // resolve validate_identity
 
       // The matching recipient is highlighted; the other is not.
-      expect(wrapper.find("[data-pubkey='age1def456']").classes()).toContain(
-        "border-accent",
-      );
-      expect(
-        wrapper.find("[data-pubkey='age1abc123']").classes(),
-      ).not.toContain("border-accent");
+      expect(wrapper.find("[data-pubkey='age1def456']").classes()).toContain("border-accent");
+      expect(wrapper.find("[data-pubkey='age1abc123']").classes()).not.toContain("border-accent");
     });
 
     it("hard-blocks submit when the pasted identity matches no recipient", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
-        .mockResolvedValueOnce([
-          { public_key: "age1abc123", comment: "Alice", key_type: "x25519" },
-        ]) // list_recipients
+        .mockResolvedValueOnce([{ public_key: "age1abc123", comment: "Alice", key_type: "x25519" }]) // list_recipients
         .mockResolvedValueOnce({
           key_type: "x25519",
           encrypted: false,
@@ -373,20 +353,13 @@ describe("SetupPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1XYZ");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1XYZ");
       await flushPromises();
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "doesn't match any recipient",
-      );
-      expect(invoke).not.toHaveBeenCalledWith(
-        "complete_setup",
-        expect.anything(),
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("doesn't match any recipient");
+      expect(invoke).not.toHaveBeenCalledWith("complete_setup", expect.anything());
     });
 
     it("proceeds with any identity when the repo has no recipients (bootstrap)", async () => {
@@ -402,9 +375,7 @@ describe("SetupPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1XYZ");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1XYZ");
       await flushPromises();
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
@@ -429,9 +400,7 @@ describe("SetupPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1abc");
       await flushPromises(); // resolve validate_identity
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
@@ -456,15 +425,11 @@ describe("SetupPage", () => {
       await flushPromises();
 
       // Pasting an x25519 key reveals the optional seal PassphraseField.
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1abc");
       await flushPromises();
 
       await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
-      await wrapper
-        .find('input[id="identity-passphrase-confirm"]')
-        .setValue("different");
+      await wrapper.find('input[id="identity-passphrase-confirm"]').setValue("different");
       // Ack first so the mismatch is what blocks submit (not the ack gate).
       await wrapper.find('input[type="checkbox"]').setValue(true);
       await wrapper.find("form").trigger("submit.prevent");
@@ -472,10 +437,7 @@ describe("SetupPage", () => {
 
       // Mismatch must block the save — the identity must not be persisted with a
       // passphrase the user can't reproduce (gpm can't recover it).
-      expect(invoke).not.toHaveBeenCalledWith(
-        "complete_setup",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("complete_setup", expect.anything());
       expect(wrapper.text()).toContain("Passphrases do not match");
     });
 
@@ -492,15 +454,11 @@ describe("SetupPage", () => {
 
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1abc");
       await flushPromises();
 
       await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
-      await wrapper
-        .find('input[id="identity-passphrase-confirm"]')
-        .setValue("secret");
+      await wrapper.find('input[id="identity-passphrase-confirm"]').setValue("secret");
 
       // Ack present + unchecked → Complete Setup disabled; submit is blocked.
       const ack = wrapper.find('input[type="checkbox"]');
@@ -512,18 +470,13 @@ describe("SetupPage", () => {
       expect((completeBtn.element as HTMLButtonElement).disabled).toBe(true);
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
-      expect(invoke).not.toHaveBeenCalledWith(
-        "complete_setup",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("complete_setup", expect.anything());
 
       // Acknowledge → Complete Setup enables and complete_setup fires.
       await ack.setValue(true);
       expect(
         (
-          wrapper
-            .findAll("button")
-            .find((b) => b.text().includes("Complete Setup"))!
+          wrapper.findAll("button").find((b) => b.text().includes("Complete Setup"))!
             .element as HTMLButtonElement
         ).disabled,
       ).toBe(false);
@@ -546,25 +499,18 @@ describe("SetupPage", () => {
         });
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1abc");
       await flushPromises();
       await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
-      await wrapper
-        .find('input[id="identity-passphrase-confirm"]')
-        .setValue("secret");
+      await wrapper.find('input[id="identity-passphrase-confirm"]').setValue("secret");
       await wrapper.find('input[type="checkbox"]').setValue(true);
 
       // Editing the passphrase invalidates the ack.
       await wrapper.find('input[id="identity-passphrase"]').setValue("changed");
-      await wrapper
-        .find('input[id="identity-passphrase-confirm"]')
-        .setValue("changed");
-      expect(
-        (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
-          .checked,
-      ).toBe(false);
+      await wrapper.find('input[id="identity-passphrase-confirm"]').setValue("changed");
+      expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(
+        false,
+      );
     });
 
     it("x25519: pasting a different identity after acking forces a re-ack", async () => {
@@ -583,25 +529,18 @@ describe("SetupPage", () => {
         });
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1aaa");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1aaa");
       await flushPromises();
       await wrapper.find('input[id="identity-passphrase"]').setValue("secret");
-      await wrapper
-        .find('input[id="identity-passphrase-confirm"]')
-        .setValue("secret");
+      await wrapper.find('input[id="identity-passphrase-confirm"]').setValue("secret");
       await wrapper.find('input[type="checkbox"]').setValue(true);
 
       // Pasting a different identity invalidates the ack.
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1bbb");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1bbb");
       await flushPromises();
-      expect(
-        (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
-          .checked,
-      ).toBe(false);
+      expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(
+        false,
+      );
     });
 
     it("x25519: empty (plaintext) passphrase shows no ack and Complete Setup is not gated", async () => {
@@ -616,9 +555,7 @@ describe("SetupPage", () => {
 
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1abc");
       await flushPromises();
 
       // No passphrase typed → plaintext → no lockout risk → no ack.
@@ -643,9 +580,7 @@ describe("SetupPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1abc");
       await flushPromises(); // resolve validate_identity
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
@@ -660,9 +595,7 @@ describe("SetupPage", () => {
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toBe(
-        "Age identity is required",
-      );
+      expect(wrapper.find("[role='alert']").text()).toBe("Age identity is required");
     });
 
     it("shows error when identity format is invalid", async () => {
@@ -680,27 +613,19 @@ describe("SetupPage", () => {
     it("shows an unsupported alert for a post-quantum identity", async () => {
       const wrapper = await mountAtStep2([]);
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-PQ-1XYZ");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-PQ-1XYZ");
       await flushPromises();
 
-      expect(wrapper.text()).toContain(
-        "Post-quantum age keys aren't supported",
-      );
+      expect(wrapper.text()).toContain("Post-quantum age keys aren't supported");
     });
 
     it("shows an unsupported alert for an age-plugin identity", async () => {
       const wrapper = await mountAtStep2([]);
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-PLUGIN-YUBIKEY-1XYZ");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-PLUGIN-YUBIKEY-1XYZ");
       await flushPromises();
 
-      expect(wrapper.text()).toContain(
-        "age-plugin identities aren't supported for decryption",
-      );
+      expect(wrapper.text()).toContain("age-plugin identities aren't supported for decryption");
     });
 
     it("verifies an encrypted SSH paste and highlights the match", async () => {
@@ -724,9 +649,7 @@ describe("SetupPage", () => {
 
       await wrapper
         .find('textarea[id="identity"]')
-        .setValue(
-          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
-        );
+        .setValue("-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----");
       await flushPromises(); // validate_identity → encrypted SSH detected
 
       await wrapper.find('input[id="passphrase"]').setValue("the-pass");
@@ -737,13 +660,12 @@ describe("SetupPage", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("verify_pasted_identity", {
-        identity:
-          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
+        identity: "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
         passphrase: "the-pass",
       });
-      expect(
-        wrapper.find("[data-pubkey='ssh-ed25519 AAAAmatch']").classes(),
-      ).toContain("border-accent");
+      expect(wrapper.find("[data-pubkey='ssh-ed25519 AAAAmatch']").classes()).toContain(
+        "border-accent",
+      );
     });
 
     it("shows a wrong-passphrase error for an encrypted SSH paste", async () => {
@@ -770,9 +692,7 @@ describe("SetupPage", () => {
 
       await wrapper
         .find('textarea[id="identity"]')
-        .setValue(
-          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
-        );
+        .setValue("-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----");
       await flushPromises();
 
       await wrapper.find('input[id="passphrase"]').setValue("bad-pass");
@@ -782,9 +702,7 @@ describe("SetupPage", () => {
         .trigger("click");
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "Wrong passphrase",
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("Wrong passphrase");
     });
 
     it("encrypted SSH paste shows no unrecoverable ack (verify field is not a new passphrase)", async () => {
@@ -800,9 +718,7 @@ describe("SetupPage", () => {
       await flushPromises();
       await wrapper
         .find('textarea[id="identity"]')
-        .setValue(
-          "-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----",
-        );
+        .setValue("-----BEGIN OPENSSH PRIVATE KEY-----\nbody\n-----END OPENSSH PRIVATE KEY-----");
       await flushPromises();
 
       // The SSH passphrase field decrypts an existing key (BaseInput), it does
@@ -829,16 +745,12 @@ describe("SetupPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('textarea[id="identity"]')
-        .setValue("AGE-SECRET-KEY-1abc");
+      await wrapper.find('textarea[id="identity"]').setValue("AGE-SECRET-KEY-1abc");
       await flushPromises(); // resolve validate_identity
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toBe(
-        "Identity does not match any recipient",
-      );
+      expect(wrapper.find("[role='alert']").text()).toBe("Identity does not match any recipient");
     });
   });
 
@@ -885,8 +797,7 @@ describe("SetupPage", () => {
       expect(wrapper.text()).toContain("age1abc1234567890");
       // Bytes never enter the textarea — it's disabled in file mode.
       expect(
-        (wrapper.find('textarea[id="identity"]').element as HTMLTextAreaElement)
-          .disabled,
+        (wrapper.find('textarea[id="identity"]').element as HTMLTextAreaElement).disabled,
       ).toBe(true);
     });
 
@@ -958,9 +869,7 @@ describe("SetupPage", () => {
     it("hard-blocks submit when a picked file matches no recipient", async () => {
       vi.mocked(invoke)
         .mockResolvedValueOnce(true) // is_repo_ready
-        .mockResolvedValueOnce([
-          { public_key: "age1abc123", comment: "Alice", key_type: "x25519" },
-        ]) // list_recipients
+        .mockResolvedValueOnce([{ public_key: "age1abc123", comment: "Alice", key_type: "x25519" }]) // list_recipients
         .mockResolvedValueOnce({
           key_type: "x25519",
           encrypted: false,
@@ -978,13 +887,8 @@ describe("SetupPage", () => {
       await wrapper.find("form").trigger("submit.prevent");
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "doesn't match any recipient",
-      );
-      expect(invoke).not.toHaveBeenCalledWith(
-        "complete_setup_from_file",
-        expect.anything(),
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("doesn't match any recipient");
+      expect(invoke).not.toHaveBeenCalledWith("complete_setup_from_file", expect.anything());
     });
 
     it("unlocks an encrypted file and reveals its public key", async () => {
@@ -1008,9 +912,7 @@ describe("SetupPage", () => {
 
       // Encrypted: no public key yet, the unlock form is shown instead.
       expect(wrapper.text()).not.toContain("Public key");
-      const unlockBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Unlock & verify"));
+      const unlockBtn = wrapper.findAll("button").find((b) => b.text().includes("Unlock & verify"));
       expect(unlockBtn).toBeDefined();
 
       vi.mocked(invoke).mockResolvedValueOnce({
@@ -1058,11 +960,9 @@ describe("SetupPage", () => {
 
       // File abandoned → error shown and back to paste mode.
       expect(wrapper.find("[role='alert']").text()).toContain("discarded");
-      expect(
-        wrapper
-          .findAll("button")
-          .some((b) => b.text().includes("Upload identity file")),
-      ).toBe(true);
+      expect(wrapper.findAll("button").some((b) => b.text().includes("Upload identity file"))).toBe(
+        true,
+      );
     });
 
     it("removes a picked file and returns to paste mode", async () => {
@@ -1076,19 +976,15 @@ describe("SetupPage", () => {
       await pickBtn!.trigger("click");
       await flushPromises();
 
-      const removeBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text() === "Remove");
+      const removeBtn = wrapper.findAll("button").find((b) => b.text() === "Remove");
       await removeBtn!.trigger("click");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("clear_pending_identity");
       // Upload button reappears in paste mode.
-      expect(
-        wrapper
-          .findAll("button")
-          .some((b) => b.text().includes("Upload identity file")),
-      ).toBe(true);
+      expect(wrapper.findAll("button").some((b) => b.text().includes("Upload identity file"))).toBe(
+        true,
+      );
     });
   });
 
@@ -1135,9 +1031,7 @@ describe("SetupPage", () => {
       // on an internal step change.
       await wrapper.find('button[aria-label="Back"]').trigger("click");
       await flushPromises();
-      expect(
-        (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,
-      ).toBe("keep-me");
+      expect((wrapper.find('input[id="pat"]').element as HTMLInputElement).value).toBe("keep-me");
     });
 
     it("wipes the hoisted git credentials when the clone flow is left", async () => {
@@ -1151,31 +1045,19 @@ describe("SetupPage", () => {
         repoUrl: "https://github.com/user/repo.git",
         pat: "leak-me",
       });
-      expect(
-        (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,
-      ).toBe("leak-me");
+      expect((wrapper.find('input[id="pat"]').element as HTMLInputElement).value).toBe("leak-me");
 
       // Clone→Create unmounts CloneFlow (useWipeOnLeave fires the wipe); back to
       // Clone remounts it fresh, so the wiped `pat` is gone.
-      await wrapper
-        .find('button[aria-labelledby="setup-mode-legend"]')
-        .trigger("click");
+      await wrapper.find('button[aria-labelledby="setup-mode-legend"]').trigger("click");
       await flushPromises();
-      await wrapper
-        .findAll('input[type="radio"][name="setup-mode"]')[1]!
-        .trigger("change"); // create
+      await wrapper.findAll('input[type="radio"][name="setup-mode"]')[1]!.trigger("change"); // create
       await flushPromises();
-      await wrapper
-        .find('button[aria-labelledby="setup-mode-legend"]')
-        .trigger("click");
+      await wrapper.find('button[aria-labelledby="setup-mode-legend"]').trigger("click");
       await flushPromises();
-      await wrapper
-        .findAll('input[type="radio"][name="setup-mode"]')[0]!
-        .trigger("change"); // clone
+      await wrapper.findAll('input[type="radio"][name="setup-mode"]')[0]!.trigger("change"); // clone
       await flushPromises();
-      expect(
-        (wrapper.find('input[id="pat"]').element as HTMLInputElement).value,
-      ).toBe("");
+      expect((wrapper.find('input[id="pat"]').element as HTMLInputElement).value).toBe("");
     });
   });
 
@@ -1187,9 +1069,7 @@ describe("SetupPage", () => {
 
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("git@github.com:user/repo.git");
+      await wrapper.find('input[id="repo-url"]').setValue("git@github.com:user/repo.git");
       await flushPromises();
 
       expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(true);
@@ -1202,9 +1082,7 @@ describe("SetupPage", () => {
 
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("ssh://git@github.com/user/repo.git");
+      await wrapper.find('input[id="repo-url"]').setValue("ssh://git@github.com/user/repo.git");
       await flushPromises();
 
       expect(wrapper.find('textarea[id="ssh-key"]').exists()).toBe(true);
@@ -1257,15 +1135,11 @@ describe("SetupPage", () => {
 
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("git@github.com:user/repo.git");
+      await wrapper.find('input[id="repo-url"]').setValue("git@github.com:user/repo.git");
       await flushPromises();
 
       // Click "Generate Key" tab (a BaseSegmentedControl radio, not a button)
-      const genLabel = wrapper
-        .findAll("label")
-        .find((l) => l.text().includes("Generate Key"));
+      const genLabel = wrapper.findAll("label").find((l) => l.text().includes("Generate Key"));
       expect(genLabel).toBeDefined();
       await genLabel!.find('input[type="radio"]').trigger("change");
       await flushPromises();
@@ -1285,15 +1159,11 @@ describe("SetupPage", () => {
 
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('input[id="repo-url"]')
-        .setValue("git@github.com:user/repo.git");
+      await wrapper.find('input[id="repo-url"]').setValue("git@github.com:user/repo.git");
       await flushPromises();
 
       // Switch to Generate tab (a BaseSegmentedControl radio, not a button)
-      const genLabel = wrapper
-        .findAll("label")
-        .find((l) => l.text().includes("Generate Key"));
+      const genLabel = wrapper.findAll("label").find((l) => l.text().includes("Generate Key"));
       await genLabel!.find('input[type="radio"]').trigger("change");
       await flushPromises();
 
@@ -1308,9 +1178,7 @@ describe("SetupPage", () => {
       expect(invoke).toHaveBeenCalledWith("generate_ssh_key", {
         passphrase: null,
       });
-      expect(wrapper.text()).toContain(
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIgenerated",
-      );
+      expect(wrapper.text()).toContain("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIgenerated");
     });
   });
 });

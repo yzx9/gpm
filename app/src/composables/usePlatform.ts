@@ -43,9 +43,7 @@ export const PLATFORM_KEY: InjectionKey<PlatformState> = Symbol("Platform");
  * Create a fresh platform instance. Production calls this once in `main.ts` and
  * provides it; tests call it per-case for isolation.
  */
-export function createPlatform(
-  opts: CreatePlatformOptions = {},
-): PlatformState {
+export function createPlatform(opts: CreatePlatformOptions = {}): PlatformState {
   const platform = ref<RuntimePlatform>(opts.platform ?? "unknown");
   let initialized = false;
 

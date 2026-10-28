@@ -173,9 +173,7 @@ export interface LicenseGroup {
  * "MIT OR Apache-2.0"), so this collapses hundreds of packages into ~8-15
  * collapsible rows — the UI's primary scale-control.
  */
-export function groupLicenses(
-  packages: readonly LicensePackage[],
-): LicenseGroup[] {
+export function groupLicenses(packages: readonly LicensePackage[]): LicenseGroup[] {
   const map = new Map<string, LicensePackage[]>();
   for (const p of packages) {
     const key = p.license || "UNKNOWN";
@@ -209,9 +207,7 @@ export function groupLicenses(
                   : 0,
         ),
     }))
-    .sort((a, b) =>
-      b.count !== a.count ? b.count - a.count : a.license < b.license ? -1 : 1,
-    );
+    .sort((a, b) => (b.count !== a.count ? b.count - a.count : a.license < b.license ? -1 : 1));
 }
 
 /**

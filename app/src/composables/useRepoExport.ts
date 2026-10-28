@@ -37,9 +37,7 @@ export interface RepoExportOptions {
  *  `README.md` (the one a finder / GitHub reads first); others get
  *  `README.<locale>.md`. */
 function readmeFile(locale: string): string {
-  return locale === DEFAULT_LOCALE
-    ? "README.md"
-    : `README.${locale.toLowerCase()}.md`;
+  return locale === DEFAULT_LOCALE ? "README.md" : `README.${locale.toLowerCase()}.md`;
 }
 
 /** Build one README entry per supported locale that has an `exportReadme` body,
@@ -82,10 +80,7 @@ export function useRepoExport() {
       if (!confirmed) return;
       // Localize the README for every supported locale (the backend writes one
       // file each — README.md, README.zh-cn.md, …).
-      await exportRepository(
-        await activeRepo.currentId(),
-        await readmeEntries(),
-      );
+      await exportRepository(await activeRepo.currentId(), await readmeEntries());
       toast.success(t("settings.repo.exported"));
     } catch (e) {
       const appError = e as AppError;

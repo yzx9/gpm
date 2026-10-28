@@ -40,17 +40,12 @@ const CARDS = [
 // Pinned to `main`: the doc is a living threat model, so the latest revision is
 // the right target (it may temporarily outrun the installed build — acceptable,
 // since the cards above are the at-version summary).
-const SECURITY_DOC_URL =
-  "https://github.com/yzx9/gpm/blob/main/docs/SECURITY.md";
+const SECURITY_DOC_URL = "https://github.com/yzx9/gpm/blob/main/docs/SECURITY.md";
 </script>
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settings' }"
-      :title="t('security.title')"
-      spacing="sm"
-    />
+    <BaseHeader :back-fallback="{ name: 'settings' }" :title="t('security.title')" spacing="sm" />
 
     <p class="intro">{{ t("security.intro") }}</p>
 

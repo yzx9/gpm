@@ -115,9 +115,7 @@ export function createSecuritySettings(): SecuritySettingsState {
 export function useSecuritySettings(): SecuritySettingsState {
   const s = inject(SECURITY_SETTINGS_KEY);
   if (!s) {
-    throw new Error(
-      "useSecuritySettings() requires SECURITY_SETTINGS_KEY to be provided",
-    );
+    throw new Error("useSecuritySettings() requires SECURITY_SETTINGS_KEY to be provided");
   }
   return s;
 }

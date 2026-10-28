@@ -27,8 +27,7 @@ describe("installRouteGuards", () => {
 
   it("redirects to setup when the repo is not configured", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_auth_state")
-        return Promise.resolve({ configured: false });
+      if (cmd === "get_auth_state") return Promise.resolve({ configured: false });
       return Promise.resolve();
     });
 
@@ -61,8 +60,7 @@ describe("installRouteGuards", () => {
     // `useSecureClaim`. Navigating to a secret-bearing route must NOT issue a
     // set_secure IPC from the guard.
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_auth_state")
-        return Promise.resolve({ configured: true });
+      if (cmd === "get_auth_state") return Promise.resolve({ configured: true });
       return Promise.resolve();
     });
 
@@ -102,8 +100,7 @@ describe("installRouteGuards", () => {
     // look for a non-existent `settingsGeneral.json` and leave the page
     // untranslated on a direct deep-link. `meta.bundle` overrides the name.
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_auth_state")
-        return Promise.resolve({ configured: true });
+      if (cmd === "get_auth_state") return Promise.resolve({ configured: true });
       return Promise.resolve();
     });
 
@@ -134,10 +131,7 @@ describe("installRouteGuards", () => {
     // Start clean so the assertion proves THIS navigation loaded the bundle:
     // i18n.global is a singleton shared across test files, so a prior test may
     // have already merged `settings`.
-    const fresh = i18n.global.getLocaleMessage(locale) as Record<
-      string,
-      unknown
-    >;
+    const fresh = i18n.global.getLocaleMessage(locale) as Record<string, unknown>;
     delete fresh.settings;
 
     await router.push("/sub");
@@ -149,16 +143,14 @@ describe("installRouteGuards", () => {
     // `meta.bundle` ("settings"), not the route name (for which no bundle ships).
     await vi.waitFor(() => {
       expect(
-        (i18n.global.getLocaleMessage(locale) as Record<string, unknown>)
-          .settings,
+        (i18n.global.getLocaleMessage(locale) as Record<string, unknown>).settings,
       ).toBeDefined();
     });
   });
 
   it("logs each confirmed navigation as [nav] <name> (not fullPath)", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_auth_state")
-        return Promise.resolve({ configured: true });
+      if (cmd === "get_auth_state") return Promise.resolve({ configured: true });
       return Promise.resolve();
     });
     // The console shim isn't armed in tests, so spy on console.info directly to

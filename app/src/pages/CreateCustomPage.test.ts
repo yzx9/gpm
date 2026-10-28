@@ -29,8 +29,7 @@ describe("CreateCustomPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "create_secret")
-        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      if (cmd === "create_secret") return Promise.resolve({ kind: "written", commit: "abc1234" });
       if (cmd === "lookup_template") return Promise.resolve(null);
       if (cmd === "preview_create") return Promise.resolve(null);
       return Promise.resolve(undefined);
@@ -40,9 +39,7 @@ describe("CreateCustomPage", () => {
   it("Save is disabled until both name and content are filled", async () => {
     const w = mountWithApp(CreateCustomPage).wrapper;
     await flushPromises();
-    const save = w
-      .findAll("button")
-      .find((b) => b.text().includes("Save secret"))!;
+    const save = w.findAll("button").find((b) => b.text().includes("Save secret"))!;
     expect((save.element as HTMLButtonElement).disabled).toBe(true);
     await w.find('input[id="c-name"]').setValue("misc/foo");
     expect((save.element as HTMLButtonElement).disabled).toBe(true);
@@ -61,9 +58,7 @@ describe("CreateCustomPage", () => {
     await flushPromises();
 
     expect(w.text()).toContain("legacy gopass YAML secret");
-    const save = w
-      .findAll("button")
-      .find((b) => b.text().includes("Save secret"))!;
+    const save = w.findAll("button").find((b) => b.text().includes("Save secret"))!;
     expect((save.element as HTMLButtonElement).disabled).toBe(true);
     expect(invoke).not.toHaveBeenCalledWith("create_secret", expect.anything());
 
@@ -81,9 +76,7 @@ describe("CreateCustomPage", () => {
     const w = mountWithApp(CreateCustomPage).wrapper;
     await flushPromises();
     await w.find('input[id="c-name"]').setValue("misc/foo");
-    const save = w
-      .findAll("button")
-      .find((b) => b.text().includes("Save secret"))!;
+    const save = w.findAll("button").find((b) => b.text().includes("Save secret"))!;
     const content = w.find('textarea[id="c-content"]');
 
     await content.setValue("---\nk: v");
@@ -216,15 +209,10 @@ describe("CreateCustomPage", () => {
     m.appLock.setAppLocked(true, "idle");
     await flushPromises();
 
-    expect(
-      (m.wrapper.find('input[id="c-name"]').element as HTMLInputElement).value,
-    ).toBe("");
-    expect(
-      (
-        m.wrapper.find('textarea[id="c-content"]')
-          .element as HTMLTextAreaElement
-      ).value,
-    ).toBe("");
+    expect((m.wrapper.find('input[id="c-name"]').element as HTMLInputElement).value).toBe("");
+    expect((m.wrapper.find('textarea[id="c-content"]').element as HTMLTextAreaElement).value).toBe(
+      "",
+    );
     expect(m.draftsNotice.consume()).toBe(true); // draft lost → toast fires
   });
 

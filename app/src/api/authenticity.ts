@@ -27,24 +27,17 @@ export interface AuthenticityState {
 }
 
 /** Read the cached authenticity state for the entry-list badge. */
-export async function getAuthenticityState(
-  repoId: string,
-): Promise<AuthenticityState> {
+export async function getAuthenticityState(repoId: string): Promise<AuthenticityState> {
   return invoke<AuthenticityState>("get_authenticity_state", { repoId });
 }
 
 /** Set the verification mode; returns the effective mode (may refuse Enforce). */
-export async function setVerificationMode(
-  repoId: string,
-  mode: VerifyMode,
-): Promise<VerifyMode> {
+export async function setVerificationMode(repoId: string, mode: VerifyMode): Promise<VerifyMode> {
   return invoke<VerifyMode>("set_verification_mode", { repoId, mode });
 }
 
 /** Read the persisted authenticity config (mode, trusted keys, ignored issues). */
-export async function getAuthenticityConfig(
-  repoId: string,
-): Promise<AuthenticityConfig> {
+export async function getAuthenticityConfig(repoId: string): Promise<AuthenticityConfig> {
   return invoke<AuthenticityConfig>("get_authenticity_config", { repoId });
 }
 
@@ -88,35 +81,24 @@ export async function importTrustedGpgKeyFile(
 }
 
 /** Remove a trusted signing key by fingerprint. */
-export async function removeTrustedKey(
-  repoId: string,
-  fingerprint: string,
-): Promise<void> {
+export async function removeTrustedKey(repoId: string, fingerprint: string): Promise<void> {
   await invoke("remove_trusted_key", { repoId, fingerprint });
 }
 
 /** Remove a trusted GPG key by primary fingerprint. */
-export async function removeTrustedGpgKey(
-  repoId: string,
-  fingerprint: string,
-): Promise<void> {
+export async function removeTrustedGpgKey(repoId: string, fingerprint: string): Promise<void> {
   await invoke("remove_trusted_gpg_key", { repoId, fingerprint });
 }
 
 /** Per-key parse warnings for the persisted trusted GPG keys (Settings-only).
  * A trusted key that later fails to re-parse surfaces here instead of silently
  * downgrading its commits to `unverified_signature`. */
-export async function getGpgKeyParseWarnings(
-  repoId: string,
-): Promise<string[]> {
+export async function getGpgKeyParseWarnings(repoId: string): Promise<string[]> {
   return invoke<string[]>("get_gpg_key_parse_warnings", { repoId });
 }
 
 /** Trust the signer of the current HEAD with a `label`. */
-export async function trustHeadSigner(
-  repoId: string,
-  label: string,
-): Promise<void> {
+export async function trustHeadSigner(repoId: string, label: string): Promise<void> {
   await invoke("trust_head_signer", { repoId, label });
 }
 
@@ -131,10 +113,7 @@ export async function trustCommitSigner(
 
 /** Dismiss the authenticity issue on a specific `commit`. Returns the commit's
  * updated signature info so the caller can refresh the row in place. */
-export async function ignoreCommitIssue(
-  repoId: string,
-  commit: string,
-): Promise<CommitSigInfo> {
+export async function ignoreCommitIssue(repoId: string, commit: string): Promise<CommitSigInfo> {
   return invoke<CommitSigInfo>("ignore_commit_issue", { repoId, commit });
 }
 

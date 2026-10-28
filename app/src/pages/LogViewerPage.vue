@@ -177,9 +177,7 @@ async function onVerboseChange(enabled: boolean) {
     nowTick.value = Date.now();
     if (verboseState.value === "on") {
       // Notify immediately: verbose is now on for the bounded window.
-      toast.info(
-        t("log.verboseActiveToast", { remaining: remainingLabel.value }),
-      );
+      toast.info(t("log.verboseActiveToast", { remaining: remainingLabel.value }));
       startCountdown();
     } else {
       stopCountdown();
@@ -223,12 +221,7 @@ async function onClear() {
              buttons that overflowed on narrow screens; moved to a full-width
              toolbar below the title. -->
         <div class="flex gap-2">
-          <BaseButton
-            class="flex-1"
-            variant="ghost"
-            :loading="loading"
-            @click="load"
-          >
+          <BaseButton class="flex-1" variant="ghost" :loading="loading" @click="load">
             <BaseIcon :icon="RefreshCw" :size="16" />
             {{ t("log.refresh") }}
           </BaseButton>
@@ -265,26 +258,18 @@ async function onClear() {
           @click="onVerboseChange(!verboseOn)"
         >
           <BaseIcon :icon="Bug" :size="16" />
-          {{ t("log.verboseLegend")
-          }}<span v-if="verboseBadge"> · {{ verboseBadge }}</span>
+          {{ t("log.verboseLegend") }}<span v-if="verboseBadge"> · {{ verboseBadge }}</span>
         </BaseButton>
         <p v-if="verboseHint" class="text-xs text-muted">{{ verboseHint }}</p>
       </div>
     </BaseCard>
 
-    <BaseAlert v-if="error" variant="danger" class="mb-4">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert v-if="error" variant="danger" class="mb-4">{{ error }}</BaseAlert>
 
-    <div
-      v-if="loading && !logText"
-      class="flex items-center gap-2 text-muted py-8"
-    >
+    <div v-if="loading && !logText" class="flex items-center gap-2 text-muted py-8">
       <BaseSpinner />
     </div>
-    <pre v-else-if="logText" ref="logPre" class="log-display">{{
-      logText
-    }}</pre>
+    <pre v-else-if="logText" ref="logPre" class="log-display">{{ logText }}</pre>
     <p v-else class="text-muted text-sm">{{ t("log.empty") }}</p>
   </main>
 </template>

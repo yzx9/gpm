@@ -23,8 +23,7 @@ export interface DraftsNoticeState {
 }
 
 /** Injection key for the app-wide drafts notice (provided in `main.ts`). */
-export const DRAFTS_NOTICE_KEY: InjectionKey<DraftsNoticeState> =
-  Symbol("DraftsNotice");
+export const DRAFTS_NOTICE_KEY: InjectionKey<DraftsNoticeState> = Symbol("DraftsNotice");
 
 /** Create a fresh drafts-notice instance (composition root + tests). */
 export function createDraftsNotice(): DraftsNoticeState {
@@ -48,9 +47,7 @@ export function createDraftsNotice(): DraftsNoticeState {
 export function useDraftsNotice(): DraftsNoticeState {
   const s = inject(DRAFTS_NOTICE_KEY);
   if (!s) {
-    throw new Error(
-      "useDraftsNotice() requires DRAFTS_NOTICE_KEY to be provided",
-    );
+    throw new Error("useDraftsNotice() requires DRAFTS_NOTICE_KEY to be provided");
   }
   return s;
 }

@@ -69,9 +69,7 @@ export async function syncRepo(repoId: string): Promise<SyncOutcome> {
  *  caller can surface divergence / an Enforce block as a passive badge, or `null`
  *  when skipped (no repo / app-locked) or on a silent network error. Only invoked
  *  when AutoSync is on — the composable gates that. Emits `"sync-outcome"`. */
-export async function backgroundSync(
-  repoId: string,
-): Promise<SyncOutcome | null> {
+export async function backgroundSync(repoId: string): Promise<SyncOutcome | null> {
   return invoke<SyncOutcome | null>("background_sync", { repoId });
 }
 
@@ -135,10 +133,7 @@ export interface RepoReadmeEntry {
  *  Passed as a JSON string because the Android IPC bridge deserializes nested
  *  structs unreliably (a single string param is safe there). Runs under App Lock
  *  — no unlock needed; a dismissed save dialog surfaces as `CANCELLED`. */
-export async function exportRepository(
-  repoId: string,
-  readmes: RepoReadmeEntry[],
-): Promise<void> {
+export async function exportRepository(repoId: string, readmes: RepoReadmeEntry[]): Promise<void> {
   await invoke("export_repository", {
     repoId,
     readmes: JSON.stringify(readmes),

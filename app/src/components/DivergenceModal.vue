@@ -44,9 +44,7 @@ const headingEl = ref<HTMLHeadingElement | null>(null);
 
 const isSave = computed(() => props.context === "save");
 const heading = computed(() =>
-  isSave.value
-    ? t("common.divergence.headingSave")
-    : t("common.divergence.headingOther"),
+  isSave.value ? t("common.divergence.headingSave") : t("common.divergence.headingOther"),
 );
 const aheadNoun = computed(() =>
   props.divergence && props.divergence.local_ahead === 1
@@ -62,11 +60,7 @@ const aheadVerb = computed(() =>
 const adoptLosses = computed<string[]>(() => {
   const d = props.divergence;
   if (!d) return [];
-  return [
-    ...d.local_only_entries,
-    ...d.modified_entries,
-    ...d.other_changed_files,
-  ];
+  return [...d.local_only_entries, ...d.modified_entries, ...d.other_changed_files];
 });
 /** Entries "keep mine" may overwrite on the remote — the shared, modified ones. */
 const keepOverwrites = computed(() => props.divergence?.modified_entries ?? []);
@@ -119,11 +113,7 @@ watch(
     :aria-label="t('common.divergence.sheetAriaLabel')"
     @close="cancelAll"
   >
-    <h2
-      ref="headingEl"
-      class="text-base font-medium mb-1 text-danger"
-      tabindex="-1"
-    >
+    <h2 ref="headingEl" class="text-base font-medium mb-1 text-danger" tabindex="-1">
       {{ heading }}
     </h2>
     <p class="text-xs text-muted mb-3">
@@ -142,10 +132,7 @@ watch(
     </p>
 
     <div v-if="adoptLosses.length" class="flex flex-col gap-2 mb-3 div-scroll">
-      <div
-        v-if="divergence.local_only_entries.length"
-        class="div-block div-danger"
-      >
+      <div v-if="divergence.local_only_entries.length" class="div-block div-danger">
         <div class="div-head text-danger">
           {{ t("common.divergence.blockDeleted") }} ·
           {{ divergence.local_only_entries.length }}
@@ -167,10 +154,7 @@ watch(
           </li>
         </ul>
       </div>
-      <div
-        v-if="divergence.other_changed_files.length"
-        class="div-block div-muted"
-      >
+      <div v-if="divergence.other_changed_files.length" class="div-block div-muted">
         <div class="div-head text-muted">
           {{ t("common.divergence.blockOther") }} ·
           {{ divergence.other_changed_files.length }}
@@ -221,17 +205,11 @@ watch(
     :dismiss-on-backdrop="!resolving"
     @close="cancelConfirm"
   >
-    <h2
-      ref="headingEl"
-      class="text-base font-medium mb-2 text-danger"
-      tabindex="-1"
-    >
+    <h2 ref="headingEl" class="text-base font-medium mb-2 text-danger" tabindex="-1">
       <template v-if="pendingChoice === 'adopt_remote'">
         {{ t("common.divergence.confirmHeadingAdopt", { noun: aheadNoun }) }}
       </template>
-      <template v-else>{{
-        t("common.divergence.confirmHeadingPush")
-      }}</template>
+      <template v-else>{{ t("common.divergence.confirmHeadingPush") }}</template>
     </h2>
 
     <template v-if="pendingChoice === 'adopt_remote'">
@@ -266,12 +244,7 @@ watch(
     </template>
 
     <div class="flex flex-col gap-2">
-      <BaseButton
-        variant="danger"
-        size="sm"
-        :loading="resolving"
-        @click="confirm"
-      >
+      <BaseButton variant="danger" size="sm" :loading="resolving" @click="confirm">
         <template v-if="resolving">
           {{
             pendingChoice === "adopt_remote"

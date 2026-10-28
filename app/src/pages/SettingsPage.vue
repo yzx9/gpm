@@ -36,9 +36,7 @@ const { t } = useI18n();
 // RFC R090: a red dot on the About entry signals an unacknowledged newer
 // release. Decorative — the About page carries the labeled Update action.
 const updateStatus = ref<UpdateStatus | null>(null);
-const showAboutDot = computed(
-  () => updateStatus.value?.unacknowledged ?? false,
-);
+const showAboutDot = computed(() => updateStatus.value?.unacknowledged ?? false);
 
 onMounted(async () => {
   try {
@@ -51,10 +49,7 @@ onMounted(async () => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'entries' }"
-      :title="t('settings.title')"
-    />
+    <BaseHeader :back-fallback="{ name: 'entries' }" :title="t('settings.title')" />
 
     <!-- Three cards, split by what the rows *do*: configuring the app,
          information & diagnostics, and about-the-app reference. The test is
@@ -65,11 +60,7 @@ onMounted(async () => {
          (WCAG 1.3.1) so the split isn't visual-only. -->
     <div class="flex flex-col gap-4">
       <!-- Card 1 — configuring the app: rows that change how gpm behaves. -->
-      <BaseCard
-        as="section"
-        class="hub"
-        :aria-label="t('settings.groups.configure')"
-      >
+      <BaseCard as="section" class="hub" :aria-label="t('settings.groups.configure')">
         <div
           class="hub-row"
           tabindex="0"
@@ -116,11 +107,7 @@ onMounted(async () => {
       <!-- Card 2 — information & diagnostics: nothing here configures gpm;
            these pages describe the app, its state, or its runtime
            context. -->
-      <BaseCard
-        as="section"
-        class="hub"
-        :aria-label="t('settings.groups.information')"
-      >
+      <BaseCard as="section" class="hub" :aria-label="t('settings.groups.information')">
         <!-- Diagnostics log viewer — leads the information card. The app
              logs at the fixed Info default, so there is no per-row level
              summary. Independent of repo/identity state, so always shown. -->
@@ -178,11 +165,7 @@ onMounted(async () => {
       <!-- Card 3 — about the app: the overview plus provenance/legal
            reference, with the About row itself as the very bottom of the
            page. -->
-      <BaseCard
-        as="section"
-        class="hub"
-        :aria-label="t('settings.groups.about')"
-      >
+      <BaseCard as="section" class="hub" :aria-label="t('settings.groups.about')">
         <!-- Acknowledgements: the projects gpm builds on. Reference
              material, part of the About triple that closes the page. -->
         <div
@@ -192,14 +175,10 @@ onMounted(async () => {
           :aria-label="t('settings.hub.acknowledgements')"
           @click="router.push({ name: 'settingsAcknowledgements' })"
           @keydown.enter="router.push({ name: 'settingsAcknowledgements' })"
-          @keydown.space.prevent="
-            router.push({ name: 'settingsAcknowledgements' })
-          "
+          @keydown.space.prevent="router.push({ name: 'settingsAcknowledgements' })"
         >
           <BaseIcon :icon="Heart" :size="20" class="text-muted" />
-          <span class="hub-title">{{
-            t("settings.hub.acknowledgements")
-          }}</span>
+          <span class="hub-title">{{ t("settings.hub.acknowledgements") }}</span>
           <BaseIcon :icon="ChevronRight" :size="20" class="text-muted" />
         </div>
 

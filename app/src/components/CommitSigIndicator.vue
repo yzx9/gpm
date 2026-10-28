@@ -7,13 +7,7 @@ import type { CommitSigStatus } from "@/api";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import { signatureSignerFp, useCommitSignature } from "@/composables";
 import type { LucideIcon } from "@lucide/vue";
-import {
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
-  CircleQuestionMark,
-  CircleX,
-} from "@lucide/vue";
+import { CircleAlert, CircleCheck, CircleDashed, CircleQuestionMark, CircleX } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -96,10 +90,7 @@ const BANNER_TONE: Record<Tone, string> = {
     <BaseIcon :icon="ICON[props.status.kind]" :size="18" />
     <div class="flex-1 min-w-0">
       <div class="font-medium">{{ signatureLabel(props.status) }}</div>
-      <div
-        v-if="signatureSignerFp(props.status)"
-        class="text-xs text-muted break-all"
-      >
+      <div v-if="signatureSignerFp(props.status)" class="text-xs text-muted break-all">
         {{ signatureSignerFp(props.status) }}
       </div>
     </div>

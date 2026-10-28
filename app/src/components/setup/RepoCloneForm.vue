@@ -71,13 +71,9 @@ function formatBytes(n: number): string {
 function onProgress(p: GitProgressEvent) {
   receivedBytes.value = p.received_bytes;
   if (p.total_objects > 0) {
-    progressPercent.value = Math.min(
-      100,
-      Math.round((p.received_objects / p.total_objects) * 100),
-    );
+    progressPercent.value = Math.min(100, Math.round((p.received_objects / p.total_objects) * 100));
   }
-  progressText.value =
-    p.message ?? `${p.received_objects} / ${p.total_objects} objects`;
+  progressText.value = p.message ?? `${p.received_objects} / ${p.total_objects} objects`;
 }
 
 /** User-initiated cancel: flip the backend token so git2 aborts the transfer.
@@ -122,8 +118,7 @@ async function onAdvancedToggle(e: Event) {
 }
 
 function validateStep1(): string | null {
-  if (!repoUrl.value.trim())
-    return t("setup.clone.validation.errRepoUrlRequired");
+  if (!repoUrl.value.trim()) return t("setup.clone.validation.errRepoUrlRequired");
   const url = repoUrl.value.trim();
   const isHttps = url.startsWith("https://");
   const isSsh = isSshRepoUrl(url);
@@ -162,10 +157,7 @@ async function onClone() {
     // Best-effort: a failure must not block the (already-cloned) setup.
     if (commitName.value.trim() || commitEmail.value.trim()) {
       try {
-        await setCommitIdentity(
-          commitName.value.trim() || null,
-          commitEmail.value.trim() || null,
-        );
+        await setCommitIdentity(commitName.value.trim() || null, commitEmail.value.trim() || null);
       } catch (e) {
         // Non-critical — editable later in Settings.
         console.debug("[clone] set-commit-identity failed", e);
@@ -211,9 +203,7 @@ async function onClone() {
         <p class="text-xs text-muted">
           {{
             t("setup.clone.advancedHint", {
-              suffix: commitDefault
-                ? ` (${commitDefault.name} <${commitDefault.email}>)`
-                : "",
+              suffix: commitDefault ? ` (${commitDefault.name} <${commitDefault.email}>)` : "",
             })
           }}
         </p>
@@ -257,9 +247,7 @@ async function onClone() {
           :disabled="cancelling"
           @click="cancelClone"
         >
-          {{
-            cancelling ? t("setup.clone.cancelling") : t("common.button.cancel")
-          }}
+          {{ cancelling ? t("setup.clone.cancelling") : t("common.button.cancel") }}
         </BaseButton>
       </div>
       <div
@@ -269,15 +257,10 @@ async function onClone() {
         aria-valuemin="0"
         aria-valuemax="100"
       >
-        <div
-          class="progress-fill"
-          :style="{ width: `${progressPercent}%` }"
-        ></div>
+        <div class="progress-fill" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div v-if="formatBytes(receivedBytes)" class="text-xs text-muted">
-        {{
-          t("setup.clone.bytesReceived", { bytes: formatBytes(receivedBytes) })
-        }}
+        {{ t("setup.clone.bytesReceived", { bytes: formatBytes(receivedBytes) }) }}
       </div>
     </div>
 

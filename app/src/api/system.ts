@@ -3,11 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { onBackButtonPress } from "@tauri-apps/api/app";
-import {
-  addPluginListener,
-  invoke,
-  type PluginListener,
-} from "@tauri-apps/api/core";
+import { addPluginListener, invoke, type PluginListener } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
@@ -129,9 +125,7 @@ export async function getAppConfig(): Promise<AppConfig> {
  * the current route's secure state on receipt. Independent of the per-route
  * plugin flag pushed by {@link setSecure}.
  */
-export async function setSecureScreenMode(
-  mode: SecureScreenMode,
-): Promise<AppConfig> {
+export async function setSecureScreenMode(mode: SecureScreenMode): Promise<AppConfig> {
   return invoke<AppConfig>("set_secure_screen_mode", { mode });
 }
 
@@ -234,9 +228,7 @@ export async function setGateIdle(mode: GateIdle): Promise<AppConfig> {
  * Set the password-view auto-clear override (`null` = default, `0` = never).
  * Returns the updated config.
  */
-export async function setViewClearSecs(
-  secs: number | null,
-): Promise<AppConfig> {
+export async function setViewClearSecs(secs: number | null): Promise<AppConfig> {
   return invoke<AppConfig>("set_view_clear_secs", { secs });
 }
 
@@ -244,9 +236,7 @@ export async function setViewClearSecs(
  * Set the clipboard auto-clear override (`null` = default, `0` = never). Returns
  * the updated config.
  */
-export async function setClipboardClearSecs(
-  secs: number | null,
-): Promise<AppConfig> {
+export async function setClipboardClearSecs(secs: number | null): Promise<AppConfig> {
   return invoke<AppConfig>("set_clipboard_clear_secs", { secs });
 }
 
@@ -260,9 +250,7 @@ export async function setAutosync(enabled: boolean): Promise<AppConfig> {
 
 /** Set the periodic background-sync cadence (`"off"` opts out). Returns the
  *  updated config. */
-export async function setBackgroundSync(
-  cadence: BackgroundSyncCadence,
-): Promise<AppConfig> {
+export async function setBackgroundSync(cadence: BackgroundSyncCadence): Promise<AppConfig> {
   return invoke<AppConfig>("set_background_sync", { cadence });
 }
 
@@ -343,12 +331,7 @@ export async function screenSecureAvailable(): Promise<boolean> {
  * nothing. The bare-passthrough return relies on the backend's Rust
  * serialization test to pin these exact wire strings.
  */
-export type RuntimePlatform =
-  | "android"
-  | "linux"
-  | "macos"
-  | "windows"
-  | "unknown";
+export type RuntimePlatform = "android" | "linux" | "macos" | "windows" | "unknown";
 
 /**
  * General platform fact for UI gating (distinct from {@link screenSecureAvailable},
@@ -382,11 +365,7 @@ export async function getSafeAreaInsets(): Promise<SafeAreaInsets> {
 export async function subscribeSafeArea(
   cb: (insets: SafeAreaInsets) => void,
 ): Promise<PluginListener> {
-  return addPluginListener<SafeAreaInsets>(
-    "safe-area",
-    "safe-area-changed",
-    cb,
-  );
+  return addPluginListener<SafeAreaInsets>("safe-area", "safe-area-changed", cb);
 }
 
 /**
@@ -396,8 +375,6 @@ export async function subscribeSafeArea(
  * registers an idle listener that never fires. Returns the plugin listener;
  * call `.unregister()` to release it back to Tauri's default back behavior.
  */
-export async function subscribeBackButton(
-  cb: () => void,
-): Promise<PluginListener> {
+export async function subscribeBackButton(cb: () => void): Promise<PluginListener> {
   return onBackButtonPress(cb);
 }

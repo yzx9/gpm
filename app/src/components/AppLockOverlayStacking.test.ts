@@ -91,9 +91,7 @@ describe("AppLockOverlay + DialogHost stacking", () => {
     expect(gate.exists()).toBe(true);
 
     // Tap the diagnostics link → real confirm → DialogHost renders it.
-    const link = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Export diagnostics"))!;
+    const link = wrapper.findAll("button").find((b) => b.text().includes("Export diagnostics"))!;
     expect(link).toBeTruthy();
     await link.trigger("click");
     await flushPromises();

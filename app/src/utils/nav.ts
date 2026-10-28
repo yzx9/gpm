@@ -21,8 +21,7 @@ import type { RouteLocationRaw, Router } from "vue-router";
  * back-press away.
  */
 export function navBack(router: Router, fallback: RouteLocationRaw): void {
-  const pos =
-    (window.history.state as { position?: number } | null)?.position ?? 0;
+  const pos = (window.history.state as { position?: number } | null)?.position ?? 0;
   if (pos > 0) router.back();
   else router.replace(fallback);
 }

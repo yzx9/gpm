@@ -204,10 +204,7 @@ describe("LicensesPage", () => {
     __resetLicensesCacheForTests();
     // HTTP failure → fetchLicenses resolves to a degraded doc (0 packages,
     // complete:false) → the `failed` computed renders the loadFailed alert.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 500 }),
-    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.text()).toContain("Couldn't load the license inventory.");
@@ -219,20 +216,14 @@ describe("LicensesPage", () => {
     // serde with empty licenseText (the degraded/Cargo.lock-fallback shape).
     const noText = {
       ...sample,
-      packages: sample.packages.map((p) =>
-        p.name === "serde" ? { ...p, licenseText: "" } : p,
-      ),
+      packages: sample.packages.map((p) => (p.name === "serde" ? { ...p, licenseText: "" } : p)),
     };
     mockFetchOk(noText);
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.findAll(".group-head")[0].trigger("click");
-    const serdeRow = wrapper
-      .findAll(".pkg-row")
-      .find((r) => r.text().includes("serde"))!;
+    const serdeRow = wrapper.findAll(".pkg-row").find((r) => r.text().includes("serde"))!;
     await serdeRow.trigger("click");
-    expect(wrapper.text()).toContain(
-      "License text unavailable for this package.",
-    );
+    expect(wrapper.text()).toContain("License text unavailable for this package.");
   });
 });

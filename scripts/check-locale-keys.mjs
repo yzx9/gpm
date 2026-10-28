@@ -193,9 +193,7 @@ function* walk(dir) {
   }
 }
 
-const localesDir = fileURLToPath(
-  new URL("../app/src/locales", import.meta.url),
-);
+const localesDir = fileURLToPath(new URL("../app/src/locales", import.meta.url));
 const files = [...walk(localesDir)].sort();
 
 let failed = 0;
@@ -209,9 +207,7 @@ for (const file of files) {
 }
 
 if (failed) {
-  console.error(
-    `\n${failed}/${files.length} locale file(s) have duplicate or invalid JSON.`,
-  );
+  console.error(`\n${failed}/${files.length} locale file(s) have duplicate or invalid JSON.`);
   process.exit(1);
 }
 console.log(`OK: no duplicate keys across ${files.length} locale file(s).`);

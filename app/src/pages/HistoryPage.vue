@@ -4,11 +4,7 @@
 
 <script setup lang="ts">
 import type { AppError, CommitSigInfo } from "@/api";
-import {
-  ignoreCommitIssue,
-  listCommitSignatures,
-  trustCommitSigner,
-} from "@/api";
+import { ignoreCommitIssue, listCommitSignatures, trustCommitSigner } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
@@ -23,13 +19,7 @@ import {
   useRelativeTime,
   useToast,
 } from "@/composables";
-import {
-  GitCommitHorizontal,
-  RefreshCw,
-  Settings,
-  TriangleAlert,
-  X,
-} from "@lucide/vue";
+import { GitCommitHorizontal, RefreshCw, Settings, TriangleAlert, X } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -105,9 +95,7 @@ function closeDetail() {
 
 async function onTrust(commit: CommitSigInfo) {
   const fp = signatureSignerFp(commit.status);
-  const suggested = fp
-    ? fp.replace("SHA256:", "").slice(0, 12)
-    : t("history.signerDefault");
+  const suggested = fp ? fp.replace("SHA256:", "").slice(0, 12) : t("history.signerDefault");
   const label = window.prompt(t("history.trustPrompt"), suggested);
   if (label === null) return;
   actionLoading.value = true;
@@ -134,9 +122,7 @@ async function onIgnore(commit: CommitSigInfo) {
     // ignore_commit_issue returns the updated signature info — refresh this row
     // in place (preserving scroll position + other rows) instead of reloading.
     const fresh = await ignoreCommitIssue(repoId, commit.hash);
-    commits.value = commits.value.map((c) =>
-      c.hash === fresh.hash ? fresh : c,
-    );
+    commits.value = commits.value.map((c) => (c.hash === fresh.hash ? fresh : c));
     toast.success(t("history.ignoredToast"));
     selected.value = null;
   } catch (e) {
@@ -196,11 +182,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'entries' }"
-      spacing="sm"
-      :title="t('history.title')"
-    >
+    <BaseHeader :back-fallback="{ name: 'entries' }" spacing="sm" :title="t('history.title')">
       <template #actions>
         <BaseButton
           size="sm"
@@ -211,11 +193,7 @@ onBeforeUnmount(() => {
         >
           <BaseIcon :icon="RefreshCw" /> {{ t("history.recheck") }}
         </BaseButton>
-        <BaseButton
-          size="sm"
-          @click="openSettings"
-          :aria-label="t('history.settingsAria')"
-        >
+        <BaseButton size="sm" @click="openSettings" :aria-label="t('history.settingsAria')">
           <BaseIcon :icon="Settings" />
         </BaseButton>
       </template>
@@ -234,15 +212,8 @@ onBeforeUnmount(() => {
       <BaseSpinner />
       <span>{{ t("history.loading") }}</span>
     </div>
-    <div
-      v-else-if="commits.length === 0 && !error"
-      class="text-center text-muted py-8"
-    >
-      <BaseIcon
-        :icon="GitCommitHorizontal"
-        :size="40"
-        class="block mb-2 mx-auto text-muted"
-      />
+    <div v-else-if="commits.length === 0 && !error" class="text-center text-muted py-8">
+      <BaseIcon :icon="GitCommitHorizontal" :size="40" class="block mb-2 mx-auto text-muted" />
       <p>{{ t("history.empty") }}</p>
     </div>
 
@@ -256,10 +227,7 @@ onBeforeUnmount(() => {
         @click="openDetail(commit)"
         @keydown.enter="openDetail(commit)"
       >
-        <CommitSigIndicator
-          :status="commit.status"
-          class="w-6 text-center shrink-0 mt-0.5"
-        />
+        <CommitSigIndicator :status="commit.status" class="w-6 text-center shrink-0 mt-0.5" />
         <div class="flex-1 min-w-0 flex flex-col gap-0.5">
           <span class="font-medium wrap-break-word line-clamp-2">{{
             commit.subject || t("history.noMessage")
@@ -344,9 +312,7 @@ onBeforeUnmount(() => {
           {{ t("history.unverifiedNote") }}
           <span v-if="signatureSignerFp(selected.status)">
             {{ t("history.issuerFp") }}
-            <code class="break-all">{{
-              signatureSignerFp(selected.status)
-            }}</code>
+            <code class="break-all">{{ signatureSignerFp(selected.status) }}</code>
           </span>
         </p>
         <BaseButton

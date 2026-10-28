@@ -44,8 +44,7 @@ function formatErr(e: unknown): string {
  *  `toString()`/`Symbol.toPrimitive` must not take down the error reporter. */
 function tryCtorName(e: unknown): string | null {
   try {
-    const name = (e as { constructor?: { name?: unknown } } | null)?.constructor
-      ?.name;
+    const name = (e as { constructor?: { name?: unknown } } | null)?.constructor?.name;
     return typeof name === "string" && name.length > 0 ? name : null;
   } catch {
     return null;
@@ -54,10 +53,7 @@ function tryCtorName(e: unknown): string | null {
 
 /** Console method → backend log level. `console.log` maps to `info` (persists by
  *  default); `console.debug` is dropped server-side unless Verbose is on. */
-const CONSOLE_LEVEL: Record<
-  "debug" | "log" | "info" | "warn" | "error",
-  string
-> = {
+const CONSOLE_LEVEL: Record<"debug" | "log" | "info" | "warn" | "error", string> = {
   debug: "debug",
   log: "info",
   info: "info",
@@ -86,9 +82,7 @@ export function installConsoleCapture(
     c[fn] = (...args: unknown[]) => {
       if (!inShim) {
         inShim = true;
-        void writeLog(CONSOLE_LEVEL[fn], args.map(formatErr).join(" ")).catch(
-          () => {},
-        );
+        void writeLog(CONSOLE_LEVEL[fn], args.map(formatErr).join(" ")).catch(() => {});
         inShim = false;
       }
       orig(...args);
@@ -108,16 +102,11 @@ export function installFrontendLogger(app: App): void {
   };
   // Vue render/watcher errors.
   app.config.errorHandler = (err: unknown, _vm: unknown, info: string) => {
-    const detail =
-      err instanceof Error ? `${err.message} (${info})` : formatErr(err);
+    const detail = err instanceof Error ? `${err.message} (${info})` : formatErr(err);
     void writeLog("error", `vue: ${detail}`).catch(() => {});
   };
   // Uncaught runtime errors.
-  window.addEventListener("error", (e) =>
-    report("window", e.error ?? e.message),
-  );
+  window.addEventListener("error", (e) => report("window", e.error ?? e.message));
   // Unhandled promise rejections.
-  window.addEventListener("unhandledrejection", (e) =>
-    report("promise", e.reason),
-  );
+  window.addEventListener("unhandledrejection", (e) => report("promise", e.reason));
 }

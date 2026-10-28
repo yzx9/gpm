@@ -91,9 +91,7 @@ export function createScrollLockController(): ScrollLockController {
 }
 
 /** Injection key for the app-wide scroll-lock controller. */
-export const SCROLL_LOCK_KEY: InjectionKey<ScrollLockController> = Symbol(
-  "ScrollLockController",
-);
+export const SCROLL_LOCK_KEY: InjectionKey<ScrollLockController> = Symbol("ScrollLockController");
 
 /**
  * Lock the document scroller for the lifetime of the calling component. Pairs

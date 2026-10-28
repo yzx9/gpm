@@ -3,12 +3,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
-import {
-  useOverlayBackHandler,
-  useScrollLock,
-  Z,
-  type ZTier,
-} from "@/composables";
+import { useOverlayBackHandler, useScrollLock, Z, type ZTier } from "@/composables";
 import { computed, ref } from "vue";
 import BaseCard from "./BaseCard.vue";
 
@@ -80,10 +75,7 @@ useScrollLock();
     @click.self="onBackdrop"
   >
     <div class="wrap" :class="variant">
-      <BaseCard
-        v-if="variant !== 'fullscreen'"
-        :variant="variant === 'center' ? 'raised' : 'flat'"
-      >
+      <BaseCard v-if="variant !== 'fullscreen'" :variant="variant === 'center' ? 'raised' : 'flat'">
         <slot />
       </BaseCard>
       <!-- fullscreen renders the slot directly on the opaque surface — a card

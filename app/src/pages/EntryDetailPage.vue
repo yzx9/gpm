@@ -63,25 +63,15 @@ const { toast } = useToast();
 const { dialog } = useDialog();
 
 const pathMatch = route.params.pathMatch;
-const entryPath = decodeURIComponent(
-  Array.isArray(pathMatch) ? pathMatch[0] : pathMatch,
-);
+const entryPath = decodeURIComponent(Array.isArray(pathMatch) ? pathMatch[0] : pathMatch);
 const entryName = entryPath.replace(/\.age$/, "");
 
 // Sensitive state lives in the shared secure-reveal composable: configurable
 // auto-clear, wipe on unmount, wipe on browser back. `copyPassword` calls
 // `clear()` itself. `withClaim` raises FLAG_SECURE before the decrypted secret
 // arrives and brands it so `reveal()` can type-check (R031).
-const {
-  attributes,
-  password,
-  notes,
-  revealed,
-  clearsInSecs,
-  reveal,
-  clear,
-  withClaim,
-} = useSecretReveal();
+const { attributes, password, notes, revealed, clearsInSecs, reveal, clear, withClaim } =
+  useSecretReveal();
 const { viewClearSecs } = useSecuritySettings();
 // Invalidation token (R031): a decrypt resolving after we left (Back/lock) must
 // not write the secret into a leaving/dead component. Bumped on every leave.
@@ -129,9 +119,7 @@ const probing = ref(false);
 const isAttachment = computed(() => showAttachment.value === true);
 const passwordActionsVisible = computed(() => !isAttachment.value);
 const exportButtonVisible = computed(() => showAttachment.value !== false);
-const editDisabled = computed(
-  () => isAttachment.value || editBlockedReason.value !== null,
-);
+const editDisabled = computed(() => isAttachment.value || editBlockedReason.value !== null);
 const totpButtonVisible = computed(() => {
   if (isAttachment.value) return false; // attachments carry no TOTP
   if (showTotp.value === false) return false;
@@ -262,28 +250,22 @@ onMounted(probeVersion);
 
 // Delete divergence (the edit flow now lives on /edit/:path, which has its own
 // useDivergence instance).
-const {
-  divergence,
-  resolving,
-  divergeError,
-  openDivergence,
-  resolveDivergence,
-  cancelDivergence,
-} = useDivergence({
-  resolveFailedKey: "entry.resolveFailed",
-  onResolved(result: PullResult, choice: DivergenceChoice) {
-    if (choice === "adopt_remote") {
-      toast.info(t("entry.adoptedRemote"));
-    } else {
-      toast.success(t("entry.keptMine", { head: result.head }));
-    }
-    navBack(router, { name: "entries" });
-  },
-  onPullFfFailed() {
-    toast.info(t("entry.remoteChanged"));
-    navBack(router, { name: "entries" });
-  },
-});
+const { divergence, resolving, divergeError, openDivergence, resolveDivergence, cancelDivergence } =
+  useDivergence({
+    resolveFailedKey: "entry.resolveFailed",
+    onResolved(result: PullResult, choice: DivergenceChoice) {
+      if (choice === "adopt_remote") {
+        toast.info(t("entry.adoptedRemote"));
+      } else {
+        toast.success(t("entry.keptMine", { head: result.head }));
+      }
+      navBack(router, { name: "entries" });
+    },
+    onPullFfFailed() {
+      toast.info(t("entry.remoteChanged"));
+      navBack(router, { name: "entries" });
+    },
+  });
 
 const {
   conflict: entryConflict,
@@ -294,11 +276,7 @@ const {
   cancelConflict,
 } = useEntryConflict({
   resolveFailedKey: "entry.resolveFailed",
-  onResolved(
-    result: PullResult,
-    choice: EntryConflictChoice,
-    op: EntryConflictOp,
-  ) {
+  onResolved(result: PullResult, choice: EntryConflictChoice, op: EntryConflictOp) {
     if (op === "delete") {
       if (choice === "keep_mine") {
         clear();
@@ -337,9 +315,7 @@ async function showPassword() {
     // we left mid-decrypt (token bumped), discard rather than render into a
     // leaving/dead component. A failed acquire returns null → abort with a toast
     // (the per-op replacement for the old route-guard abort).
-    const claimed = await withClaim(() =>
-      runEntryAction(() => showPasswordCmd(repoId, entryPath)),
-    );
+    const claimed = await withClaim(() => runEntryAction(() => showPasswordCmd(repoId, entryPath)));
     if (myToken !== revealToken) return;
     if (!claimed) {
       error.value = t("common.toast.secureScreenFailed");
@@ -445,9 +421,7 @@ async function exportAttachment() {
   loading.value = true;
   try {
     const repoId = await activeRepo.currentId();
-    const result = await runEntryAction(() =>
-      exportAttachmentCmd(repoId, entryPath),
-    );
+    const result = await runEntryAction(() => exportAttachmentCmd(repoId, entryPath));
     if (!result.exported) {
       // The entry holds no attachment (the button was a fallback) — settle the
       // signal and tell the user; no file was written.
@@ -565,9 +539,7 @@ function handleKeydown(e: KeyboardEvent) {
   <main class="max-w-120 mx-auto p-4" role="main" @keydown="handleKeydown">
     <BaseHeader :back-fallback="BACK_FALLBACK" @back="clear">
       <template #title>
-        <h1
-          class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
-        >
+        <h1 class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1">
           {{ entryName }}
         </h1>
       </template>
@@ -584,9 +556,7 @@ function handleKeydown(e: KeyboardEvent) {
          stays visible but de-emphasized so a delete-without-decrypt still works. -->
     <div v-if="gateVisible" class="mb-6">
       <div class="flex flex-col items-center text-muted py-6">
-        <span aria-hidden="true"
-          ><BaseIcon :icon="Lock" class="w-7 h-7"
-        /></span>
+        <span aria-hidden="true"><BaseIcon :icon="Lock" class="w-7 h-7" /></span>
         <p class="text-sm mt-2">{{ t("entry.unlockMicrocopy") }}</p>
       </div>
       <BaseButton
@@ -625,9 +595,7 @@ function handleKeydown(e: KeyboardEvent) {
           variant="outline"
           class="flex-1"
           :disabled="loading || deleting"
-          :aria-label="
-            revealed ? t('entry.showingAria') : t('entry.showPasswordAria')
-          "
+          :aria-label="revealed ? t('entry.showingAria') : t('entry.showPasswordAria')"
           @click="showPassword"
         >
           <BaseIcon :icon="Eye" />
@@ -731,10 +699,7 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
     </template>
 
-    <div
-      v-if="loading"
-      class="flex items-center justify-center gap-2 text-center text-muted py-4"
-    >
+    <div v-if="loading" class="flex items-center justify-center gap-2 text-center text-muted py-4">
       <BaseSpinner />
       <span>{{ t("entry.decrypting") }}</span>
     </div>
@@ -744,22 +709,18 @@ function handleKeydown(e: KeyboardEvent) {
       class="bg-surface rounded-lg p-4 shadow-[0_1px_6px_rgba(0,0,0,0.06)]"
     >
       <div class="mb-4">
-        <label
-          class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
-          >{{ t("entry.password") }}</label
-        >
-        <div
-          class="font-mono text-lg p-2 bg-accent-ring rounded-sm break-all select-all"
-        >
+        <label class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1">{{
+          t("entry.password")
+        }}</label>
+        <div class="font-mono text-lg p-2 bg-accent-ring rounded-sm break-all select-all">
           {{ password }}
         </div>
       </div>
 
       <div v-if="notes" class="mb-2">
-        <label
-          class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
-          >{{ t("entry.notes") }}</label
-        >
+        <label class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1">{{
+          t("entry.notes")
+        }}</label>
 
         <!-- prettier-ignore -->
         <pre

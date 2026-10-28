@@ -98,9 +98,7 @@ const mode = computed<Mode>(() => {
   return props.status?.available ? "update" : "upToDate";
 });
 
-const latestTag = computed(
-  () => (checked.value ?? props.status)?.latest_version ?? "—",
-);
+const latestTag = computed(() => (checked.value ?? props.status)?.latest_version ?? "—");
 
 const primaryLabel = computed(() => {
   if (checking.value) return t("about.updateDialog.checking");
@@ -178,15 +176,9 @@ async function toggleAutoCheck() {
     @close="emit('close')"
   >
     <h2 class="dialog-title" tabindex="-1">
-      <template v-if="mode === 'checking'">{{
-        t("about.updateDialog.title")
-      }}</template>
-      <template v-else-if="mode === 'failed'">{{
-        t("about.updateDialog.failedTitle")
-      }}</template>
-      <template v-else-if="mode === 'update'">{{
-        t("about.updateDialog.updateTitle")
-      }}</template>
+      <template v-if="mode === 'checking'">{{ t("about.updateDialog.title") }}</template>
+      <template v-else-if="mode === 'failed'">{{ t("about.updateDialog.failedTitle") }}</template>
+      <template v-else-if="mode === 'update'">{{ t("about.updateDialog.updateTitle") }}</template>
       <template v-else-if="mode === 'upToDate'">{{
         t("about.updateDialog.upToDateTitle")
       }}</template>
@@ -229,12 +221,7 @@ async function toggleAutoCheck() {
       <!-- Explicit cancel (the app's confirm-dialog convention — backdrop and
            Android back also close). Stays live while checking so a slow probe
            can be bailed on through a labeled control, not only the gestures. -->
-      <BaseButton
-        variant="outline"
-        block
-        :disabled="toggling"
-        @click="emit('close')"
-      >
+      <BaseButton variant="outline" block :disabled="toggling" @click="emit('close')">
         {{ t("common.button.cancel") }}
       </BaseButton>
     </div>
@@ -247,11 +234,7 @@ async function toggleAutoCheck() {
       :disabled="checking || toggling"
       @click="toggleAutoCheck"
     >
-      {{
-        prefEnabled
-          ? t("about.updateDialog.disable")
-          : t("about.updateDialog.enable")
-      }}
+      {{ prefEnabled ? t("about.updateDialog.disable") : t("about.updateDialog.enable") }}
     </button>
   </BaseModalShell>
 </template>

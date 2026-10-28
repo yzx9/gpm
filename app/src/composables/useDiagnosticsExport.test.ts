@@ -43,9 +43,7 @@ describe("useDiagnosticsExport", () => {
     await wrapper.find("button").trigger("click");
     await flushPromises();
 
-    expect(dialog.dialog.confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ z: Z.gate }),
-    );
+    expect(dialog.dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({ z: Z.gate }));
     expect(exportDiagnostics).toHaveBeenCalledTimes(1);
     expect(successSpy).toHaveBeenCalled();
   });

@@ -15,9 +15,7 @@ const props = defineProps<{
 const resolvedRole = computed(
   () => props.role ?? (props.variant === "danger" ? "alert" : "status"),
 );
-const ariaLive = computed(() =>
-  resolvedRole.value === "status" ? "polite" : undefined,
-);
+const ariaLive = computed(() => (resolvedRole.value === "status" ? "polite" : undefined));
 
 // Literal class strings so Tailwind's scanner generates the utilities.
 const VARIANT: Record<typeof props.variant, string> = {

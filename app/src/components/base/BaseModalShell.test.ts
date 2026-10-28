@@ -27,9 +27,7 @@ enableAutoUnmount(afterEach);
 // (enableAutoUnmount drains it between tests). BaseModalShell injects it via
 // BACK_HANDLER_KEY, so every mount must provide it.
 const backHandler = createBackHandlerRegistry();
-function mountShell(
-  options: ComponentMountingOptions<typeof BaseModalShell> = {},
-) {
+function mountShell(options: ComponentMountingOptions<typeof BaseModalShell> = {}) {
   return mount(BaseModalShell, {
     ...options,
     global: {
@@ -90,23 +88,17 @@ describe("BaseModalShell", () => {
 
   it("defaults z-index to Z.overlay (1000) for both variants", () => {
     const center = mountShell({ props: { variant: "center" } });
-    expect(center.find(".overlay").attributes("style")).toContain(
-      "z-index: 1000",
-    );
+    expect(center.find(".overlay").attributes("style")).toContain("z-index: 1000");
 
     const sheet = mountShell({ props: { variant: "sheet" } });
-    expect(sheet.find(".overlay").attributes("style")).toContain(
-      "z-index: 1000",
-    );
+    expect(sheet.find(".overlay").attributes("style")).toContain("z-index: 1000");
   });
 
   it("honors an explicit `z` override (app-lock sits above the identity modal)", () => {
     const wrapper = mountShell({
       props: { variant: "center", z: 70 },
     });
-    expect(wrapper.find(".overlay").attributes("style")).toContain(
-      "z-index: 70",
-    );
+    expect(wrapper.find(".overlay").attributes("style")).toContain("z-index: 70");
   });
 
   it("fullscreen variant: opaque surface, slot rendered without a BaseCard wrapper", () => {

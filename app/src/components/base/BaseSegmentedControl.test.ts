@@ -59,8 +59,6 @@ describe("BaseSegmentedControl", () => {
         disabled: true,
       },
     });
-    expect(
-      (wrapper.find("fieldset").element as HTMLFieldSetElement).disabled,
-    ).toBe(true);
+    expect((wrapper.find("fieldset").element as HTMLFieldSetElement).disabled).toBe(true);
   });
 });

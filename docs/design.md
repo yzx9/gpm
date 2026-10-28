@@ -1,8 +1,8 @@
 # gpm Design Principles
 
-> Status: Design direction
-> Scope: Brand identity, visual language, UI/UX principles, interaction tone, and design quality
-> Excludes: Product requirements, feature specifications, technical architecture, and implementation details
+> Status: Design direction Scope: Brand identity, visual language, UI/UX principles, interaction
+> tone, and design quality Excludes: Product requirements, feature specifications, technical
+> architecture, and implementation details
 
 ---
 
@@ -10,7 +10,9 @@
 
 gpm should feel like a private instrument that belongs to its user.
 
-It should not feel like a cloud service, a security dashboard, or a generic “cybersecurity” product. It should feel calm, deliberate, self-contained, and trustworthy—an application that protects sensitive information without dramatizing that protection.
+It should not feel like a cloud service, a security dashboard, or a generic “cybersecurity” product.
+It should feel calm, deliberate, self-contained, and trustworthy—an application that protects
+sensitive information without dramatizing that protection.
 
 The central design idea is:
 
@@ -22,7 +24,9 @@ The product should communicate three qualities at the same time:
 - **Sovereign** — control remains with the user, not with a platform.
 - **Verifiable** — trust comes from clear state and understandable behavior, not from decoration.
 
-The visual system draws from Chinese sealing traditions, especially seal impressions and clay seals, but translates those ideas into a modern digital interface. The result should not look antique, ceremonial, or ornamental. It should feel contemporary, useful, and culturally grounded.
+The visual system draws from Chinese sealing traditions, especially seal impressions and clay seals,
+but translates those ideas into a modern digital interface. The result should not look antique,
+ceremonial, or ornamental. It should feel contemporary, useful, and culturally grounded.
 
 ---
 
@@ -32,15 +36,18 @@ The interface should make users feel:
 
 ### Calm
 
-The product should avoid visual noise, unnecessary urgency, and exaggerated security language. Sensitive actions should feel controlled rather than alarming.
+The product should avoid visual noise, unnecessary urgency, and exaggerated security language.
+Sensitive actions should feel controlled rather than alarming.
 
 ### In control
 
-The interface should make ownership visible. Users should feel that the application is helping them use their own protected information, not granting temporary access to a remote service.
+The interface should make ownership visible. Users should feel that the application is helping them
+use their own protected information, not granting temporary access to a remote service.
 
 ### Respected
 
-The design should not assume that users are careless, uninformed, or incapable. It should explain important states clearly without becoming patronizing.
+The design should not assume that users are careless, uninformed, or incapable. It should explain
+important states clearly without becoming patronizing.
 
 ### Confident
 
@@ -55,11 +62,14 @@ Trust should come from consistency:
 
 ### Protected, but not trapped
 
-Protection should feel strong without suggesting enclosure by the application itself. The interface should communicate that secrets are sealed by the user’s authority, not locked inside a proprietary system.
+Protection should feel strong without suggesting enclosure by the application itself. The interface
+should communicate that secrets are sealed by the user’s authority, not locked inside a proprietary
+system.
 
 ### Focused
 
-The interface should support one clear task at a time. It should not resemble an administrative console filled with competing panels, metrics, badges, and security scores.
+The interface should support one clear task at a time. It should not resemble an administrative
+console filled with competing panels, metrics, badges, and security scores.
 
 ---
 
@@ -77,9 +87,11 @@ Historically, a seal can represent:
 - confidentiality;
 - evidence that something has been opened or altered.
 
-These meanings are more relevant to gpm than common security symbols such as shields, padlocks, fingerprints, or keyholes.
+These meanings are more relevant to gpm than common security symbols such as shields, padlocks,
+fingerprints, or keyholes.
 
-The seal is not merely a metaphor for “locked.” It is a sign that something was intentionally closed by a known holder and can be recognized as belonging to them.
+The seal is not merely a metaphor for “locked.” It is a sign that something was intentionally closed
+by a known holder and can be recognized as belonging to them.
 
 The brand statement is:
 
@@ -103,7 +115,9 @@ Its structure should include:
 
 The logo must not be constructed from the letter “G.”
 
-The name gpm originated from “GoPass Mobile,” but the product identity should not imply that it is written in the Go programming language. The logo should therefore be semantic rather than typographic.
+The name gpm originated from “GoPass Mobile,” but the product identity should not imply that it is
+written in the Go programming language. The logo should therefore be semantic rather than
+typographic.
 
 It should be recognizable as:
 
@@ -128,7 +142,8 @@ It should consist of:
 
 The clasp should appear to enter the seal structure, but it must not directly merge with it.
 
-This separation is important. It communicates that access requires alignment and authorization rather than permanent attachment.
+This separation is important. It communicates that access requires alignment and authorization
+rather than permanent attachment.
 
 The opening in the seal must remain small and intentional. It must never suggest:
 
@@ -165,7 +180,8 @@ The logo should follow these rules:
 - The clasp should remain visually secondary to the full seal.
 - The logo should work in one color before color is added.
 - Texture may soften the impression but must not define the geometry.
-- The mark must remain recognizable without shadows, highlights, gradients, or three-dimensional rendering.
+- The mark must remain recognizable without shadows, highlights, gradients, or three-dimensional
+  rendering.
 
 The logo should feel stamped, not illustrated.
 
@@ -197,7 +213,8 @@ Avoid:
 
 The geometry must remain clear when texture is removed.
 
-A clean vector master should always exist. Texture should be applied as an optional rendering treatment.
+A clean vector master should always exist. Texture should be applied as an optional rendering
+treatment.
 
 ---
 
@@ -212,7 +229,8 @@ Recommended visual ratio:
 
 Cinnabar defines the seal as a whole. Celadon identifies the clasp and controlled activation point.
 
-Celadon should not divide the logo into two equal color regions. The mark should still read as a single seal, not as a two-color technology symbol.
+Celadon should not divide the logo into two equal color regions. The mark should still read as a
+single seal, not as a two-color technology symbol.
 
 ---
 
@@ -238,11 +256,13 @@ Used where the cultural identity of the seal is most important.
 
 ### Single-color neutral version
 
-Used for system monochrome modes, notification icons, engraving, embossing, or restricted reproduction.
+Used for system monochrome modes, notification icons, engraving, embossing, or restricted
+reproduction.
 
 ### Reverse version
 
-A light mark on an ink-dark background. The clasp may remain distinguishable by shape rather than color.
+A light mark on an ink-dark background. The clasp may remain distinguishable by shape rather than
+color.
 
 ### Small-size version
 
@@ -324,7 +344,8 @@ Brand cinnabar and semantic danger red must use separate tokens and visibly dist
 --on-seal-dark-container: #ffdad4;
 ```
 
-The dark-theme cinnabar is intentionally lighter. The color role remains the same, but its luminance changes so it does not disappear into the background.
+The dark-theme cinnabar is intentionally lighter. The color role remains the same, but its luminance
+changes so it does not disappear into the background.
 
 ---
 
@@ -332,7 +353,8 @@ The dark-theme cinnabar is intentionally lighter. The color role remains the sam
 
 Celadon is the primary interaction color.
 
-Its cultural reference comes from the restrained, quiet quality of Chinese celadon rather than from bright modern green. It should feel mineral, muted, stable, and enduring.
+Its cultural reference comes from the restrained, quiet quality of Chinese celadon rather than from
+bright modern green. It should feel mineral, muted, stable, and enduring.
 
 It represents:
 
@@ -357,7 +379,8 @@ Recommended uses:
 - normal connected states;
 - subtle path or node illustrations.
 
-Celadon is not a universal “success green.” Long-term stable states may use it, but success, warning, danger, and information should remain separate semantic categories.
+Celadon is not a universal “success green.” Long-term stable states may use it, but success,
+warning, danger, and information should remain separate semantic categories.
 
 ### Suggested light-theme celadon
 
@@ -393,7 +416,8 @@ Neutrals provide:
 - space for sensitive content;
 - contrast for small amounts of brand color.
 
-The interface should not be filled with cinnabar and celadon. Their impact depends on a calm neutral field.
+The interface should not be filled with cinnabar and celadon. Their impact depends on a calm neutral
+field.
 
 ### Light theme
 
@@ -445,7 +469,8 @@ The dark theme should use an ink-like dark neutral rather than pure black.
 
 The dark theme should feel like ink, stone, or lacquered darkness—not a neon terminal.
 
-Pure black may be offered as an optional OLED treatment, but it should not define the core brand presentation.
+Pure black may be offered as an optional OLED treatment, but it should not define the core brand
+presentation.
 
 ---
 
@@ -464,7 +489,8 @@ Examples:
 - Daily working screens should be led by neutrals and celadon.
 - Brand introduction or completion moments may give cinnabar greater presence.
 - The logo may use both, but cinnabar remains dominant.
-- Warning and danger states should override the brand palette with semantic colors where clarity requires it.
+- Warning and danger states should override the brand palette with semantic colors where clarity
+  requires it.
 
 ---
 
@@ -484,7 +510,8 @@ Both themes preserve the same role system:
 
 The hue relationship remains recognizable, but luminance is adjusted for contrast and comfort.
 
-The dark theme should not make cinnabar look brown or celadon look muddy. Both colors need dedicated dark-theme values.
+The dark theme should not make cinnabar look brown or celadon look muddy. Both colors need dedicated
+dark-theme values.
 
 ---
 
@@ -517,7 +544,8 @@ It should avoid the visual language of:
 
 ## 7.1 Security Should Be Experienced as Clarity
 
-Users should feel protected because the application behaves consistently and communicates state precisely.
+Users should feel protected because the application behaves consistently and communicates state
+precisely.
 
 Security should be expressed through:
 
@@ -556,7 +584,8 @@ The interaction tone should be:
 
 Avoid dramatic opening animations, glowing secrets, or effects that attract unnecessary attention.
 
-A good reveal interaction should feel like a controlled unsealing, not like opening a treasure chest.
+A good reveal interaction should feel like a controlled unsealing, not like opening a treasure
+chest.
 
 ---
 
@@ -615,7 +644,8 @@ Use text, iconography, and hierarchy together. Do not rely on color alone.
 
 ## 7.6 Local Ownership Should Be Visible
 
-The interface should consistently suggest that the user is working with a private collection that exists under their control.
+The interface should consistently suggest that the user is working with a private collection that
+exists under their control.
 
 The product should avoid language and visual patterns that imply:
 
@@ -676,7 +706,8 @@ It does not require:
 - terminal-like interfaces;
 - excessively sharp geometry.
 
-The seal identity introduces cultural warmth. The interface should balance that warmth with modern precision.
+The seal identity introduces cultural warmth. The interface should balance that warmth with modern
+precision.
 
 ---
 
@@ -726,7 +757,8 @@ Avoid:
 - low-contrast secondary labels;
 - excessive size variation.
 
-Chinese cultural identity should come from structure, color, and material reference—not from making the entire interface look historical.
+Chinese cultural identity should come from structure, color, and material reference—not from making
+the entire interface look historical.
 
 ---
 
@@ -825,7 +857,8 @@ A connection symbol should mean an actual relationship or path.
 
 Do not use security icons as decorative reassurance.
 
-The seal clasp should remain a brand element and should not become a universal icon for every action.
+The seal clasp should remain a brand element and should not become a universal icon for every
+action.
 
 ---
 
@@ -922,7 +955,8 @@ Avoid absolute claims such as:
 - zero risk;
 - permanently secure.
 
-The brand metaphor may use words such as “sealed,” “unsealed,” or “mark,” but the interface should not become excessively poetic or archaic.
+The brand metaphor may use words such as “sealed,” “unsealed,” or “mark,” but the interface should
+not become excessively poetic or archaic.
 
 ---
 
@@ -1061,4 +1095,5 @@ The ideal gpm experience should feel like handling a private seal:
 
 The final design should leave users with one simple impression:
 
-> **My secrets remain under my authority. gpm helps me use them without taking ownership away from me.**
+> **My secrets remain under my authority. gpm helps me use them without taking ownership away from
+> me.**

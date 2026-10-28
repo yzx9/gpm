@@ -3,12 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { mountWithApp } from "@/test/appTestUtils";
-import {
-  baseDefaults,
-  resetOverrides,
-  when,
-  type Overrides,
-} from "@/test/settingsTestUtils";
+import { baseDefaults, resetOverrides, when, type Overrides } from "@/test/settingsTestUtils";
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -86,9 +81,7 @@ describe("SettingsPage (hub)", () => {
     // The grouping is programmatic, not just visual (WCAG 1.3.1): each
     // section landmark carries its localized group name.
     expect(cards[0]!.attributes("aria-label")).toBe("Configure the app");
-    expect(cards[1]!.attributes("aria-label")).toBe(
-      "Information & diagnostics",
-    );
+    expect(cards[1]!.attributes("aria-label")).toBe("Information & diagnostics");
     expect(cards[2]!.attributes("aria-label")).toBe("About the app");
   });
 
@@ -166,8 +159,6 @@ describe("SettingsPage (hub)", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll(".hub-row")[8]!.find(".update-dot").exists()).toBe(
-      false,
-    );
+    expect(wrapper.findAll(".hub-row")[8]!.find(".update-dot").exists()).toBe(false);
   });
 });

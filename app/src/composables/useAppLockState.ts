@@ -91,9 +91,7 @@ export const APP_LOCK_KEY: InjectionKey<AppLockStore> = Symbol("AppLockStore");
  * and provides it; tests call it per-case for isolation (no module singleton to
  * reset).
  */
-export function createAppLockStore(
-  opts: CreateAppLockStateOptions = {},
-): AppLockStore {
+export function createAppLockStore(opts: CreateAppLockStateOptions = {}): AppLockStore {
   const el = opts.enabledLocked === true;
   const appLockEnabled = ref(el);
   const appLocked = ref(el);

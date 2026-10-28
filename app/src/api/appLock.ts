@@ -71,9 +71,7 @@ export async function getAppLockState(): Promise<AppLockState> {
  * supplies the localized prompt text; when absent the native layer
  * falls back to a generic safety string.
  */
-export async function enableBiometricAppLock(
-  prompt?: BiometricPromptText,
-): Promise<void> {
+export async function enableBiometricAppLock(prompt?: BiometricPromptText): Promise<void> {
   await invoke("enable_biometric_app_lock", { promptText: prompt });
 }
 
@@ -81,9 +79,7 @@ export async function enableBiometricAppLock(
  * Disable the gate: migrate the master key back to the auth-free store (one last
  * BiometricPrompt). Rejects with {@link AppLockError} on cancel/failure.
  */
-export async function disableBiometricAppLock(
-  prompt?: BiometricPromptText,
-): Promise<void> {
+export async function disableBiometricAppLock(prompt?: BiometricPromptText): Promise<void> {
   await invoke("disable_biometric_app_lock", { promptText: prompt });
 }
 
@@ -115,9 +111,7 @@ export async function appLock(): Promise<void> {
  * second prompt. Requires the gate on + an encrypted identity. Rejects with
  * {@link AppLockError} on a wrong passphrase or cancel.
  */
-export async function enableIdentityAutoUnlock(
-  passphrase: string,
-): Promise<void> {
+export async function enableIdentityAutoUnlock(passphrase: string): Promise<void> {
   await invoke("enable_identity_auto_unlock", { passphrase });
 }
 
@@ -140,8 +134,6 @@ export function asAppLockError(e: unknown): AppLockError {
 
 /** Subscribe to backend app-lock gate transitions (the same
  *  {@link AppLockState} shape `getAppLockState` returns). Returns an unlisten. */
-export async function subscribeAppLockState(
-  cb: (e: AppLockState) => void,
-): Promise<UnlistenFn> {
+export async function subscribeAppLockState(cb: (e: AppLockState) => void): Promise<UnlistenFn> {
   return listen<AppLockState>("app-lock-state", (e) => cb(e.payload));
 }

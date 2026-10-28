@@ -26,12 +26,7 @@ const { t } = useI18n();
     <div class="flex flex-col gap-4">
       <p class="text-sm text-muted px-1">{{ t("about.ack.intro") }}</p>
 
-      <BaseCard
-        v-for="ack in ACKNOWLEDGEMENTS"
-        :key="ack.id"
-        as="section"
-        variant="raised"
-      >
+      <BaseCard v-for="ack in ACKNOWLEDGEMENTS" :key="ack.id" as="section" variant="raised">
         <div class="flex items-baseline justify-between gap-2 mb-1">
           <!-- Name opens the project in the system browser via the opener plugin;
                @click.prevent stops the WebView from navigating itself. -->

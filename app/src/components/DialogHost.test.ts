@@ -122,9 +122,7 @@ describe("DialogHost", () => {
     void d.dialog.confirm({ message: "m", confirmLabel: "Export" });
     await flushPromises();
 
-    expect(wrapper.findAllComponents(BaseButton)[0]!.props("variant")).toBe(
-      "primary",
-    );
+    expect(wrapper.findAllComponents(BaseButton)[0]!.props("variant")).toBe("primary");
   });
 
   it("forwards opts.z so a Z.gate confirm can clear the opaque lock screen", async () => {
@@ -135,9 +133,7 @@ describe("DialogHost", () => {
     void d.dialog.confirm({ message: "m", z: Z.gate });
     await flushPromises();
 
-    expect(wrapper.find(".overlay").attributes("style")).toContain(
-      `z-index: ${Z.gate}`,
-    );
+    expect(wrapper.find(".overlay").attributes("style")).toContain(`z-index: ${Z.gate}`);
   });
 
   it("falls back to Z.overlay when no z is passed (every page-level caller)", async () => {
@@ -145,8 +141,6 @@ describe("DialogHost", () => {
     void d.dialog.confirm({ message: "m" });
     await flushPromises();
 
-    expect(wrapper.find(".overlay").attributes("style")).toContain(
-      `z-index: ${Z.overlay}`,
-    );
+    expect(wrapper.find(".overlay").attributes("style")).toContain(`z-index: ${Z.overlay}`);
   });
 });

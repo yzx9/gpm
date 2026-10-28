@@ -18,9 +18,7 @@ describe("classifyIdentity", () => {
   });
 
   it("classifies an age-plugin identity (e.g. age-plugin-yubikey)", () => {
-    expect(classifyIdentity("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ")).toBe(
-      "plugin",
-    );
+    expect(classifyIdentity("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ")).toBe("plugin");
   });
 
   it("classifies a generic age-plugin identity", () => {
@@ -28,15 +26,11 @@ describe("classifyIdentity", () => {
   });
 
   it("does not swallow a plugin identity as x25519", () => {
-    expect(
-      classifyIdentity("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ"),
-    ).not.toBe("x25519");
+    expect(classifyIdentity("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ")).not.toBe("x25519");
   });
 
   it("classifies a post-quantum identity", () => {
-    expect(
-      classifyIdentity("AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQ"),
-    ).toBe("post_quantum");
+    expect(classifyIdentity("AGE-SECRET-KEY-PQ-1QQQQQQQQQQQQQQQQQQQQQQQQQ")).toBe("post_quantum");
   });
 
   it("classifies unknown content", () => {
@@ -54,9 +48,7 @@ describe("isValidIdentity", () => {
   });
 
   it("rejects a plugin identity (decrypt not supported yet)", () => {
-    expect(isValidIdentity("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ")).toBe(
-      false,
-    );
+    expect(isValidIdentity("AGE-PLUGIN-YUBIKEY-1QGZKJQYZL98RLMC67F9PJ")).toBe(false);
   });
 
   it("rejects unknown content", () => {

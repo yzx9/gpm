@@ -115,10 +115,7 @@ describe("UnlockModal", () => {
 
     // No auto system prompt on an idle re-lock — but biometric mode still
     // renders so the user can tap to unlock when they return.
-    expect(invoke).not.toHaveBeenCalledWith(
-      "biometric_unlock",
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith("biometric_unlock", expect.anything());
     expect(wrapper.text()).toContain("Unlock with biometric");
     expect(wrapper.find('input[type="password"]').exists()).toBe(false);
   });
@@ -202,8 +199,7 @@ describe("UnlockModal", () => {
     const wrapper = mountUnlock();
     await flushPromises();
 
-    const input = () =>
-      wrapper.find('input[type="password"]').element as HTMLInputElement;
+    const input = () => wrapper.find('input[type="password"]').element as HTMLInputElement;
     await wrapper.find('input[type="password"]').setValue("topsecret");
     expect(input().value).toBe("topsecret");
 
@@ -223,9 +219,7 @@ describe("UnlockModal", () => {
     const wrapper = mountUnlock();
     await flushPromises();
 
-    const btn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Unlock with biometric"))!;
+    const btn = wrapper.findAll("button").find((b) => b.text().includes("Unlock with biometric"))!;
     expect(btn).toBeTruthy();
     await btn.trigger("click");
     await flushPromises();
@@ -293,9 +287,7 @@ describe("UnlockModal", () => {
     await toBiometric.trigger("click");
     await flushPromises();
 
-    const biometricCalls = vi
-      .mocked(invoke)
-      .mock.calls.filter((c) => c[0] === "biometric_unlock");
+    const biometricCalls = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "biometric_unlock");
     expect(biometricCalls).toHaveLength(2); // auto-prompt + manual re-prompt
   });
 
@@ -388,9 +380,7 @@ describe("UnlockModal", () => {
     const wrapper = mountUnlock();
     await flushPromises();
 
-    expect(wrapper.text()).toContain(
-      "Identity auto-locks after 5 min of inactivity.",
-    );
+    expect(wrapper.text()).toContain("Identity auto-locks after 5 min of inactivity.");
   });
 
   it("shows the never-lock hint for the Never policy", async () => {
@@ -401,9 +391,7 @@ describe("UnlockModal", () => {
     const wrapper = mountUnlock();
     await flushPromises();
 
-    expect(wrapper.text()).toContain(
-      "Identity stays unlocked until you lock manually.",
-    );
+    expect(wrapper.text()).toContain("Identity stays unlocked until you lock manually.");
   });
 
   it("falls back to the Immediate hint when get_app_config fails", async () => {
@@ -426,9 +414,7 @@ describe("UnlockModal", () => {
     const wrapper = mountUnlock();
     await flushPromises();
 
-    const helpBtn = wrapper.find(
-      'button[aria-label="What is this passphrase?"]',
-    );
+    const helpBtn = wrapper.find('button[aria-label="What is this passphrase?"]');
     expect(helpBtn.exists()).toBe(true);
     expect(wrapper.text()).not.toContain("cannot recover or reset it");
 
@@ -447,9 +433,7 @@ describe("UnlockModal", () => {
     const wrapper = mountUnlock();
     await flushPromises();
 
-    const resetBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Reset all data"));
+    const resetBtn = wrapper.findAll("button").find((b) => b.text().includes("Reset all data"));
     expect(resetBtn).toBeUndefined();
     expect(invoke).not.toHaveBeenCalledWith("reset_config");
   });
@@ -513,8 +497,7 @@ describe("UnlockModal", () => {
     });
     await flushPromises();
 
-    const input = () =>
-      wrapper.find('input[type="password"]').element as HTMLInputElement;
+    const input = () => wrapper.find('input[type="password"]').element as HTMLInputElement;
     await wrapper.find('input[type="password"]').setValue("topsecret");
 
     // lock:false: a hard identity lock event must not clear the field the

@@ -27,9 +27,7 @@ describe("clipboard notification wrappers", () => {
   it("requestClipboardNotificationsPermission calls request_clipboard_notifications_permission", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(true);
     expect(await requestClipboardNotificationsPermission()).toBe(true);
-    expect(invoke).toHaveBeenCalledWith(
-      "request_clipboard_notifications_permission",
-    );
+    expect(invoke).toHaveBeenCalledWith("request_clipboard_notifications_permission");
   });
 
   it("ensureClipboardNotifyPermission skips the request when already granted", async () => {
@@ -38,17 +36,13 @@ describe("clipboard notification wrappers", () => {
     await ensureClipboardNotifyPermission();
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("are_clipboard_notifications_enabled");
-    expect(invoke).not.toHaveBeenCalledWith(
-      "request_clipboard_notifications_permission",
-    );
+    expect(invoke).not.toHaveBeenCalledWith("request_clipboard_notifications_permission");
   });
 
   it("ensureClipboardNotifyPermission requests the permission when not granted", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(false);
     await ensureClipboardNotifyPermission();
-    expect(invoke).toHaveBeenCalledWith(
-      "request_clipboard_notifications_permission",
-    );
+    expect(invoke).toHaveBeenCalledWith("request_clipboard_notifications_permission");
   });
 
   it("ensureClipboardNotifyPermission treats a denied dialog (granted=false) as success, not an error", async () => {
@@ -59,13 +53,9 @@ describe("clipboard notification wrappers", () => {
   });
 
   it("ensureClipboardNotifyPermission swallows a broken probe, still resolves, and does not request", async () => {
-    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("plugin not found"),
-    );
+    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("plugin not found"));
     await expect(ensureClipboardNotifyPermission()).resolves.toBeUndefined();
-    expect(invoke).not.toHaveBeenCalledWith(
-      "request_clipboard_notifications_permission",
-    );
+    expect(invoke).not.toHaveBeenCalledWith("request_clipboard_notifications_permission");
   });
 
   it("ensureClipboardNotifyPermission swallows a request-side rejection and still resolves", async () => {

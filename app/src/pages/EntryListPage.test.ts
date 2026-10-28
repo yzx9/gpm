@@ -39,10 +39,7 @@ const sampleEntries: Entry[] = [
 ];
 
 /** Wrap entries as a paginated EntryPage response. */
-function page(
-  entries: Entry[],
-  opts: { hasMore?: boolean; total?: number } = {},
-): EntryPage {
+function page(entries: Entry[], opts: { hasMore?: boolean; total?: number } = {}): EntryPage {
   return {
     entries,
     total: opts.total ?? entries.length,
@@ -136,9 +133,7 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "Store not found",
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("Store not found");
     });
 
     it("shows retry button on error", async () => {
@@ -161,9 +156,7 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const retryBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Retry"));
+      const retryBtn = wrapper.findAll("button").find((b) => b.text().includes("Retry"));
       expect(retryBtn).toBeDefined();
       await retryBtn!.trigger("click");
       await flushPromises();
@@ -206,9 +199,7 @@ describe("EntryListPage", () => {
 
       // While locked: the "locked" error is shown (a reminder, not a bug), and
       // no entries are loaded.
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "Store is locked",
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("Store is locked");
       expect(wrapper.text()).not.toContain("github-token");
 
       // Biometric unlock: master key back in memory → the error clears and the
@@ -288,9 +279,7 @@ describe("EntryListPage", () => {
           listCall += 1;
           // First (cold-start, sealed) fetch hangs — its rejection never lands
           // before the unlock; the second (post-unlock) fetch succeeds.
-          return listCall === 1
-            ? new Promise(() => {})
-            : Promise.resolve(page(sampleEntries));
+          return listCall === 1 ? new Promise(() => {}) : Promise.resolve(page(sampleEntries));
         }
         if (cmd in overrides) {
           const o = overrides[cmd];
@@ -407,10 +396,7 @@ describe("EntryListPage", () => {
   describe("search", () => {
     it("debounces and renders backend search results", async () => {
       when("list_entries", page(sampleEntries));
-      when(
-        "search_entries",
-        page([{ path: "github.com/token.age", name: "github-token" }]),
-      );
+      when("search_entries", page([{ path: "github.com/token.age", name: "github-token" }]));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -464,14 +450,10 @@ describe("EntryListPage", () => {
       await flushPromises();
       expect(wrapper.text()).toContain("No matches");
 
-      const listBefore = vi
-        .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "list_entries").length;
+      const listBefore = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "list_entries").length;
       await wrapper.find('input[type="search"]').setValue("");
       await flushPromises();
-      const listAfter = vi
-        .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "list_entries").length;
+      const listAfter = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "list_entries").length;
 
       expect(listAfter).toBeGreaterThan(listBefore); // a fresh browse fetch fired
       expect(wrapper.text()).toContain("github-token");
@@ -489,18 +471,13 @@ describe("EntryListPage", () => {
       await flushPromises();
 
       expect(wrapper.text()).toContain("github-token"); // browse fallback, not blanked
-      expect(toast.toasts.value.some((t) => t.message.includes("boom"))).toBe(
-        true,
-      ); // error toast surfaced
+      expect(toast.toasts.value.some((t) => t.message.includes("boom"))).toBe(true); // error toast surfaced
       expect(wrapper.text()).not.toContain("No matches"); // not a misleading empty
     });
 
     it("only the latest query is searched when typing fast (debounce coalescing)", async () => {
       when("list_entries", page(sampleEntries));
-      when(
-        "search_entries",
-        page([{ path: "github.com/token.age", name: "github-token" }]),
-      );
+      when("search_entries", page([{ path: "github.com/token.age", name: "github-token" }]));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -529,10 +506,7 @@ describe("EntryListPage", () => {
 
     it("refreshes search results after a pull changes the store", async () => {
       when("list_entries", page(sampleEntries));
-      when(
-        "search_entries",
-        page([{ path: "github.com/token.age", name: "github-token" }]),
-      );
+      when("search_entries", page([{ path: "github.com/token.age", name: "github-token" }]));
       const wrapper = mountPage();
       await flushPromises();
 
@@ -543,10 +517,7 @@ describe("EntryListPage", () => {
       expect(wrapper.text()).toContain("github-token");
 
       // Pull adds an entry; with an active search, results re-run against the store.
-      when(
-        "list_entries",
-        page([...sampleEntries, { path: "new.age", name: "new" }]),
-      );
+      when("list_entries", page([...sampleEntries, { path: "new.age", name: "new" }]));
       when("search_entries", page([{ path: "new.age", name: "new-git" }]));
       when("sync_repo", {
         kind: "fast_forwarded",
@@ -559,9 +530,7 @@ describe("EntryListPage", () => {
           blocked: false,
         },
       });
-      await (
-        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
-      ).syncRepo();
+      await (wrapper.vm as unknown as { syncRepo: () => Promise<void> }).syncRepo();
       await flushPromises();
       await flushPromises();
 
@@ -578,13 +547,9 @@ describe("EntryListPage", () => {
       const page1: Entry[] = [{ path: "e50.age", name: "e50" }];
       vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === "list_entries") {
-          const offset =
-            ((args as Record<string, unknown> | undefined)?.offset as number) ??
-            0;
+          const offset = ((args as Record<string, unknown> | undefined)?.offset as number) ?? 0;
           return Promise.resolve(
-            offset === 0
-              ? page(page0, { hasMore: true, total: 51 })
-              : page(page1, { total: 51 }),
+            offset === 0 ? page(page0, { hasMore: true, total: 51 }) : page(page1, { total: 51 }),
           );
         }
         return Promise.resolve(defaults[cmd]);
@@ -614,15 +579,10 @@ describe("EntryListPage", () => {
       vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === "list_entries") return Promise.resolve(page(sampleEntries));
         if (cmd === "search_entries") {
-          const q =
-            ((args as Record<string, unknown> | undefined)?.query as string) ??
-            "";
-          if (q === "foo")
-            return Promise.resolve(page([{ path: "foo.age", name: "foo-x" }]));
+          const q = ((args as Record<string, unknown> | undefined)?.query as string) ?? "";
+          if (q === "foo") return Promise.resolve(page([{ path: "foo.age", name: "foo-x" }]));
           if (q === "foobar")
-            return Promise.resolve(
-              page([{ path: "foobar.age", name: "foobar-y" }]),
-            );
+            return Promise.resolve(page([{ path: "foobar.age", name: "foobar-y" }]));
         }
         return Promise.resolve(defaults[cmd]);
       });
@@ -659,11 +619,8 @@ describe("EntryListPage", () => {
       }));
       vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === "list_entries") {
-          const offset =
-            ((args as Record<string, unknown> | undefined)?.offset as number) ??
-            0;
-          if (offset === 0)
-            return Promise.resolve(page(page0, { hasMore: true, total: 100 }));
+          const offset = ((args as Record<string, unknown> | undefined)?.offset as number) ?? 0;
+          if (offset === 0) return Promise.resolve(page(page0, { hasMore: true, total: 100 }));
           return new Promise(() => {}); // page 1 never resolves → stays loading
         }
         return Promise.resolve(defaults[cmd]);
@@ -694,26 +651,19 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await (
-        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
-      ).syncRepo();
+      await (wrapper.vm as unknown as { syncRepo: () => Promise<void> }).syncRepo();
       await flushPromises();
 
       expect(wrapper.text()).toContain("Already up to date");
     });
 
     it("reloads entries and shows update message when changed", async () => {
-      const updatedEntries: Entry[] = [
-        ...sampleEntries,
-        { path: "new.age", name: "new-entry" },
-      ];
+      const updatedEntries: Entry[] = [...sampleEntries, { path: "new.age", name: "new-entry" }];
       let listCall = 0;
       vi.mocked(invoke).mockImplementation((cmd: string) => {
         if (cmd === "list_entries") {
           listCall += 1;
-          return Promise.resolve(
-            listCall === 1 ? page(sampleEntries) : page(updatedEntries),
-          );
+          return Promise.resolve(listCall === 1 ? page(sampleEntries) : page(updatedEntries));
         }
         if (cmd === "sync_repo") {
           return Promise.resolve({
@@ -738,9 +688,7 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await (
-        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
-      ).syncRepo();
+      await (wrapper.vm as unknown as { syncRepo: () => Promise<void> }).syncRepo();
       await flushPromises();
 
       expect(wrapper.text()).toContain("Updated to def456");
@@ -760,9 +708,7 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await (
-        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
-      ).syncRepo();
+      await (wrapper.vm as unknown as { syncRepo: () => Promise<void> }).syncRepo();
       await flushPromises();
 
       // Modal surfaces, listing every local-side change category.
@@ -773,19 +719,15 @@ describe("EntryListPage", () => {
 
       // No confirm-checkbox anymore — Adopt is immediately enabled.
       expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
-      const adopt = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Adopt remote"))!;
+      const adopt = wrapper.findAll("button").find((b) => b.text().includes("Adopt remote"))!;
       expect((adopt.element as HTMLButtonElement).disabled).toBe(false);
 
       // Tapping it opens the centered confirm (the second step).
       await adopt.trigger("click");
       await flushPromises();
-      expect(
-        wrapper
-          .findAll("button")
-          .some((b) => b.text().includes("Discard my commit")),
-      ).toBe(true);
+      expect(wrapper.findAll("button").some((b) => b.text().includes("Discard my commit"))).toBe(
+        true,
+      );
     });
 
     it("a gate re-lock dismisses the sync divergence modal (either lock)", async () => {
@@ -800,9 +742,7 @@ describe("EntryListPage", () => {
       });
       const m = mountWithApp(EntryListPage);
       await flushPromises();
-      await (
-        m.wrapper.vm as unknown as { syncRepo: () => Promise<void> }
-      ).syncRepo();
+      await (m.wrapper.vm as unknown as { syncRepo: () => Promise<void> }).syncRepo();
       await flushPromises();
       expect(m.wrapper.text()).toContain("Local and remote have diverged");
 
@@ -822,9 +762,7 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      void (
-        wrapper.vm as unknown as { syncRepo: () => Promise<void> }
-      ).syncRepo();
+      void (wrapper.vm as unknown as { syncRepo: () => Promise<void> }).syncRepo();
       await flushPromises(); // pulling=true renders the progress bar + Cancel
 
       await wrapper.find('button[aria-label="Cancel sync"]').trigger("click");
@@ -839,16 +777,10 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(
-        wrapper.find('button[aria-label="Sync with remote"]').exists(),
-      ).toBe(false);
-      expect(
-        wrapper.find('button[aria-label="Generate passwords"]').exists(),
-      ).toBe(false);
+      expect(wrapper.find('button[aria-label="Sync with remote"]').exists()).toBe(false);
+      expect(wrapper.find('button[aria-label="Generate passwords"]').exists()).toBe(false);
       // The two header buttons that remain:
-      expect(
-        wrapper.find('button[aria-label="Create a new secret"]').exists(),
-      ).toBe(true);
+      expect(wrapper.find('button[aria-label="Create a new secret"]').exists()).toBe(true);
       expect(wrapper.find('button[aria-label="Settings"]').exists()).toBe(true);
     });
   });
@@ -871,9 +803,7 @@ describe("EntryListPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await wrapper
-        .find('[role="button"][aria-label="Open github-token"]')
-        .trigger("click");
+      await wrapper.find('[role="button"][aria-label="Open github-token"]').trigger("click");
       await flushPromises();
 
       expect(mockPush).toHaveBeenCalledWith({
@@ -930,15 +860,12 @@ describe("EntryListPage", () => {
   describe("foreground sync-outcome listener", () => {
     /** Grab the `sync-outcome` handler the page registered in onMounted. */
     function syncOutcomeHandler(): (e: { payload: unknown }) => void {
-      const h = vi
-        .mocked(listen)
-        .mock.calls.find((c) => c[0] === "sync-outcome")?.[1];
+      const h = vi.mocked(listen).mock.calls.find((c) => c[0] === "sync-outcome")?.[1];
       if (!h) throw new Error("sync-outcome listener not registered");
       return h as (e: { payload: unknown }) => void;
     }
     function countListCalls(): number {
-      return vi.mocked(invoke).mock.calls.filter((c) => c[0] === "list_entries")
-        .length;
+      return vi.mocked(invoke).mock.calls.filter((c) => c[0] === "list_entries").length;
     }
 
     it("refreshes the list on a fast-forward foreground sync", async () => {

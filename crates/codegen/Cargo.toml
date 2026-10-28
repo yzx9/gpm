@@ -8,9 +8,7 @@ license.workspace = true
 
 [dependencies]
 rustpass = { path = "../rustpass" }
-tauri-plugin-keystore = { path = "../tauri-plugin-keystore", features = [
-  "ts-codegen",
-] }
+tauri-plugin-keystore = { path = "../tauri-plugin-keystore", features = ["ts-codegen"] }
 gpm_lib = { package = "gpm", path = "../../app/src-tauri" }
 ts-rs = { workspace = true }
 

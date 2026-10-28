@@ -5,18 +5,10 @@
 import { type RuntimePlatform } from "@/api";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { mountWithApp } from "@/test/appTestUtils";
-import {
-  baseDefaults,
-  resetOverrides,
-  type Overrides,
-} from "@/test/settingsTestUtils";
+import { baseDefaults, resetOverrides, type Overrides } from "@/test/settingsTestUtils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import {
-  flushPromises,
-  type DOMWrapper,
-  type VueWrapper,
-} from "@vue/test-utils";
+import { flushPromises, type DOMWrapper, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPermissionsPage from "./SettingsPermissionsPage.vue";
 
@@ -73,17 +65,12 @@ describe("SettingsPermissionsPage", () => {
     vi.restoreAllMocks();
   });
 
-  function mountPage(
-    secureAvailable = true,
-    platform: RuntimePlatform = "android",
-  ) {
+  function mountPage(secureAvailable = true, platform: RuntimePlatform = "android") {
     return mountWithApp(SettingsPermissionsPage, { secureAvailable, platform });
   }
 
   function rowByText(wrapper: VueWrapper, text: string): DOMWrapper<Element> {
-    const el = wrapper
-      .findAll(".perm-row")
-      .find((r) => r.text().includes(text));
+    const el = wrapper.findAll(".perm-row").find((r) => r.text().includes(text));
     return el as unknown as DOMWrapper<Element>;
   }
 
@@ -271,9 +258,7 @@ describe("SettingsPermissionsPage", () => {
     await flushPromises();
     // The resume listener is the subscribeAppResume handle; capture its unlisten
     // (the value `listen` resolved to) and assert unmount invokes it.
-    const resumeIdx = vi
-      .mocked(listen)
-      .mock.calls.findIndex((c) => c[0] === "app-resumed");
+    const resumeIdx = vi.mocked(listen).mock.calls.findIndex((c) => c[0] === "app-resumed");
     const unlisten = await vi.mocked(listen).mock.results[resumeIdx].value;
     expect(unlisten).not.toHaveBeenCalled();
     wrapper.unmount();
@@ -290,9 +275,7 @@ describe("SettingsPermissionsPage", () => {
     // stale (already-unmounted) closure.
     wrapper.unmount();
     await flushPromises();
-    const resumeIdx = vi
-      .mocked(listen)
-      .mock.calls.findIndex((c) => c[0] === "app-resumed");
+    const resumeIdx = vi.mocked(listen).mock.calls.findIndex((c) => c[0] === "app-resumed");
     const unlisten = await vi.mocked(listen).mock.results[resumeIdx].value;
     expect(unlisten).toHaveBeenCalled();
   });

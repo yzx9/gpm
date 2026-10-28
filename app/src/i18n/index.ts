@@ -53,9 +53,7 @@ export function isSupportedLocale(code: string): code is SupportedLocale {
  * variants → `en`, anything else (or missing) → {@link DEFAULT_LOCALE}. Mirrors
  * the Rust `normalize_system_locale` — keep them in sync.
  */
-export function normalizeSupported(
-  tag: string | undefined | null,
-): SupportedLocale {
+export function normalizeSupported(tag: string | undefined | null): SupportedLocale {
   if (!tag) return DEFAULT_LOCALE;
   const lower = tag.toLowerCase();
   if (lower.startsWith("zh")) return "zh-CN";
@@ -98,14 +96,8 @@ export const i18n = createI18n<{ message: MessageSchema }, string, false>({
  * locale. A missing bundle (e.g. a page not yet translated for a locale) is
  * swallowed — `fallbackLocale` covers the missing keys.
  */
-export async function loadBundle(
-  locale: SupportedLocale,
-  namespace: string,
-): Promise<void> {
-  const messages = i18n.global.getLocaleMessage(locale) as Record<
-    string,
-    unknown
-  >;
+export async function loadBundle(locale: SupportedLocale, namespace: string): Promise<void> {
+  const messages = i18n.global.getLocaleMessage(locale) as Record<string, unknown>;
   // Presence-based dedup: once a namespace has been loaded for this locale —
   // even as an empty bundle (e.g. a page not yet translated for it) — skip the
   // re-import. A non-empty check would re-import forever for intentionally-empty
@@ -141,10 +133,7 @@ export async function setLocale(locale: SupportedLocale): Promise<void> {
   // place, not just on the next navigation.
   const prev = i18n.global.locale.value;
   if (prev !== locale) {
-    const loaded = i18n.global.getLocaleMessage(prev) as Record<
-      string,
-      unknown
-    >;
+    const loaded = i18n.global.getLocaleMessage(prev) as Record<string, unknown>;
     await Promise.all(Object.keys(loaded).map((ns) => loadBundle(locale, ns)));
   }
   i18n.global.locale.value = locale;

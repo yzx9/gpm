@@ -35,8 +35,7 @@ describe("useSecureScreen", () => {
 
   it("releaseClaim sets secure=false once the last claim drops (sensitive mode)", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, acquireClaim, releaseClaim } =
-      createSecureScreen();
+    const { secureAvailable, acquireClaim, releaseClaim } = createSecureScreen();
     secureAvailable.value = true;
     await acquireClaim();
     await releaseClaim();
@@ -47,8 +46,7 @@ describe("useSecureScreen", () => {
 
   it("a second claim keeps the flag up; it only drops when both release", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, acquireClaim, releaseClaim } =
-      createSecureScreen();
+    const { secureAvailable, acquireClaim, releaseClaim } = createSecureScreen();
     secureAvailable.value = true;
     await acquireClaim();
     await acquireClaim();
@@ -82,8 +80,7 @@ describe("useSecureScreen", () => {
 
   it("acquireClaim is ignored under off mode (claims do not secure; user opted into capture)", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, secureScreenMode, acquireClaim } =
-      createSecureScreen();
+    const { secureAvailable, secureScreenMode, acquireClaim } = createSecureScreen();
     secureAvailable.value = true;
     secureScreenMode.value = "off";
     await acquireClaim();
@@ -94,8 +91,7 @@ describe("useSecureScreen", () => {
 
   it("acquireClaim forces secure=true on every screen under always mode", async () => {
     fn().mockResolvedValue(undefined);
-    const { secureAvailable, secureScreenMode, acquireClaim } =
-      createSecureScreen();
+    const { secureAvailable, secureScreenMode, acquireClaim } = createSecureScreen();
     secureAvailable.value = true;
     secureScreenMode.value = "always";
     await acquireClaim();
@@ -115,12 +111,10 @@ describe("useSecureScreen", () => {
   it("initSecureScreen loads availability + mode and reconciles (no claims ⇒ secure=false)", async () => {
     fn().mockImplementation((cmd: string) => {
       if (cmd === "screen_secure_available") return Promise.resolve(true);
-      if (cmd === "get_app_config")
-        return Promise.resolve({ secure_screen_mode: "off" });
+      if (cmd === "get_app_config") return Promise.resolve({ secure_screen_mode: "off" });
       return Promise.resolve(undefined); // plugin:screen-secure|set_secure
     });
-    const { secureAvailable, secureScreenMode, initSecureScreen } =
-      createSecureScreen();
+    const { secureAvailable, secureScreenMode, initSecureScreen } = createSecureScreen();
     await initSecureScreen();
     expect(secureAvailable.value).toBe(true);
     expect(secureScreenMode.value).toBe("off");
@@ -132,8 +126,7 @@ describe("useSecureScreen", () => {
   it("initSecureScreen resolves an unrecognized backend mode (unknown) to sensitive", async () => {
     fn().mockImplementation((cmd: string) => {
       if (cmd === "screen_secure_available") return Promise.resolve(true);
-      if (cmd === "get_app_config")
-        return Promise.resolve({ secure_screen_mode: "unknown" });
+      if (cmd === "get_app_config") return Promise.resolve({ secure_screen_mode: "unknown" });
       return Promise.resolve(undefined);
     });
     const { secureScreenMode, initSecureScreen } = createSecureScreen();
@@ -146,20 +139,14 @@ describe("useSecureScreen", () => {
     const { initSecureScreen } = createSecureScreen();
     await initSecureScreen();
     await initSecureScreen();
-    const calls = fn().mock.calls.filter(
-      (c) => c[0] === "screen_secure_available",
-    );
+    const calls = fn().mock.calls.filter((c) => c[0] === "screen_secure_available");
     expect(calls).toHaveLength(1);
   });
 
   it("setSecureScreenMode persists the mode and re-applies (a held claim is ignored under off)", async () => {
     fn().mockResolvedValue(undefined);
-    const {
-      secureAvailable,
-      secureScreenMode,
-      acquireClaim,
-      setSecureScreenMode,
-    } = createSecureScreen();
+    const { secureAvailable, secureScreenMode, acquireClaim, setSecureScreenMode } =
+      createSecureScreen();
     secureAvailable.value = true;
     await acquireClaim(); // a secret is on screen ⇒ secure=true (sensitive default)
     await setSecureScreenMode("off");
@@ -184,8 +171,7 @@ describe("useSecureScreen", () => {
   it("initSecureScreen keeps the default sensitive mode when get_app_config rejects", async () => {
     fn().mockImplementation((cmd: string) => {
       if (cmd === "screen_secure_available") return Promise.resolve(true);
-      if (cmd === "get_app_config")
-        return Promise.reject(new Error("pre-setup"));
+      if (cmd === "get_app_config") return Promise.reject(new Error("pre-setup"));
       return Promise.resolve(undefined); // plugin:screen-secure|set_secure
     });
     const { secureScreenMode, initSecureScreen } = createSecureScreen();
@@ -195,16 +181,11 @@ describe("useSecureScreen", () => {
 
   it("setSecureScreenMode reverts the ref and returns false when persistence rejects", async () => {
     fn().mockImplementation((cmd: string) => {
-      if (cmd === "set_secure_screen_mode")
-        return Promise.reject(new Error("disk"));
+      if (cmd === "set_secure_screen_mode") return Promise.reject(new Error("disk"));
       return Promise.resolve(undefined);
     });
-    const {
-      secureAvailable,
-      secureScreenMode,
-      acquireClaim,
-      setSecureScreenMode,
-    } = createSecureScreen();
+    const { secureAvailable, secureScreenMode, acquireClaim, setSecureScreenMode } =
+      createSecureScreen();
     secureAvailable.value = true;
     await acquireClaim(); // a held claim under the default sensitive mode
     const ok = await setSecureScreenMode("off");

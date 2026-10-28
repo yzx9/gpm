@@ -110,9 +110,7 @@ describe("useDivergence", () => {
     await flushPromises();
 
     expect(
-      vi
-        .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "resolve_sync_divergence"),
+      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "resolve_sync_divergence"),
     ).toHaveLength(0);
     expect(handle.divergence.value).toBeNull();
     expect(handle.resolving.value).toBe(false);
@@ -155,9 +153,7 @@ describe("useDivergence", () => {
     await flushPromises();
 
     expect(
-      vi
-        .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "resolve_sync_divergence"),
+      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "resolve_sync_divergence"),
     ).toHaveLength(0);
     expect(handle.resolving.value).toBe(false);
   });

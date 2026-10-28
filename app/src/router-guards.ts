@@ -40,8 +40,7 @@ export function installRouteGuards(router: Router): void {
     // navigation. The namespace defaults to the route name; a route may
     // override it via `meta.bundle` when its strings live under a different
     // namespace (e.g. the settings sub-pages share the `settings` bundle).
-    const ns =
-      (typeof to.meta?.bundle === "string" && to.meta.bundle) || to.name;
+    const ns = (typeof to.meta?.bundle === "string" && to.meta.bundle) || to.name;
     if (typeof ns === "string") {
       void loadBundle(currentLocale(), ns);
     }

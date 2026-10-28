@@ -13,9 +13,7 @@ export function isSshUrl(url: string): boolean {
   const trimmed = url.trim();
   return (
     trimmed.startsWith("ssh://") ||
-    (trimmed.includes("@") &&
-      trimmed.includes(":") &&
-      !trimmed.startsWith("http"))
+    (trimmed.includes("@") && trimmed.includes(":") && !trimmed.startsWith("http"))
   );
 }
 

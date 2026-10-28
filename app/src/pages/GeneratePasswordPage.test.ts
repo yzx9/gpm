@@ -71,13 +71,9 @@ describe("GeneratePasswordPage", () => {
       generate_password_batch: () => ["x"],
     });
     // Open the BaseSelect sheet and pick xkcd (the 3rd option).
-    await wrapper
-      .find('button[aria-labelledby="generate-style-legend"]')
-      .trigger("click");
+    await wrapper.find('button[aria-labelledby="generate-style-legend"]').trigger("click");
     await flushPromises();
-    await wrapper
-      .findAll('input[type="radio"][name="generate-style"]')[2]!
-      .trigger("change");
+    await wrapper.findAll('input[type="radio"][name="generate-style"]')[2]!.trigger("change");
     await flushPromises();
     await wrapper.find("form").trigger("submit");
     await flushPromises();
@@ -121,13 +117,9 @@ describe("GeneratePasswordPage", () => {
       generate_password_batch: () => ["x"],
     });
     // Open the BaseSelect sheet and pick xkcd (the 3rd option).
-    await wrapper
-      .find('button[aria-labelledby="generate-style-legend"]')
-      .trigger("click");
+    await wrapper.find('button[aria-labelledby="generate-style-legend"]').trigger("click");
     await flushPromises();
-    await wrapper
-      .findAll('input[type="radio"][name="generate-style"]')[2]!
-      .trigger("change");
+    await wrapper.findAll('input[type="radio"][name="generate-style"]')[2]!.trigger("change");
     await flushPromises();
 
     expect(wrapper.find("#g-length").exists()).toBe(false);
@@ -156,9 +148,7 @@ describe("GeneratePasswordPage", () => {
       "copy_generated_password",
       expect.objectContaining({ text: "topsecret" }),
     );
-    expect(toast.toasts.value.some((t) => t.message.includes("Copied"))).toBe(
-      true,
-    );
+    expect(toast.toasts.value.some((t) => t.message.includes("Copied"))).toBe(true);
   });
 
   it("a generate error shows the message and renders no rows", async () => {
@@ -180,8 +170,7 @@ describe("GeneratePasswordPage", () => {
 
   it("clears the batch the moment the identity locks", async () => {
     vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch")
-        return Promise.resolve(["a", "b", "c"]);
+      if (cmd === "generate_password_batch") return Promise.resolve(["a", "b", "c"]);
       return Promise.resolve(undefined);
     }) as typeof invoke);
     const { wrapper, lock } = mountWithApp(GeneratePasswordPage);
@@ -201,8 +190,7 @@ describe("GeneratePasswordPage", () => {
 
   it("clears the batch on browser back (popstate)", async () => {
     vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch")
-        return Promise.resolve(["a", "b", "c"]);
+      if (cmd === "generate_password_batch") return Promise.resolve(["a", "b", "c"]);
       return Promise.resolve(undefined);
     }) as typeof invoke);
     const { wrapper } = mountWithApp(GeneratePasswordPage);
@@ -255,8 +243,7 @@ describe("GeneratePasswordPage", () => {
 
   it("a gate re-lock clears the batch and marks the drafts notice (unsaved passwords lost)", async () => {
     vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch")
-        return Promise.resolve(["a", "b", "c"]);
+      if (cmd === "generate_password_batch") return Promise.resolve(["a", "b", "c"]);
       return Promise.resolve(undefined);
     }) as typeof invoke);
     const m = mountWithApp(GeneratePasswordPage);

@@ -67,9 +67,7 @@ describe("PatPage", () => {
   it("Replace is disabled until a token is entered", async () => {
     const w = mountWithApp(PatPage).wrapper;
     await flushPromises();
-    const btn = w
-      .findAll("button")
-      .find((b) => b.text().includes("Replace token"))!;
+    const btn = w.findAll("button").find((b) => b.text().includes("Replace token"))!;
     expect(btn.attributes("disabled")).toBeDefined();
     await w.find("#new-pat").setValue("ghp_newtokenvalue");
     await flushPromises();

@@ -59,8 +59,7 @@ const EVENT_TYPES: (keyof DocumentEventMap)[] = [
 
 /** Type guard for the `Idle` variant (the only object in the `LockMode` union).
  *  `!== null` because `typeof null === "object"` in JS. */
-const isIdleMode = (m: LockMode): m is { idle: number } =>
-  typeof m === "object" && m !== null;
+const isIdleMode = (m: LockMode): m is { idle: number } => typeof m === "object" && m !== null;
 
 /**
  * Create an idle-timer activity bumper. `lockMode` and `identityCached` are read

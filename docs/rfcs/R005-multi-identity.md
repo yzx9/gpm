@@ -1,37 +1,46 @@
 # Multi-identity support + .age-recipients
 
-**Priority:** P3
-**Status:** Draft
-**Phase:** Future
-**Revision:** 1
+**Priority:** P3 **Status:** Draft **Phase:** Future **Revision:** 1
 
 ## What
 
-Support multiple age and/or SSH identities for decryption. Parse `.age-recipients` files to determine which identity to use for each `.age` file, instead of trying all identities against every file.
+Support multiple age and/or SSH identities for decryption. Parse `.age-recipients` files to
+determine which identity to use for each `.age` file, instead of trying all identities against every
+file.
 
 ## Why
 
-MVP supports a single identity. In multi-user gopass setups, different `.age` files may be encrypted to different recipients (public keys). A user who has identities for multiple recipients needs all of them available. Without `.age-recipients` parsing, the app would need to try every identity against every file — slow and inelegant.
+MVP supports a single identity. In multi-user gopass setups, different `.age` files may be encrypted
+to different recipients (public keys). A user who has identities for multiple recipients needs all
+of them available. Without `.age-recipients` parsing, the app would need to try every identity
+against every file — slow and inelegant.
 
 ## Context
 
 ### Current behavior
 
-Single identity tried against every `.age` file. If decryption fails, return error. No recipient awareness.
+Single identity tried against every `.age` file. If decryption fails, return error. No recipient
+awareness.
 
 ### gopass / age recipient model
 
-- `.age-recipients` file in each directory lists public keys (age recipients or SSH public keys) that the files in that directory are encrypted to.
+- `.age-recipients` file in each directory lists public keys (age recipients or SSH public keys)
+  that the files in that directory are encrypted to.
 - To decrypt, the user needs at least one matching private key (identity).
 - A gopass repo may have multiple `.age-recipients` files in different directories.
 
 ### Implementation
 
-1. **Store multiple identities:** Replace single identity file with a collection. UI allows adding/removing identities. Each has a label (e.g., "Work key", "Personal key").
+1. **Store multiple identities:** Replace single identity file with a collection. UI allows
+   adding/removing identities. Each has a label (e.g., "Work key", "Personal key").
 
-2. **Parse `.age-recipients`:** When listing entries, also parse `.age-recipients` files. For each entry, note which recipients it's encrypted to. This allows showing "needs: Work key" for entries the user can't yet decrypt.
+2. **Parse `.age-recipients`:** When listing entries, also parse `.age-recipients` files. For each
+   entry, note which recipients it's encrypted to. This allows showing "needs: Work key" for entries
+   the user can't yet decrypt.
 
-3. **Targeted decryption:** When decrypting an entry, check its recipients → find matching identity → decrypt with that specific identity. Falls back to trying all identities if no `.age-recipients` exists (backward compatible).
+3. **Targeted decryption:** When decrypting an entry, check its recipients → find matching identity
+   → decrypt with that specific identity. Falls back to trying all identities if no
+   `.age-recipients` exists (backward compatible).
 
 4. **UI changes:**
    - SetupPage: allow pasting multiple identities
@@ -40,17 +49,34 @@ Single identity tried against every `.age` file. If decryption fails, return err
 
 ### Relationship to 0003 (encrypted SSH key)
 
-Encrypted SSH keys are already supported as identities. Multi-identity must handle both x25519 and SSH key types with their optional passphrases.
+Encrypted SSH keys are already supported as identities. Multi-identity must handle both x25519 and
+SSH key types with their optional passphrases.
 
 ### Overwrite-safety gate (deferred until multi-identity)
 
-Once a store can hold entries encrypted to a recipient set that does **not** include us, a "keep mine" resolve (or any push that overwrites a same-name remote entry) can silently destroy ciphertext we cannot read or verify — the remote entry could carry content we're not a recipient of. The write path today has no `remote_decryptable` / overwrite-confirm gate; it doesn't need one because gpm is single-identity (every entry in the store decrypts with our one key, so an overwrite never destroys something we can't read).
+Once a store can hold entries encrypted to a recipient set that does **not** include us, a "keep
+mine" resolve (or any push that overwrites a same-name remote entry) can silently destroy ciphertext
+we cannot read or verify — the remote entry could carry content we're not a recipient of. The write
+path today has no `remote_decryptable` / overwrite-confirm gate; it doesn't need one because gpm is
+single-identity (every entry in the store decrypts with our one key, so an overwrite never destroys
+something we can't read).
 
-When multi-identity lands, add a gate: refuse to overwrite a remote entry whose current ciphertext we can't decrypt, unless the user explicitly confirms (a `keep_mine_force`-class choice). This is a team-store safety item, irrelevant for the single-user MVP; recorded here so it is not silently dropped. (Deferred from the decouple-sync work — the orchestrator that would surface this ships without the gate.)
+When multi-identity lands, add a gate: refuse to overwrite a remote entry whose current ciphertext
+we can't decrypt, unless the user explicitly confirms (a `keep_mine_force`-class choice). This is a
+team-store safety item, irrelevant for the single-user MVP; recorded here so it is not silently
+dropped. (Deferred from the decouple-sync work — the orchestrator that would surface this ships
+without the gate.)
 
 ### Revision decryption uses current identities only (no historical recipients)
 
-Viewing a past secret revision (the shipped secret-revisions feature, formerly R027) decrypts with the current identity/identities only — it does **not** reconstruct the recipient set the revision was encrypted to at the time (no "historical recipient" notion). A revision encrypted to a recipient none of the current identities covers — key rotation, a departed teammate's revision in a shared store — remains **undecryptable** and is reported as a state rather than surfaced as ciphertext. Multi-identity broadens "current identity" to "any current identity" but does not change this: the recipient set at revision time is not modeled, and a past revision readable only to a long-removed identity stays unreadable. (From R027 decision 2.)
+Viewing a past secret revision (the shipped secret-revisions feature, formerly R027) decrypts with
+the current identity/identities only — it does **not** reconstruct the recipient set the revision
+was encrypted to at the time (no "historical recipient" notion). A revision encrypted to a recipient
+none of the current identities covers — key rotation, a departed teammate's revision in a shared
+store — remains **undecryptable** and is reported as a state rather than surfaced as ciphertext.
+Multi-identity broadens "current identity" to "any current identity" but does not change this: the
+recipient set at revision time is not modeled, and a past revision readable only to a long-removed
+identity stays unreadable. (From R027 decision 2.)
 
 ## Effort
 
@@ -58,4 +84,7 @@ Viewing a past secret revision (the shipped secret-revisions feature, formerly R
 
 ## Depends on / Supersedes
 
-None — independent of other RFCs. (Connection editing was previously listed as a dependency — R004, now deprecated and superseded by `R098` — on the assumption it would establish the identity type system first; it is scoped to git credentials only and touches no identity work, so the two are independent.)
+None — independent of other RFCs. (Connection editing was previously listed as a dependency — R004,
+now deprecated and superseded by `R098` — on the assumption it would establish the identity type
+system first; it is scoped to git credentials only and touches no identity work, so the two are
+independent.)

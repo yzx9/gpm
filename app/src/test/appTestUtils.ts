@@ -85,10 +85,7 @@ function createTestStackedRouterView(): StackedRouterViewState & {
  * CreatePage/EntryDetailPage test needs those keys or setup throws. Fail-loud
  * (`inject` + throw) catches any forgotten key immediately.
  */
-export function mountWithApp<C extends Component>(
-  comp: C,
-  opts: MountWithAppOptions<C> = {},
-) {
+export function mountWithApp<C extends Component>(comp: C, opts: MountWithAppOptions<C> = {}) {
   const lock = createLockState({ unlocked: opts.unlocked !== false });
   const appLock = createAppLockStore();
   const draftsNotice = createDraftsNotice();

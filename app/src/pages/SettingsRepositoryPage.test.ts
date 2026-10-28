@@ -125,9 +125,7 @@ describe("SettingsRepositoryPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "Config not found",
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("Config not found");
     });
 
     it("shows loading state before config loads", async () => {
@@ -145,9 +143,7 @@ describe("SettingsRepositoryPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const btn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Manage SSH Key"));
+      const btn = wrapper.findAll("button").find((b) => b.text().includes("Manage SSH Key"));
       expect(btn).toBeDefined();
       await btn!.trigger("click");
       await flushPromises();
@@ -159,9 +155,7 @@ describe("SettingsRepositoryPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const btn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Manage token"));
+      const btn = wrapper.findAll("button").find((b) => b.text().includes("Manage token"));
       expect(btn).toBeDefined();
       await btn!.trigger("click");
       await flushPromises();
@@ -174,9 +168,7 @@ describe("SettingsRepositoryPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const btn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Set up token"));
+      const btn = wrapper.findAll("button").find((b) => b.text().includes("Set up token"));
       expect(btn).toBeDefined();
       await btn!.trigger("click");
       await flushPromises();
@@ -195,9 +187,7 @@ describe("SettingsRepositoryPage", () => {
 
       expect(wrapper.text()).toContain("personal access token is also stored");
       expect(
-        wrapper
-          .findAll("button")
-          .filter((b) => b.text().includes("Manage token")).length,
+        wrapper.findAll("button").filter((b) => b.text().includes("Manage token")).length,
       ).toBeGreaterThanOrEqual(1);
     });
   });
@@ -233,9 +223,7 @@ describe("SettingsRepositoryPage", () => {
       expect(wrapper.text()).toContain("SHA256:abcd");
       expect(wrapper.text()).toContain("Alice");
 
-      const removeBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Remove"));
+      const removeBtn = wrapper.findAll("button").find((b) => b.text().includes("Remove"));
       expect(removeBtn).toBeDefined();
       await removeBtn!.trigger("click");
       await flushPromises();
@@ -267,9 +255,7 @@ describe("SettingsRepositoryPage", () => {
       expect(wrapper.text()).toContain("abcdef0123456789");
       expect(wrapper.text()).toContain("GPG");
 
-      const removeBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Remove"));
+      const removeBtn = wrapper.findAll("button").find((b) => b.text().includes("Remove"));
       expect(removeBtn).toBeDefined();
       await removeBtn!.trigger("click");
       await flushPromises();
@@ -347,9 +333,7 @@ describe("SettingsRepositoryPage", () => {
 
       await wrapper.find("#commit-name").setValue("Alice");
       await wrapper.find("#commit-email").setValue("alice@example.com");
-      const saveBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Save"));
+      const saveBtn = wrapper.findAll("button").find((b) => b.text().includes("Save"));
       expect(saveBtn).toBeDefined();
       await saveBtn!.trigger("click");
       await flushPromises();
@@ -406,9 +390,7 @@ describe("SettingsRepositoryPage", () => {
 
   describe("leave guard", () => {
     function leaveGuard() {
-      return mockOnBeforeRouteLeave.mock.calls[0][0] as () => Promise<
-        boolean | void
-      >;
+      return mockOnBeforeRouteLeave.mock.calls[0][0] as () => Promise<boolean | void>;
     }
 
     it("leaves freely when nothing is dirty", async () => {
@@ -416,9 +398,7 @@ describe("SettingsRepositoryPage", () => {
       await flushPromises();
 
       await expect(leaveGuard()()).resolves.toBe(true);
-      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
-        false,
-      );
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(false);
     });
 
     it("discard drops changes and leaves", async () => {
@@ -484,9 +464,7 @@ describe("SettingsRepositoryPage", () => {
         .trigger("click");
 
       await expect(p).resolves.toBe(false);
-      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
-        false,
-      );
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(false);
       expect(wrapper.find("[role='alert']").text()).toContain("nope");
     });
 
@@ -506,9 +484,7 @@ describe("SettingsRepositoryPage", () => {
         .trigger("click");
 
       await expect(p).resolves.toBe(false);
-      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(
-        false,
-      );
+      expect(wrapper.find('[aria-label="Unsaved changes"]').exists()).toBe(false);
     });
   });
 });

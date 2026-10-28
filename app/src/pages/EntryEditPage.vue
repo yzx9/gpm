@@ -51,9 +51,7 @@ const activeRepo = useActiveRepo();
 const { toast } = useToast();
 
 const pathMatch = route.params.pathMatch;
-const entryPath = decodeURIComponent(
-  Array.isArray(pathMatch) ? pathMatch[0] : pathMatch,
-);
+const entryPath = decodeURIComponent(Array.isArray(pathMatch) ? pathMatch[0] : pathMatch);
 const entryName = entryPath.replace(/\.age$/, "");
 
 // Shared by the header Back button, the form Cancel (goBack), and Save-success
@@ -104,29 +102,23 @@ useWipeOnLeave(() => {
   loadToken++;
 });
 
-const {
-  divergence,
-  resolving,
-  divergeError,
-  openDivergence,
-  resolveDivergence,
-  cancelDivergence,
-} = useDivergence({
-  resolveFailedKey: "entry.resolveFailed",
-  onResolved(result: PullResult, choice: DivergenceChoice) {
-    exitEdit();
-    if (choice === "adopt_remote") {
-      toast.info(t("entry.adoptedRemote"));
-    } else {
-      toast.success(t("entry.keptMine", { head: result.head }));
-    }
-    navBack(router, { name: "entries" });
-  },
-  onPullFfFailed() {
-    toast.info(t("entry.remoteChanged"));
-    navBack(router, { name: "entries" });
-  },
-});
+const { divergence, resolving, divergeError, openDivergence, resolveDivergence, cancelDivergence } =
+  useDivergence({
+    resolveFailedKey: "entry.resolveFailed",
+    onResolved(result: PullResult, choice: DivergenceChoice) {
+      exitEdit();
+      if (choice === "adopt_remote") {
+        toast.info(t("entry.adoptedRemote"));
+      } else {
+        toast.success(t("entry.keptMine", { head: result.head }));
+      }
+      navBack(router, { name: "entries" });
+    },
+    onPullFfFailed() {
+      toast.info(t("entry.remoteChanged"));
+      navBack(router, { name: "entries" });
+    },
+  });
 
 const {
   conflict: entryConflict,
@@ -185,8 +177,7 @@ function partsEqual(a: SecretParts, b: SecretParts): boolean {
   if (a.password !== b.password || a.body !== b.body) return false;
   if (a.attributes.length !== b.attributes.length) return false;
   return a.attributes.every(
-    (attr, i) =>
-      attr.key === b.attributes[i].key && attr.value === b.attributes[i].value,
+    (attr, i) => attr.key === b.attributes[i].key && attr.value === b.attributes[i].value,
   );
 }
 
@@ -215,9 +206,7 @@ function removeAttribute(index: number) {
  *  re-parse to a different structure — block Save (the Rust assembler also
  *  rejects it via SecretInvalid). */
 const hasInvalidKey = computed(() =>
-  editAttributes.value.some(
-    (a) => a.key.includes(": ") || a.key.includes("\n"),
-  ),
+  editAttributes.value.some((a) => a.key.includes(": ") || a.key.includes("\n")),
 );
 
 /** A004: gpm never writes YAML secrets — parts that would assemble to a
@@ -276,9 +265,7 @@ async function loadBody() {
     // withClaim raises FLAG_SECURE before the decrypted body arrives; a late
     // load resolving after we left is discarded by the token; a failed acquire
     // returns null → abort (the per-op replacement for the old route-guard abort).
-    const claimed = await withClaim(() =>
-      runWithAuth(() => showPasswordCmd(repoId, entryPath)),
-    );
+    const claimed = await withClaim(() => runWithAuth(() => showPasswordCmd(repoId, entryPath)));
     if (myToken !== loadToken) return;
     if (!claimed) {
       error.value = t("common.toast.secureScreenFailed");
@@ -403,9 +390,7 @@ function goBack() {
   <main class="max-w-120 mx-auto p-4" role="main">
     <BaseHeader :back-fallback="BACK_FALLBACK">
       <template #title>
-        <h1
-          class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1"
-        >
+        <h1 class="text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1">
           {{ entryName }}
         </h1>
       </template>
@@ -426,19 +411,14 @@ function goBack() {
       {{ t("entry.yamlMarkerBlocked") }}
     </BaseAlert>
 
-    <div
-      v-if="loading"
-      class="flex items-center justify-center gap-2 text-center text-muted py-4"
-    >
+    <div v-if="loading" class="flex items-center justify-center gap-2 text-center text-muted py-4">
       <BaseSpinner />
       <span>{{ t("common.loading") }}</span>
     </div>
 
     <form v-else class="flex flex-col gap-4 mb-6" @submit.prevent="onSave">
       <div class="flex flex-col gap-1">
-        <label for="e-password" class="text-sm font-medium">{{
-          t("entry.password")
-        }}</label>
+        <label for="e-password" class="text-sm font-medium">{{ t("entry.password") }}</label>
         <BaseInput
           id="e-password"
           v-model="editPassword"
@@ -449,11 +429,7 @@ function goBack() {
         />
       </div>
       <div class="flex flex-col gap-2">
-        <div
-          v-for="(attr, index) in editAttributes"
-          :key="index"
-          class="flex flex-col gap-1"
-        >
+        <div v-for="(attr, index) in editAttributes" :key="index" class="flex flex-col gap-1">
           <div class="flex items-center gap-2">
             <BaseInput
               v-model="attr.key"
@@ -479,11 +455,7 @@ function goBack() {
             <BaseInput
               v-model="attr.value"
               class="flex-1 font-mono"
-              :type="
-                isSensitiveKey(attr.key) && !revealedAttr[index]
-                  ? 'password'
-                  : 'text'
-              "
+              :type="isSensitiveKey(attr.key) && !revealedAttr[index] ? 'password' : 'text'"
               autocomplete="off"
               autocapitalize="off"
               autocorrect="off"
@@ -497,19 +469,14 @@ function goBack() {
               tone="muted"
               type="button"
               :aria-label="
-                revealedAttr[index]
-                  ? t('entry.hideValueAria')
-                  : t('entry.showValueAria')
+                revealedAttr[index] ? t('entry.hideValueAria') : t('entry.showValueAria')
               "
               @click="revealedAttr[index] = !revealedAttr[index]"
             >
               <BaseIcon :icon="revealedAttr[index] ? EyeOff : Eye" />
             </BaseButton>
           </div>
-          <p
-            v-if="attr.key.includes(': ') || attr.key.includes('\n')"
-            class="text-xs text-danger"
-          >
+          <p v-if="attr.key.includes(': ') || attr.key.includes('\n')" class="text-xs text-danger">
             {{ t("entry.attrKeyInvalid") }}
           </p>
         </div>
@@ -524,15 +491,8 @@ function goBack() {
         </BaseButton>
       </div>
       <div class="flex flex-col gap-1">
-        <label for="e-notes" class="text-sm font-medium">{{
-          t("entry.notes")
-        }}</label>
-        <BaseTextarea
-          id="e-notes"
-          v-model="editNotes"
-          rows="6"
-          autocomplete="off"
-        />
+        <label for="e-notes" class="text-sm font-medium">{{ t("entry.notes") }}</label>
+        <BaseTextarea id="e-notes" v-model="editNotes" rows="6" autocomplete="off" />
         <small class="text-xs text-muted">{{ t("entry.firstLineHint") }}</small>
       </div>
       <div class="flex gap-3">
@@ -550,9 +510,7 @@ function goBack() {
           type="button"
           class="flex-1"
           :disabled="cancelling"
-          :aria-label="
-            saving ? t('entry.cancelSaveAria') : t('entry.cancelEditAria')
-          "
+          :aria-label="saving ? t('entry.cancelSaveAria') : t('entry.cancelEditAria')"
           @click="saving ? cancelSave() : goBack()"
         >
           {{

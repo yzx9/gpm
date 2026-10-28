@@ -17,9 +17,8 @@ across all branches. Delete this comment when filling the ADR in.
 
 ## Context
 
-The problem and the forces at play — constraints, prior decisions, what's
-unsatisfying about the current state. Cross-cutting (it shapes more than one
-feature), and decision-altitude only; no code.
+The problem and the forces at play — constraints, prior decisions, what's unsatisfying about the
+current state. Cross-cutting (it shapes more than one feature), and decision-altitude only; no code.
 
 ## Decision
 
@@ -27,8 +26,8 @@ The choice, stated in one or two plain sentences.
 
 ## Consequences
 
-What follows: what gets easier, what gets harder or ruled out, the trade-offs
-accepted. Flag anything a future reader must honor.
+What follows: what gets easier, what gets harder or ruled out, the trade-offs accepted. Flag
+anything a future reader must honor.
 
 ## Alternatives considered
 

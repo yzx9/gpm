@@ -53,9 +53,9 @@ describe("BaseHeader", () => {
     await wrapper.find('button[aria-label="Back"]').trigger("click");
     expect(navBack).toHaveBeenCalledTimes(1);
     // [0] = router, [1] = fallback.
-    expect(
-      (navBack as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![1],
-    ).toEqual({ name: "settings" });
+    expect((navBack as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual({
+      name: "settings",
+    });
   });
 
   it("emits back BEFORE navBack runs (side-effect handler runs first)", async () => {

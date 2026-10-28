@@ -31,8 +31,7 @@ export interface ActiveRepoStore {
 }
 
 /** Injection key for [`useActiveRepo`]. */
-export const ACTIVE_REPO_KEY: InjectionKey<ActiveRepoStore> =
-  Symbol("activeRepo");
+export const ACTIVE_REPO_KEY: InjectionKey<ActiveRepoStore> = Symbol("activeRepo");
 
 /** Pick the active repository id from an already-fetched `AppConfig`:
  *  `last_active` iff it names a registered repo, else the first, else `null`.
@@ -44,9 +43,7 @@ export function pickActiveRepoId(cfg: {
   last_active?: string | null;
 }): string | null {
   const ids = cfg.repositories ?? [];
-  return cfg.last_active && ids.includes(cfg.last_active)
-    ? cfg.last_active
-    : (ids[0] ?? null);
+  return cfg.last_active && ids.includes(cfg.last_active) ? cfg.last_active : (ids[0] ?? null);
 }
 
 /** Resolve the active repository id from the persisted registry (`AppConfig`).
@@ -72,9 +69,6 @@ export function createActiveRepoStore(): ActiveRepoStore {
  *  provides `ACTIVE_REPO_KEY` (i.e. outside the app shell). */
 export function useActiveRepo(): ActiveRepoStore {
   const store = inject(ACTIVE_REPO_KEY);
-  if (!store)
-    throw new Error(
-      "useActiveRepo() called without an ActiveRepoStore provider",
-    );
+  if (!store) throw new Error("useActiveRepo() called without an ActiveRepoStore provider");
   return store;
 }

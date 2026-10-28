@@ -49,17 +49,13 @@ const props = withDefaults(
 );
 
 const sizeClass = computed(() =>
-  props.variant === "action" || props.variant === "action-danger"
-    ? null
-    : `size-${props.size}`,
+  props.variant === "action" || props.variant === "action-danger" ? null : `size-${props.size}`,
 );
 
 /** `tone` only colors the `link` variant — other variants own their foreground,
  * and a tone class would fight them at equal specificity. */
 const toneClass = computed(() =>
-  props.variant === "link" && props.tone !== "default"
-    ? `tone-${props.tone}`
-    : null,
+  props.variant === "link" && props.tone !== "default" ? `tone-${props.tone}` : null,
 );
 </script>
 
@@ -72,9 +68,7 @@ const toneClass = computed(() =>
   >
     <BaseSpinner
       v-if="loading"
-      :variant="
-        variant === 'primary' || variant === 'danger' ? 'white' : 'dark'
-      "
+      :variant="variant === 'primary' || variant === 'danger' ? 'white' : 'dark'"
     />
     <slot />
   </button>

@@ -11,17 +11,14 @@ vi.mock("@tauri-apps/api/core");
 
 /// Branch `invoke` by command name. `done`-emission + call ordering are the
 /// things under test, so a per-command map is more robust than a value queue.
-function mockInvoke(
-  handlers: Record<string, (args?: Record<string, unknown>) => unknown>,
-) {
+function mockInvoke(handlers: Record<string, (args?: Record<string, unknown>) => unknown>) {
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
     const h = handlers[cmd];
     if (h) return h(args as Record<string, unknown> | undefined);
     // The setup flow resolves the active repo id (for the first push) from the
     // persisted registry; default to a registered repo so resolveActiveRepoId
     // succeeds without each push test restating it.
-    if (cmd === "get_app_config")
-      return { repositories: ["test-repo"], last_active: "test-repo" };
+    if (cmd === "get_app_config") return { repositories: ["test-repo"], last_active: "test-repo" };
     return undefined;
   });
 }
@@ -32,11 +29,7 @@ function mockInvoke(
 /// field (the structural regression this refactor removed).
 function expectNoSecretCrossedIPC() {
   for (const [cmd, args] of vi.mocked(invoke).mock.calls) {
-    if (
-      args &&
-      typeof args === "object" &&
-      "identity" in (args as Record<string, unknown>)
-    ) {
+    if (args && typeof args === "object" && "identity" in (args as Record<string, unknown>)) {
       throw new Error(
         `${cmd} was invoked with an \`identity\` field — the secret must stay backend-side`,
       );
@@ -66,10 +59,7 @@ describe("CreateFlow", () => {
 
   /// BaseSegmentedControl renders sr-only radios (not buttons), keyed by the
   /// `name` prop; option order is [age, ssh]. Trigger `change` to select.
-  async function selectKind(
-    wrapper: ReturnType<typeof mount>,
-    kind: "age" | "ssh",
-  ) {
+  async function selectKind(wrapper: ReturnType<typeof mount>, kind: "age" | "ssh") {
     const radios = wrapper.findAll('input[name="create-identity-kind"]');
     await radios[kind === "age" ? 0 : 1]!.trigger("change");
     await flushPromises();
@@ -116,10 +106,7 @@ describe("CreateFlow", () => {
     await submit(wrapper);
 
     expect(invoke).toHaveBeenCalledWith("create_store", expect.anything());
-    expect(invoke).toHaveBeenCalledWith(
-      "complete_setup_from_file",
-      expect.anything(),
-    );
+    expect(invoke).toHaveBeenCalledWith("complete_setup_from_file", expect.anything());
     // No remote → no first push.
     expect(invoke).not.toHaveBeenCalledWith("push_repo");
     expect(wrapper.emitted("done")).toHaveLength(1);
@@ -159,9 +146,7 @@ describe("CreateFlow", () => {
     // Browser-back during the create wipes the live field.
     window.dispatchEvent(new PopStateEvent("popstate"));
     await flushPromises();
-    expect(
-      (wrapper.find("#create-passphrase").element as HTMLInputElement).value,
-    ).toBe("");
+    expect((wrapper.find("#create-passphrase").element as HTMLInputElement).value).toBe("");
 
     // create_store resolves → complete_setup_from_file runs with the snapshot.
     resolveCreate();
@@ -246,18 +231,12 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("https://example.com/r.git");
+    await wrapper.find('input[id="repo-url"]').setValue("https://example.com/r.git");
     await wrapper.find('input[id="pat"]').setValue("my-pat");
     await submit(wrapper);
 
     // create → complete_setup_from_file → push_repo, in that order (deferred push).
-    expect(calls).toEqual([
-      "create_store",
-      "complete_setup_from_file",
-      "push_repo",
-    ]);
+    expect(calls).toEqual(["create_store", "complete_setup_from_file", "push_repo"]);
     expect(invoke).toHaveBeenCalledWith("create_store", {
       recipient: "age1r",
       repoUrl: "https://example.com/r.git",
@@ -289,9 +268,7 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("git@github.com:user/repo.git");
+    await wrapper.find('input[id="repo-url"]').setValue("git@github.com:user/repo.git");
     await wrapper.find('textarea[id="ssh-key"]').setValue("push-auth-key");
     await submit(wrapper);
 
@@ -311,9 +288,7 @@ describe("CreateFlow", () => {
     mockInvoke({ generate_identity: () => "age1r" });
     const wrapper = mount(CreateFlow);
     await flushPromises();
-    expect(
-      wrapper.find('input[id="repo-url"]').attributes("required"),
-    ).toBeUndefined();
+    expect(wrapper.find('input[id="repo-url"]').attributes("required")).toBeUndefined();
   });
 
   it("requires an identity before creating", async () => {
@@ -321,9 +296,7 @@ describe("CreateFlow", () => {
     await flushPromises();
     await submit(wrapper);
 
-    expect(wrapper.find("[role='alert']").text()).toBe(
-      "Generate an identity first",
-    );
+    expect(wrapper.find("[role='alert']").text()).toBe("Generate an identity first");
     expect(invoke).not.toHaveBeenCalledWith("create_store", expect.anything());
   });
 
@@ -338,9 +311,7 @@ describe("CreateFlow", () => {
     await wrapper.find('input[id="pat"]').setValue("stray-pat");
     await submit(wrapper);
 
-    expect(wrapper.find("[role='alert']").text()).toContain(
-      "Enter a repository URL",
-    );
+    expect(wrapper.find("[role='alert']").text()).toContain("Enter a repository URL");
     expect(invoke).not.toHaveBeenCalledWith("create_store", expect.anything());
     expect(wrapper.emitted("done")).toBeUndefined();
   });
@@ -352,9 +323,7 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("git@github.com:user/repo.git");
+    await wrapper.find('input[id="repo-url"]').setValue("git@github.com:user/repo.git");
     await submit(wrapper);
 
     expect(wrapper.find("[role='alert']").text()).toBe(
@@ -375,10 +344,7 @@ describe("CreateFlow", () => {
     await submit(wrapper);
 
     expect(wrapper.find("[role='alert']").text()).toBe("disk full");
-    expect(invoke).not.toHaveBeenCalledWith(
-      "complete_setup_from_file",
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith("complete_setup_from_file", expect.anything());
     expect(wrapper.emitted("done")).toBeUndefined();
   });
 
@@ -396,16 +362,11 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("https://example.com/r.git");
+    await wrapper.find('input[id="repo-url"]').setValue("https://example.com/r.git");
     await submit(wrapper);
 
     expect(wrapper.find("[role='alert']").text()).toBe("identity save failed");
-    expect(invoke).toHaveBeenCalledWith(
-      "complete_setup_from_file",
-      expect.anything(),
-    );
+    expect(invoke).toHaveBeenCalledWith("complete_setup_from_file", expect.anything());
     expect(invoke).not.toHaveBeenCalledWith("push_repo", expect.anything());
     expect(wrapper.emitted("done")).toBeUndefined();
   });
@@ -425,9 +386,7 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("https://example.com/r.git");
+    await wrapper.find('input[id="repo-url"]').setValue("https://example.com/r.git");
     await submit(wrapper);
 
     // create + complete_setup_from_file succeeded; the push failed → stay on
@@ -435,9 +394,7 @@ describe("CreateFlow", () => {
     expect(invoke).toHaveBeenCalledWith("push_repo", {
       repoId: "test-repo",
     });
-    expect(wrapper.find("[role='alert']").text()).toContain(
-      "remote unreachable",
-    );
+    expect(wrapper.find("[role='alert']").text()).toContain("remote unreachable");
     expect(wrapper.find("[role='alert']").text()).toContain("saved locally");
     expect(wrapper.emitted("done")).toBeUndefined();
   });
@@ -482,9 +439,7 @@ describe("CreateFlow", () => {
     // Editable before generation.
     expect(passInput.attributes("disabled")).toBeUndefined();
     await passInput.setValue("original-pass");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("original-pass");
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("original-pass");
     await clickButton(wrapper, "Generate SSH key");
 
     // Locked after generation — for SSH the passphrase is fixed at mint time.
@@ -506,17 +461,12 @@ describe("CreateFlow", () => {
     await flushPromises();
     await selectKind(wrapper, "ssh");
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("different");
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("different");
     await clickButton(wrapper, "Generate SSH key");
 
     // The passphrase is baked into the SSH key at mint time, so a mismatch must
     // block the mint entirely — the key must not be generated with a typo.
-    expect(invoke).not.toHaveBeenCalledWith(
-      "generate_identity",
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith("generate_identity", expect.anything());
     expect(wrapper.text()).toContain("Passphrases do not match");
     expect(wrapper.text()).not.toContain("ssh-ed25519");
   });
@@ -556,20 +506,12 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("https://example.com/r.git");
+    await wrapper.find('input[id="repo-url"]').setValue("https://example.com/r.git");
     await submit(wrapper);
 
     // 1st submit: full bootstrap, then a failed push. No done emitted.
-    expect(seq).toEqual([
-      "create_store",
-      "complete_setup_from_file",
-      "push_repo",
-    ]);
-    expect(wrapper.find("[role='alert']").text()).toContain(
-      "remote unreachable",
-    );
+    expect(seq).toEqual(["create_store", "complete_setup_from_file", "push_repo"]);
+    expect(wrapper.find("[role='alert']").text()).toContain("remote unreachable");
     expect(wrapper.emitted("done")).toBeUndefined();
 
     // Retry: the store is configured now → must NOT re-bootstrap (create_store
@@ -577,12 +519,7 @@ describe("CreateFlow", () => {
     // so a re-run would strand the store). Only the push is retried.
     await submit(wrapper);
 
-    expect(seq).toEqual([
-      "create_store",
-      "complete_setup_from_file",
-      "push_repo",
-      "push_repo",
-    ]);
+    expect(seq).toEqual(["create_store", "complete_setup_from_file", "push_repo", "push_repo"]);
     expect(wrapper.emitted("done")).toHaveLength(1);
   });
 
@@ -601,15 +538,11 @@ describe("CreateFlow", () => {
 
     // Type an seal passphrase → ack appears, unchecked → Create Store disabled.
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("secret");
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("secret");
     const ack = wrapper.find('input[type="checkbox"]');
     expect(ack.exists()).toBe(true);
     expect((ack.element as HTMLInputElement).checked).toBe(false);
-    const createBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Create Store"))!;
+    const createBtn = wrapper.findAll("button").find((b) => b.text().includes("Create Store"))!;
     expect((createBtn.element as HTMLButtonElement).disabled).toBe(true);
 
     // Enter-key backstop: submit is blocked via validate() too.
@@ -620,9 +553,7 @@ describe("CreateFlow", () => {
     await ack.setValue(true);
     expect(
       (
-        wrapper
-          .findAll("button")
-          .find((b) => b.text().includes("Create Store"))!
+        wrapper.findAll("button").find((b) => b.text().includes("Create Store"))!
           .element as HTMLButtonElement
       ).disabled,
     ).toBe(false);
@@ -642,29 +573,19 @@ describe("CreateFlow", () => {
     await flushPromises();
     await clickButton(wrapper, "Generate identity");
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("secret");
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("secret");
     await wrapper.find('input[type="checkbox"]').setValue(true);
 
     // Editing the passphrase invalidates the ack → Create Store re-gated.
     await wrapper.find('input[id="create-passphrase"]').setValue("changed");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("changed");
-    expect(
-      (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
-        .checked,
-    ).toBe(false);
-    const createBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Create Store"))!;
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("changed");
+    expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(
+      false,
+    );
+    const createBtn = wrapper.findAll("button").find((b) => b.text().includes("Create Store"))!;
     expect((createBtn.element as HTMLButtonElement).disabled).toBe(true);
     await submit(wrapper);
-    expect(invoke).not.toHaveBeenCalledWith(
-      "complete_setup_from_file",
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith("complete_setup_from_file", expect.anything());
   });
 
   it("ssh: shows no unrecoverable ack and Generate SSH key is not gated", async () => {
@@ -674,9 +595,7 @@ describe("CreateFlow", () => {
     await selectKind(wrapper, "ssh");
     // SSH key-gen uses SSH's own native passphrase protection → no ack.
     await wrapper.find('input[id="create-passphrase"]').setValue("ssh-pass");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("ssh-pass");
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("ssh-pass");
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain("cannot be recovered");
 
@@ -696,9 +615,7 @@ describe("CreateFlow", () => {
     const wrapper = mount(CreateFlow);
     await flushPromises();
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("secret");
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("secret");
     const ack = wrapper.find('input[type="checkbox"]');
     await ack.setValue(true);
     expect((ack.element as HTMLInputElement).checked).toBe(true);
@@ -707,13 +624,10 @@ describe("CreateFlow", () => {
     await selectKind(wrapper, "ssh");
     await selectKind(wrapper, "age");
     await wrapper.find('input[id="create-passphrase"]').setValue("secret");
-    await wrapper
-      .find('input[id="create-passphrase-confirm"]')
-      .setValue("secret");
-    expect(
-      (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
-        .checked,
-    ).toBe(false);
+    await wrapper.find('input[id="create-passphrase-confirm"]').setValue("secret");
+    expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(
+      false,
+    );
   });
 
   it("age: empty (plaintext) passphrase shows no ack and Create Store is enabled", async () => {
@@ -724,9 +638,7 @@ describe("CreateFlow", () => {
     // No passphrase typed → plaintext → no lockout risk → no ack.
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain("cannot be recovered");
-    const createBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Create Store"))!;
+    const createBtn = wrapper.findAll("button").find((b) => b.text().includes("Create Store"))!;
     expect((createBtn.element as HTMLButtonElement).disabled).toBe(false);
   });
 });

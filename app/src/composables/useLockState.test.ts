@@ -91,10 +91,7 @@ describe("useLockState", () => {
     await s.init();
 
     expect(listen).toHaveBeenCalledTimes(1);
-    expect(listen).toHaveBeenCalledWith(
-      "identity-lock-state",
-      expect.any(Function),
-    );
+    expect(listen).toHaveBeenCalledWith("identity-lock-state", expect.any(Function));
   });
 
   it("the identity-lock-state handler mirrors the backend payload", async () => {

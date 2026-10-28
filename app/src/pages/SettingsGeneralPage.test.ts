@@ -6,11 +6,7 @@ import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSelect from "@/components/base/BaseSelect.vue";
 import { setLocale } from "@/i18n";
 import { mountWithApp } from "@/test/appTestUtils";
-import {
-  baseDefaults,
-  resetOverrides,
-  type Overrides,
-} from "@/test/settingsTestUtils";
+import { baseDefaults, resetOverrides, type Overrides } from "@/test/settingsTestUtils";
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,9 +78,7 @@ describe("SettingsGeneralPage", () => {
 
   describe("reset", () => {
     async function openReset(wrapper: ReturnType<typeof mountPage>) {
-      const dangerBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Reset All Data"));
+      const dangerBtn = wrapper.findAll("button").find((b) => b.text().includes("Reset All Data"));
       await dangerBtn!.trigger("click");
       await flushPromises();
     }
@@ -128,14 +122,10 @@ describe("SettingsGeneralPage", () => {
       await openReset(wrapper);
 
       await wrapper.find('[role="alertdialog"] input').setValue("RESETT");
-      expect(
-        (modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled,
-      ).toBe(true);
+      expect((modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled).toBe(true);
 
       await wrapper.find('[role="alertdialog"] input').setValue("RESET");
-      expect(
-        (modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled,
-      ).toBe(false);
+      expect((modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled).toBe(false);
 
       const cancelBtn = wrapper
         .find('[role="alertdialog"]')
@@ -155,9 +145,7 @@ describe("SettingsGeneralPage", () => {
       await openReset(wrapper);
 
       await wrapper.find('[role="alertdialog"] input').setValue("  reset  ");
-      expect(
-        (modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled,
-      ).toBe(false);
+      expect((modalConfirmBtn(wrapper)!.element as HTMLButtonElement).disabled).toBe(false);
       await modalConfirmBtn(wrapper)!.trigger("click");
       await flushPromises();
 
@@ -181,9 +169,9 @@ describe("SettingsGeneralPage", () => {
 
   describe("display-language picker", () => {
     function findLanguagePicker(wrapper: ReturnType<typeof mountPage>) {
-      return (
-        wrapper.findAllComponents(BaseSelect) as unknown as VueWrapper<any>[]
-      ).find((c) => c.props("name") === "display-language");
+      return (wrapper.findAllComponents(BaseSelect) as unknown as VueWrapper<any>[]).find(
+        (c) => c.props("name") === "display-language",
+      );
     }
 
     it("applies a pinned locale in-memory first, then persists it", async () => {
@@ -199,9 +187,7 @@ describe("SettingsGeneralPage", () => {
       expect(invoke).toHaveBeenCalledWith("set_locale_pref", {
         locale: "zh-CN",
       });
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("Display language")),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("Display language"))).toBe(true);
     });
 
     it("rolls back to the prior selection when persisting fails", async () => {
@@ -216,9 +202,7 @@ describe("SettingsGeneralPage", () => {
 
       expect(picker?.props("modelValue")).toBe("en");
       expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("Couldn't save display language"),
-        ),
+        toast.toasts.value.some((t) => t.message.includes("Couldn't save display language")),
       ).toBe(true);
     });
 
@@ -233,10 +217,7 @@ describe("SettingsGeneralPage", () => {
         if (cmd === "resolved_locale") {
           return Promise.resolve(overrideCleared ? "en" : "zh-CN");
         }
-        if (
-          cmd === "set_locale_pref" &&
-          (args as { locale?: unknown })?.locale === null
-        ) {
+        if (cmd === "set_locale_pref" && (args as { locale?: unknown })?.locale === null) {
           overrideCleared = true;
           return Promise.resolve({});
         }
@@ -337,11 +318,9 @@ describe("SettingsGeneralPage", () => {
     });
 
     function findThemePicker(wrapper: ReturnType<typeof mountPage>) {
-      return (
-        wrapper.findAllComponents(
-          BaseSegmentedControl,
-        ) as unknown as VueWrapper<any>[]
-      ).find((c) => c.props("name") === "theme-mode");
+      return (wrapper.findAllComponents(BaseSegmentedControl) as unknown as VueWrapper<any>[]).find(
+        (c) => c.props("name") === "theme-mode",
+      );
     }
 
     it("reflects the persisted theme_mode on load", async () => {
@@ -363,9 +342,7 @@ describe("SettingsGeneralPage", () => {
 
       expect(document.documentElement.dataset.theme).toBe("dark");
       expect(invoke).toHaveBeenCalledWith("set_theme_mode", { mode: "dark" });
-      expect(toast.toasts.value.some((t) => t.message.includes("Theme"))).toBe(
-        true,
-      );
+      expect(toast.toasts.value.some((t) => t.message.includes("Theme"))).toBe(true);
     });
 
     it("rolls back the picker and the applied theme when persisting fails", async () => {
@@ -380,11 +357,7 @@ describe("SettingsGeneralPage", () => {
 
       expect(picker?.props("modelValue")).toBe("light");
       expect(document.documentElement.dataset.theme).toBe("light");
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("Couldn't save theme"),
-        ),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("Couldn't save theme"))).toBe(true);
     });
 
     it("'system' clears the override (persists null and removes the attribute)", async () => {
@@ -403,11 +376,9 @@ describe("SettingsGeneralPage", () => {
 
   describe("secure-screen picker", () => {
     function findSecurePicker(wrapper: ReturnType<typeof mountPage>) {
-      return (
-        wrapper.findAllComponents(
-          BaseSegmentedControl,
-        ) as unknown as VueWrapper<any>[]
-      ).find((c) => c.props("name") === "secure-screen");
+      return (wrapper.findAllComponents(BaseSegmentedControl) as unknown as VueWrapper<any>[]).find(
+        (c) => c.props("name") === "secure-screen",
+      );
     }
 
     it("renders the three-state picker defaulting to sensitive", async () => {
@@ -430,23 +401,18 @@ describe("SettingsGeneralPage", () => {
       expect(invoke).toHaveBeenCalledWith("set_secure_screen_mode", {
         mode: "always",
       });
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("every screen")),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("every screen"))).toBe(true);
     });
 
     it("selecting Off confirms before disabling capture protection", async () => {
-      const { wrapper, dialog, secureScreen } =
-        mountWithApp(SettingsGeneralPage);
+      const { wrapper, dialog, secureScreen } = mountWithApp(SettingsGeneralPage);
       await flushPromises();
 
       findSecurePicker(wrapper)!.vm.$emit("change", "off");
       await flushPromises();
 
       // Confirm fires (danger), and the weakening payload is persisted.
-      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ danger: true }),
-      );
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
       expect(invoke).toHaveBeenCalledWith("set_secure_screen_mode", {
         mode: "off",
       });
@@ -454,8 +420,7 @@ describe("SettingsGeneralPage", () => {
     });
 
     it("canceling the Off confirm keeps the prior mode", async () => {
-      const { wrapper, dialog, secureScreen } =
-        mountWithApp(SettingsGeneralPage);
+      const { wrapper, dialog, secureScreen } = mountWithApp(SettingsGeneralPage);
       // mountWithApp defaults confirm to "proceed"; flip it to cancel.
       vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
       await flushPromises();
@@ -464,10 +429,7 @@ describe("SettingsGeneralPage", () => {
       await flushPromises();
 
       expect(dialog.dialog.confirm).toHaveBeenCalled();
-      expect(invoke).not.toHaveBeenCalledWith(
-        "set_secure_screen_mode",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("set_secure_screen_mode", expect.anything());
       // Never mutated: the controlled pill stays on the seeded "sensitive".
       expect(secureScreen.secureScreenMode.value).toBe("sensitive");
     });
@@ -492,9 +454,9 @@ describe("SettingsGeneralPage", () => {
       Comp: typeof BaseSelect | typeof BaseSegmentedControl,
       name: string,
     ) {
-      return (
-        wrapper.findAllComponents(Comp) as unknown as VueWrapper<any>[]
-      ).find((c) => c.props("name") === name);
+      return (wrapper.findAllComponents(Comp) as unknown as VueWrapper<any>[]).find(
+        (c) => c.props("name") === name,
+      );
     }
 
     it("on desktop, hides the periodic background-sync block (Android-only)", async () => {
@@ -507,12 +469,8 @@ describe("SettingsGeneralPage", () => {
       });
       await flushPromises();
 
-      expect(
-        findControl(wrapper, BaseSegmentedControl, "background-sync-enabled"),
-      ).toBeUndefined();
-      expect(
-        findControl(wrapper, BaseSelect, "background-sync-cadence"),
-      ).toBeUndefined();
+      expect(findControl(wrapper, BaseSegmentedControl, "background-sync-enabled")).toBeUndefined();
+      expect(findControl(wrapper, BaseSelect, "background-sync-cadence")).toBeUndefined();
     });
 
     it("toggling on persists the default cadence and reveals the select", async () => {
@@ -521,15 +479,9 @@ describe("SettingsGeneralPage", () => {
       await flushPromises();
 
       // Default background_sync is "off" → toggle off, cadence select hidden.
-      const toggle = findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "background-sync-enabled",
-      )!;
+      const toggle = findControl(wrapper, BaseSegmentedControl, "background-sync-enabled")!;
       expect(toggle.props("modelValue")).toBe(false);
-      expect(
-        findControl(wrapper, BaseSelect, "background-sync-cadence"),
-      ).toBeUndefined();
+      expect(findControl(wrapper, BaseSelect, "background-sync-cadence")).toBeUndefined();
 
       await toggle.vm.$emit("change", true); // on → restore default 6h
       await flushPromises();
@@ -546,11 +498,7 @@ describe("SettingsGeneralPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const cadence = findControl(
-        wrapper,
-        BaseSelect,
-        "background-sync-cadence",
-      )!;
+      const cadence = findControl(wrapper, BaseSelect, "background-sync-cadence")!;
       expect(cadence).toBeTruthy(); // shown because cadence is "1h" (on)
       await cadence.vm.$emit("change", "12h");
       await flushPromises();
@@ -568,11 +516,7 @@ describe("SettingsGeneralPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const toggle = findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "background-sync-enabled",
-      )!;
+      const toggle = findControl(wrapper, BaseSegmentedControl, "background-sync-enabled")!;
       await toggle.vm.$emit("change", true);
       await flushPromises();
 
@@ -589,18 +533,16 @@ describe("SettingsGeneralPage", () => {
 
       // lastBackgroundSync is seeded to the loaded 12h by the watcher; toggle
       // off then on → must restore 12h, not the 6h default.
-      await findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "background-sync-enabled",
-      )!.vm.$emit("change", false);
+      await findControl(wrapper, BaseSegmentedControl, "background-sync-enabled")!.vm.$emit(
+        "change",
+        false,
+      );
       await flushPromises();
       vi.mocked(invoke).mockClear();
-      await findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "background-sync-enabled",
-      )!.vm.$emit("change", true);
+      await findControl(wrapper, BaseSegmentedControl, "background-sync-enabled")!.vm.$emit(
+        "change",
+        true,
+      );
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_background_sync", {

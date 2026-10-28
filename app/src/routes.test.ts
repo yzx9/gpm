@@ -20,10 +20,9 @@ describe("route i18n wiring", () => {
     for (const r of routes) {
       if (typeof r.name !== "string") continue; // redirect-only records
       const ns = (r.meta?.bundle as string | undefined) ?? r.name;
-      expect(
-        enBundles,
-        `route "${r.name}" would load non-existent bundle "${ns}"`,
-      ).toHaveProperty(`./locales/en/${ns}.json`);
+      expect(enBundles, `route "${r.name}" would load non-existent bundle "${ns}"`).toHaveProperty(
+        `./locales/en/${ns}.json`,
+      );
     }
   });
 });

@@ -45,9 +45,7 @@ const props = withDefaults(
 // (not via `withDefaults`) because `<script setup>` hoists `defineProps` out of
 // `setup()`, so the defaults cannot call `useI18n()`. Each falls back to the
 // `common.passphraseField.*` value when the caller leaves the prop unset.
-const labelText = computed(
-  () => props.label ?? t("common.passphraseField.label"),
-);
+const labelText = computed(() => props.label ?? t("common.passphraseField.label"));
 const placeholderText = computed(
   () => props.placeholder ?? t("common.passphraseField.placeholder"),
 );
@@ -55,8 +53,7 @@ const confirmLabelText = computed(
   () => props.confirmLabel ?? t("common.passphraseField.confirmLabel"),
 );
 const confirmPlaceholderText = computed(
-  () =>
-    props.confirmPlaceholder ?? t("common.passphraseField.confirmPlaceholder"),
+  () => props.confirmPlaceholder ?? t("common.passphraseField.confirmPlaceholder"),
 );
 
 const emit = defineEmits<{ "update:modelValue": [string] }>();
@@ -69,16 +66,12 @@ const show = ref(false);
 const generatedMainId = useId();
 const generatedConfirmId = useId();
 const mainId = computed(() => props.id ?? generatedMainId);
-const confirmId = computed(() =>
-  props.id ? `${props.id}-confirm` : generatedConfirmId,
-);
+const confirmId = computed(() => (props.id ? `${props.id}-confirm` : generatedConfirmId));
 
 // Show the confirm field for required passphrases, or — for optional ones —
 // only once the user has typed something (empty optional = plaintext; there is
 // nothing to confirm until they choose a passphrase).
-const showConfirmField = computed(
-  () => !props.optional || props.modelValue !== "",
-);
+const showConfirmField = computed(() => !props.optional || props.modelValue !== "");
 
 const mismatch = computed(() => props.modelValue !== confirm.value);
 const inlineError = computed(
@@ -140,11 +133,7 @@ defineExpose({
         variant="link"
         tone="muted"
         class="absolute inset-y-0 right-0"
-        :aria-label="
-          show
-            ? t('common.passphraseField.hide')
-            : t('common.passphraseField.show')
-        "
+        :aria-label="show ? t('common.passphraseField.hide') : t('common.passphraseField.show')"
         @click="show = !show"
       >
         <BaseIcon :icon="show ? EyeOff : Eye" :size="18" />
@@ -152,9 +141,7 @@ defineExpose({
     </div>
 
     <template v-if="showConfirmField">
-      <label :for="confirmId" class="text-sm font-medium mt-1">{{
-        confirmLabelText
-      }}</label>
+      <label :for="confirmId" class="text-sm font-medium mt-1">{{ confirmLabelText }}</label>
       <div class="relative">
         <BaseInput
           :id="confirmId"
@@ -165,9 +152,7 @@ defineExpose({
           :disabled="disabled"
           class="w-full"
           :style="{ paddingRight: '2.5rem' }"
-          @update:model-value="
-            (v) => (confirm = v === undefined ? '' : String(v))
-          "
+          @update:model-value="(v) => (confirm = v === undefined ? '' : String(v))"
         />
       </div>
       <small v-if="inlineError" class="text-xs text-danger">{{

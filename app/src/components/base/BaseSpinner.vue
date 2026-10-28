@@ -13,11 +13,7 @@ withDefaults(
 </script>
 
 <template>
-  <span
-    class="spinner"
-    :class="{ 'spinner-white': variant === 'white' }"
-    aria-hidden="true"
-  ></span>
+  <span class="spinner" :class="{ 'spinner-white': variant === 'white' }" aria-hidden="true"></span>
 </template>
 
 <style scoped>

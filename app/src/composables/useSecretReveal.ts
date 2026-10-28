@@ -91,10 +91,7 @@ export function useSecretReveal() {
       // Clamped at 1 so the label never flashes "0s" — the wipe hides the whole
       // block the moment it fires (even if the wipe itself is throttled late).
       countdownTimer = setInterval(() => {
-        clearsInSecs.value = Math.max(
-          1,
-          Math.ceil((wipeDeadline - Date.now()) / 1000),
-        );
+        clearsInSecs.value = Math.max(1, Math.ceil((wipeDeadline - Date.now()) / 1000));
       }, 1000);
     } else {
       clearsInSecs.value = 0;
@@ -105,11 +102,7 @@ export function useSecretReveal() {
    *  replacing any prior reveal and (re)starting the auto-clear timer. The
    *  `Claimed` type is the compile-time guarantee the caller acquired
    *  FLAG_SECURE first. */
-  function reveal(
-    content: Claimed<
-      Pick<SensitiveContent, "attributes" | "notes" | "password">
-    >,
-  ) {
+  function reveal(content: Claimed<Pick<SensitiveContent, "attributes" | "notes" | "password">>) {
     password.value = content.password;
     notes.value = content.notes;
     attributes.value = content.attributes;

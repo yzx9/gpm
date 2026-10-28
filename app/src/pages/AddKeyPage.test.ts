@@ -34,9 +34,7 @@ describe("AddKeyPage", () => {
   it("Save is disabled until a key is pasted", async () => {
     const w = mountWithApp(AddKeyPage).wrapper;
     await flushPromises();
-    const save = w
-      .findAll("button")
-      .find((b) => b.text().includes("Save key"))!;
+    const save = w.findAll("button").find((b) => b.text().includes("Save key"))!;
     expect((save.element as HTMLButtonElement).disabled).toBe(true);
     await w.find("textarea").setValue("ssh-ed25519 AAAA key");
     expect((save.element as HTMLButtonElement).disabled).toBe(false);

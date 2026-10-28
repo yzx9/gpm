@@ -92,9 +92,7 @@ async function tryUnlock() {
 // focus — so the watch's loading→false is what actually lands focus there.
 function focusUnlock() {
   void nextTick().then(() => {
-    (
-      unlockButton.value?.$el as HTMLButtonElement | null | undefined
-    )?.focus?.();
+    (unlockButton.value?.$el as HTMLButtonElement | null | undefined)?.focus?.();
   });
 }
 
@@ -133,17 +131,10 @@ onUnmounted(() => {
          group is vertically centered while `.lock-foot` pins to the bottom
          safe-area. -->
     <div class="lock-body">
-      <h1 class="lock-title">
-        <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
-      </h1>
+      <h1 class="lock-title"><BaseIcon :icon="LockKeyhole" :size="28" /> gpm</h1>
       <p class="lock-subtitle">{{ t("common.appLock.locked") }}</p>
 
-      <BaseAlert
-        v-if="notice"
-        variant="danger"
-        role="status"
-        class="lock-notice"
-      >
+      <BaseAlert v-if="notice" variant="danger" role="status" class="lock-notice">
         {{ notice }}
       </BaseAlert>
 
@@ -162,9 +153,7 @@ onUnmounted(() => {
       >
         <BaseIcon v-if="!loading" :icon="ScanFace" />
         <span>{{
-          loading
-            ? t("common.appLock.unlocking")
-            : t("common.appLock.unlockWithBiometric")
+          loading ? t("common.appLock.unlocking") : t("common.appLock.unlockWithBiometric")
         }}</span>
       </BaseButton>
     </div>

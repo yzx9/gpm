@@ -2,11 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import {
-  filterPackages,
-  groupLicenses,
-  type LicensePackage,
-} from "@/components/about/data";
+import { filterPackages, groupLicenses, type LicensePackage } from "@/components/about/data";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const pkg = (over: Partial<LicensePackage> = {}): LicensePackage => ({
@@ -72,9 +68,7 @@ describe("groupLicenses", () => {
         license: "MIT",
       }),
     ]);
-    expect(
-      groups[0].packages.map((p) => `${p.ecosystem}:${p.name}@${p.version}`),
-    ).toEqual([
+    expect(groups[0].packages.map((p) => `${p.ecosystem}:${p.name}@${p.version}`)).toEqual([
       "npm:zeta@1.0.0",
       "rust:alpha@1.0.0",
       "rust:beta@1.0.0",

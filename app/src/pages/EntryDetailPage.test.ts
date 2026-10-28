@@ -175,17 +175,15 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("s3cret");
 
       // Second click toggles off — the aria-label flips to "Password is showing".
-      await wrapper
-        .find('button[aria-label="Password is showing"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Password is showing"]').trigger("click");
       await flushPromises();
 
       // Password is hidden again...
       expect(wrapper.text()).not.toContain("s3cret");
       // ...and show_password was NOT invoked a second time.
-      expect(
-        vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "show_password"),
-      ).toHaveLength(1);
+      expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "show_password")).toHaveLength(
+        1,
+      );
     });
 
     it("auto-clears sensitive data after the default view-clear window", async () => {
@@ -221,9 +219,7 @@ describe("EntryDetailPage", () => {
       await wrapper.find('button[aria-label="Show password"]').trigger("click");
       await flushPromises();
 
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "Decryption failed",
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("Decryption failed");
     });
 
     it("shows hint for errors containing 'ecrypt'", async () => {
@@ -250,9 +246,7 @@ describe("EntryDetailPage", () => {
       const { wrapper, lock } = mountWithApp(EntryDetailPage, {
         unlocked: false,
       });
-      await wrapper
-        .find('button[aria-label="Unlock servers/prod"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Unlock servers/prod"]').trigger("click");
       await flushPromises(); // parked awaiting auth
 
       lock.cancelAuth(); // user dismissed the overlay (back)
@@ -310,9 +304,7 @@ describe("EntryDetailPage", () => {
         has_attachment: false,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
-      await wrapper
-        .find('button[aria-label="Copy password to clipboard"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Copy password to clipboard"]').trigger("click");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith(
@@ -323,9 +315,7 @@ describe("EntryDetailPage", () => {
         }),
       );
       expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("✓ Copied prod (45s auto-clear)"),
-        ),
+        toast.toasts.value.some((t) => t.message.includes("✓ Copied prod (45s auto-clear)")),
       ).toBe(true);
     });
 
@@ -340,17 +330,11 @@ describe("EntryDetailPage", () => {
         password_non_utf8: true,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
-      await wrapper
-        .find('button[aria-label="Copy password to clipboard"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Copy password to clipboard"]').trigger("click");
       await flushPromises();
 
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("can't be copied")),
-      ).toBe(true);
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("✓ Copied")),
-      ).toBe(false);
+      expect(toast.toasts.value.some((t) => t.message.includes("can't be copied"))).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("✓ Copied"))).toBe(false);
     });
 
     it("hides the whole action pile behind the Unlock gate when cold (R086)", async () => {
@@ -359,26 +343,14 @@ describe("EntryDetailPage", () => {
       // button pile that dead-ends into unlock prompts.
       const { wrapper } = mountWithApp(EntryDetailPage, { unlocked: false });
       await flushPromises();
-      expect(
-        wrapper
-          .find('button[aria-label="Copy password to clipboard"]')
-          .exists(),
-      ).toBe(false);
-      expect(wrapper.find('button[aria-label="Show password"]').exists()).toBe(
+      expect(wrapper.find('button[aria-label="Copy password to clipboard"]').exists()).toBe(false);
+      expect(wrapper.find('button[aria-label="Show password"]').exists()).toBe(false);
+      expect(wrapper.find('button[aria-label="Edit servers/prod"]').exists()).toBe(false);
+      expect(wrapper.find('button[aria-label="Revision history for servers/prod"]').exists()).toBe(
         false,
       );
-      expect(
-        wrapper.find('button[aria-label="Edit servers/prod"]').exists(),
-      ).toBe(false);
-      expect(
-        wrapper
-          .find('button[aria-label="Revision history for servers/prod"]')
-          .exists(),
-      ).toBe(false);
       // The gate's Unlock button is the single primary action.
-      expect(
-        wrapper.find('button[aria-label="Unlock servers/prod"]').exists(),
-      ).toBe(true);
+      expect(wrapper.find('button[aria-label="Unlock servers/prod"]').exists()).toBe(true);
     });
 
     it("clears sensitive data immediately after copy", async () => {
@@ -418,9 +390,7 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("s3cret");
 
       // Now copy — this should clear sensitive data
-      await wrapper
-        .find('button[aria-label="Copy password to clipboard"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Copy password to clipboard"]').trigger("click");
       await flushPromises();
 
       expect(wrapper.text()).not.toContain("s3cret");
@@ -434,14 +404,10 @@ describe("EntryDetailPage", () => {
         has_attachment: false,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
-      await wrapper
-        .find('button[aria-label="Copy password to clipboard"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Copy password to clipboard"]').trigger("click");
       await flushPromises();
 
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("✓ Copied prod")),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("✓ Copied prod"))).toBe(true);
 
       vi.advanceTimersByTime(3000);
       await flushPromises();
@@ -458,9 +424,7 @@ describe("EntryDetailPage", () => {
         cleared_after_secs: 45,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
-      await wrapper
-        .find('button[aria-label="Copy 2FA code to clipboard"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Copy 2FA code to clipboard"]').trigger("click");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith(
@@ -470,11 +434,9 @@ describe("EntryDetailPage", () => {
           entryPath: "servers/prod.age",
         }),
       );
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("✓ 2FA code copied for prod"),
-        ),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("✓ 2FA code copied for prod"))).toBe(
+        true,
+      );
     });
 
     it("shows the no-2FA info toast when the entry has no seed", async () => {
@@ -484,9 +446,7 @@ describe("EntryDetailPage", () => {
         cleared_after_secs: 0,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
-      await wrapper
-        .find('button[aria-label="Copy 2FA code to clipboard"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Copy 2FA code to clipboard"]').trigger("click");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith(
@@ -496,11 +456,9 @@ describe("EntryDetailPage", () => {
           entryPath: "servers/prod.age",
         }),
       );
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("This entry has no 2FA code"),
-        ),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("This entry has no 2FA code"))).toBe(
+        true,
+      );
     });
 
     it("keeps Delete on the cold gate (de-emphasized) so delete-without-decrypt still works (R086)", async () => {
@@ -510,15 +468,9 @@ describe("EntryDetailPage", () => {
       const { wrapper } = mountWithApp(EntryDetailPage, { unlocked: false });
       await flushPromises();
       // Delete is present on the gate...
-      expect(
-        wrapper.find('button[aria-label="Delete servers/prod"]').exists(),
-      ).toBe(true);
+      expect(wrapper.find('button[aria-label="Delete servers/prod"]').exists()).toBe(true);
       // ...while the TOTP action (the copyTotp entry point) is hidden.
-      expect(
-        wrapper
-          .find('button[aria-label="Copy 2FA code to clipboard"]')
-          .exists(),
-      ).toBe(false);
+      expect(wrapper.find('button[aria-label="Copy 2FA code to clipboard"]').exists()).toBe(false);
     });
   });
 
@@ -575,9 +527,7 @@ describe("EntryDetailPage", () => {
         attachment: null,
       });
       const m = mountWithApp(EntryDetailPage);
-      await m.wrapper
-        .find('button[aria-label="Show password"]')
-        .trigger("click");
+      await m.wrapper.find('button[aria-label="Show password"]').trigger("click");
       await flushPromises();
 
       // Password is in the DOM
@@ -640,10 +590,7 @@ describe("EntryDetailPage", () => {
     // reveal is still base-version-guarded. The dispatch-by-command mock mirrors
     // the copyPassword test's caution: an ordered Once queue drifts once any
     // sibling probe (here the mount-time `has_totp` + `entry_oid`) sneaks in.
-    function mockDelete(opts: {
-      entryOid: string | null;
-      deleteOutcome?: unknown;
-    }) {
+    function mockDelete(opts: { entryOid: string | null; deleteOutcome?: unknown }) {
       vi.mocked(invoke).mockImplementation((cmd: string) => {
         switch (cmd) {
           case "has_totp":
@@ -651,9 +598,7 @@ describe("EntryDetailPage", () => {
           case "entry_oid":
             return Promise.resolve(opts.entryOid);
           case "delete_secret":
-            return Promise.resolve(
-              opts.deleteOutcome ?? { kind: "written", commit: "abc1234" },
-            );
+            return Promise.resolve(opts.deleteOutcome ?? { kind: "written", commit: "abc1234" });
           default:
             return Promise.resolve(undefined);
         }
@@ -692,9 +637,7 @@ describe("EntryDetailPage", () => {
         name: "servers/prod",
       });
       // Belt-and-suspendences: no baseOid key at all on the arg object.
-      const call = vi
-        .mocked(invoke)
-        .mock.calls.find(([cmd]) => cmd === "delete_secret");
+      const call = vi.mocked(invoke).mock.calls.find(([cmd]) => cmd === "delete_secret");
       expect(call?.[1]).not.toHaveProperty("baseOid");
     });
 
@@ -707,11 +650,9 @@ describe("EntryDetailPage", () => {
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
 
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("✓ Deleted (commit abc1234)"),
-        ),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("✓ Deleted (commit abc1234)"))).toBe(
+        true,
+      );
       expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
 
@@ -727,11 +668,9 @@ describe("EntryDetailPage", () => {
       await wrapper.find(deleteBtn()).trigger("click");
       await flushPromises();
 
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("Already removed elsewhere"),
-        ),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("Already removed elsewhere"))).toBe(
+        true,
+      );
       expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
     });
 
@@ -797,9 +736,7 @@ describe("EntryDetailPage", () => {
       expect(wrapper.text()).toContain("conflicts with a newer remote");
       expect(wrapper.text()).toContain("servers/prod");
 
-      const adopt = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Adopt remote"))!;
+      const adopt = wrapper.findAll("button").find((b) => b.text().includes("Adopt remote"))!;
       await adopt.trigger("click");
       await flushPromises();
 
@@ -858,10 +795,7 @@ describe("EntryDetailPage", () => {
 
       // The mount-time `has_totp` probe still runs; assert the delete itself
       // never happened rather than total invoke silence.
-      expect(invoke).not.toHaveBeenCalledWith(
-        "delete_secret",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("delete_secret", expect.anything());
       expect(mockPush).not.toHaveBeenCalled();
     });
   });
@@ -896,9 +830,7 @@ describe("EntryDetailPage", () => {
       await flushPromises();
       expect(wrapper.find(totpBtn()).exists()).toBe(false);
       // The gate's Unlock button shows instead.
-      expect(
-        wrapper.find('button[aria-label="Unlock servers/prod"]').exists(),
-      ).toBe(true);
+      expect(wrapper.find('button[aria-label="Unlock servers/prod"]').exists()).toBe(true);
       // has_totp is identity-gated, so it is NOT probed when uncached; entry_oid
       // (R026, non-secret) does run on mount — assert the identity probe specifically.
       expect(invoke).not.toHaveBeenCalledWith("has_totp", expect.anything());
@@ -915,26 +847,14 @@ describe("EntryDetailPage", () => {
       await flushPromises();
 
       // Copy/Show are dead for an attachment (empty password, base64 body).
-      expect(
-        wrapper
-          .find('button[aria-label="Copy password to clipboard"]')
-          .exists(),
-      ).toBe(false);
-      expect(wrapper.find('button[aria-label="Show password"]').exists()).toBe(
-        false,
-      );
+      expect(wrapper.find('button[aria-label="Copy password to clipboard"]').exists()).toBe(false);
+      expect(wrapper.find('button[aria-label="Show password"]').exists()).toBe(false);
       // Export is the primary action; the metadata caption shows the filename.
-      expect(
-        wrapper
-          .find('button[aria-label="Export attachment to a file"]')
-          .exists(),
-      ).toBe(true);
+      expect(wrapper.find('button[aria-label="Export attachment to a file"]').exists()).toBe(true);
       expect(wrapper.text()).toContain("photo.png");
       // Edit is locked with the attachment hint.
       expect(
-        wrapper
-          .find('button[aria-label="Edit servers/prod"]')
-          .attributes("disabled"),
+        wrapper.find('button[aria-label="Edit servers/prod"]').attributes("disabled"),
       ).toBeDefined();
       expect(wrapper.text()).toContain("Attachments can't be edited yet");
     });
@@ -955,9 +875,7 @@ describe("EntryDetailPage", () => {
       });
       const wrapper = mountPage();
       await flushPromises();
-      await wrapper
-        .find('button[aria-label="Export attachment to a file"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Export attachment to a file"]').trigger("click");
       await flushPromises();
       // A dismissed picker is a silent cancel, not an error.
       expect(wrapper.find("[role='alert']").exists()).toBe(false);
@@ -977,17 +895,11 @@ describe("EntryDetailPage", () => {
         password_empty: true,
       });
       const { wrapper, toast } = mountWithApp(EntryDetailPage);
-      await wrapper
-        .find('button[aria-label="Copy password to clipboard"]')
-        .trigger("click");
+      await wrapper.find('button[aria-label="Copy password to clipboard"]').trigger("click");
       await flushPromises();
 
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("no password")),
-      ).toBe(true);
-      expect(
-        toast.toasts.value.some((t) => t.message.includes("✓ Copied")),
-      ).toBe(false);
+      expect(toast.toasts.value.some((t) => t.message.includes("no password"))).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("✓ Copied"))).toBe(false);
     });
 
     it("shows the legacy-YAML edit hint and disables Edit", async () => {

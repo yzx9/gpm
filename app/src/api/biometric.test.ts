@@ -21,12 +21,7 @@ describe("biometric wrappers", () => {
   });
 
   it("isBiometricAvailable returns the quad-state from is_biometric_available", async () => {
-    for (const state of [
-      "available",
-      "no_enrollment",
-      "weak_enrolled",
-      "unavailable",
-    ] as const) {
+    for (const state of ["available", "no_enrollment", "weak_enrolled", "unavailable"] as const) {
       (invoke as ReturnType<typeof vi.fn>).mockResolvedValue(state);
       expect(await isBiometricAvailable()).toBe(state);
     }
@@ -34,9 +29,7 @@ describe("biometric wrappers", () => {
   });
 
   it("isBiometricAvailable swallows errors and returns 'unavailable' (desktop / <API30)", async () => {
-    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("plugin not found"),
-    );
+    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("plugin not found"));
     expect(await isBiometricAvailable()).toBe("unavailable");
   });
 
@@ -53,9 +46,7 @@ describe("biometric wrappers", () => {
   });
 
   it("isBiometricUnlockEnabled swallows errors and returns false", async () => {
-    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("plugin not found"),
-    );
+    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("plugin not found"));
     expect(await isBiometricUnlockEnabled()).toBe(false);
   });
 

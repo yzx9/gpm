@@ -22,10 +22,7 @@ function relativeFormatter(locale: string): Intl.RelativeTimeFormat {
   return f;
 }
 
-function absoluteFormatter(
-  locale: string,
-  withYear: boolean,
-): Intl.DateTimeFormat {
+function absoluteFormatter(locale: string, withYear: boolean): Intl.DateTimeFormat {
   const key = `${locale}|${withYear}`;
   let f = dtfCache.get(key);
   if (!f) {
@@ -100,11 +97,6 @@ export function useRelativeTime(): {
   const { locale, t } = useI18n();
   return {
     formatRelativeTime: (now, timestamp) =>
-      formatRelativeTime(
-        now,
-        timestamp,
-        locale.value,
-        t("common.relativeTime.justNow"),
-      ),
+      formatRelativeTime(now, timestamp, locale.value, t("common.relativeTime.justNow")),
   };
 }

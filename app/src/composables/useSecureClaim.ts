@@ -85,9 +85,7 @@ export function useSecureClaim(): SecureClaim {
     while (held > 0) release();
   });
 
-  async function withClaim<T>(
-    op: () => Promise<T>,
-  ): Promise<Claimed<T> | null> {
+  async function withClaim<T>(op: () => Promise<T>): Promise<Claimed<T> | null> {
     const ok = await acquire();
     if (!ok) return null;
     try {

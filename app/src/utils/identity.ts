@@ -20,12 +20,9 @@ export function classifyIdentity(text: string): IdentityType {
   if (trimmed.startsWith("AGE-SECRET-KEY-PQ-1")) return "post_quantum";
   if (trimmed.startsWith("AGE-PLUGIN-")) return "plugin";
   if (trimmed.startsWith("AGE-SECRET-KEY-")) return "x25519";
-  if (trimmed.startsWith("-----BEGIN AGE ENCRYPTED FILE-----"))
-    return "age_encrypted";
-  if (trimmed.startsWith("-----BEGIN PGP PRIVATE KEY BLOCK-----"))
-    return "pgp_secret_key";
-  if (trimmed.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----"))
-    return "ssh_ed25519";
+  if (trimmed.startsWith("-----BEGIN AGE ENCRYPTED FILE-----")) return "age_encrypted";
+  if (trimmed.startsWith("-----BEGIN PGP PRIVATE KEY BLOCK-----")) return "pgp_secret_key";
+  if (trimmed.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----")) return "ssh_ed25519";
   if (trimmed.startsWith("-----BEGIN RSA PRIVATE KEY-----")) return "ssh_rsa";
   if (trimmed.startsWith("-----BEGIN PRIVATE KEY-----")) return "ssh_ed25519";
   return "unknown";
@@ -40,9 +37,6 @@ export function isValidIdentity(text: string): boolean {
   // (ed25519/RSA, incl. PKCS#8 which classifies as ssh_ed25519), and armored
   // PGP secret keys. Rejects age-encrypted, plugin, post-quantum, unknown.
   return (
-    type === "x25519" ||
-    type === "ssh_ed25519" ||
-    type === "ssh_rsa" ||
-    type === "pgp_secret_key"
+    type === "x25519" || type === "ssh_ed25519" || type === "ssh_rsa" || type === "pgp_secret_key"
   );
 }

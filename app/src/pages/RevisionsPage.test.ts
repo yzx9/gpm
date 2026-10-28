@@ -35,10 +35,7 @@ const commit = (over: Partial<CommitSigInfo> = {}): CommitSigInfo => ({
 });
 
 /** Build a `list_revisions` page envelope (snake_case fields, with base_oid). */
-const page = (
-  commits: CommitSigInfo[],
-  opts: { hasMore?: boolean; baseOid?: string } = {},
-) => ({
+const page = (commits: CommitSigInfo[], opts: { hasMore?: boolean; baseOid?: string } = {}) => ({
   commits,
   has_more: opts.hasMore ?? false,
   base_oid: opts.baseOid ?? "deadbeef",
@@ -74,10 +71,7 @@ describe("RevisionsPage", () => {
     vi.mocked(invoke).mockImplementation((cmd: string) =>
       cmd === "list_revisions"
         ? Promise.resolve(
-            page([
-              commit({ subject: "newest" }),
-              commit({ hash: "h2", subject: "older" }),
-            ]),
+            page([commit({ subject: "newest" }), commit({ hash: "h2", subject: "older" })]),
           )
         : Promise.resolve(undefined),
     );
@@ -91,9 +85,7 @@ describe("RevisionsPage", () => {
 
   it("clicking a row opens the revision detail sheet", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) =>
-      cmd === "list_revisions"
-        ? Promise.resolve(page([commit()]))
-        : Promise.resolve(undefined),
+      cmd === "list_revisions" ? Promise.resolve(page([commit()])) : Promise.resolve(undefined),
     );
     const wrapper = mountWithApp(RevisionsPage).wrapper;
     await flushPromises();
@@ -150,10 +142,8 @@ describe("RevisionsPage", () => {
   });
 
   describe("view states", () => {
-    const findButton = (
-      w: { findAll: (s: string) => DOMWrapper<Element>[] },
-      text: string,
-    ) => w.findAll("button").find((b) => b.text().includes(text));
+    const findButton = (w: { findAll: (s: string) => DOMWrapper<Element>[] }, text: string) =>
+      w.findAll("button").find((b) => b.text().includes(text));
 
     // Load one revision, open its detail sheet, and click "Show this version"
     // with `view` as the show_revision result.

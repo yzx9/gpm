@@ -2,11 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import {
-  subscribeEntryCacheWarmed,
-  subscribeEntryCacheWiped,
-  type UnlistenFn,
-} from "@/api";
+import { subscribeEntryCacheWarmed, subscribeEntryCacheWiped, type UnlistenFn } from "@/api";
 import { onScopeDispose, ref, type Ref } from "vue";
 
 /**

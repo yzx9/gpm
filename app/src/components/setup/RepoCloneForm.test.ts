@@ -12,9 +12,7 @@ vi.mock("@tauri-apps/api/core");
 
 /// Branch `invoke` by command name. The clone must stay in flight for the whole
 /// test so the Cancel button stays mounted, while `cancel_git` is wired per-test.
-function mockInvoke(
-  handlers: Record<string, (args?: Record<string, unknown>) => unknown>,
-) {
+function mockInvoke(handlers: Record<string, (args?: Record<string, unknown>) => unknown>) {
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
     const h = handlers[cmd];
     if (h) return h(args as Record<string, unknown> | undefined);
@@ -60,16 +58,12 @@ describe("RepoCloneForm — cancel", () => {
     await flushPromises();
 
     // Before submit there is no progress block / cancel button.
-    expect(
-      wrapper.findAll("button").some((b) => b.text().includes("Cancel")),
-    ).toBe(false);
+    expect(wrapper.findAll("button").some((b) => b.text().includes("Cancel"))).toBe(false);
 
     await startClone(wrapper);
 
     // The clone is in flight → the cancel button is present and enabled.
-    const cancelBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Cancel"));
+    const cancelBtn = wrapper.findAll("button").find((b) => b.text().includes("Cancel"));
     expect(cancelBtn).toBeDefined();
     expect(cancelBtn!.attributes("disabled")).toBeUndefined();
     expect(cancelBtn!.text()).toContain("Cancel");
@@ -79,9 +73,7 @@ describe("RepoCloneForm — cancel", () => {
 
     // The cancel request was sent and the button immediately reflects it.
     expect(invoke).toHaveBeenCalledWith("cancel_git");
-    const after = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Cancel"))!;
+    const after = wrapper.findAll("button").find((b) => b.text().includes("Cancel"))!;
     expect(after.text()).toContain("Cancelling");
     expect(after.attributes("disabled")).toBeDefined();
   });

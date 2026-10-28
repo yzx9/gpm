@@ -158,9 +158,7 @@ describe("AboutPage (RFC R090 update check)", () => {
 
     const calls = vi
       .mocked(invoke)
-      .mock.calls.filter(
-        (call: [string, ...unknown[]]) => call[0] === "get_update_status",
-      );
+      .mock.calls.filter((call: [string, ...unknown[]]) => call[0] === "get_update_status");
     expect(calls.length).toBeGreaterThanOrEqual(2);
   });
 });

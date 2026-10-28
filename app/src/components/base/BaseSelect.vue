@@ -53,9 +53,7 @@ function isActive(v: T): boolean {
   return props.by ? props.by(props.modelValue, v) : props.modelValue === v;
 }
 
-const selectedLabel = computed(
-  () => props.options.find((o) => isActive(o.value))?.label ?? "",
-);
+const selectedLabel = computed(() => props.options.find((o) => isActive(o.value))?.label ?? "");
 
 // Accessible name for the trigger (when there's no legend to label it) and the
 // dialog. One of `legend` / `ariaLabel` should be provided.
@@ -73,9 +71,7 @@ watch(open, (v, prev) => {
     void nextTick(() => {
       const root = sheet.value;
       if (!root) return;
-      const radios = root.querySelectorAll<HTMLInputElement>(
-        'input[type="radio"]',
-      );
+      const radios = root.querySelectorAll<HTMLInputElement>('input[type="radio"]');
       const target = Array.from(radios).find((r) => r.checked) ?? radios[0];
       // Fall back to the fieldset itself when there are no options, so ESC and
       // the Tab wrap still have a focused target inside the sheet.
@@ -100,9 +96,7 @@ function onSheetKeydown(e: KeyboardEvent) {
   // the fieldset when there are none).
   e.preventDefault();
   const radios = sheet.value
-    ? Array.from(
-        sheet.value.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
-      )
+    ? Array.from(sheet.value.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
     : [];
   if (radios.length === 0) {
     sheet.value?.focus();
@@ -116,9 +110,7 @@ function onSheetKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="base-select">
-    <span v-if="legend" :id="`${name}-legend`" class="legend">{{
-      legend
-    }}</span>
+    <span v-if="legend" :id="`${name}-legend`" class="legend">{{ legend }}</span>
     <!-- Raw <button> (not BaseButton): the trigger needs a template ref,
          :inert toggling, and the full aria-expanded/controls/labelledby wiring
          BaseButton doesn't expose — BaseButton is the wrong layer for a select
@@ -142,12 +134,7 @@ function onSheetKeydown(e: KeyboardEvent) {
     </button>
     <slot name="hint" />
 
-    <BaseModalShell
-      v-if="open"
-      variant="sheet"
-      :aria-label="accessibleName"
-      @close="open = false"
-    >
+    <BaseModalShell v-if="open" variant="sheet" :aria-label="accessibleName" @close="open = false">
       <fieldset
         :id="`${name}-sheet`"
         ref="sheet"
@@ -170,12 +157,7 @@ function onSheetKeydown(e: KeyboardEvent) {
             @change="pick(opt.value)"
           />
           <span class="option-label">{{ opt.label }}</span>
-          <BaseIcon
-            v-if="isActive(opt.value)"
-            :icon="Check"
-            :size="18"
-            class="check"
-          />
+          <BaseIcon v-if="isActive(opt.value)" :icon="Check" :size="18" class="check" />
         </label>
         <p v-if="options.length === 0 && emptyLabel" class="no-options">
           {{ emptyLabel }}

@@ -109,8 +109,7 @@ describe("useAppLockState", () => {
 
   it("resume (app-resumed) re-locks when enabled+unlocked", async () => {
     vi.mocked(invoke).mockImplementation((cmd) => {
-      if (cmd === "get_app_lock_state")
-        return Promise.resolve({ enabled: true, locked: false });
+      if (cmd === "get_app_lock_state") return Promise.resolve({ enabled: true, locked: false });
       return Promise.resolve();
     });
     await s.init();
@@ -149,8 +148,7 @@ describe("useAppLockState", () => {
 
   it("resume does NOT re-lock while a biometric unlock is in flight (loop guard)", async () => {
     vi.mocked(invoke).mockImplementation((cmd) => {
-      if (cmd === "get_app_lock_state")
-        return Promise.resolve({ enabled: true, locked: false });
+      if (cmd === "get_app_lock_state") return Promise.resolve({ enabled: true, locked: false });
       return Promise.resolve();
     });
     await s.init();
@@ -185,9 +183,7 @@ describe("useAppLockState", () => {
 
   /** Resolve the `app-lock-state` handler captured on the mocked `listen`. */
   function gateHandler() {
-    const call = vi
-      .mocked(listen)
-      .mock.calls.find((c) => c[0] === "app-lock-state");
+    const call = vi.mocked(listen).mock.calls.find((c) => c[0] === "app-lock-state");
     expect(call).toBeDefined();
     return call?.[1] as (e: {
       payload: { enabled: boolean; locked: boolean; reason?: string | null };

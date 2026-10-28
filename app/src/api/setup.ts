@@ -20,13 +20,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type CreateIdentityKind = "age" | "ssh";
 
 /** A crypto/identity key type (mirrors Rust `KeyType`, including `"gpg"`). */
-export type KeyType =
-  | "x25519"
-  | "ssh_ed25519"
-  | "ssh_rsa"
-  | "plugin"
-  | "post_quantum"
-  | "gpg";
+export type KeyType = "x25519" | "ssh_ed25519" | "ssh_rsa" | "plugin" | "post_quantum" | "gpg";
 
 /** A public recipient the store encrypts to (from `list_recipients`). */
 export interface RecipientInfo {
@@ -147,24 +141,17 @@ export async function listRecipients(): Promise<RecipientInfo[]> {
 }
 
 /** Classify a pasted identity (key type + whether it is passphrase-encrypted). */
-export async function validateIdentity(
-  identity: string,
-): Promise<IdentityInfoResult> {
+export async function validateIdentity(identity: string): Promise<IdentityInfoResult> {
   return invoke<IdentityInfoResult>("validate_identity", { identity });
 }
 
 /** Complete setup from a pasted identity (encrypted at rest with `passphrase`). */
-export async function completeSetup(
-  identity: string,
-  passphrase: string | null,
-): Promise<void> {
+export async function completeSetup(identity: string, passphrase: string | null): Promise<void> {
   await invoke("complete_setup", { identity, passphrase });
 }
 
 /** Complete setup from the staged (picked/generated) identity file. */
-export async function completeSetupFromFile(
-  passphrase: string | null,
-): Promise<void> {
+export async function completeSetupFromFile(passphrase: string | null): Promise<void> {
   await invoke("complete_setup_from_file", { passphrase });
 }
 
@@ -174,9 +161,7 @@ export async function pickIdentityFile(): Promise<PickedIdentityResult> {
 }
 
 /** Verify the staged file's passphrase; on success reveals its public recipient. */
-export async function verifyPickedIdentity(
-  passphrase: string,
-): Promise<VerifiedIdentityResult> {
+export async function verifyPickedIdentity(passphrase: string): Promise<VerifiedIdentityResult> {
   return invoke<VerifiedIdentityResult>("verify_picked_identity", {
     passphrase,
   });

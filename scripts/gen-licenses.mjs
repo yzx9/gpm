@@ -35,14 +35,7 @@
 // "regenerate with the full toolchain" notice instead of failing.
 
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,9 +84,7 @@ function readLicenseText(dir) {
   } catch {
     return "";
   }
-  const matches = entries
-    .filter((n) => LICENSE_FILE_RE.test(n) && !isBackupFile(n))
-    .sort();
+  const matches = entries.filter((n) => LICENSE_FILE_RE.test(n) && !isBackupFile(n)).sort();
   if (matches.length === 0) return "";
   return matches
     .map((n) => {
@@ -239,10 +230,7 @@ function npmEntry(pj, dir) {
     name: pj.name,
     version: pj.version,
     license,
-    repository:
-      typeof pj.repository === "string"
-        ? pj.repository
-        : (pj.repository?.url ?? ""),
+    repository: typeof pj.repository === "string" ? pj.repository : (pj.repository?.url ?? ""),
     licenseText: readLicenseText(dir),
   };
 }
@@ -432,10 +420,7 @@ export function generateLicenses(opts = {}) {
 // CLI entry: `node scripts/gen-licenses.mjs [--force]`
 const isMain = (() => {
   try {
-    return (
-      process.argv[1] &&
-      resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-    );
+    return process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
   } catch {
     return false;
   }

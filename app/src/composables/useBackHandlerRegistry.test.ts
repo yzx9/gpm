@@ -15,8 +15,7 @@ const api = vi.hoisted(() => {
   const unregister = vi.fn(async () => {
     handler = null;
   });
-  let pendingResolve: ((l: { unregister: typeof unregister }) => void) | null =
-    null;
+  let pendingResolve: ((l: { unregister: typeof unregister }) => void) | null = null;
   const onBackButtonPress = vi.fn((h: (p: { canGoBack: boolean }) => void) => {
     handler = h;
     return new Promise<{ unregister: typeof unregister }>((res) => {

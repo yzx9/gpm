@@ -222,11 +222,7 @@ async function onCreate() {
         @click="onPickFile"
       >
         <BaseIcon :icon="KeyRound" />
-        {{
-          picking
-            ? t("setup.createGpg.importLoading")
-            : t("setup.createGpg.importButton")
-        }}
+        {{ picking ? t("setup.createGpg.importLoading") : t("setup.createGpg.importButton") }}
       </BaseButton>
 
       <div
@@ -260,9 +256,7 @@ async function onCreate() {
           {{ pickedFile.user_id }}
         </div>
         <div v-if="pickedFile.fingerprint" class="flex flex-col gap-0.5">
-          <span class="text-muted">{{
-            t("setup.identity.gpgFingerprint")
-          }}</span>
+          <span class="text-muted">{{ t("setup.identity.gpgFingerprint") }}</span>
           <code class="font-mono break-all">{{ pickedFile.fingerprint }}</code>
         </div>
 
@@ -296,9 +290,7 @@ async function onCreate() {
           >
             <BaseIcon :icon="KeyRound" />
             {{
-              verifying
-                ? t("setup.identity.gpgVerifyLoading")
-                : t("setup.identity.gpgVerifyButton")
+              verifying ? t("setup.identity.gpgVerifyLoading") : t("setup.identity.gpgVerifyButton")
             }}
           </BaseButton>
         </div>
@@ -312,9 +304,7 @@ async function onCreate() {
     <!-- Optional remote -->
     <div class="flex flex-col gap-3 pt-4 border-t border-edge">
       <div>
-        <span class="text-sm font-medium">{{
-          t("setup.create.remoteLabel")
-        }}</span>
+        <span class="text-sm font-medium">{{ t("setup.create.remoteLabel") }}</span>
         <p class="text-xs text-muted">{{ t("setup.create.remoteHint") }}</p>
       </div>
       <div class="flex flex-col gap-4">

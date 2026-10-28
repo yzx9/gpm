@@ -53,44 +53,29 @@ onMounted(loadPresets);
       </template>
     </BaseHeader>
 
-    <BaseAlert v-if="error" variant="danger" class="mb-3">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert v-if="error" variant="danger" class="mb-3">{{ error }}</BaseAlert>
 
     <!-- Pick a type — each routes to its own page so Android back returns here -->
     <section>
       <p class="text-sm text-muted mb-3">{{ t("create.pickHint") }}</p>
-      <div v-if="presetsLoading" class="loading">
-        <BaseSpinner /> {{ t("create.loading") }}
-      </div>
+      <div v-if="presetsLoading" class="loading"><BaseSpinner /> {{ t("create.loading") }}</div>
       <ul v-else class="list-none flex flex-col gap-2" role="list">
         <li v-for="p in presets" :key="p.id">
           <BaseButton
             variant="action"
-            @click="
-              router.push({ name: 'createPreset', params: { presetId: p.id } })
-            "
+            @click="router.push({ name: 'createPreset', params: { presetId: p.id } })"
           >
             <span class="flex flex-col flex-1">
               <span class="text-base font-medium">{{ p.label }}</span>
-              <span class="text-xs text-muted"
-                >{{ t("create.savedUnder") }} {{ p.prefix }}/</span
-              >
+              <span class="text-xs text-muted">{{ t("create.savedUnder") }} {{ p.prefix }}/</span>
             </span>
           </BaseButton>
         </li>
         <li>
-          <BaseButton
-            variant="action"
-            @click="router.push({ name: 'createCustom' })"
-          >
+          <BaseButton variant="action" @click="router.push({ name: 'createCustom' })">
             <span class="flex flex-col flex-1">
-              <span class="text-base font-medium">{{
-                t("create.customLabel")
-              }}</span>
-              <span class="text-xs text-muted">{{
-                t("create.customHint")
-              }}</span>
+              <span class="text-base font-medium">{{ t("create.customLabel") }}</span>
+              <span class="text-xs text-muted">{{ t("create.customHint") }}</span>
             </span>
           </BaseButton>
         </li>
@@ -101,9 +86,7 @@ onMounted(loadPresets);
                 <BaseIcon :icon="Dices" :size="18" />
                 {{ t("create.generateLabel") }}
               </span>
-              <span class="text-xs text-muted">{{
-                t("create.generateHint")
-              }}</span>
+              <span class="text-xs text-muted">{{ t("create.generateHint") }}</span>
             </span>
           </BaseButton>
         </li>

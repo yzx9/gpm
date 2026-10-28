@@ -76,28 +76,22 @@ const hasTemplate = ref(false);
 const preview = ref<string | null>(null);
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
 
-const {
-  divergence,
-  resolving,
-  divergeError,
-  openDivergence,
-  resolveDivergence,
-  cancelDivergence,
-} = useDivergence({
-  resolveFailedKey: "create.resolveFailed",
-  onResolved(result: PullResult, choice: DivergenceChoice) {
-    if (choice === "adopt_remote") {
-      toast.info(t("create.adoptedRemote"));
-    } else {
-      toast.success(t("create.keptMine", { head: result.head }));
-    }
-    navBack(router, { name: "entries" });
-  },
-  onPullFfFailed() {
-    toast.info(t("create.remoteChanged"));
-    navBack(router, { name: "entries" });
-  },
-});
+const { divergence, resolving, divergeError, openDivergence, resolveDivergence, cancelDivergence } =
+  useDivergence({
+    resolveFailedKey: "create.resolveFailed",
+    onResolved(result: PullResult, choice: DivergenceChoice) {
+      if (choice === "adopt_remote") {
+        toast.info(t("create.adoptedRemote"));
+      } else {
+        toast.success(t("create.keptMine", { head: result.head }));
+      }
+      navBack(router, { name: "entries" });
+    },
+    onPullFfFailed() {
+      toast.info(t("create.remoteChanged"));
+      navBack(router, { name: "entries" });
+    },
+  });
 
 const {
   conflict: entryConflict,
@@ -110,9 +104,7 @@ const {
   resolveFailedKey: "create.resolveFailed",
   onResolved(result: PullResult, choice: EntryConflictChoice) {
     toast.success(
-      choice === "keep_mine"
-        ? t("create.saved", { commit: result.head })
-        : t("create.keptTheirs"),
+      choice === "keep_mine" ? t("create.saved", { commit: result.head }) : t("create.keptTheirs"),
     );
     navBack(router, { name: "entries" });
   },
@@ -272,20 +264,13 @@ onBeforeUnmount(() => {
           :placeholder="t('create.pathPlaceholder')"
           autocomplete="off"
         />
-        <small class="text-xs text-muted">{{
-          t("create.firstLineHint")
-        }}</small>
+        <small class="text-xs text-muted">{{ t("create.firstLineHint") }}</small>
       </div>
       <div class="flex flex-col gap-1">
         <label for="c-content" class="text-sm font-medium">
           {{ t("create.content") }}<span aria-hidden="true">*</span>
         </label>
-        <BaseTextarea
-          id="c-content"
-          v-model="customContent"
-          rows="4"
-          autocomplete="off"
-        />
+        <BaseTextarea id="c-content" v-model="customContent" rows="4" autocomplete="off" />
       </div>
       <BaseAlert v-if="hasTemplate" variant="info">
         {{ t("create.templateHint") }}
@@ -295,11 +280,7 @@ onBeforeUnmount(() => {
       </BaseAlert>
       <pre v-if="preview" class="preview">{{ preview }}</pre>
       <div class="flex gap-3">
-        <BaseButton
-          variant="primary"
-          type="submit"
-          class="flex-1"
-          :disabled="!canSubmit"
+        <BaseButton variant="primary" type="submit" class="flex-1" :disabled="!canSubmit"
           >{{ submitting ? t("create.saving") : t("create.saveSecret") }}
         </BaseButton>
         <BaseButton
@@ -310,9 +291,7 @@ onBeforeUnmount(() => {
           :disabled="cancelling"
           :aria-label="t('create.cancelSaveAria')"
           @click="cancelSave"
-          >{{
-            cancelling ? t("create.cancellingSave") : t("create.cancelSave")
-          }}
+          >{{ cancelling ? t("create.cancellingSave") : t("create.cancelSave") }}
         </BaseButton>
       </div>
     </form>

@@ -11,13 +11,7 @@ import BaseCard from "@/components/base/BaseCard.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import { openExternal } from "@/utils/open-external";
 import { version } from "@/version";
-import {
-  ChevronRight,
-  ExternalLink,
-  Heart,
-  ShieldCheck,
-  Target,
-} from "@lucide/vue";
+import { ChevronRight, ExternalLink, Heart, ShieldCheck, Target } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -39,17 +33,12 @@ const builtWith = ["Rust", "Tauri", "Vue 3", "age", "libgit2"] as const;
 const appConfig = ref<AppConfig | null>(null);
 const updateStatus = ref<UpdateStatus | null>(null);
 const hasUpdate = computed(() => updateStatus.value?.available ?? false);
-const updateCheckEnabled = computed(
-  () => appConfig.value?.update_check_enabled ?? true,
-);
+const updateCheckEnabled = computed(() => appConfig.value?.update_check_enabled ?? true);
 const updateDialogOpen = ref(false);
 
 async function loadStatus() {
   try {
-    const [cfg, status] = await Promise.all([
-      getAppConfig(),
-      getUpdateStatus(),
-    ]);
+    const [cfg, status] = await Promise.all([getAppConfig(), getUpdateStatus()]);
     appConfig.value = cfg;
     updateStatus.value = status;
     // Opening About acknowledges the current latest release for this version —
@@ -82,11 +71,7 @@ onMounted(() => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settings' }"
-      :title="t('about.title')"
-      spacing="sm"
-    />
+    <BaseHeader :back-fallback="{ name: 'settings' }" :title="t('about.title')" spacing="sm" />
 
     <div class="flex flex-col gap-4">
       <!-- Identity -->
@@ -107,14 +92,8 @@ onMounted(() => {
              (ignores the ack); it's decorative, the button is the labeled action. -->
         <!-- No aria-label override: the visible "Version vX.Y.Z" text is the
              accessible name (WCAG 2.5.3 Label in Name). -->
-        <button
-          type="button"
-          class="version-btn mt-2"
-          @click="updateDialogOpen = true"
-        >
-          <span class="text-xs text-muted">
-            {{ t("about.overview.version") }} {{ version }}
-          </span>
+        <button type="button" class="version-btn mt-2" @click="updateDialogOpen = true">
+          <span class="text-xs text-muted"> {{ t("about.overview.version") }} {{ version }} </span>
           <span
             v-if="hasUpdate"
             class="update-dot"
@@ -144,11 +123,7 @@ onMounted(() => {
           <Target :size="16" /> {{ t("about.overview.designGoalsTitle") }}
         </h2>
         <ul class="flex flex-col gap-2">
-          <li
-            v-for="goal in DESIGN_GOALS"
-            :key="goal"
-            class="flex items-start gap-2 text-sm"
-          >
+          <li v-for="goal in DESIGN_GOALS" :key="goal" class="flex items-start gap-2 text-sm">
             <ShieldCheck :size="16" class="goal-check shrink-0" />
             <span>{{ t(`about.overview.goals.${goal}`) }}</span>
           </li>
@@ -161,9 +136,7 @@ onMounted(() => {
           <Heart :size="16" /> {{ t("about.overview.builtWithTitle") }}
         </h2>
         <div class="flex flex-wrap gap-2">
-          <span v-for="tech in builtWith" :key="tech" class="tech-chip">{{
-            tech
-          }}</span>
+          <span v-for="tech in builtWith" :key="tech" class="tech-chip">{{ tech }}</span>
         </div>
       </BaseCard>
     </div>

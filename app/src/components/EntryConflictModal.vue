@@ -29,16 +29,8 @@ import EntryAttributes from "./EntryAttributes.vue";
 const { t } = useI18n();
 const { runWithAuth } = useLockState();
 const activeRepo = useActiveRepo();
-const {
-  attributes,
-  password,
-  notes,
-  revealed,
-  clearsInSecs,
-  reveal,
-  clear,
-  withClaim,
-} = useSecretReveal();
+const { attributes, password, notes, revealed, clearsInSecs, reveal, clear, withClaim } =
+  useSecretReveal();
 
 const props = withDefaults(
   defineProps<{
@@ -98,10 +90,7 @@ const keepMineLabel = computed(
 );
 // Step-2 contextual confirm copy, keyed by (choice, op). Returns an i18n key.
 const confirmHeading = computed(() => {
-  const byChoice: Record<
-    EntryConflictChoice,
-    Record<EntryConflictOp, string>
-  > = {
+  const byChoice: Record<EntryConflictChoice, Record<EntryConflictOp, string>> = {
     keep_theirs: {
       edit: "common.entryConflict.confirmKeepTheirsHeading",
       delete: "common.entryConflict.confirmKeepTheirsDeleteHeading",
@@ -116,10 +105,7 @@ const confirmHeading = computed(() => {
   return (byChoice[pendingChoice.value ?? "keep_mine"] ?? {})[op.value];
 });
 const confirmLine = computed(() => {
-  const byChoice: Record<
-    EntryConflictChoice,
-    Record<EntryConflictOp, string>
-  > = {
+  const byChoice: Record<EntryConflictChoice, Record<EntryConflictOp, string>> = {
     keep_theirs: {
       edit: "common.entryConflict.confirmKeepTheirsLine1",
       delete: "common.entryConflict.confirmKeepTheirsDeleteLine1",
@@ -203,8 +189,7 @@ async function previewTheirs() {
     }
     reveal(claimed);
   } catch (e) {
-    previewError.value =
-      (e as AppError)?.message || t("common.entryConflict.previewError");
+    previewError.value = (e as AppError)?.message || t("common.entryConflict.previewError");
   } finally {
     previewLoading.value = false;
   }
@@ -250,11 +235,7 @@ watch(
     :aria-label="t('common.entryConflict.sheetAriaLabel')"
     @close="cancelAll"
   >
-    <h2
-      ref="headingEl"
-      class="text-base font-medium mb-1 text-danger"
-      tabindex="-1"
-    >
+    <h2 ref="headingEl" class="text-base font-medium mb-1 text-danger" tabindex="-1">
       {{ heading }}
     </h2>
     <p class="text-xs text-muted mb-3">{{ t("common.entryConflict.hint") }}</p>
@@ -329,11 +310,7 @@ watch(
     :dismiss-on-backdrop="!resolving"
     @close="cancelConfirm"
   >
-    <h2
-      ref="headingEl"
-      class="text-base font-medium mb-2 text-danger"
-      tabindex="-1"
-    >
+    <h2 ref="headingEl" class="text-base font-medium mb-2 text-danger" tabindex="-1">
       {{ t(confirmHeading) }}
     </h2>
 
@@ -342,12 +319,7 @@ watch(
     </p>
 
     <div class="flex flex-col gap-2">
-      <BaseButton
-        variant="danger"
-        size="sm"
-        :loading="resolving"
-        @click="confirm"
-      >
+      <BaseButton variant="danger" size="sm" :loading="resolving" @click="confirm">
         {{ resolving ? confirmBtnBusy : confirmBtnIdle }}
       </BaseButton>
       <BaseButton size="sm" :disabled="resolving" @click="cancelConfirm">

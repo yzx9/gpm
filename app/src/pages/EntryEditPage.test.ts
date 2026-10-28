@@ -31,8 +31,7 @@ describe("EntryEditPage", () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd === "show_password")
         return Promise.resolve({ password: "s3cret", notes: "note line" });
-      if (cmd === "edit_secret")
-        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      if (cmd === "edit_secret") return Promise.resolve({ kind: "written", commit: "abc1234" });
       return Promise.resolve(undefined);
     });
   });
@@ -44,9 +43,7 @@ describe("EntryEditPage", () => {
       repoId: "test-repo",
       entryPath: "servers/prod",
     });
-    expect(
-      (w.find('input[id="e-password"]').element as HTMLInputElement).value,
-    ).toBe("s3cret");
+    expect((w.find('input[id="e-password"]').element as HTMLInputElement).value).toBe("s3cret");
   });
 
   it("Save edits and returns to the read view", async () => {
@@ -95,9 +92,7 @@ describe("EntryEditPage", () => {
     // loadBody detected the attachment, set the hint, and early-returned.
     expect(w.text()).toContain("Attachments can't be edited yet");
     // canSave is false for an attachment — Save stays disabled.
-    expect(
-      w.find('button[type="submit"]').attributes("disabled"),
-    ).toBeDefined();
+    expect(w.find('button[type="submit"]').attributes("disabled")).toBeDefined();
     // The base64 body never reached the editor textarea.
     expect((w.find("textarea").element as HTMLTextAreaElement).value).toBe("");
     // And no edit_secret write was attempted.
@@ -123,9 +118,7 @@ describe("EntryEditPage", () => {
     // loadBody detected non-UTF-8 content, set the hint, and early-returned.
     expect(w.text()).toContain("non-UTF-8");
     // canSave is false — Save stays disabled.
-    expect(
-      w.find('button[type="submit"]').attributes("disabled"),
-    ).toBeDefined();
+    expect(w.find('button[type="submit"]').attributes("disabled")).toBeDefined();
     // No edit_secret write was attempted (the lossy view is never saved back).
     expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
   });
@@ -142,8 +135,7 @@ describe("EntryEditPage", () => {
           edit_blocked: null,
           version: "oid-cafe",
         });
-      if (cmd === "edit_secret")
-        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      if (cmd === "edit_secret") return Promise.resolve({ kind: "written", commit: "abc1234" });
       return Promise.resolve(undefined);
     });
     const w = mountWithApp(EntryEditPage).wrapper;
@@ -199,8 +191,7 @@ describe("EntryEditPage", () => {
           notes: "",
           attributes: [{ key: "user", value: "alice" }],
         });
-      if (cmd === "edit_secret")
-        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      if (cmd === "edit_secret") return Promise.resolve({ kind: "written", commit: "abc1234" });
       return Promise.resolve(undefined);
     });
     const w = mountWithApp(EntryEditPage).wrapper;
@@ -230,17 +221,14 @@ describe("EntryEditPage", () => {
           notes: "",
           attributes: [{ key: "bad: key", value: "v" }],
         });
-      if (cmd === "edit_secret")
-        return Promise.resolve({ kind: "written", commit: "abc1234" });
+      if (cmd === "edit_secret") return Promise.resolve({ kind: "written", commit: "abc1234" });
       return Promise.resolve(undefined);
     });
     const w = mountWithApp(EntryEditPage).wrapper;
     await flushPromises();
 
     // hasInvalidKey ⇒ Save stays disabled and no write is attempted.
-    expect(
-      w.find('button[type="submit"]').attributes("disabled"),
-    ).toBeDefined();
+    expect(w.find('button[type="submit"]').attributes("disabled")).toBeDefined();
     await w.find("form").trigger("submit");
     await flushPromises();
     expect(invoke).not.toHaveBeenCalledWith("edit_secret", expect.anything());
@@ -277,8 +265,7 @@ describe("EntryEditPage", () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd === "show_password")
         return Promise.resolve({ password: "s3cret", notes: "note line" });
-      if (cmd === "edit_secret")
-        return Promise.reject({ code: "DECRYPT_FAILED", message: "boom" });
+      if (cmd === "edit_secret") return Promise.reject({ code: "DECRYPT_FAILED", message: "boom" });
       return Promise.resolve(undefined);
     });
     const w = mountWithApp(EntryEditPage).wrapper;
@@ -301,10 +288,7 @@ describe("EntryEditPage", () => {
     m.appLock.setAppLocked(true, "idle");
     await flushPromises();
 
-    expect(
-      (m.wrapper.find('input[id="e-password"]').element as HTMLInputElement)
-        .value,
-    ).toBe("");
+    expect((m.wrapper.find('input[id="e-password"]').element as HTMLInputElement).value).toBe("");
     expect(m.draftsNotice.consume()).toBe(true); // real edits lost → toast fires
   });
 
@@ -315,10 +299,7 @@ describe("EntryEditPage", () => {
     m.appLock.setAppLocked(true, "idle");
     await flushPromises();
 
-    expect(
-      (m.wrapper.find('input[id="e-password"]').element as HTMLInputElement)
-        .value,
-    ).toBe("");
+    expect((m.wrapper.find('input[id="e-password"]').element as HTMLInputElement).value).toBe("");
     // No user content lost — the precise dirty predicate (partsEqual) must
     // keep the post-unlock toast silent for a merely-opened editor.
     expect(m.draftsNotice.consume()).toBe(false);

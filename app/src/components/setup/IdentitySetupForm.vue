@@ -24,13 +24,7 @@ import BaseTextarea from "@/components/base/BaseTextarea.vue";
 import PassphraseField from "@/components/PassphraseField.vue";
 import PassphraseUnrecoverableAck from "@/components/PassphraseUnrecoverableAck.vue";
 import { usePlatform, useWipeOnLeave } from "@/composables";
-import {
-  ArrowLeft,
-  Check,
-  FileText,
-  KeyRound,
-  TriangleAlert,
-} from "@lucide/vue";
+import { ArrowLeft, Check, FileText, KeyRound, TriangleAlert } from "@lucide/vue";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { truncateKey } from "./url";
@@ -105,9 +99,7 @@ watch(
 const deriveSeq = ref(0);
 
 const hasSshRecipients = computed(() =>
-  recipients.value.some(
-    (r) => r.key_type === "ssh_ed25519" || r.key_type === "ssh_rsa",
-  ),
+  recipients.value.some((r) => r.key_type === "ssh_ed25519" || r.key_type === "ssh_rsa"),
 );
 
 // On Android a store with an age plugin recipient (e.g. age1yubikey1…) is
@@ -117,9 +109,7 @@ const hasSshRecipients = computed(() =>
 // `platform.value` here (not a snapshot) so it reactively turns on once
 // App.vue's initPlatform resolves.
 const pluginRecipientReadOnly = computed(
-  () =>
-    platform.value === "android" &&
-    recipients.value.some((r) => r.key_type === "plugin"),
+  () => platform.value === "android" && recipients.value.some((r) => r.key_type === "plugin"),
 );
 
 // A GPG key has been picked: drive the GPG-aware panel off the picked key type
@@ -130,27 +120,20 @@ const gpgPicked = computed(() => pickedFile.value?.key_type === "gpg");
 
 const canReuseSshKey = computed(
   () =>
-    props.isSshUrl === true &&
-    hasSshRecipients.value &&
-    !!props.sshKey &&
-    !!props.sshKey.trim(),
+    props.isSshUrl === true && hasSshRecipients.value && !!props.sshKey && !!props.sshKey.trim(),
 );
 
 const isSshIdentity = computed(
-  () =>
-    identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
+  () => identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
 );
 
 const matchedRecipient = computed(() =>
   derivedRecipient.value
-    ? (recipients.value.find((r) => r.public_key === derivedRecipient.value) ??
-      null)
+    ? (recipients.value.find((r) => r.public_key === derivedRecipient.value) ?? null)
     : null,
 );
 
-const matchStatus = computed<
-  "none" | "deriving" | "match" | "noMatch" | "neutral"
->(() => {
+const matchStatus = computed<"none" | "deriving" | "match" | "noMatch" | "neutral">(() => {
   if (recipients.value.length === 0) return "none";
   if (deriving.value || verifying.value) return "deriving";
   if (derivedRecipient.value === null) return "neutral";
@@ -179,11 +162,7 @@ const statusAlert = computed<{
     case "neutral":
       // Only prompt when there's an action to take (encrypted SSH paste,
       // pre-verify). For partial typing or the file path, stay quiet.
-      if (
-        identitySource.value === "paste" &&
-        isSshIdentity.value &&
-        isIdentityEncrypted.value
-      ) {
+      if (identitySource.value === "paste" && isSshIdentity.value && isIdentityEncrypted.value) {
         return {
           variant: "info",
           text: t("setup.identity.status.verifySshHint"),
@@ -216,32 +195,23 @@ function validateStep2(): string | null {
       // string-match below, which reads the wrong backend). A key definitively
       // NOT a recipient can't decrypt the store — block before the user spends a
       // passphrase on it (the authoritative gate is save_identity; this pre-warns).
-      if (pickedFile.value?.is_recipient === false)
-        return t("setup.identity.noMatchWarning");
-      if (!gpgVerified.value)
-        return t("setup.identity.validation.errGpgVerifyFirst");
+      if (pickedFile.value?.is_recipient === false) return t("setup.identity.noMatchWarning");
+      if (!gpgVerified.value) return t("setup.identity.validation.errGpgVerifyFirst");
       return null;
     }
-    if (!pickedFile.value.recipient)
-      return t("setup.identity.validation.errUnlockFileFirst");
+    if (!pickedFile.value.recipient) return t("setup.identity.validation.errUnlockFileFirst");
   } else {
-    if (!identity.value.trim())
-      return t("setup.identity.validation.errIdentityRequired");
+    if (!identity.value.trim()) return t("setup.identity.validation.errIdentityRequired");
     const trimmed = identity.value.trim();
     const isAgeKey = trimmed.startsWith("AGE-SECRET-KEY-");
     const isSshKey =
       trimmed.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----") ||
       trimmed.startsWith("-----BEGIN RSA PRIVATE KEY-----");
-    if (!isAgeKey && !isSshKey)
-      return t("setup.identity.validation.errIdentityFormat");
+    if (!isAgeKey && !isSshKey) return t("setup.identity.validation.errIdentityFormat");
     if (malformedIdentity.value) return t("setup.identity.malformed");
     if (isSshIdentity.value && isIdentityEncrypted.value && !passphrase.value)
       return t("setup.identity.validation.errSshPassRequired");
-    if (
-      isSshIdentity.value &&
-      isIdentityEncrypted.value &&
-      !derivedRecipient.value
-    )
+    if (isSshIdentity.value && isIdentityEncrypted.value && !derivedRecipient.value)
       return t("setup.identity.validation.errVerifyFirst");
     // x25519 seal passphrase confirmation (pf is null on SSH/file paths —
     // those enter an existing passphrase, not a new one to confirm).
@@ -253,11 +223,7 @@ function validateStep2(): string | null {
   }
   // Last check (mirrors the Store::save_identity backstop): hard-block a
   // derived recipient that matches nothing in a non-empty repo.
-  if (
-    recipients.value.length > 0 &&
-    derivedRecipient.value &&
-    !matchedRecipient.value
-  )
+  if (recipients.value.length > 0 && derivedRecipient.value && !matchedRecipient.value)
     return t("setup.identity.noMatchWarning");
   return null;
 }
@@ -340,10 +306,7 @@ async function onVerifyPaste() {
   verifying.value = true;
   error.value = "";
   try {
-    const res = await verifyPastedIdentity(
-      identity.value.trim(),
-      passphrase.value,
-    );
+    const res = await verifyPastedIdentity(identity.value.trim(), passphrase.value);
     derivedRecipient.value = res.recipient;
   } catch (e) {
     const appError = e as AppError;
@@ -453,8 +416,7 @@ watch(identity, (val) => {
   if (isSsh) {
     // Type + encryption need a backend parse; gate on the END marker so we
     // don't fire mid-paste.
-    if (/-----END (OPENSSH|RSA) PRIVATE KEY-----/.test(trimmed))
-      void deriveRecipient(trimmed);
+    if (/-----END (OPENSSH|RSA) PRIVATE KEY-----/.test(trimmed)) void deriveRecipient(trimmed);
     return;
   }
   identityType.value = "";
@@ -469,9 +431,7 @@ watch(matchedRecipient, (m) => {
     // or `\` (none in age/SSH keys today, but defensive against future formats)
     // can't break out of the selector.
     const pubkey = m.public_key.replace(/[\\"]/g, "\\$&");
-    document
-      .querySelector(`[data-pubkey="${pubkey}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    document.querySelector(`[data-pubkey="${pubkey}"]`)?.scrollIntoView({ block: "nearest" });
   });
 });
 
@@ -493,12 +453,7 @@ onUnmounted(clearPendingFile);
 
 <template>
   <form class="flex flex-col gap-4" @submit.prevent="onCompleteSetup">
-    <BaseButton
-      variant="ghost"
-      class="self-start"
-      :aria-label="t('common.back')"
-      @click="goBack"
-    >
+    <BaseButton variant="ghost" class="self-start" :aria-label="t('common.back')" @click="goBack">
       <BaseIcon :icon="ArrowLeft" /> {{ t("common.back") }}
     </BaseButton>
 
@@ -512,10 +467,7 @@ onUnmounted(clearPendingFile);
     <!-- For a GPG store listRecipients reads the age backend (clone default) and
          is empty/misleading, so the whole list is hidden once a GPG key is picked;
          the GPG pick panel below carries the real GPG membership UX. -->
-    <div
-      v-if="!gpgPicked && loadingRecipients"
-      class="text-center py-4 text-sm text-muted"
-    >
+    <div v-if="!gpgPicked && loadingRecipients" class="text-center py-4 text-sm text-muted">
       {{ t("setup.identity.loadingRecipients") }}
     </div>
 
@@ -523,17 +475,12 @@ onUnmounted(clearPendingFile);
       {{ t("setup.identity.noRecipientsAlert") }}
     </BaseAlert>
 
-    <div
-      v-else-if="!gpgPicked"
-      class="flex flex-col gap-2 max-h-56 overflow-y-auto"
-    >
+    <div v-else-if="!gpgPicked" class="flex flex-col gap-2 max-h-56 overflow-y-auto">
       <div
         v-for="r in recipients"
         :key="r.public_key"
         :data-pubkey="r.public_key"
-        :aria-current="
-          matchedRecipient?.public_key === r.public_key ? 'true' : undefined
-        "
+        :aria-current="matchedRecipient?.public_key === r.public_key ? 'true' : undefined"
         :class="[
           'flex items-start gap-3 p-3 rounded-md border transition-colors',
           matchedRecipient?.public_key === r.public_key
@@ -549,9 +496,7 @@ onUnmounted(clearPendingFile);
         />
         <div class="flex flex-col gap-0.5 min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
-            <code class="text-xs font-mono break-all">{{
-              truncateKey(r.public_key)
-            }}</code>
+            <code class="text-xs font-mono break-all">{{ truncateKey(r.public_key) }}</code>
             <span
               v-if="r.key_type !== 'x25519'"
               class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-edge text-muted"
@@ -569,9 +514,7 @@ onUnmounted(clearPendingFile);
               >{{ t("setup.identity.badgeYourKey") }}</span
             >
           </div>
-          <span v-if="r.comment" class="text-xs text-muted">{{
-            r.comment
-          }}</span>
+          <span v-if="r.comment" class="text-xs text-muted">{{ r.comment }}</span>
         </div>
       </div>
     </div>
@@ -581,11 +524,7 @@ onUnmounted(clearPendingFile);
          recipients list is visible (!gpgPicked — a GPG store reads the age
          backend and the list is misleading there). -->
     <BaseAlert v-if="!gpgPicked && pluginRecipientReadOnly" variant="warning">
-      <BaseIcon
-        :icon="TriangleAlert"
-        :size="14"
-        class="inline-block align-middle"
-      />
+      <BaseIcon :icon="TriangleAlert" :size="14" class="inline-block align-middle" />
       {{ t("setup.identity.pluginRecipientReadOnlyNotice") }}
     </BaseAlert>
 
@@ -630,11 +569,7 @@ onUnmounted(clearPendingFile);
       >
         <div class="flex items-center justify-between gap-2">
           <span class="min-w-0 truncate inline-flex items-center gap-1">
-            <BaseIcon
-              :icon="FileText"
-              :size="14"
-              class="inline-block align-middle shrink-0"
-            />
+            <BaseIcon :icon="FileText" :size="14" class="inline-block align-middle shrink-0" />
             <span class="truncate">{{
               pickedFile?.filename || t("setup.identity.fileTypeFallback")
             }}</span>
@@ -643,13 +578,7 @@ onUnmounted(clearPendingFile);
               >{{ t("setup.identity.badgeGpg") }}</span
             >
           </span>
-          <BaseButton
-            variant="link"
-            size="xs"
-            tone="danger"
-            class="shrink-0"
-            @click="onUsePaste"
-          >
+          <BaseButton variant="link" size="xs" tone="danger" class="shrink-0" @click="onUsePaste">
             {{ t("setup.identity.fileRemove") }}
           </BaseButton>
         </div>
@@ -658,9 +587,7 @@ onUnmounted(clearPendingFile);
           {{ pickedFile.user_id }}
         </div>
         <div v-if="pickedFile?.fingerprint" class="flex flex-col gap-0.5">
-          <span class="text-muted">{{
-            t("setup.identity.gpgFingerprint")
-          }}</span>
+          <span class="text-muted">{{ t("setup.identity.gpgFingerprint") }}</span>
           <code class="font-mono break-all">{{ pickedFile.fingerprint }}</code>
         </div>
 
@@ -686,22 +613,14 @@ onUnmounted(clearPendingFile);
             autocomplete="off"
             :disabled="verifying"
           />
-          <BaseButton
-            variant="secondary"
-            :disabled="verifying || !passphrase"
-            @click="onVerify"
-          >
+          <BaseButton variant="secondary" :disabled="verifying || !passphrase" @click="onVerify">
             <BaseIcon :icon="KeyRound" />
             {{
-              verifying
-                ? t("setup.identity.gpgVerifyLoading")
-                : t("setup.identity.gpgVerifyButton")
+              verifying ? t("setup.identity.gpgVerifyLoading") : t("setup.identity.gpgVerifyButton")
             }}
           </BaseButton>
         </div>
-        <BaseAlert v-else variant="success">{{
-          t("setup.identity.gpgVerified")
-        }}</BaseAlert>
+        <BaseAlert v-else variant="success">{{ t("setup.identity.gpgVerified") }}</BaseAlert>
       </div>
 
       <!-- Picked-file panel (age/SSH): the bytes live in backend state, not here -->
@@ -711,36 +630,20 @@ onUnmounted(clearPendingFile);
       >
         <div class="flex items-center justify-between gap-2">
           <span class="min-w-0 truncate">
-            <BaseIcon
-              :icon="FileText"
-              :size="14"
-              class="inline-block align-middle shrink-0"
-            />
+            <BaseIcon :icon="FileText" :size="14" class="inline-block align-middle shrink-0" />
             {{ pickedFile.filename || t("setup.identity.fileTypeFallback") }} ·
             {{ pickedFile.key_type
-            }}<span v-if="pickedFile.encrypted">{{
-              t("setup.identity.fileEncrypted")
-            }}</span>
+            }}<span v-if="pickedFile.encrypted">{{ t("setup.identity.fileEncrypted") }}</span>
           </span>
-          <BaseButton
-            variant="link"
-            size="xs"
-            tone="danger"
-            class="shrink-0"
-            @click="onUsePaste"
-          >
+          <BaseButton variant="link" size="xs" tone="danger" class="shrink-0" @click="onUsePaste">
             {{ t("setup.identity.fileRemove") }}
           </BaseButton>
         </div>
 
         <!-- Public key, once usable (unencrypted, or unlocked) -->
         <div v-if="pickedFile.recipient" class="flex flex-col gap-0.5">
-          <span class="text-muted">{{
-            t("setup.identity.filePublicKey")
-          }}</span>
-          <code class="font-mono break-all">{{
-            truncateKey(pickedFile.recipient)
-          }}</code>
+          <span class="text-muted">{{ t("setup.identity.filePublicKey") }}</span>
+          <code class="font-mono break-all">{{ truncateKey(pickedFile.recipient) }}</code>
         </div>
 
         <!-- Encrypted: unlock + verify before the key is usable -->
@@ -752,25 +655,17 @@ onUnmounted(clearPendingFile);
             autocomplete="off"
             :disabled="verifying"
           />
-          <BaseButton
-            variant="secondary"
-            :disabled="verifying || !passphrase"
-            @click="onVerify"
-          >
+          <BaseButton variant="secondary" :disabled="verifying || !passphrase" @click="onVerify">
             {{
               verifying
                 ? t("setup.identity.fileUnlockLoading")
                 : t("setup.identity.fileUnlockButton")
             }}
           </BaseButton>
-          <small class="text-muted">{{
-            t("setup.identity.fileUnlockHint")
-          }}</small>
+          <small class="text-muted">{{ t("setup.identity.fileUnlockHint") }}</small>
         </div>
       </div>
-      <small v-else class="text-xs text-muted">{{
-        t("setup.identity.identityHint")
-      }}</small>
+      <small v-else class="text-xs text-muted">{{ t("setup.identity.identityHint") }}</small>
 
       <!-- Upload via the native picker (hidden once a file is picked) -->
       <BaseButton
@@ -780,37 +675,21 @@ onUnmounted(clearPendingFile);
         :disabled="picking || loadingIdentity"
         @click="onPickFile"
       >
-        {{
-          picking
-            ? t("setup.identity.uploadButtonLoading")
-            : t("setup.identity.uploadButton")
-        }}
+        {{ picking ? t("setup.identity.uploadButtonLoading") : t("setup.identity.uploadButton") }}
       </BaseButton>
     </div>
 
     <!-- Inline unsupported / malformed alerts for the pasted key. -->
     <BaseAlert v-if="identityType === 'post_quantum'" variant="warning">
-      <BaseIcon
-        :icon="TriangleAlert"
-        :size="14"
-        class="inline-block align-middle"
-      />
+      <BaseIcon :icon="TriangleAlert" :size="14" class="inline-block align-middle" />
       {{ t("setup.identity.unsupportedPq") }}
     </BaseAlert>
     <BaseAlert v-else-if="identityType === 'plugin'" variant="warning">
-      <BaseIcon
-        :icon="TriangleAlert"
-        :size="14"
-        class="inline-block align-middle"
-      />
+      <BaseIcon :icon="TriangleAlert" :size="14" class="inline-block align-middle" />
       {{ t("setup.identity.unsupportedPlugin") }}
     </BaseAlert>
     <BaseAlert v-else-if="malformedIdentity" variant="danger">
-      <BaseIcon
-        :icon="TriangleAlert"
-        :size="14"
-        class="inline-block align-middle"
-      />
+      <BaseIcon :icon="TriangleAlert" :size="14" class="inline-block align-middle" />
       {{ t("setup.identity.malformed") }}
     </BaseAlert>
 
@@ -843,9 +722,7 @@ onUnmounted(clearPendingFile);
             : t("setup.identity.sshVerifyButton")
         }}
       </BaseButton>
-      <small class="text-xs text-muted">{{
-        t("setup.identity.sshVerifyHint")
-      }}</small>
+      <small class="text-xs text-muted">{{ t("setup.identity.sshVerifyHint") }}</small>
     </div>
 
     <!-- Optional seal encryption (paste path; x25519 keys only) -->
@@ -860,15 +737,9 @@ onUnmounted(clearPendingFile);
       :disabled="loadingIdentity"
     >
       <template #help>
-        <small class="text-xs text-muted">{{
-          t("setup.identity.sealPassphraseHelpAge")
-        }}</small>
+        <small class="text-xs text-muted">{{ t("setup.identity.sealPassphraseHelpAge") }}</small>
         <BaseAlert v-if="!passphrase.trim()" variant="warning">
-          <BaseIcon
-            :icon="TriangleAlert"
-            :size="14"
-            class="inline-block align-middle"
-          />
+          <BaseIcon :icon="TriangleAlert" :size="14" class="inline-block align-middle" />
           {{ t("setup.identity.sealPassphraseWarning") }}
         </BaseAlert>
       </template>
@@ -879,9 +750,7 @@ onUnmounted(clearPendingFile);
          field above decrypts an existing key rather than setting a new seal
          passphrase, so it gets no ack. -->
     <PassphraseUnrecoverableAck
-      v-if="
-        identitySource === 'paste' && identityType === 'x25519' && passphrase
-      "
+      v-if="identitySource === 'paste' && identityType === 'x25519' && passphrase"
       v-model="ackX25519"
     />
 
@@ -897,9 +766,7 @@ onUnmounted(clearPendingFile);
       :loading="loadingIdentity"
       :disabled="ackRequired"
       >{{
-        loadingIdentity
-          ? t("setup.identity.verifying")
-          : t("setup.identity.buttonComplete")
+        loadingIdentity ? t("setup.identity.verifying") : t("setup.identity.buttonComplete")
       }}</BaseButton
     >
   </form>

@@ -165,9 +165,7 @@ describe("usePullToRefresh", () => {
 
   it("removes its window listeners on unmount (no leak / no fire after teardown)", () => {
     const onRefresh = vi.fn();
-    const [, app] = withSetup(() =>
-      usePullToRefresh({ onRefresh, threshold: 70, damping: 0.5 }),
-    );
+    const [, app] = withSetup(() => usePullToRefresh({ onRefresh, threshold: 70, damping: 0.5 }));
     app.unmount(); // fires onBeforeUnmount → listeners removed
 
     fire("touchstart", 100);
@@ -185,10 +183,7 @@ describe("usePullToRefresh", () => {
     });
 
     // Dispatch a touch event carrying an explicit identifier list.
-    const ev = (
-      type: string,
-      touches: { identifier?: number; clientY: number }[],
-    ): void => {
+    const ev = (type: string, touches: { identifier?: number; clientY: number }[]): void => {
       const e = new Event(type, { cancelable: true, bubbles: true });
       Object.defineProperty(e, "touches", {
         value: touches as Touch[],

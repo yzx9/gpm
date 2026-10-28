@@ -97,10 +97,7 @@ export function createDialog(): DialogState {
         pending.value = pending.value.filter((r) => r.id !== id);
         res(value);
       };
-      pending.value = [
-        ...pending.value,
-        { id, kind: "confirm", opts, resolve: settle },
-      ];
+      pending.value = [...pending.value, { id, kind: "confirm", opts, resolve: settle }];
     });
   }
 

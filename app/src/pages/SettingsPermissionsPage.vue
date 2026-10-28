@@ -20,14 +20,7 @@ import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
 import { usePlatform, useToast } from "@/composables";
-import {
-  Bell,
-  ChevronRight,
-  Clipboard,
-  FileText,
-  Fingerprint,
-  Globe,
-} from "@lucide/vue";
+import { Bell, ChevronRight, Clipboard, FileText, Fingerprint, Globe } from "@lucide/vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -83,15 +76,11 @@ async function probe() {
   // an infinite spinner — this page's whole purpose is the recovery lever, so a
   // plugin flake must not strand the row. (isBiometricAvailable swallows its own
   // errors → "unavailable", so it never rejects here.)
-  notificationsState.value =
-    n.status === "fulfilled" && n.value ? "granted" : "blocked";
+  notificationsState.value = n.status === "fulfilled" && n.value ? "granted" : "blocked";
   biometricState.value = b.status === "fulfilled" ? b.value : "unknown";
-  biometricEnabled.value =
-    enabled.status === "fulfilled" ? !!enabled.value : false;
-  identityEncrypted.value =
-    auth.status === "fulfilled" ? !!auth.value?.encrypted : false;
-  identityType.value =
-    auth.status === "fulfilled" ? (auth.value?.identity_type ?? "") : "";
+  biometricEnabled.value = enabled.status === "fulfilled" ? !!enabled.value : false;
+  identityEncrypted.value = auth.status === "fulfilled" ? !!auth.value?.encrypted : false;
+  identityType.value = auth.status === "fulfilled" ? (auth.value?.identity_type ?? "") : "";
 }
 
 // Resume refresh: the backend emits the authoritative `app-resumed` signal from
@@ -165,9 +154,7 @@ const notifAria = computed(() =>
 // `available`; on Class-2-only hardware the deep-link is a harmless no-op
 // round-trip — and mapBiometricState can't tell the two apart, so offer it.
 const bioTap = computed(
-  () =>
-    biometricState.value === "no_enrollment" ||
-    biometricState.value === "weak_enrolled",
+  () => biometricState.value === "no_enrollment" || biometricState.value === "weak_enrolled",
 );
 const bioStatus = computed(() => {
   switch (biometricState.value) {
@@ -205,8 +192,7 @@ const bioAvailable = computed(() => biometricState.value === "available");
 // SSH-key identities can't be sealed for biometric unlock, so the manage link
 // is suppressed for them — it would deep-link to a card that doesn't exist.
 const isSshIdentity = computed(
-  () =>
-    identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
+  () => identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
 );
 const bioLinkLabel = computed(() =>
   biometricEnabled.value
@@ -264,18 +250,10 @@ function toneClass(tone: string) {
             </div>
             <div class="perm-trailing">
               <BaseSpinner v-if="!notifStatus" :size="14" />
-              <span
-                v-else
-                class="perm-status"
-                :class="toneClass(notifStatus.tone)"
-                >{{ notifStatus.text }}</span
-              >
-              <BaseIcon
-                v-if="notifTap"
-                :icon="ChevronRight"
-                :size="18"
-                class="text-muted"
-              />
+              <span v-else class="perm-status" :class="toneClass(notifStatus.tone)">{{
+                notifStatus.text
+              }}</span>
+              <BaseIcon v-if="notifTap" :icon="ChevronRight" :size="18" class="text-muted" />
             </div>
           </div>
         </BaseCard>
@@ -298,18 +276,10 @@ function toneClass(tone: string) {
             </div>
             <div class="perm-trailing">
               <BaseSpinner v-if="!bioStatus" :size="14" />
-              <span
-                v-else
-                class="perm-status"
-                :class="toneClass(bioStatus.tone)"
-                >{{ bioStatus.text }}</span
-              >
-              <BaseIcon
-                v-if="bioTap"
-                :icon="ChevronRight"
-                :size="18"
-                class="text-muted"
-              />
+              <span v-else class="perm-status" :class="toneClass(bioStatus.tone)">{{
+                bioStatus.text
+              }}</span>
+              <BaseIcon v-if="bioTap" :icon="ChevronRight" :size="18" class="text-muted" />
             </div>
           </div>
 

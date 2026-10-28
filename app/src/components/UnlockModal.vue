@@ -68,9 +68,7 @@ const biometricAvailable = ref(false);
 const biometricEnabled = ref(false);
 const biometricLoading = ref(false);
 const biometricNotice = ref("");
-const biometricUsable = computed(
-  () => biometricAvailable.value && biometricEnabled.value,
-);
+const biometricUsable = computed(() => biometricAvailable.value && biometricEnabled.value);
 
 // ── Auto-lock policy hint ─────────────────────────────────────────────
 // The policy in effect (Immediate / N min idle / Never), shown so the user
@@ -144,8 +142,7 @@ async function tryBiometricUnlock() {
         // so the user can retry, or switch manually via the ghost button. The
         // backend's localized message surfaces as-is (the LOCKOUT test asserts
         // it), falling back to a generic notice.
-        biometricNotice.value =
-          err.message || t("common.unlock.biometricUnlockFailed");
+        biometricNotice.value = err.message || t("common.unlock.biometricUnlockFailed");
     }
   } finally {
     biometricLoading.value = false;
@@ -235,9 +232,7 @@ onUnmounted(() => {
       >
         <BaseIcon :icon="X" :size="18" />
       </BaseButton>
-      <h1
-        class="text-center text-display flex items-center justify-center gap-2"
-      >
+      <h1 class="text-center text-display flex items-center justify-center gap-2">
         <BaseIcon :icon="LockKeyhole" :size="28" /> gpm
         <BaseButton
           variant="link"
@@ -262,12 +257,7 @@ onUnmounted(() => {
     </BaseAlert>
 
     <!-- Biometric notice (reset / stale / failure) -->
-    <BaseAlert
-      v-if="biometricNotice"
-      variant="danger"
-      role="status"
-      class="mb-4"
-    >
+    <BaseAlert v-if="biometricNotice" variant="danger" role="status" class="mb-4">
       {{ biometricNotice }}
     </BaseAlert>
 
@@ -282,9 +272,7 @@ onUnmounted(() => {
       >
         <BaseIcon v-if="!biometricLoading" :icon="ScanFace" />
         <span>{{
-          biometricLoading
-            ? t("common.unlock.unlocking")
-            : t("common.unlock.unlockWithBiometric")
+          biometricLoading ? t("common.unlock.unlocking") : t("common.unlock.unlockWithBiometric")
         }}</span>
       </BaseButton>
       <BaseButton variant="ghost" block @click="enterPassphraseMode">
@@ -293,11 +281,7 @@ onUnmounted(() => {
     </div>
 
     <!-- PASSPHRASE MODE: input + primary + (optional) switch back to biometric. -->
-    <form
-      v-else-if="resolved"
-      @submit.prevent="onUnlock"
-      class="flex flex-col gap-4"
-    >
+    <form v-else-if="resolved" @submit.prevent="onUnlock" class="flex flex-col gap-4">
       <div class="flex flex-col gap-1">
         <label for="passphrase" class="text-sm font-medium">{{
           t("common.unlock.passphraseLabel")
@@ -312,25 +296,16 @@ onUnmounted(() => {
           autocomplete="off"
           :disabled="loading"
         />
-        <small class="text-xs text-muted">{{
-          t("common.unlock.passphraseHint")
-        }}</small>
+        <small class="text-xs text-muted">{{ t("common.unlock.passphraseHint") }}</small>
       </div>
 
       <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
       <BaseButton variant="primary" type="submit" block :loading="loading">{{
-        loading
-          ? t("common.unlock.decrypting")
-          : t("common.unlock.unlockButton")
+        loading ? t("common.unlock.decrypting") : t("common.unlock.unlockButton")
       }}</BaseButton>
 
-      <BaseButton
-        v-if="biometricUsable"
-        variant="ghost"
-        block
-        @click="switchToBiometric"
-      >
+      <BaseButton v-if="biometricUsable" variant="ghost" block @click="switchToBiometric">
         {{ t("common.unlock.unlockWithBiometric") }}
       </BaseButton>
     </form>

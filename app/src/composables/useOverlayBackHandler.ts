@@ -4,10 +4,7 @@
 
 import { Z } from "@/zTiers";
 import { inject, onBeforeUnmount, watch, type Ref } from "vue";
-import {
-  BACK_HANDLER_KEY,
-  type BackHandlerHandle,
-} from "./useBackHandlerRegistry";
+import { BACK_HANDLER_KEY, type BackHandlerHandle } from "./useBackHandlerRegistry";
 
 /**
  * Take over the Android back button while `shown` is true: each back press
@@ -42,9 +39,7 @@ export function useOverlayBackHandler(
   // loudly if a test mounts a back-consuming component without providing it.
   const registry = inject(BACK_HANDLER_KEY);
   if (!registry) {
-    throw new Error(
-      "useOverlayBackHandler() requires BACK_HANDLER_KEY to be provided",
-    );
+    throw new Error("useOverlayBackHandler() requires BACK_HANDLER_KEY to be provided");
   }
   let handle: BackHandlerHandle | null = null;
 

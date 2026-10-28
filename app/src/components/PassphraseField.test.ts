@@ -10,8 +10,7 @@ import PassphraseField from "./PassphraseField.vue";
 // `useId` output or DOM ordering.
 const PROPS = { id: "pf-main" } as const;
 const main = (w: ReturnType<typeof mount>) => w.get('input[id="pf-main"]');
-const confirm = (w: ReturnType<typeof mount>) =>
-  w.find('input[id="pf-main-confirm"]');
+const confirm = (w: ReturnType<typeof mount>) => w.find('input[id="pf-main-confirm"]');
 
 describe("PassphraseField", () => {
   it("optional + empty: valid and renders no confirm field", () => {

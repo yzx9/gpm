@@ -75,8 +75,7 @@ describe("SshKeyPage", () => {
 
   it("shows an empty state (not an error) when no SSH key is configured", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_ssh_public_key")
-        return Promise.resolve({ public_key: null });
+      if (cmd === "get_ssh_public_key") return Promise.resolve({ public_key: null });
       if (cmd === "export_ssh_private_key")
         return Promise.resolve({
           private_key: "-----OPENSSH PRIVATE KEY-----",

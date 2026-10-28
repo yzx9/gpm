@@ -31,12 +31,8 @@ const replacing = ref(false);
 const clearing = ref(false);
 
 const hasToken = computed(() => !!config.value?.pat);
-const busy = computed(
-  () => verifying.value || replacing.value || clearing.value,
-);
-const canReplace = computed(
-  () => newPat.value.trim().length > 0 && !busy.value,
-);
+const busy = computed(() => verifying.value || replacing.value || clearing.value);
+const canReplace = computed(() => newPat.value.trim().length > 0 && !busy.value);
 
 onMounted(loadConfig);
 
@@ -113,14 +109,9 @@ async function clearToken() {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settingsRepository' }"
-      :title="t('pat.title')"
-    />
+    <BaseHeader :back-fallback="{ name: 'settingsRepository' }" :title="t('pat.title')" />
 
-    <BaseAlert v-if="error" variant="danger" class="mb-4">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert v-if="error" variant="danger" class="mb-4">{{ error }}</BaseAlert>
 
     <div v-if="loading" class="flex items-center gap-2 text-muted py-4">
       <BaseSpinner />
@@ -140,9 +131,7 @@ async function clearToken() {
       <!-- Replace (validated) -->
       <section class="mb-6">
         <div class="flex flex-col gap-1 mb-2">
-          <label for="new-pat" class="text-xs text-muted">{{
-            t("pat.replaceLabel")
-          }}</label>
+          <label for="new-pat" class="text-xs text-muted">{{ t("pat.replaceLabel") }}</label>
           <BaseInput
             id="new-pat"
             v-model="newPat"
@@ -152,12 +141,7 @@ async function clearToken() {
             :disabled="busy"
           />
         </div>
-        <BaseButton
-          variant="action"
-          :loading="busy"
-          :disabled="!canReplace"
-          @click="replaceToken"
-        >
+        <BaseButton variant="action" :loading="busy" :disabled="!canReplace" @click="replaceToken">
           {{ verifying ? t("pat.verifying") : t("pat.replace") }}
         </BaseButton>
       </section>

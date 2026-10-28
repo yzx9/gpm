@@ -3,12 +3,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
-import {
-  getAppConfig,
-  isVerboseActive,
-  notifyOs,
-  verboseRemainingSecs,
-} from "@/api";
+import { getAppConfig, isVerboseActive, notifyOs, verboseRemainingSecs } from "@/api";
 import { computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -38,18 +33,8 @@ const {
   identityCached,
   shouldAutoPromptBiometric,
 } = useLockState();
-const {
-  appLockEnabled,
-  appLocked,
-  appReady,
-  init: initAppLock,
-} = useAppLockState();
-const {
-  gateIdle,
-  loadSecuritySettings,
-  lockMode,
-  reload: reloadSecurity,
-} = useSecuritySettings();
+const { appLockEnabled, appLocked, appReady, init: initAppLock } = useAppLockState();
+const { gateIdle, loadSecuritySettings, lockMode, reload: reloadSecurity } = useSecuritySettings();
 // True when the gate idle timer is armed (gate on + unlocked + gate-idle != Off)
 // so the activity bumper resets it on in-app use, not just on secret ops.
 const gateIdleArmed = computed(
@@ -57,23 +42,12 @@ const gateIdleArmed = computed(
 );
 // Activity bumper: any in-app tap/scroll/key extends BOTH idle timers (identity
 // + gate); no-op when neither is armed (Immediate/Never + gate-idle Off/locked).
-const lockActivity = createLockActivity(
-  lockMode,
-  identityCached,
-  gateIdleArmed,
-);
+const lockActivity = createLockActivity(lockMode, identityCached, gateIdleArmed);
 // Best-effort foreground sync (RFC R060 Tier 1): pull + push on cold-start/resume
 // when AutoSync is on; surfaces divergence / Enforce-block as a passive status
 // badge, never a modal; silent on success and failure.
-const foregroundSync = createForegroundSyncStore(
-  useAppLockState(),
-  useRouter(),
-);
-const {
-  initSecureScreen,
-  setSecureOverlay,
-  reload: reloadSecureScreen,
-} = useSecureScreen();
+const foregroundSync = createForegroundSyncStore(useAppLockState(), useRouter());
+const { initSecureScreen, setSecureOverlay, reload: reloadSecureScreen } = useSecureScreen();
 const { initPlatform } = usePlatform();
 const { t } = useI18n();
 // Post-unlock "cleared your unsaved changes" toast — owns its own unlock-edge

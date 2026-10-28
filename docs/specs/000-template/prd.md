@@ -7,8 +7,8 @@ scope: <kebab-token> # Conventional-Commit scope for this feature domain
 
 # <Feature Title>
 
-> Status: Shipped | In flight | Partial | Planned | Blocked
-> Related: ANNN · Last verified: YYYY-MM-DD
+> Status: Shipped | In flight | Partial | Planned | Blocked Related: ANNN · Last verified:
+> YYYY-MM-DD
 
 <!--
 A PRD captures product REQUIREMENTS — functional + non-functional — and USER
@@ -40,11 +40,11 @@ Why it exists — the need it filled (shipped) or the gap it closes (forward).
 
 ## 3. Use Cases
 
-For each relevant persona (see `../../personas.md`), write a **complete usage scenario** —
-the concrete end-to-end flow they go through in THIS feature, grounded in their real
-workflow (e.g. Jordan's desktop-gopass + mobile-gpm + git-sync + gopass-compat; Casey's
-create-from-scratch + daily mobile access). Don't re-describe the persona; that lives in
-personas.md. Skip a persona with no notable behavior here.
+For each relevant persona (see `../../personas.md`), write a **complete usage scenario** — the
+concrete end-to-end flow they go through in THIS feature, grounded in their real workflow (e.g.
+Jordan's desktop-gopass + mobile-gpm + git-sync + gopass-compat; Casey's create-from-scratch + daily
+mobile access). Don't re-describe the persona; that lives in personas.md. Skip a persona with no
+notable behavior here.
 
 ## 4. Key Aspects
 
@@ -76,5 +76,5 @@ Decisions made (link the ADR for rationale) + unresolved tradeoffs.
 
 ## 6. Roadmap
 
-Shipped milestones → Now → Next → Future, with ADR references.
-Current state in a few sentences — no detail.
+Shipped milestones → Now → Next → Future, with ADR references. Current state in a few sentences — no
+detail.

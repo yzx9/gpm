@@ -122,9 +122,7 @@ describe("safe-area", () => {
   });
 
   it("handles desktop fallback gracefully", async () => {
-    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("plugin not found"),
-    );
+    (invoke as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("plugin not found"));
 
     // Should not throw
     await applySafeAreaInsets();

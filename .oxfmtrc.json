@@ -1,6 +1,13 @@
 {
-  "printWidth": 80,
-  "sortPackageJson": false,
+  "overrides": [
+    {
+      "files": ["**/*.md"],
+      "options": {
+        "proseWrap": "always",
+        "printWidth": 100
+      }
+    }
+  ],
   "ignorePatterns": [
     ".agents/skills/",
     ".claude/",

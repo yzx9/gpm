@@ -6,11 +6,7 @@
 // The searchable open-source license inventory. Carries no secret content, so
 // (like About) the route is not marked secure.
 import type { LicensePackage } from "@/components/about/data";
-import {
-  fetchLicenses,
-  filterPackages,
-  groupLicenses,
-} from "@/components/about/data";
+import { fetchLicenses, filterPackages, groupLicenses } from "@/components/about/data";
 import PackageRow from "@/components/about/PackageRow.vue";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -55,9 +51,7 @@ const npmCount = computed(() => data.value?.ecosystems.npm ?? 0);
 const degraded = computed(() => !!data.value && !data.value.complete);
 // Fetch failure surfaces as a degraded doc with 0 packages + a note; a genuine
 // empty inventory (complete, 0 packages) is separate.
-const failed = computed(
-  () => total.value === 0 && !!data.value && !data.value.complete,
-);
+const failed = computed(() => total.value === 0 && !!data.value && !data.value.complete);
 
 const trimmedQuery = computed(() => query.value.trim());
 const searching = computed(() => trimmedQuery.value.length > 0);
@@ -112,9 +106,7 @@ function togglePkg(p: LicensePackage) {
       </div>
 
       <div v-if="loading" class="state-row">
-        <BaseSpinner /><span class="text-sm text-muted">{{
-          t("about.licenses.loading")
-        }}</span>
+        <BaseSpinner /><span class="text-sm text-muted">{{ t("about.licenses.loading") }}</span>
       </div>
 
       <BaseAlert v-else-if="failed" variant="danger">
@@ -138,11 +130,7 @@ function togglePkg(p: LicensePackage) {
           </span>
         </p>
 
-        <BaseAlert
-          v-if="degraded"
-          variant="warning"
-          class="flex items-start gap-2"
-        >
+        <BaseAlert v-if="degraded" variant="warning" class="flex items-start gap-2">
           <BaseIcon :icon="TriangleAlert" :size="16" class="shrink-0 mt-0.5" />
           <span>{{ t("about.licenses.degradedNotice") }}</span>
         </BaseAlert>
@@ -157,15 +145,11 @@ function togglePkg(p: LicensePackage) {
               @click="toggleGroup(group.license)"
             >
               <BaseIcon
-                :icon="
-                  expandedGroups.has(group.license) ? ChevronDown : ChevronRight
-                "
+                :icon="expandedGroups.has(group.license) ? ChevronDown : ChevronRight"
                 :size="16"
               />
               <span class="group-license">{{ group.license }}</span>
-              <span class="group-count">{{
-                t("about.licenses.packageCount", group.count)
-              }}</span>
+              <span class="group-count">{{ t("about.licenses.packageCount", group.count) }}</span>
             </BaseButton>
             <ul v-if="expandedGroups.has(group.license)" class="pkg-list">
               <PackageRow

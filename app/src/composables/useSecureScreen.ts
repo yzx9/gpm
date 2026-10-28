@@ -80,16 +80,13 @@ export interface CreateSecureScreenOptions {
 }
 
 /** Injection key for the app-wide screen-capture-protection state. */
-export const SECURE_SCREEN_KEY: InjectionKey<SecureScreenState> =
-  Symbol("SecureScreen");
+export const SECURE_SCREEN_KEY: InjectionKey<SecureScreenState> = Symbol("SecureScreen");
 
 /**
  * Create a fresh screen-capture-protection instance. Production calls this once
  * in `main.ts` and provides it; tests call it per-case for isolation.
  */
-export function createSecureScreen(
-  opts: CreateSecureScreenOptions = {},
-): SecureScreenState {
+export function createSecureScreen(opts: CreateSecureScreenOptions = {}): SecureScreenState {
   const secureScreenMode = ref<SecureScreenMode>(opts.mode ?? "sensitive");
   const secureAvailable = ref(opts.available === true);
   let overlayActive = false;
@@ -182,8 +179,7 @@ export function createSecureScreen(
     try {
       const cfg = await getAppConfig();
       const raw = cfg.secure_screen_mode;
-      secureScreenMode.value =
-        raw === "off" || raw === "always" ? raw : "sensitive";
+      secureScreenMode.value = raw === "off" || raw === "always" ? raw : "sensitive";
     } catch {
       // Backend unavailable (e.g. pre-setup) — keep the default "sensitive".
     }
@@ -250,9 +246,7 @@ export function createSecureScreen(
 export function useSecureScreen(): SecureScreenState {
   const s = inject(SECURE_SCREEN_KEY);
   if (!s) {
-    throw new Error(
-      "useSecureScreen() requires SECURE_SCREEN_KEY to be provided",
-    );
+    throw new Error("useSecureScreen() requires SECURE_SCREEN_KEY to be provided");
   }
   return s;
 }

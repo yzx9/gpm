@@ -5,32 +5,26 @@
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSelect from "@/components/base/BaseSelect.vue";
 import { mountWithApp } from "@/test/appTestUtils";
-import {
-  baseDefaults,
-  resetOverrides,
-  type Overrides,
-} from "@/test/settingsTestUtils";
+import { baseDefaults, resetOverrides, type Overrides } from "@/test/settingsTestUtils";
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsIdentityPage from "./SettingsIdentityPage.vue";
 
-const { mockPush, mockReplace, mockOnBeforeRouteLeave, mockRoute } = vi.hoisted(
-  () => ({
-    mockPush: vi.fn(),
-    mockReplace: vi.fn(),
-    mockOnBeforeRouteLeave: vi.fn(),
-    // Mutable route so a test can set `mockRoute.query = { focus: ... }` before
-    // mounting to exercise the deep-link scroll/highlight.
-    mockRoute: {
-      params: {},
-      query: {} as Record<string, unknown>,
-      name: "",
-      path: "/",
-      fullPath: "/",
-    },
-  }),
-);
+const { mockPush, mockReplace, mockOnBeforeRouteLeave, mockRoute } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+  mockReplace: vi.fn(),
+  mockOnBeforeRouteLeave: vi.fn(),
+  // Mutable route so a test can set `mockRoute.query = { focus: ... }` before
+  // mounting to exercise the deep-link scroll/highlight.
+  mockRoute: {
+    params: {},
+    query: {} as Record<string, unknown>,
+    name: "",
+    path: "/",
+    fullPath: "/",
+  },
+}));
 
 vi.mock("@tauri-apps/api/core");
 vi.mock("vue-router", () => ({
@@ -90,9 +84,9 @@ describe("SettingsIdentityPage", () => {
     Comp: typeof BaseSelect | typeof BaseSegmentedControl,
     name: string,
   ) {
-    return (
-      wrapper.findAllComponents(Comp) as unknown as VueWrapper<any>[]
-    ).find((c) => c.props("name") === name);
+    return (wrapper.findAllComponents(Comp) as unknown as VueWrapper<any>[]).find(
+      (c) => c.props("name") === name,
+    );
   }
 
   describe("deep-link focus (?focus=...)", () => {
@@ -129,9 +123,7 @@ describe("SettingsIdentityPage", () => {
         expect(mockReplace).toHaveBeenCalledWith({ query: {} });
         vi.advanceTimersByTime(1700); // the flash auto-clears
         await flushPromises();
-        expect(wrapper.find("#biometric-card").classes()).not.toContain(
-          "card-highlight",
-        );
+        expect(wrapper.find("#biometric-card").classes()).not.toContain("card-highlight");
       } finally {
         wrapper.unmount(); // cancels the highlight-clear timer
         proto.scrollIntoView = orig;
@@ -202,9 +194,7 @@ describe("SettingsIdentityPage", () => {
         stackedRouterView.releaseEnter();
         await flushPromises();
         expect(scrollIntoView).not.toHaveBeenCalled();
-        expect(wrapper.find("#biometric-card").classes()).not.toContain(
-          "card-highlight",
-        );
+        expect(wrapper.find("#biometric-card").classes()).not.toContain("card-highlight");
       } finally {
         wrapper.unmount();
         proto.scrollIntoView = orig;
@@ -218,9 +208,7 @@ describe("SettingsIdentityPage", () => {
     it("set passphrase: blocks Encrypt until the unrecoverable ack is checked", async () => {
       const wrapper = mountPage();
       await flushPromises();
-      const openBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Set Passphrase"))!;
+      const openBtn = wrapper.findAll("button").find((b) => b.text().includes("Set Passphrase"))!;
       await openBtn.trigger("click");
       await flushPromises();
       const modal = wrapper.find('[role="dialog"]');
@@ -233,15 +221,10 @@ describe("SettingsIdentityPage", () => {
       const ack = modal.find('input[type="checkbox"]');
       expect(ack.exists()).toBe(true);
       expect((ack.element as HTMLInputElement).checked).toBe(false);
-      expect(
-        (modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled,
-      ).toBe(true);
+      expect((modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled).toBe(true);
       await modalBtn("Encrypt Identity").trigger("click");
       await flushPromises();
-      expect(invoke).not.toHaveBeenCalledWith(
-        "set_passphrase",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("set_passphrase", expect.anything());
 
       await ack.setValue(true);
       when("set_passphrase", { ok: true });
@@ -256,9 +239,7 @@ describe("SettingsIdentityPage", () => {
     it("set passphrase: editing the passphrase after acking forces a re-ack", async () => {
       const wrapper = mountPage();
       await flushPromises();
-      const openBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Set Passphrase"))!;
+      const openBtn = wrapper.findAll("button").find((b) => b.text().includes("Set Passphrase"))!;
       await openBtn.trigger("click");
       await flushPromises();
       const modal = wrapper.find('[role="dialog"]');
@@ -267,27 +248,20 @@ describe("SettingsIdentityPage", () => {
       await modal.find('input[id="pp-new"]').setValue("secret");
       await modal.find('input[id="pp-new-confirm"]').setValue("secret");
       await modal.find('input[type="checkbox"]').setValue(true);
-      expect(
-        (modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled,
-      ).toBe(false);
+      expect((modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled).toBe(false);
 
       await modal.find('input[id="pp-new"]').setValue("changed");
       await modal.find('input[id="pp-new-confirm"]').setValue("changed");
-      expect(
-        (modal.find('input[type="checkbox"]').element as HTMLInputElement)
-          .checked,
-      ).toBe(false);
-      expect(
-        (modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled,
-      ).toBe(true);
+      expect((modal.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(
+        false,
+      );
+      expect((modalBtn("Encrypt Identity").element as HTMLButtonElement).disabled).toBe(true);
     });
 
     it("set passphrase: blocks encrypt when the confirm does not match", async () => {
       const wrapper = mountPage();
       await flushPromises();
-      const openBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Set Passphrase"))!;
+      const openBtn = wrapper.findAll("button").find((b) => b.text().includes("Set Passphrase"))!;
       await openBtn.trigger("click");
       await flushPromises();
       const modal = wrapper.find('[role="dialog"]');
@@ -300,10 +274,7 @@ describe("SettingsIdentityPage", () => {
       await modalBtn("Encrypt Identity").trigger("click");
       await flushPromises();
 
-      expect(invoke).not.toHaveBeenCalledWith(
-        "set_passphrase",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("set_passphrase", expect.anything());
       expect(wrapper.text()).toContain("Passphrases do not match");
     });
 
@@ -330,9 +301,7 @@ describe("SettingsIdentityPage", () => {
       await modal.find('input[id="pp-new-confirm"]').setValue("new-pass");
 
       const ack = modal.find('input[type="checkbox"]');
-      expect(
-        (modalBtn("Change Passphrase").element as HTMLButtonElement).disabled,
-      ).toBe(true);
+      expect((modalBtn("Change Passphrase").element as HTMLButtonElement).disabled).toBe(true);
       await ack.setValue(true);
       when("change_passphrase", { ok: true });
       await modalBtn("Change Passphrase").trigger("click");
@@ -354,9 +323,7 @@ describe("SettingsIdentityPage", () => {
       when("is_biometric_available", "available");
       const wrapper = mountPage();
       await flushPromises();
-      const openBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Enable Biometric"))!;
+      const openBtn = wrapper.findAll("button").find((b) => b.text().includes("Enable Biometric"))!;
       await openBtn.trigger("click");
       await flushPromises();
 
@@ -371,9 +338,7 @@ describe("SettingsIdentityPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const setBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Set Passphrase"));
+      const setBtn = wrapper.findAll("button").find((b) => b.text().includes("Set Passphrase"));
       await setBtn!.trigger("click");
       await flushPromises();
 
@@ -388,21 +353,14 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
-      expect(invoke).not.toHaveBeenCalledWith(
-        "set_passphrase",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("set_passphrase", expect.anything());
 
       await setBtn!.trigger("click");
       await flushPromises();
-      expect((wrapper.find("#pp-new").element as HTMLInputElement).value).toBe(
-        "",
-      );
+      expect((wrapper.find("#pp-new").element as HTMLInputElement).value).toBe("");
       expect(
-        (
-          wrapper.find('[role="dialog"]').find('input[type="checkbox"]')
-            .element as HTMLInputElement
-        ).checked,
+        (wrapper.find('[role="dialog"]').find('input[type="checkbox"]').element as HTMLInputElement)
+          .checked,
       ).toBe(false);
     });
 
@@ -410,9 +368,7 @@ describe("SettingsIdentityPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const setBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("Set Passphrase"));
+      const setBtn = wrapper.findAll("button").find((b) => b.text().includes("Set Passphrase"));
       await setBtn!.trigger("click");
       await flushPromises();
 
@@ -420,10 +376,7 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
-      expect(invoke).not.toHaveBeenCalledWith(
-        "set_passphrase",
-        expect.anything(),
-      );
+      expect(invoke).not.toHaveBeenCalledWith("set_passphrase", expect.anything());
     });
   });
 
@@ -480,11 +433,9 @@ describe("SettingsIdentityPage", () => {
         "enable_biometric_unlock",
         expect.objectContaining({ passphrase: "my-pass" }),
       );
-      expect(
-        toast.toasts.value.some((t) =>
-          t.message.includes("Biometric unlock enabled"),
-        ),
-      ).toBe(true);
+      expect(toast.toasts.value.some((t) => t.message.includes("Biometric unlock enabled"))).toBe(
+        true,
+      );
     });
 
     it("shows an error on a wrong passphrase when enabling", async () => {
@@ -513,9 +464,7 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
-      expect(wrapper.find("[role='alert']").text()).toContain(
-        "Wrong passphrase",
-      );
+      expect(wrapper.find("[role='alert']").text()).toContain("Wrong passphrase");
     });
 
     it("calls disable_biometric_unlock after confirming when disabling", async () => {
@@ -534,9 +483,7 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       // The disable is now gated behind a destructive confirm.
-      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ danger: true }),
-      );
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
       expect(invoke).toHaveBeenCalledWith("disable_biometric_unlock");
     });
 
@@ -581,9 +528,7 @@ describe("SettingsIdentityPage", () => {
       await disableBtn!.trigger("click");
       await flushPromises();
 
-      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ danger: true }),
-      );
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
       expect(invoke).toHaveBeenCalledWith("disable_identity_auto_unlock");
     });
   });
@@ -607,10 +552,7 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       // "After idle" → restores the default 1 min idle.
-      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
-        "change",
-        "idle",
-      );
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit("change", "idle");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
@@ -642,10 +584,7 @@ describe("SettingsIdentityPage", () => {
       );
       await flushPromises();
       when("set_lock_mode", { lock_mode: { idle: 900 } });
-      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
-        "change",
-        "idle",
-      );
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit("change", "idle");
       await flushPromises();
       expect(invoke).toHaveBeenCalledWith("set_lock_mode", {
         mode: { idle: 900 },
@@ -660,14 +599,9 @@ describe("SettingsIdentityPage", () => {
 
       const toggle = findControl(wrapper, BaseSegmentedControl, "view-clear")!;
       expect(toggle.props("modelValue")).toBe(true);
-      expect(
-        findControl(wrapper, BaseSelect, "view-clear-duration"),
-      ).toBeTruthy();
+      expect(findControl(wrapper, BaseSelect, "view-clear-duration")).toBeTruthy();
 
-      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit(
-        "change",
-        10,
-      );
+      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit("change", 10);
       await flushPromises();
       expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", { secs: 10 });
 
@@ -682,18 +616,10 @@ describe("SettingsIdentityPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      const toggle = findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "clipboard-clear",
-      )!;
+      const toggle = findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!;
       expect(toggle.props("modelValue")).toBe(true);
 
-      await findControl(
-        wrapper,
-        BaseSelect,
-        "clipboard-clear-duration",
-      )!.vm.$emit("change", 180);
+      await findControl(wrapper, BaseSelect, "clipboard-clear-duration")!.vm.$emit("change", 180);
       await flushPromises();
       expect(invoke).toHaveBeenCalledWith("set_clipboard_clear_secs", {
         secs: 180,
@@ -713,10 +639,7 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       expect(findControl(wrapper, BaseSelect, "lock-idle")).toBeTruthy();
-      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
-        "change",
-        "never",
-      );
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit("change", "never");
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_lock_mode", { mode: "never" });
@@ -729,15 +652,10 @@ describe("SettingsIdentityPage", () => {
       const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
       await flushPromises();
 
-      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
-        "change",
-        "never",
-      );
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit("change", "never");
       await flushPromises();
 
-      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ danger: true }),
-      );
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
       expect(invoke).toHaveBeenCalledWith("set_lock_mode", { mode: "never" });
     });
 
@@ -747,10 +665,7 @@ describe("SettingsIdentityPage", () => {
       vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
       await flushPromises();
 
-      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit(
-        "change",
-        "never",
-      );
+      await findControl(wrapper, BaseSegmentedControl, "lock-mode")!.vm.$emit("change", "never");
       await flushPromises();
 
       expect(dialog.dialog.confirm).toHaveBeenCalled();
@@ -759,11 +674,9 @@ describe("SettingsIdentityPage", () => {
         expect.objectContaining({ mode: "never" }),
       );
       // Controlled pill stays on the prior (idle) mode.
-      expect(
-        findControl(wrapper, BaseSegmentedControl, "lock-mode")!.props(
-          "modelValue",
-        ),
-      ).toBe("idle");
+      expect(findControl(wrapper, BaseSegmentedControl, "lock-mode")!.props("modelValue")).toBe(
+        "idle",
+      );
     });
 
     it("switching to a non-Never mode does not prompt", async () => {
@@ -790,16 +703,13 @@ describe("SettingsIdentityPage", () => {
       const { wrapper, dialog } = mountWithApp(SettingsIdentityPage);
       await flushPromises();
 
-      await findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "clipboard-clear",
-      )!.vm.$emit("change", false);
+      await findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!.vm.$emit(
+        "change",
+        false,
+      );
       await flushPromises();
 
-      expect(dialog.dialog.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ danger: true }),
-      );
+      expect(dialog.dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
       expect(invoke).toHaveBeenCalledWith("set_clipboard_clear_secs", {
         secs: 0,
       });
@@ -811,11 +721,10 @@ describe("SettingsIdentityPage", () => {
       vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
       await flushPromises();
 
-      await findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "clipboard-clear",
-      )!.vm.$emit("change", false);
+      await findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!.vm.$emit(
+        "change",
+        false,
+      );
       await flushPromises();
 
       expect(dialog.dialog.confirm).toHaveBeenCalled();
@@ -824,9 +733,7 @@ describe("SettingsIdentityPage", () => {
         expect.objectContaining({ secs: 0 }),
       );
       expect(
-        findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!.props(
-          "modelValue",
-        ),
+        findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!.props("modelValue"),
       ).toBe(true);
     });
 
@@ -837,22 +744,13 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       // Pick a non-default duration (3 min).
-      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit(
-        "change",
-        180,
-      );
+      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit("change", 180);
       await flushPromises();
       // Toggle off, then back on → must restore 180, not the 45s default.
-      await findControl(wrapper, BaseSegmentedControl, "view-clear")!.vm.$emit(
-        "change",
-        false,
-      );
+      await findControl(wrapper, BaseSegmentedControl, "view-clear")!.vm.$emit("change", false);
       await flushPromises();
       vi.mocked(invoke).mockClear();
-      await findControl(wrapper, BaseSegmentedControl, "view-clear")!.vm.$emit(
-        "change",
-        true,
-      );
+      await findControl(wrapper, BaseSegmentedControl, "view-clear")!.vm.$emit("change", true);
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_view_clear_secs", {
@@ -866,24 +764,15 @@ describe("SettingsIdentityPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await findControl(
-        wrapper,
-        BaseSelect,
-        "clipboard-clear-duration",
-      )!.vm.$emit("change", 180);
+      await findControl(wrapper, BaseSelect, "clipboard-clear-duration")!.vm.$emit("change", 180);
       await flushPromises();
-      await findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "clipboard-clear",
-      )!.vm.$emit("change", false);
+      await findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!.vm.$emit(
+        "change",
+        false,
+      );
       await flushPromises();
       vi.mocked(invoke).mockClear();
-      await findControl(
-        wrapper,
-        BaseSegmentedControl,
-        "clipboard-clear",
-      )!.vm.$emit("change", true);
+      await findControl(wrapper, BaseSegmentedControl, "clipboard-clear")!.vm.$emit("change", true);
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_clipboard_clear_secs", {
@@ -897,10 +786,7 @@ describe("SettingsIdentityPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit(
-        "change",
-        10,
-      );
+      await findControl(wrapper, BaseSelect, "view-clear-duration")!.vm.$emit("change", 10);
       await flushPromises();
 
       expect(wrapper.find("[role='alert']").text()).toContain("nope");
@@ -936,16 +822,11 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       expect(findControl(wrapper, BaseSelect, "gate-idle-after")).toBeTruthy();
-      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit(
-        "change",
-        false,
-      );
+      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit("change", false);
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_gate_idle", { mode: "off" });
-      expect(
-        findControl(wrapper, BaseSelect, "gate-idle-after"),
-      ).toBeUndefined();
+      expect(findControl(wrapper, BaseSelect, "gate-idle-after")).toBeUndefined();
     });
 
     it("gate-idle off→on restores the last-used after duration, not the default", async () => {
@@ -956,22 +837,15 @@ describe("SettingsIdentityPage", () => {
       await flushPromises();
 
       // Pick 30 min.
-      await findControl(wrapper, BaseSelect, "gate-idle-after")!.vm.$emit(
-        "change",
-        { after: 1800 },
-      );
+      await findControl(wrapper, BaseSelect, "gate-idle-after")!.vm.$emit("change", {
+        after: 1800,
+      });
       await flushPromises();
       // Toggle off, then on → restore 1800, not the 5 min default.
-      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit(
-        "change",
-        false,
-      );
+      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit("change", false);
       await flushPromises();
       vi.mocked(invoke).mockClear();
-      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit(
-        "change",
-        true,
-      );
+      await findControl(wrapper, BaseSegmentedControl, "gate-idle")!.vm.$emit("change", true);
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("set_gate_idle", {
@@ -995,9 +869,7 @@ describe("SettingsIdentityPage", () => {
       // identityCoupled (gate on + auto-unlock on + encrypted) → the managed
       // note shows and the lock-mode fieldset is disabled (the radios rely on
       // the fieldset's disabled state, so check the fieldset, not each radio).
-      expect(wrapper.text()).toContain(
-        "Ignored while Identity Auto-Unlock is on",
-      );
+      expect(wrapper.text()).toContain("Ignored while Identity Auto-Unlock is on");
       const lockModeField = wrapper
         .find('input[name="lock-mode"]')
         .element.closest("fieldset") as HTMLFieldSetElement | null;
@@ -1016,9 +888,7 @@ describe("SettingsIdentityPage", () => {
       const wrapper = mountPage();
       await flushPromises();
 
-      expect(wrapper.text()).not.toContain(
-        "Ignored while Identity Auto-Unlock is on",
-      );
+      expect(wrapper.text()).not.toContain("Ignored while Identity Auto-Unlock is on");
       const fs = wrapper
         .find('input[name="lock-mode"]')
         .element.closest("fieldset") as HTMLFieldSetElement | null;
@@ -1034,9 +904,7 @@ describe("SettingsIdentityPage", () => {
 
       // gate-idle control still shows; the auto-unlock opt-in does not
       expect(wrapper.findAll('input[name="gate-idle"]')).toHaveLength(2);
-      expect(
-        wrapper.findAll("button").some((b) => b.text().includes("Auto-Unlock")),
-      ).toBe(false);
+      expect(wrapper.findAll("button").some((b) => b.text().includes("Auto-Unlock"))).toBe(false);
     });
   });
 
@@ -1084,9 +952,7 @@ describe("SettingsIdentityPage", () => {
     const m = mountWithApp(SettingsIdentityPage);
     await flushPromises();
 
-    const setBtn = m.wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Set Passphrase"));
+    const setBtn = m.wrapper.findAll("button").find((b) => b.text().includes("Set Passphrase"));
     await setBtn!.trigger("click");
     await flushPromises();
     await m.wrapper.find("#pp-new").setValue("secret");

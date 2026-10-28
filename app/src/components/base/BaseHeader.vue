@@ -61,11 +61,7 @@ function onBack() {
 </script>
 
 <template>
-  <header
-    class="flex justify-between items-center gap-3"
-    :class="spacingClass"
-    role="banner"
-  >
+  <header class="flex justify-between items-center gap-3" :class="spacingClass" role="banner">
     <!-- Left cluster: #nav overrides the whole default (root logo + badge);
          otherwise it's the back button (if any) + the title. -->
     <slot name="nav">

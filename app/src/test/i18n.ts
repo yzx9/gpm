@@ -89,10 +89,7 @@ export function createTestI18n() {
  * `wrapper.text()` / queries traverse into `comp` as usual — the host only adds
  * the i18n scope around it.
  */
-export function withI18nScope<P extends Record<string, unknown>>(
-  comp: Component,
-  props?: P,
-) {
+export function withI18nScope<P extends Record<string, unknown>>(comp: Component, props?: P) {
   return defineComponent({
     setup() {
       useI18n({ messages: TEST_MESSAGES });

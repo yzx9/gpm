@@ -41,9 +41,7 @@ describe("SecurityPage", () => {
 
     const link = wrapper.find('[data-testid="security-full-model-link"]');
     expect(link.exists()).toBe(true);
-    expect(link.attributes("href")).toBe(
-      "https://github.com/yzx9/gpm/blob/main/docs/SECURITY.md",
-    );
+    expect(link.attributes("href")).toBe("https://github.com/yzx9/gpm/blob/main/docs/SECURITY.md");
     expect(link.text()).toContain("Read the full security model");
     // a11y: the link announces that it opens a new window (WCAG G201).
     expect(link.find(".sr-only").text()).toBe("opens in a new window");

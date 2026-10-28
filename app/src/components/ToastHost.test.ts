@@ -32,9 +32,7 @@ describe("ToastHost", () => {
     // host. Z.toast sits above Z.gate so a toast fired from the lock screen
     // stays visible.
     const { wrapper } = mountHost();
-    expect(wrapper.find(".toast-host").attributes("style")).toContain(
-      `z-index: ${Z.toast}`,
-    );
+    expect(wrapper.find(".toast-host").attributes("style")).toContain(`z-index: ${Z.toast}`);
   });
 
   it("renders one BaseAlert per toast, bound to its variant + message", async () => {

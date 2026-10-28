@@ -14,10 +14,8 @@
 @theme {
   /* Typography */
   --font-family-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
-  --font-family-mono:
-    "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-mono: "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
 
   --text-xs: 0.75rem;
   --text-sm: 0.85rem;

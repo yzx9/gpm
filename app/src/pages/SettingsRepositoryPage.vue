@@ -3,13 +3,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
-import type {
-  AppError,
-  AuthenticityConfig,
-  CommitIdentity,
-  RepoConfig,
-  VerifyMode,
-} from "@/api";
+import type { AppError, AuthenticityConfig, CommitIdentity, RepoConfig, VerifyMode } from "@/api";
 import {
   getAuthenticityConfig,
   getCommitIdentityDefault,
@@ -30,13 +24,7 @@ import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseInput from "@/components/base/BaseInput.vue";
 import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
-import {
-  useActiveRepo,
-  useDialog,
-  useRepoExport,
-  useToast,
-  Z,
-} from "@/composables";
+import { useActiveRepo, useDialog, useRepoExport, useToast, Z } from "@/composables";
 import { Download, FileUp, History, KeyRound, Plus } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -342,10 +330,7 @@ onMounted(() => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settings' }"
-      :title="t('settings.hub.repository')"
-    />
+    <BaseHeader :back-fallback="{ name: 'settings' }" :title="t('settings.hub.repository')" />
 
     <div v-if="loading" class="text-center text-muted py-8">
       {{ t("common.loading") }}
@@ -430,11 +415,7 @@ onMounted(() => {
               :disabled="commitLoading"
             />
           </div>
-          <BaseButton
-            variant="action"
-            :loading="commitLoading"
-            @click="onSaveCommitIdentity"
-          >
+          <BaseButton variant="action" :loading="commitLoading" @click="onSaveCommitIdentity">
             {{ t("settings.commit.save") }}
           </BaseButton>
         </BaseCard>
@@ -448,11 +429,7 @@ onMounted(() => {
             {{ t("settings.gitAuth.title") }}
           </h2>
           <div class="text-sm mb-1">
-            <BaseIcon
-              :icon="KeyRound"
-              :size="14"
-              class="inline-block align-middle"
-            />
+            <BaseIcon :icon="KeyRound" :size="14" class="inline-block align-middle" />
             <span class="align-middle ml-1">{{
               authMethod === "ssh"
                 ? t("settings.gitAuth.ssh")
@@ -473,11 +450,9 @@ onMounted(() => {
 
           <!-- Masked PAT preview (the backend masks; the full token never reaches
                the WebView). -->
-          <code
-            v-if="authMethod === 'pat' && config.pat"
-            class="auth-preview block mb-2"
-            >{{ config.pat }}</code
-          >
+          <code v-if="authMethod === 'pat' && config.pat" class="auth-preview block mb-2">{{
+            config.pat
+          }}</code>
 
           <!-- Surface a dormant credential so it isn't invisible under the active
                method (relevant now that methods can be cleared to switch). -->
@@ -501,11 +476,7 @@ onMounted(() => {
               <BaseIcon :icon="KeyRound" />
               {{ t("settings.gitAuth.managePat") }}
             </BaseButton>
-            <BaseButton
-              v-else
-              variant="action"
-              @click="router.push({ name: 'pat' })"
-            >
+            <BaseButton v-else variant="action" @click="router.push({ name: 'pat' })">
               <BaseIcon :icon="KeyRound" /> {{ t("settings.gitAuth.setUpPat") }}
             </BaseButton>
 
@@ -554,9 +525,7 @@ onMounted(() => {
 
           <!-- Trusted signing keys (SSH + GPG combined; GPG entries tagged) -->
           <div class="text-xs text-muted mb-1">
-            {{
-              t("settings.auth.trustedKeys", { count: trustedKeyRows.length })
-            }}
+            {{ t("settings.auth.trustedKeys", { count: trustedKeyRows.length }) }}
           </div>
           <ul v-if="trustedKeyRows.length" class="flex flex-col gap-1 mb-2">
             <li
@@ -564,17 +533,13 @@ onMounted(() => {
               :key="row.kind + ':' + row.fingerprint"
               class="key-row"
             >
-              <code class="text-xs break-all flex-1">{{
-                row.fingerprint
-              }}</code>
+              <code class="text-xs break-all flex-1">{{ row.fingerprint }}</code>
               <span
                 v-if="row.kind === 'gpg'"
                 class="text-[0.6rem] text-default px-1 rounded-sm bg-edge shrink-0"
                 >GPG</span
               >
-              <span class="text-xs text-muted mx-2 truncate">{{
-                row.label
-              }}</span>
+              <span class="text-xs text-muted mx-2 truncate">{{ row.label }}</span>
               <BaseButton
                 variant="link"
                 size="xs"
@@ -588,32 +553,18 @@ onMounted(() => {
           <p v-else class="text-xs text-muted mb-2">
             {{ t("settings.auth.noTrustedKeys") }}
           </p>
-          <p
-            v-if="gpgWarnings.length"
-            class="text-xs text-warning mb-2 break-words"
-          >
+          <p v-if="gpgWarnings.length" class="text-xs text-warning mb-2 break-words">
             {{ t("settings.auth.gpgWarning", { count: gpgWarnings.length }) }}
           </p>
 
           <div class="flex flex-col gap-2">
-            <BaseButton
-              v-if="trustedKeyRows.length === 0"
-              variant="action"
-              @click="onTrustHead"
-            >
+            <BaseButton v-if="trustedKeyRows.length === 0" variant="action" @click="onTrustHead">
               <BaseIcon :icon="KeyRound" /> {{ t("settings.auth.trustHead") }}
             </BaseButton>
-            <BaseButton
-              variant="action"
-              @click="router.push({ name: 'addKey' })"
-            >
+            <BaseButton variant="action" @click="router.push({ name: 'addKey' })">
               <BaseIcon :icon="Plus" /> {{ t("settings.auth.addKey") }}
             </BaseButton>
-            <BaseButton
-              variant="action"
-              :disabled="authLoading"
-              @click="onImportGpgKey"
-            >
+            <BaseButton variant="action" :disabled="authLoading" @click="onImportGpgKey">
               <BaseIcon :icon="FileUp" /> {{ t("settings.auth.importGpg") }}
             </BaseButton>
             <BaseButton variant="action" @click="openHistory">
@@ -645,11 +596,9 @@ onMounted(() => {
         <BaseButton variant="secondary" @click="resolveUnsaved('cancel')">{{
           t("settings.unsaved.keep")
         }}</BaseButton>
-        <BaseButton
-          variant="action-danger"
-          @click="resolveUnsaved('discard')"
-          >{{ t("settings.unsaved.discard") }}</BaseButton
-        >
+        <BaseButton variant="action-danger" @click="resolveUnsaved('discard')">{{
+          t("settings.unsaved.discard")
+        }}</BaseButton>
       </div>
     </BaseModalShell>
   </main>

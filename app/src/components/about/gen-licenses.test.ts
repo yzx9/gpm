@@ -28,14 +28,7 @@ describe("gen-licenses scanNpm", () => {
     const names = pkgs.map((p) => p.name);
     // scanNpmAll seeds from BOTH dependencies and devDependencies, so build/test
     // tooling is attributed despite not shipping.
-    for (const dep of [
-      "vite",
-      "vitest",
-      "jsdom",
-      "typescript",
-      "vue-tsc",
-      "tailwindcss",
-    ])
+    for (const dep of ["vite", "vitest", "jsdom", "typescript", "vue-tsc", "tailwindcss"])
       expect(names).toContain(dep);
     // Runtime deps still present (regression guard on the existing behavior):
     for (const dep of ["vue", "@tauri-apps/api"]) expect(names).toContain(dep);

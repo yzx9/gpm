@@ -6,11 +6,7 @@ import EntryConflictModal from "@/components/EntryConflictModal.vue";
 import type { EntryConflictPayload } from "@/composables/useEntryConflict";
 import { mountWithApp } from "@/test/appTestUtils";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  enableAutoUnmount,
-  flushPromises,
-  type ComponentMountingOptions,
-} from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, type ComponentMountingOptions } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mirror DivergenceModal.test.ts: mount the modal inside the app-shell provide
@@ -32,9 +28,7 @@ const SHEET = '[aria-label="This secret changed elsewhere"]';
 // Step-2 aria-label depends on which choice opened it.
 const STEP2_KEEPTHEIRS = '[aria-label="Keep their version"]';
 
-function mountModal(
-  options: ComponentMountingOptions<typeof EntryConflictModal>,
-) {
+function mountModal(options: ComponentMountingOptions<typeof EntryConflictModal>) {
   // mountWithApp forwards mountOpts under its 8-key provide block; we keep it
   // for parity with the page tests even though bare `mount` would also work
   // given the global setup.ts i18n + per-test provide.
@@ -74,9 +68,7 @@ describe("EntryConflictModal", () => {
 
     // The step-2 confirm button (variant=danger) emits "resolve" with the
     // pending choice; it does NOT call any IPC directly.
-    const confirmBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Discard my edit"))!;
+    const confirmBtn = wrapper.findAll("button").find((b) => b.text().includes("Discard my edit"))!;
     await confirmBtn.trigger("click");
     await flushPromises();
 
@@ -191,12 +183,8 @@ describe("EntryConflictModal", () => {
     expect(wrapper.text()).toContain("This name is already in use");
     const buttons = wrapper.findAll("button");
     // Step-1 labels are op-keyed: keepTheirsCreate + overwriteCreate.
-    expect(
-      buttons.some((b) => b.text().includes("Keep the existing one")),
-    ).toBe(true);
-    expect(buttons.some((b) => b.text().includes("Overwrite with mine"))).toBe(
-      true,
-    );
+    expect(buttons.some((b) => b.text().includes("Keep the existing one"))).toBe(true);
+    expect(buttons.some((b) => b.text().includes("Overwrite with mine"))).toBe(true);
   });
 
   it("renders the delete-specific heading + buttons for a delete conflict", async () => {
@@ -210,12 +198,8 @@ describe("EntryConflictModal", () => {
     expect(wrapper.text()).toContain("This secret was changed elsewhere");
     const buttons = wrapper.findAll("button");
     // Step-1 labels: keepTheirsDelete + deleteAnyway.
-    expect(buttons.some((b) => b.text().includes("Keep their version"))).toBe(
-      true,
-    );
-    expect(buttons.some((b) => b.text().includes("Delete it anyway"))).toBe(
-      true,
-    );
+    expect(buttons.some((b) => b.text().includes("Keep their version"))).toBe(true);
+    expect(buttons.some((b) => b.text().includes("Delete it anyway"))).toBe(true);
   });
 
   it("'Preview their version' surfaces previewError when show_password rejects (undecryptable)", async () => {
@@ -223,8 +207,7 @@ describe("EntryConflictModal", () => {
     // identity — the preview must surface a clear error, not crash the modal, and
     // keep-theirs stays a stated leap of faith.
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "plugin:screen-secure|set_secure")
-        return Promise.resolve(undefined);
+      if (cmd === "plugin:screen-secure|set_secure") return Promise.resolve(undefined);
       if (cmd === "show_password")
         return Promise.reject({
           code: "DECRYPT_FAILED",
@@ -277,9 +260,7 @@ describe("EntryConflictModal", () => {
     expect(wrapper.find(STEP2_KEEPTHEIRS).exists()).toBe(true);
 
     // The step-2 Cancel is the last "Cancel" button (the sheet's cancel renders first).
-    const cancels = wrapper
-      .findAll("button")
-      .filter((b) => b.text().includes("Cancel"));
+    const cancels = wrapper.findAll("button").filter((b) => b.text().includes("Cancel"));
     await cancels[cancels.length - 1].trigger("click");
     await flushPromises();
 

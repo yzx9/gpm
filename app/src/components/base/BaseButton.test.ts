@@ -20,9 +20,7 @@ describe("BaseButton", () => {
       "link",
     ] as const) {
       const wrapper = mount(BaseButton, { props: { variant } });
-      expect(wrapper.find("button").classes(), `variant=${variant}`).toContain(
-        variant,
-      );
+      expect(wrapper.find("button").classes(), `variant=${variant}`).toContain(variant);
     }
   });
 
@@ -78,9 +76,7 @@ describe("BaseButton", () => {
 
   it("loading disables the button and renders a spinner", () => {
     const wrapper = mount(BaseButton, { props: { loading: true } });
-    expect((wrapper.find("button").element as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect((wrapper.find("button").element as HTMLButtonElement).disabled).toBe(true);
     expect(wrapper.findComponent(BaseSpinner).exists()).toBe(true);
   });
 
@@ -88,9 +84,7 @@ describe("BaseButton", () => {
     const wrapper = mount(BaseButton, {
       props: { loading: true, disabled: false },
     });
-    expect((wrapper.find("button").element as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect((wrapper.find("button").element as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("block adds the block class", () => {

@@ -37,11 +37,7 @@ function buildRouter() {
  * position to reflect the navigation it is about to perform, then drives it.
  */
 let position = 0;
-async function goto(
-  router: ReturnType<typeof buildRouter>,
-  path: string,
-  pos: number,
-) {
+async function goto(router: ReturnType<typeof buildRouter>, path: string, pos: number) {
   position = pos;
   await router.push(path);
   await flushPromises();

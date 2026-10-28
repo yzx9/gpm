@@ -17,10 +17,7 @@ import { useWipeOnLeave } from "./useWipeOnLeave";
 // wipe). vue-router is mocked in setup.ts, so popstate must be driven
 // explicitly via window.dispatchEvent — programmatic router.back() does not
 // touch real history.
-function mountWipe(
-  opts?: { lock?: boolean },
-  wipe: () => boolean | void = vi.fn(),
-) {
+function mountWipe(opts?: { lock?: boolean }, wipe: () => boolean | void = vi.fn()) {
   const lock = createLockState({ unlocked: true });
   const appLock = createAppLockStore();
   const notice = createDraftsNotice();

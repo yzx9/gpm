@@ -31,9 +31,7 @@ const emit = defineEmits<{
 }>();
 
 /** The first untrusted-key issue, if any — gates the "Trust this signer" button. */
-const untrustedIssue = computed(() =>
-  props.issues?.find((c) => c.status.kind === "untrusted_key"),
-);
+const untrustedIssue = computed(() => props.issues?.find((c) => c.status.kind === "untrusted_key"));
 
 /** The first GPG `unverified_signature` issue, if any. GPG signatures carry no
  * public key to auto-trust (unlike SSH-sig), so there's no "Trust this signer"
@@ -47,9 +45,7 @@ const unverifiedIssue = computed(() =>
  * can find the right key to paste. */
 const unverifiedSignerFp = computed(() => {
   const issue = unverifiedIssue.value;
-  return issue && issue.status.kind === "unverified_signature"
-    ? issue.status.signer_fp
-    : null;
+  return issue && issue.status.kind === "unverified_signature" ? issue.status.signer_fp : null;
 });
 </script>
 
@@ -66,11 +62,7 @@ const unverifiedSignerFp = computed(() => {
     </h2>
     <p class="text-xs text-muted mb-3">{{ t("common.authenticity.body") }}</p>
     <ul class="flex flex-col gap-2 mb-3">
-      <li
-        v-for="c in issues"
-        :key="c.hash"
-        class="flex items-center gap-2 text-sm"
-      >
+      <li v-for="c in issues" :key="c.hash" class="flex items-center gap-2 text-sm">
         <CommitSigIndicator :status="c.status" class="shrink-0" />
         <code class="text-xs text-muted">{{ c.short_hash }}</code>
         <span class="flex-1 truncate">{{ c.subject }}</span>
@@ -91,26 +83,17 @@ const unverifiedSignerFp = computed(() => {
           <strong>{{ t("common.authenticity.gpgNoticeLink") }}</strong>
         </template>
       </i18n-t>
-      <p
-        v-if="unverifiedIssue && unverifiedSignerFp"
-        class="text-xs text-muted mb-1 break-words"
-      >
+      <p v-if="unverifiedIssue && unverifiedSignerFp" class="text-xs text-muted mb-1 break-words">
         {{ t("common.authenticity.unverifiedFingerprint") }}
         <code class="break-all">{{ unverifiedSignerFp }}</code>
       </p>
-      <BaseButton
-        v-if="untrustedIssue"
-        size="sm"
-        @click="emit('trust-signer', untrustedIssue)"
-      >
+      <BaseButton v-if="untrustedIssue" size="sm" @click="emit('trust-signer', untrustedIssue)">
         {{ t("common.authenticity.trustSigner") }}
       </BaseButton>
       <BaseButton size="sm" @click="emit('switch-to-audit')">
         {{ t("common.authenticity.switchToAudit") }}
       </BaseButton>
-      <BaseButton size="sm" @click="emit('close')">{{
-        t("common.button.cancel")
-      }}</BaseButton>
+      <BaseButton size="sm" @click="emit('close')">{{ t("common.button.cancel") }}</BaseButton>
     </div>
   </BaseModalShell>
 </template>

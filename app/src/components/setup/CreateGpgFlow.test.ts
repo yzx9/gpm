@@ -11,17 +11,14 @@ vi.mock("@tauri-apps/api/core");
 
 /// Branch `invoke` by command name. Call ordering + payloads are the things
 /// under test, so a per-command map is more robust than a value queue.
-function mockInvoke(
-  handlers: Record<string, (args?: Record<string, unknown>) => unknown>,
-) {
+function mockInvoke(handlers: Record<string, (args?: Record<string, unknown>) => unknown>) {
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
     const h = handlers[cmd];
     if (h) return h(args as Record<string, unknown> | undefined);
     // The setup flow resolves the active repo id (for the first push) from the
     // persisted registry; default to a registered repo so resolveActiveRepoId
     // succeeds without each push test restating it.
-    if (cmd === "get_app_config")
-      return { repositories: ["test-repo"], last_active: "test-repo" };
+    if (cmd === "get_app_config") return { repositories: ["test-repo"], last_active: "test-repo" };
     return undefined;
   });
 }
@@ -121,10 +118,7 @@ describe("CreateGpgFlow", () => {
     await submit(wrapper);
 
     expect(invoke).toHaveBeenCalledWith("create_gpg_store", expect.anything());
-    expect(invoke).toHaveBeenCalledWith(
-      "complete_setup_from_file",
-      expect.anything(),
-    );
+    expect(invoke).toHaveBeenCalledWith("complete_setup_from_file", expect.anything());
     // No remote → no first push.
     expect(invoke).not.toHaveBeenCalledWith("push_repo");
     expect(wrapper.emitted("done")).toHaveLength(1);
@@ -172,18 +166,12 @@ describe("CreateGpgFlow", () => {
     const wrapper = mount(CreateGpgFlow);
     await flushPromises();
     await importAndVerify(wrapper);
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("https://example.com/r.git");
+    await wrapper.find('input[id="repo-url"]').setValue("https://example.com/r.git");
     await wrapper.find('input[id="pat"]').setValue("my-pat");
     await submit(wrapper);
 
     // create → complete_setup_from_file → push_repo, in that order.
-    expect(calls).toEqual([
-      "create_gpg_store",
-      "complete_setup_from_file",
-      "push_repo",
-    ]);
+    expect(calls).toEqual(["create_gpg_store", "complete_setup_from_file", "push_repo"]);
     expect(wrapper.emitted("done")).toHaveLength(1);
     expectNoKeyArmorCrossedIPC();
   });
@@ -195,13 +183,8 @@ describe("CreateGpgFlow", () => {
     await flushPromises();
     await submit(wrapper);
 
-    expect(wrapper.find("[role='alert']").text()).toBe(
-      "Import a GPG key first",
-    );
-    expect(invoke).not.toHaveBeenCalledWith(
-      "create_gpg_store",
-      expect.anything(),
-    );
+    expect(wrapper.find("[role='alert']").text()).toBe("Import a GPG key first");
+    expect(invoke).not.toHaveBeenCalledWith("create_gpg_store", expect.anything());
   });
 
   it("requires the S2K passphrase to be verified before creating", async () => {
@@ -212,13 +195,8 @@ describe("CreateGpgFlow", () => {
     // Picked but not verified.
     await submit(wrapper);
 
-    expect(wrapper.find("[role='alert']").text()).toBe(
-      "Verify your GPG key's passphrase first",
-    );
-    expect(invoke).not.toHaveBeenCalledWith(
-      "create_gpg_store",
-      expect.anything(),
-    );
+    expect(wrapper.find("[role='alert']").text()).toBe("Verify your GPG key's passphrase first");
+    expect(invoke).not.toHaveBeenCalledWith("create_gpg_store", expect.anything());
     expect(wrapper.emitted("done")).toBeUndefined();
   });
 
@@ -246,10 +224,7 @@ describe("CreateGpgFlow", () => {
     await submit(wrapper);
 
     expect(wrapper.find("[role='alert']").text()).toBe("disk full");
-    expect(invoke).not.toHaveBeenCalledWith(
-      "complete_setup_from_file",
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith("complete_setup_from_file", expect.anything());
     expect(wrapper.emitted("done")).toBeUndefined();
   });
 
@@ -276,17 +251,13 @@ describe("CreateGpgFlow", () => {
     const wrapper = mount(CreateGpgFlow);
     await flushPromises();
     await importAndVerify(wrapper);
-    await wrapper
-      .find('input[id="repo-url"]')
-      .setValue("https://example.com/r.git");
+    await wrapper.find('input[id="repo-url"]').setValue("https://example.com/r.git");
     await submit(wrapper);
 
     expect(invoke).toHaveBeenCalledWith("push_repo", {
       repoId: "test-repo",
     });
-    expect(wrapper.find("[role='alert']").text()).toContain(
-      "remote unreachable",
-    );
+    expect(wrapper.find("[role='alert']").text()).toContain("remote unreachable");
     expect(wrapper.find("[role='alert']").text()).toContain("saved locally");
     expect(wrapper.emitted("done")).toBeUndefined();
   });

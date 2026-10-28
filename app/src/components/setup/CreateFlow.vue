@@ -77,9 +77,7 @@ watch(passphrase, () => {
 // Identity-kind options for the segmented control. `computed` keeps the labels
 // reactive to locale changes and pins the value type so the control's generic
 // parameter resolves to CreateIdentityKind (not string).
-const IDENTITY_KIND_OPTIONS = computed<
-  { label: string; value: CreateIdentityKind }[]
->(() => [
+const IDENTITY_KIND_OPTIONS = computed<{ label: string; value: CreateIdentityKind }[]>(() => [
   { label: t("setup.create.tabAge"), value: "age" },
   { label: t("setup.create.tabSsh"), value: "ssh" },
 ]);
@@ -143,10 +141,7 @@ async function generate() {
       // edit — or a mid-generate keystroke before the lock takes effect — can't
       // desync the two.
       mintedSshPassphrase.value = passphrase.value || null;
-      recipient.value = await generateIdentity(
-        "ssh",
-        mintedSshPassphrase.value,
-      );
+      recipient.value = await generateIdentity("ssh", mintedSshPassphrase.value);
     } else {
       recipient.value = await generateIdentity("age", null);
     }
@@ -198,9 +193,7 @@ async function onCreate() {
   // must read the value the user actually typed — mirrors the SSH
   // mintedSshPassphrase snapshot (see generate()).
   const sealPassphrase =
-    identityKind.value === "ssh"
-      ? mintedSshPassphrase.value
-      : passphrase.value || null;
+    identityKind.value === "ssh" ? mintedSshPassphrase.value : passphrase.value || null;
 
   loading.value = true;
   try {
@@ -265,9 +258,7 @@ async function onCreate() {
 
     <!-- Identity type -->
     <div class="flex flex-col gap-1">
-      <span class="text-sm font-medium">{{
-        t("setup.create.identityTypeLabel")
-      }}</span>
+      <span class="text-sm font-medium">{{ t("setup.create.identityTypeLabel") }}</span>
       <BaseSegmentedControl
         name="create-identity-kind"
         :model-value="identityKind"
@@ -299,18 +290,10 @@ async function onCreate() {
     <!-- age seal: forced unrecoverable ack (only once a passphrase is
          typed; empty = plaintext = no lockout risk). SSH key-gen is out of
          scope — its passphrase uses SSH's own native protection. -->
-    <PassphraseUnrecoverableAck
-      v-if="identityKind === 'age' && passphrase"
-      v-model="ackAge"
-    />
+    <PassphraseUnrecoverableAck v-if="identityKind === 'age' && passphrase" v-model="ackAge" />
 
     <!-- Generate -->
-    <BaseButton
-      variant="secondary"
-      :loading="generating"
-      :disabled="loading"
-      @click="generate"
-    >
+    <BaseButton variant="secondary" :loading="generating" :disabled="loading" @click="generate">
       <BaseIcon v-if="!generating" :icon="KeyRound" />
       {{
         generating
@@ -324,24 +307,18 @@ async function onCreate() {
     <!-- Recipient (public key) — shown once generated. The secret identity is
          never rendered. -->
     <div v-if="recipient" class="flex flex-col gap-1">
-      <span
-        class="text-sm font-medium text-success inline-flex items-center gap-1"
-      >
+      <span class="text-sm font-medium text-success inline-flex items-center gap-1">
         <BaseIcon :icon="CircleCheck" :size="14" />
         {{ t("setup.create.recipientLabel") }}
       </span>
       <code class="public-key-display">{{ truncateKey(recipient) }}</code>
-      <small class="text-xs text-muted">{{
-        t("setup.create.recipientHint")
-      }}</small>
+      <small class="text-xs text-muted">{{ t("setup.create.recipientHint") }}</small>
     </div>
 
     <!-- Optional remote -->
     <div class="flex flex-col gap-3 pt-4 border-t border-edge">
       <div>
-        <span class="text-sm font-medium">{{
-          t("setup.create.remoteLabel")
-        }}</span>
+        <span class="text-sm font-medium">{{ t("setup.create.remoteLabel") }}</span>
         <p class="text-xs text-muted">{{ t("setup.create.remoteHint") }}</p>
       </div>
       <div class="flex flex-col gap-4">
@@ -363,15 +340,9 @@ async function onCreate() {
 
     <BaseAlert v-if="error" variant="danger">{{ error }}</BaseAlert>
 
-    <BaseButton
-      variant="primary"
-      type="submit"
-      :loading="loading"
-      :disabled="ackRequired"
-      >{{
-        loading ? t("setup.create.creating") : t("setup.create.buttonCreate")
-      }}</BaseButton
-    >
+    <BaseButton variant="primary" type="submit" :loading="loading" :disabled="ackRequired">{{
+      loading ? t("setup.create.creating") : t("setup.create.buttonCreate")
+    }}</BaseButton>
   </form>
 </template>
 

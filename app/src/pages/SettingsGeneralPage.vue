@@ -3,12 +3,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
-import type {
-  AppConfig,
-  AppError,
-  BackgroundSyncCadence,
-  SecureScreenMode,
-} from "@/api";
+import type { AppConfig, AppError, BackgroundSyncCadence, SecureScreenMode } from "@/api";
 import {
   resetConfig as apiResetConfig,
   DEFAULT_BACKGROUND_SYNC_CADENCE,
@@ -29,13 +24,7 @@ import BaseModalShell from "@/components/base/BaseModalShell.vue";
 import BaseOnOffToggle from "@/components/base/BaseOnOffToggle.vue";
 import BaseSegmentedControl from "@/components/base/BaseSegmentedControl.vue";
 import BaseSelect from "@/components/base/BaseSelect.vue";
-import {
-  useDialog,
-  usePlatform,
-  useSecureScreen,
-  useToast,
-  Z,
-} from "@/composables";
+import { useDialog, usePlatform, useSecureScreen, useToast, Z } from "@/composables";
 import { normalizeSupported, setLocale } from "@/i18n";
 import { applyTheme, normalizeThemeMode, type ThemeMode } from "@/theme";
 import { Trash2 } from "@lucide/vue";
@@ -55,8 +44,7 @@ const localeSelection = ref<"system" | "en" | "zh-CN">("system");
 async function loadLocalePref(): Promise<void> {
   try {
     const app = await getAppConfig();
-    localeSelection.value =
-      app.locale === "en" || app.locale === "zh-CN" ? app.locale : "system";
+    localeSelection.value = app.locale === "en" || app.locale === "zh-CN" ? app.locale : "system";
   } catch {
     // No app config yet — leave "system".
   }
@@ -138,8 +126,7 @@ const appConfig = ref<AppConfig | null>(null);
 const loading = ref(false);
 const error = ref("");
 
-const { secureScreenMode, secureAvailable, setSecureScreenMode } =
-  useSecureScreen();
+const { secureScreenMode, secureAvailable, setSecureScreenMode } = useSecureScreen();
 const { platform } = usePlatform();
 
 async function loadConfig() {
@@ -213,25 +200,15 @@ async function onAutosyncChange(enabled: boolean) {
 // while AutoSync is on. The on/off primary enables the periodic background sync;
 // when on, the cadence select picks how often. "off" is the opt-out sentinel the
 // backend already accepts (the foreground sync always runs regardless).
-const backgroundSyncOptions: BackgroundSyncCadence[] = [
-  "1h",
-  "6h",
-  "12h",
-  "1d",
-  "3d",
-];
+const backgroundSyncOptions: BackgroundSyncCadence[] = ["1h", "6h", "12h", "1d", "3d"];
 const backgroundSyncCadence = computed<BackgroundSyncCadence>(
   () => appConfig.value?.background_sync ?? "off",
 );
-const backgroundSyncEnabled = computed(
-  () => backgroundSyncCadence.value !== "off",
-);
+const backgroundSyncEnabled = computed(() => backgroundSyncCadence.value !== "off");
 // Last-used cadence, restored when the toggle flips back on. The install default
 // is "off" (no cadence chosen), so the first enable falls back to
 // DEFAULT_BACKGROUND_SYNC_CADENCE. The watcher below is its sole writer.
-const lastBackgroundSync = ref<BackgroundSyncCadence>(
-  DEFAULT_BACKGROUND_SYNC_CADENCE,
-);
+const lastBackgroundSync = ref<BackgroundSyncCadence>(DEFAULT_BACKGROUND_SYNC_CADENCE);
 watch(
   backgroundSyncCadence,
   (c) => {
@@ -316,10 +293,7 @@ onMounted(() => {
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settings' }"
-      :title="t('settings.hub.general')"
-    />
+    <BaseHeader :back-fallback="{ name: 'settings' }" :title="t('settings.hub.general')" />
 
     <div v-if="loading" class="text-center text-muted py-8">
       {{ t("common.loading") }}
@@ -421,9 +395,7 @@ onMounted(() => {
         >
           <template #hint>
             <p class="text-xs text-muted mt-1">
-              <template v-if="autosyncEnabled">{{
-                t("settings.autosync.onHint")
-              }}</template>
+              <template v-if="autosyncEnabled">{{ t("settings.autosync.onHint") }}</template>
               <template v-else>{{ t("settings.autosync.offHint") }}</template>
             </p>
           </template>
@@ -500,12 +472,7 @@ onMounted(() => {
         <label class="text-sm font-medium" for="reset-confirm">{{
           t("settings.reset.typeReset")
         }}</label>
-        <BaseInput
-          id="reset-confirm"
-          v-model="resetConfirmText"
-          autocomplete="off"
-          autofocus
-        />
+        <BaseInput id="reset-confirm" v-model="resetConfirmText" autocomplete="off" autofocus />
       </div>
       <div class="flex gap-2 justify-end">
         <BaseButton variant="secondary" @click="resetOpen = false">{{

@@ -19,10 +19,7 @@ describe("PassphraseUnrecoverableAck", () => {
   it("checks the box and emits update:modelValue when the user ticks it", async () => {
     const wrapper = mount(PassphraseUnrecoverableAck);
     await wrapper.find('input[type="checkbox"]').setValue(true);
-    expect(
-      (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true);
     expect(wrapper.emitted("update:modelValue")![0]).toEqual([true]);
   });
 
@@ -30,10 +27,7 @@ describe("PassphraseUnrecoverableAck", () => {
     const wrapper = mount(PassphraseUnrecoverableAck, {
       props: { modelValue: true },
     });
-    expect(
-      (wrapper.find('input[type="checkbox"]').element as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true);
   });
 
   it("un-checking emits update:modelValue=false", async () => {

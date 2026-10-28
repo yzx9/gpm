@@ -89,17 +89,13 @@ describe("reconcileLocaleFromBackend", () => {
   });
 
   it("switches when the backend resolves a different locale", async () => {
-    vi.mocked(invoke).mockResolvedValue(
-      "zh-CN" as unknown as Awaited<ReturnType<typeof invoke>>,
-    );
+    vi.mocked(invoke).mockResolvedValue("zh-CN" as unknown as Awaited<ReturnType<typeof invoke>>);
     await reconcileLocaleFromBackend();
     expect(currentLocale()).toBe("zh-CN");
   });
 
   it("is a no-op when the backend matches the boot locale", async () => {
-    vi.mocked(invoke).mockResolvedValue(
-      "en" as unknown as Awaited<ReturnType<typeof invoke>>,
-    );
+    vi.mocked(invoke).mockResolvedValue("en" as unknown as Awaited<ReturnType<typeof invoke>>);
     await reconcileLocaleFromBackend();
     expect(currentLocale()).toBe("en");
   });

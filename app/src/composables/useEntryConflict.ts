@@ -49,11 +49,7 @@ export function useEntryConflict(opts: {
   /** i18n key for the generic "resolve failed" error line. */
   resolveFailedKey: string;
   /** Resolve succeeded — page toasts/navigates (wording/target differ per op + choice). */
-  onResolved: (
-    result: PullResult,
-    choice: EntryConflictChoice,
-    op: EntryConflictOp,
-  ) => void;
+  onResolved: (result: PullResult, choice: EntryConflictChoice, op: EntryConflictOp) => void;
   /** `PULL_FF_FAILED` — the remote moved since the user reviewed; the page recovers. */
   onPullFfFailed: () => void;
   /** Enforce signature verification refused the resolve's re-fetch (an unverified
@@ -67,10 +63,7 @@ export function useEntryConflict(opts: {
   conflictError: Ref<string>;
   /** Surface a conflict (caller strips the outcome `kind` tag first). `parts` is
    *  the edited secret parts to re-send on keep-mine edit (null for delete). */
-  openConflict: (
-    payload: EntryConflictPayload,
-    parts: SecretParts | null,
-  ) => void;
+  openConflict: (payload: EntryConflictPayload, parts: SecretParts | null) => void;
   resolveConflict: (choice: EntryConflictChoice) => Promise<void>;
   cancelConflict: () => void;
 } {
@@ -114,10 +107,7 @@ export function useEntryConflict(opts: {
   // cancel time cannot skip the deferred identity-wipe release below.
   let openRepoId: Promise<string> | null = null;
 
-  function openConflict(
-    payload: EntryConflictPayload,
-    parts: SecretParts | null,
-  ) {
+  function openConflict(payload: EntryConflictPayload, parts: SecretParts | null) {
     conflict.value = payload;
     pendingParts = parts;
     conflictError.value = "";
@@ -131,10 +121,7 @@ export function useEntryConflict(opts: {
     conflict.value = null;
     conflictError.value = "";
     pendingParts = null;
-    if (openRepoId)
-      void openRepoId
-        .then((repoId) => discardDivergence(repoId))
-        .catch(() => {});
+    if (openRepoId) void openRepoId.then((repoId) => discardDivergence(repoId)).catch(() => {});
   }
 
   async function resolveConflict(choice: EntryConflictChoice) {
@@ -143,9 +130,7 @@ export function useEntryConflict(opts: {
     // Only a keep-mine edit/create re-sends the edited parts; delete +
     // keep-theirs carry none.
     const parts =
-      (op === "edit" || op === "create") && choice === "keep_mine"
-        ? pendingParts
-        : null;
+      (op === "edit" || op === "create") && choice === "keep_mine" ? pendingParts : null;
     resolving.value = true;
     conflictError.value = "";
     try {
@@ -157,14 +142,7 @@ export function useEntryConflict(opts: {
             await runWithAuth(() =>
               resolveEntryConflict(repoId, name, parts, remote_tip, op, choice),
             )
-          : await resolveEntryConflict(
-              repoId,
-              name,
-              parts,
-              remote_tip,
-              op,
-              choice,
-            );
+          : await resolveEntryConflict(repoId, name, parts, remote_tip, op, choice);
       conflict.value = null;
       pendingParts = null;
       // Enforce may refuse the resolve's re-fetch (an unverified remote commit).

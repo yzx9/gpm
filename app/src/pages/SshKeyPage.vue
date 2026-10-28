@@ -3,24 +3,13 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
-import {
-  clearSshKey,
-  exportSshPrivateKey,
-  getSshPublicKey,
-  type AppError,
-} from "@/api";
+import { clearSshKey, exportSshPrivateKey, getSshPublicKey, type AppError } from "@/api";
 import BaseAlert from "@/components/base/BaseAlert.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseHeader from "@/components/base/BaseHeader.vue";
 import BaseIcon from "@/components/base/BaseIcon.vue";
 import BaseSpinner from "@/components/base/BaseSpinner.vue";
-import {
-  useActiveRepo,
-  useDialog,
-  useSecureClaim,
-  useToast,
-  useWipeOnLeave,
-} from "@/composables";
+import { useActiveRepo, useDialog, useSecureClaim, useToast, useWipeOnLeave } from "@/composables";
 import { Copy, LockOpen, Trash2, TriangleAlert } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -149,27 +138,18 @@ useWipeOnLeave(hidePrivate);
 
 <template>
   <main class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settings' }"
-      :title="t('sshKey.title')"
-    />
+    <BaseHeader :back-fallback="{ name: 'settings' }" :title="t('sshKey.title')" />
 
-    <BaseAlert v-if="error" variant="danger" class="mb-4">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert v-if="error" variant="danger" class="mb-4">{{ error }}</BaseAlert>
 
     <!-- No SSH key configured — a normal state, not an error. -->
-    <BaseAlert v-if="noKey" variant="info" class="mb-4">{{
-      t("sshKey.noKey")
-    }}</BaseAlert>
+    <BaseAlert v-if="noKey" variant="info" class="mb-4">{{ t("sshKey.noKey") }}</BaseAlert>
 
     <template v-if="!noKey">
       <!-- Public key -->
       <section class="mb-6">
         <div class="flex justify-between items-center mb-2">
-          <span class="text-xs text-muted">{{
-            t("sshKey.publicKeyLabel")
-          }}</span>
+          <span class="text-xs text-muted">{{ t("sshKey.publicKeyLabel") }}</span>
           <BaseButton
             v-if="publicKey"
             variant="link"
@@ -200,20 +180,11 @@ useWipeOnLeave(hidePrivate);
 
         <div v-if="showPrivate" class="mt-3 flex flex-col gap-2">
           <BaseAlert variant="danger">
-            <BaseIcon
-              :icon="TriangleAlert"
-              :size="14"
-              class="inline-block align-middle"
-            />
+            <BaseIcon :icon="TriangleAlert" :size="14" class="inline-block align-middle" />
             {{ t("sshKey.privateVisible") }}
           </BaseAlert>
           <div class="flex justify-end">
-            <BaseButton
-              variant="link"
-              size="xs"
-              tone="accent"
-              @click="copyText(privateKey)"
-            >
+            <BaseButton variant="link" size="xs" tone="accent" @click="copyText(privateKey)">
               <BaseIcon :icon="Copy" /> {{ t("sshKey.copy") }}
             </BaseButton>
           </div>
@@ -226,11 +197,7 @@ useWipeOnLeave(hidePrivate);
 
       <!-- Remove key (method switching: clears SSH so a stored PAT / None takes over) -->
       <section>
-        <BaseButton
-          variant="action-danger"
-          :loading="removing"
-          @click="removeKey"
-        >
+        <BaseButton variant="action-danger" :loading="removing" @click="removeKey">
           <BaseIcon :icon="Trash2" /> {{ t("sshKey.remove") }}
         </BaseButton>
       </section>

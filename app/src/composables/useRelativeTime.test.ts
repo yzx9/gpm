@@ -21,87 +21,46 @@ describe("formatRelativeTime (pure)", () => {
 
   it("returns the caller-supplied justNow for less than 60 seconds", () => {
     expect(formatRelativeTime(now, now, "en", JUST_NOW_EN)).toBe("just now");
-    expect(formatRelativeTime(now, now - 59_000, "en", JUST_NOW_EN)).toBe(
-      "just now",
-    );
-    expect(formatRelativeTime(now, now - 1, "en", JUST_NOW_EN)).toBe(
-      "just now",
-    );
-    expect(formatRelativeTime(now, now - 30_000, "zh-CN", JUST_NOW_ZH)).toBe(
-      "刚刚",
-    );
+    expect(formatRelativeTime(now, now - 59_000, "en", JUST_NOW_EN)).toBe("just now");
+    expect(formatRelativeTime(now, now - 1, "en", JUST_NOW_EN)).toBe("just now");
+    expect(formatRelativeTime(now, now - 30_000, "zh-CN", JUST_NOW_ZH)).toBe("刚刚");
   });
 
   it("formats the minute bucket via Intl for each locale", () => {
-    expect(formatRelativeTime(now, now - 60_000, "en", JUST_NOW_EN)).toBe(
-      "1 minute ago",
-    );
-    expect(formatRelativeTime(now, now - 120_000, "en", JUST_NOW_EN)).toBe(
-      "2 minutes ago",
-    );
-    expect(formatRelativeTime(now, now - 1_800_000, "en", JUST_NOW_EN)).toBe(
-      "30 minutes ago",
-    );
-    expect(formatRelativeTime(now, now - 120_000, "zh-CN", JUST_NOW_ZH)).toBe(
-      "2分钟前",
-    );
-    expect(formatRelativeTime(now, now - 1_800_000, "zh-CN", JUST_NOW_ZH)).toBe(
-      "30分钟前",
-    );
+    expect(formatRelativeTime(now, now - 60_000, "en", JUST_NOW_EN)).toBe("1 minute ago");
+    expect(formatRelativeTime(now, now - 120_000, "en", JUST_NOW_EN)).toBe("2 minutes ago");
+    expect(formatRelativeTime(now, now - 1_800_000, "en", JUST_NOW_EN)).toBe("30 minutes ago");
+    expect(formatRelativeTime(now, now - 120_000, "zh-CN", JUST_NOW_ZH)).toBe("2分钟前");
+    expect(formatRelativeTime(now, now - 1_800_000, "zh-CN", JUST_NOW_ZH)).toBe("30分钟前");
   });
 
   it("formats the hour bucket via Intl for each locale", () => {
-    expect(formatRelativeTime(now, now - 3_600_000, "en", JUST_NOW_EN)).toBe(
-      "1 hour ago",
-    );
-    expect(formatRelativeTime(now, now - 7_200_000, "en", JUST_NOW_EN)).toBe(
-      "2 hours ago",
-    );
-    expect(formatRelativeTime(now, now - 36_000_000, "en", JUST_NOW_EN)).toBe(
-      "10 hours ago",
-    );
-    expect(formatRelativeTime(now, now - 7_200_000, "zh-CN", JUST_NOW_ZH)).toBe(
-      "2小时前",
-    );
+    expect(formatRelativeTime(now, now - 3_600_000, "en", JUST_NOW_EN)).toBe("1 hour ago");
+    expect(formatRelativeTime(now, now - 7_200_000, "en", JUST_NOW_EN)).toBe("2 hours ago");
+    expect(formatRelativeTime(now, now - 36_000_000, "en", JUST_NOW_EN)).toBe("10 hours ago");
+    expect(formatRelativeTime(now, now - 7_200_000, "zh-CN", JUST_NOW_ZH)).toBe("2小时前");
   });
 
   it("formats the day bucket via Intl for each locale", () => {
-    expect(formatRelativeTime(now, now - 86_400_000, "en", JUST_NOW_EN)).toBe(
-      "1 day ago",
-    );
-    expect(
-      formatRelativeTime(now, now - 5 * 86_400_000, "en", JUST_NOW_EN),
-    ).toBe("5 days ago");
-    expect(
-      formatRelativeTime(now, now - 5 * 86_400_000, "zh-CN", JUST_NOW_ZH),
-    ).toBe("5天前");
+    expect(formatRelativeTime(now, now - 86_400_000, "en", JUST_NOW_EN)).toBe("1 day ago");
+    expect(formatRelativeTime(now, now - 5 * 86_400_000, "en", JUST_NOW_EN)).toBe("5 days ago");
+    expect(formatRelativeTime(now, now - 5 * 86_400_000, "zh-CN", JUST_NOW_ZH)).toBe("5天前");
   });
 
   it("handles the day/hour boundary at exactly 24 hours", () => {
-    expect(formatRelativeTime(now, now - 86_400_000, "en", JUST_NOW_EN)).toBe(
-      "1 day ago",
-    );
-    expect(formatRelativeTime(now, now - 86_399_000, "en", JUST_NOW_EN)).toBe(
-      "23 hours ago",
-    );
+    expect(formatRelativeTime(now, now - 86_400_000, "en", JUST_NOW_EN)).toBe("1 day ago");
+    expect(formatRelativeTime(now, now - 86_399_000, "en", JUST_NOW_EN)).toBe("23 hours ago");
   });
 
   it("handles the day/absolute boundary at exactly 7 days", () => {
     // 1ms under 7 days stays in the relative day bucket.
-    expect(
-      formatRelativeTime(now, now - (7 * 86_400_000 - 1), "en", JUST_NOW_EN),
-    ).toBe("6 days ago");
+    expect(formatRelativeTime(now, now - (7 * 86_400_000 - 1), "en", JUST_NOW_EN)).toBe(
+      "6 days ago",
+    );
     // Exactly 7 days falls back to an absolute date.
-    const result = formatRelativeTime(
-      now,
-      now - 7 * 86_400_000,
-      "en",
-      JUST_NOW_EN,
-    );
+    const result = formatRelativeTime(now, now - 7 * 86_400_000, "en", JUST_NOW_EN);
     expect(result).not.toMatch(/ago$/);
-    expect(result).toMatch(
-      /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(, \d{4})?$/,
-    );
+    expect(result).toMatch(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(, \d{4})?$/);
   });
 
   it("returns justNow for a future timestamp (clock skew)", () => {
@@ -109,26 +68,15 @@ describe("formatRelativeTime (pure)", () => {
     // collapses to the sub-minute bucket. For sync/commit labels that is the
     // friendly call (you can't show "in 2 hours" for a last-sync stamp); this
     // pins the behavior so a future change is visible.
-    expect(formatRelativeTime(now, now + 5_000, "en", JUST_NOW_EN)).toBe(
-      "just now",
-    );
-    expect(formatRelativeTime(now, now + 7_200_000, "en", JUST_NOW_EN)).toBe(
-      "just now",
-    );
+    expect(formatRelativeTime(now, now + 5_000, "en", JUST_NOW_EN)).toBe("just now");
+    expect(formatRelativeTime(now, now + 7_200_000, "en", JUST_NOW_EN)).toBe("just now");
   });
 
   it("falls back to an absolute date past a week instead of a relative form", () => {
     // Regression guard: a 249h-old timestamp used to read "249h ago".
-    const result = formatRelativeTime(
-      now,
-      now - 249 * 3_600_000,
-      "en",
-      JUST_NOW_EN,
-    );
+    const result = formatRelativeTime(now, now - 249 * 3_600_000, "en", JUST_NOW_EN);
     expect(result).not.toMatch(/ago$/);
-    expect(result).toMatch(
-      /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(, \d{4})?$/,
-    );
+    expect(result).toMatch(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(, \d{4})?$/);
   });
 
   it("includes the year once the timestamp is in a prior year", () => {
@@ -136,41 +84,31 @@ describe("formatRelativeTime (pure)", () => {
     const priorYearTs = Date.UTC(2024, 2, 15, 12, 0, 0); // 2024-03-15
     // Mid-month, noon UTC: the local-calendar day can shift by ±1 across
     // timezones, but the month and year stay fixed, so anchor with regex.
-    expect(
-      formatRelativeTime(sameYearNow, priorYearTs, "en", JUST_NOW_EN),
-    ).toMatch(/^Mar \d{1,2}, 2024$/);
-    expect(
-      formatRelativeTime(sameYearNow, priorYearTs, "zh-CN", JUST_NOW_ZH),
-    ).toMatch(/^2024年\d{1,2}月\d{1,2}日$/);
+    expect(formatRelativeTime(sameYearNow, priorYearTs, "en", JUST_NOW_EN)).toMatch(
+      /^Mar \d{1,2}, 2024$/,
+    );
+    expect(formatRelativeTime(sameYearNow, priorYearTs, "zh-CN", JUST_NOW_ZH)).toMatch(
+      /^2024年\d{1,2}月\d{1,2}日$/,
+    );
   });
 
   it("omits the year for a same-year absolute date", () => {
     const sameYearNow = Date.UTC(2025, 5, 15, 12, 0, 0); // 2025-06-15
     const sameYearTs = Date.UTC(2025, 2, 15, 12, 0, 0); // 2025-03-15
-    expect(
-      formatRelativeTime(sameYearNow, sameYearTs, "en", JUST_NOW_EN),
-    ).toMatch(/^Mar \d{1,2}$/);
-    expect(
-      formatRelativeTime(sameYearNow, sameYearTs, "zh-CN", JUST_NOW_ZH),
-    ).toMatch(/^\d{1,2}月\d{1,2}日$/);
+    expect(formatRelativeTime(sameYearNow, sameYearTs, "en", JUST_NOW_EN)).toMatch(/^Mar \d{1,2}$/);
+    expect(formatRelativeTime(sameYearNow, sameYearTs, "zh-CN", JUST_NOW_ZH)).toMatch(
+      /^\d{1,2}月\d{1,2}日$/,
+    );
   });
 
   it("handles boundary at exactly 60 seconds", () => {
-    expect(formatRelativeTime(now, now - 60_000, "en", JUST_NOW_EN)).toBe(
-      "1 minute ago",
-    );
-    expect(formatRelativeTime(now, now - 59_999, "en", JUST_NOW_EN)).toBe(
-      "just now",
-    );
+    expect(formatRelativeTime(now, now - 60_000, "en", JUST_NOW_EN)).toBe("1 minute ago");
+    expect(formatRelativeTime(now, now - 59_999, "en", JUST_NOW_EN)).toBe("just now");
   });
 
   it("handles boundary at exactly 3600 seconds (1 hour)", () => {
-    expect(formatRelativeTime(now, now - 3_600_000, "en", JUST_NOW_EN)).toBe(
-      "1 hour ago",
-    );
-    expect(formatRelativeTime(now, now - 3_599_000, "en", JUST_NOW_EN)).toBe(
-      "59 minutes ago",
-    );
+    expect(formatRelativeTime(now, now - 3_600_000, "en", JUST_NOW_EN)).toBe("1 hour ago");
+    expect(formatRelativeTime(now, now - 3_599_000, "en", JUST_NOW_EN)).toBe("59 minutes ago");
   });
 });
 
@@ -218,10 +156,7 @@ describe("common.relativeTime.justNow bundle parity", () => {
       const mod = (await import(`@/locales/${locale}/common.json`)).default as {
         relativeTime?: { justNow?: string };
       };
-      expect(
-        mod.relativeTime?.justNow,
-        `${locale} common.relativeTime.justNow`,
-      ).toBeTruthy();
+      expect(mod.relativeTime?.justNow, `${locale} common.relativeTime.justNow`).toBeTruthy();
     }
   });
 });

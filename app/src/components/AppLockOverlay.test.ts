@@ -51,17 +51,13 @@ describe("AppLockOverlay", () => {
     const { wrapper, dialog } = mountWithApp(AppLockOverlay);
     await flushPromises();
 
-    const link = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Export diagnostics"))!;
+    const link = wrapper.findAll("button").find((b) => b.text().includes("Export diagnostics"))!;
     expect(link).toBeTruthy();
     await link.trigger("click");
     await flushPromises();
 
     // z: Z.gate so the confirm (and its success toast) surface above this gate.
-    expect(dialog.dialog.confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ z: Z.gate }),
-    );
+    expect(dialog.dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({ z: Z.gate }));
     expect(invoke).toHaveBeenCalledWith("export_diagnostics");
   });
 
@@ -86,8 +82,6 @@ describe("AppLockOverlay", () => {
     await unlock.trigger("click");
     await flushPromises();
 
-    expect(wrapper.text()).toContain(
-      "Biometric unlock isn't available right now.",
-    );
+    expect(wrapper.text()).toContain("Biometric unlock isn't available right now.");
   });
 });

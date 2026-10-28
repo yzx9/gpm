@@ -3,14 +3,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script lang="ts">
-import {
-  defineComponent,
-  inject,
-  provide,
-  ref,
-  type InjectionKey,
-  type Ref,
-} from "vue";
+import { defineComponent, inject, provide, ref, type InjectionKey, type Ref } from "vue";
 import { START_LOCATION, useRouter, type Router } from "vue-router";
 
 /**
@@ -51,9 +44,7 @@ export const STACKED_ROUTER_VIEW_KEY: InjectionKey<StackedRouterViewState> =
 export function useStackedRouterView(): StackedRouterViewState {
   const s = inject(STACKED_ROUTER_VIEW_KEY);
   if (!s) {
-    throw new Error(
-      "useStackedRouterView() requires <StackedRouterView> to be mounted above it",
-    );
+    throw new Error("useStackedRouterView() requires <StackedRouterView> to be mounted above it");
   }
   return s;
 }
@@ -164,8 +155,7 @@ export default defineComponent({
     // Only the settle signal crosses the boundary into routed pages; the
     // transition name + hooks stay component-internal.
     provide(STACKED_ROUTER_VIEW_KEY, { whenSettled: state.whenSettled });
-    const { transitionName, onBeforeEnter, onAfterEnter, onEnterCancelled } =
-      state;
+    const { transitionName, onBeforeEnter, onAfterEnter, onEnterCancelled } = state;
     return { transitionName, onBeforeEnter, onAfterEnter, onEnterCancelled };
   },
 });

@@ -154,9 +154,7 @@ export function createLockState(opts: CreateLockStateOptions = {}): LockState {
    *  unless the user dismissed a hard-lock overlay (× / backdrop / back) — the
    *  identity stays locked, but the overlay stays hidden until the next secret
    *  op (per-op auth) or a fresh hard lock re-shows it. */
-  const overlayUp = computed(
-    () => (locked.value || authPrompted.value) && !overlayDismissed.value,
-  );
+  const overlayUp = computed(() => (locked.value || authPrompted.value) && !overlayDismissed.value);
 
   /** Whether the unlock overlay should auto-fire biometric on mount. Per-op auth
    *  (the user just tapped a secret) always auto-prompts; a hard lock

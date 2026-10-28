@@ -22,11 +22,11 @@ cd gpm
 
 ### Dev environment
 
-We recommend using [Nix](https://nixos.org/download/) for a consistent, reproducible dev
-environment across all platforms. The provided `flake.nix` sets up everything you need.
+We recommend using [Nix](https://nixos.org/download/) for a consistent, reproducible dev environment
+across all platforms. The provided `flake.nix` sets up everything you need.
 
-Install [direnv](https://direnv.net/) (with its [shell hook](https://direnv.net/docs/hook.html))
-to auto-load the environment when you `cd` into the project:
+Install [direnv](https://direnv.net/) (with its [shell hook](https://direnv.net/docs/hook.html)) to
+auto-load the environment when you `cd` into the project:
 
 ```bash
 direnv allow
@@ -51,9 +51,11 @@ You'll need to install these yourself:
 
 **Android & JDK**
 
-- **JDK 17**: [Adoptium Temurin](https://adoptium.net/) or your preferred distribution; set `JAVA_HOME`
-- **Android SDK/NDK** — Android Studio or [command-line tools](https://developer.android.com/studio#command-line-tools-only);
-  set `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_NDK_ROOT`
+- **JDK 17**: [Adoptium Temurin](https://adoptium.net/) or your preferred distribution; set
+  `JAVA_HOME`
+- **Android SDK/NDK** — Android Studio or
+  [command-line tools](https://developer.android.com/studio#command-line-tools-only); set
+  `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_NDK_ROOT`
 
 **Utilities**
 
@@ -99,9 +101,10 @@ just android-install-release # Build + install release APK to connected device
 If you don't want to use `just`, you can see the individual commands in `justfile` and run them
 manually.
 
-Android builds require launcher icons in `app/src-tauri/gen/android/app/src/main/res/mipmap-*/`, which
-are not tracked in git (they are regenerated on each build). If you use `just`, this is handled
-automatically. If you run `npm run tauri -w app -- android build` directly, generate icons first:
+Android builds require launcher icons in `app/src-tauri/gen/android/app/src/main/res/mipmap-*/`,
+which are not tracked in git (they are regenerated on each build). If you use `just`, this is
+handled automatically. If you run `npm run tauri -w app -- android build` directly, generate icons
+first:
 
 ```bash
 npm run tauri -w app -- icon assets/app-icon.png
@@ -146,17 +149,17 @@ Key details:
 - Gated behind `pkgs.stdenv.hostPlatform.isDarwin` — Linux hosts are unaffected because the system
   `ar` already produces GNU-format archives
 
-**Files involved:** `flake.nix` (shellHook), `app/src-tauri/Cargo.toml` (`git2` with `vendored-openssl` +
-`vendored-libgit2`)
+**Files involved:** `flake.nix` (shellHook), `app/src-tauri/Cargo.toml` (`git2` with
+`vendored-openssl` + `vendored-libgit2`)
 
 ### Android: HTTPS git certificate verification
 
 On Android the vendored OpenSSL is built `no-stdio`, so HTTPS git would fail certificate
 verification (it can't read the system CA store or a CA file). gpm embeds Mozilla's root bundle
-(`crates/rustpass/data/cacert.pem`) and loads it into libgit2's trust store from memory — Android-only,
-lazily before the first HTTPS op, scheme-gated so SSH / local-only repos are untouched. Desktop is
-unaffected. The root cause (`no-stdio` → `BIO_new_file` compiled out → load via
-`GIT_OPT_ADD_SSL_X509_CERT`) is documented in `crates/rustpass/src/git.rs`.
+(`crates/rustpass/data/cacert.pem`) and loads it into libgit2's trust store from memory —
+Android-only, lazily before the first HTTPS op, scheme-gated so SSH / local-only repos are
+untouched. Desktop is unaffected. The root cause (`no-stdio` → `BIO_new_file` compiled out → load
+via `GIT_OPT_ADD_SSL_X509_CERT`) is documented in `crates/rustpass/src/git.rs`.
 
 **Refresh the bundle every release** so the trusted roots track Mozilla's trust decisions (root
 additions/distrusts):

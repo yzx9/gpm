@@ -1,10 +1,10 @@
 {
   "name": "gpm",
-  "private": true,
   "version": "0.20.1",
-  "type": "module",
-  "author": "Zexin Yuan <gpm@yzx9.xyz> (https://github.com/yzx9)",
+  "private": true,
   "license": "MIT OR Apache-2.0",
+  "author": "Zexin Yuan <gpm@yzx9.xyz> (https://github.com/yzx9)",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",

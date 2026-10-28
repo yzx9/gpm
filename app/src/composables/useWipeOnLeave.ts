@@ -43,10 +43,7 @@ import { useLockSignals } from "./useLockSignals";
  * Must be called during a component's `setup()` (uses `onMounted`/
  * `onBeforeUnmount`).
  */
-export function useWipeOnLeave(
-  wipe: () => boolean | void,
-  opts: { lock?: boolean } = {},
-): void {
+export function useWipeOnLeave(wipe: () => boolean | void, opts: { lock?: boolean } = {}): void {
   onMounted(() => window.addEventListener("popstate", wipe));
   onBeforeUnmount(() => {
     window.removeEventListener("popstate", wipe);

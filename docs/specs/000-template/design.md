@@ -13,8 +13,7 @@ What technical problem this design solves.
 
 ## Approach
 
-The chosen design and why. Design-level only — interfaces, data flow, threat-model
-impact. No code.
+The chosen design and why. Design-level only — interfaces, data flow, threat-model impact. No code.
 
 ## Alternatives considered
 

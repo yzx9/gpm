@@ -2,29 +2,13 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import {
-  getSafeAreaInsets,
-  subscribeSafeArea,
-  type SafeAreaInsets,
-} from "@/api";
+import { getSafeAreaInsets, subscribeSafeArea, type SafeAreaInsets } from "@/api";
 
 function applyInsets(insets: SafeAreaInsets): void {
-  document.documentElement.style.setProperty(
-    "--safe-area-inset-top",
-    `${insets.top}px`,
-  );
-  document.documentElement.style.setProperty(
-    "--safe-area-inset-bottom",
-    `${insets.bottom}px`,
-  );
-  document.documentElement.style.setProperty(
-    "--safe-area-inset-left",
-    `${insets.left}px`,
-  );
-  document.documentElement.style.setProperty(
-    "--safe-area-inset-right",
-    `${insets.right}px`,
-  );
+  document.documentElement.style.setProperty("--safe-area-inset-top", `${insets.top}px`);
+  document.documentElement.style.setProperty("--safe-area-inset-bottom", `${insets.bottom}px`);
+  document.documentElement.style.setProperty("--safe-area-inset-left", `${insets.left}px`);
+  document.documentElement.style.setProperty("--safe-area-inset-right", `${insets.right}px`);
 }
 
 /**

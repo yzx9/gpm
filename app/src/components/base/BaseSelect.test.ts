@@ -23,9 +23,7 @@ import BaseSelect from "./BaseSelect.vue";
 enableAutoUnmount(afterEach);
 
 const backHandler = createBackHandlerRegistry();
-function mountSelect(
-  options: ComponentMountingOptions<typeof BaseSelect> = {},
-) {
+function mountSelect(options: ComponentMountingOptions<typeof BaseSelect> = {}) {
   return mount(BaseSelect, {
     ...options,
     global: {
@@ -63,9 +61,7 @@ const CADENCE = [
   { label: "6 hours", value: "6h" },
 ] as const;
 
-async function openSheet(
-  wrapper: ReturnType<typeof mountSelect>,
-): Promise<void> {
+async function openSheet(wrapper: ReturnType<typeof mountSelect>): Promise<void> {
   await wrapper.find("button.trigger").trigger("click");
   await flushPromises();
 }
@@ -222,9 +218,7 @@ describe("BaseSelect", () => {
     await wrapper.find("fieldset.options").trigger("keydown", { key: "Tab" });
     expect(document.activeElement).toBe(radios[0]!.element);
     // Shift+Tab from the first → wraps to the last (index 2).
-    await wrapper
-      .find("fieldset.options")
-      .trigger("keydown", { key: "Tab", shiftKey: true });
+    await wrapper.find("fieldset.options").trigger("keydown", { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(radios[2]!.element);
   });
 
@@ -254,9 +248,7 @@ describe("BaseSelect", () => {
       },
     });
     await openSheet(wrapper);
-    await wrapper
-      .find("fieldset.options")
-      .trigger("keydown", { key: "Escape" });
+    await wrapper.find("fieldset.options").trigger("keydown", { key: "Escape" });
     await flushPromises();
     expect(wrapper.find(".options").exists()).toBe(false);
     expect(wrapper.emitted("change")).toBeUndefined();
@@ -276,12 +268,8 @@ describe("BaseSelect", () => {
     await openSheet(wrapper);
     // No radios — focus falls back to the fieldset so the keyboard contract
     // (ESC closes) still holds.
-    expect(document.activeElement).toBe(
-      wrapper.find("fieldset.options").element,
-    );
-    await wrapper
-      .find("fieldset.options")
-      .trigger("keydown", { key: "Escape" });
+    expect(document.activeElement).toBe(wrapper.find("fieldset.options").element);
+    await wrapper.find("fieldset.options").trigger("keydown", { key: "Escape" });
     await flushPromises();
     expect(wrapper.find(".options").exists()).toBe(false);
   });

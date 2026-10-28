@@ -58,13 +58,11 @@ const fields = ref<Record<string, string>>({});
 const revealed = ref<Record<string, boolean>>({});
 const genMode = ref<GenerateMode>("random");
 
-const genModeOptions = computed<{ label: string; value: GenerateMode }[]>(
-  () => [
-    { label: t("create.genRandom"), value: "random" },
-    { label: t("create.genMemorable"), value: "memorable" },
-    { label: t("create.genPassphrase"), value: "xkcd" },
-  ],
-);
+const genModeOptions = computed<{ label: string; value: GenerateMode }[]>(() => [
+  { label: t("create.genRandom"), value: "random" },
+  { label: t("create.genMemorable"), value: "memorable" },
+  { label: t("create.genPassphrase"), value: "xkcd" },
+]);
 
 function onGenModeChange(next: GenerateMode) {
   genMode.value = next;
@@ -81,28 +79,22 @@ const error = ref("");
 const errorCode = ref<string | null>(null);
 const { cancelling, cancelSave } = useCancellableSave();
 
-const {
-  divergence,
-  resolving,
-  divergeError,
-  openDivergence,
-  resolveDivergence,
-  cancelDivergence,
-} = useDivergence({
-  resolveFailedKey: "create.resolveFailed",
-  onResolved(result: PullResult, choice: DivergenceChoice) {
-    if (choice === "adopt_remote") {
-      toast.info(t("create.adoptedRemote"));
-    } else {
-      toast.success(t("create.keptMine", { head: result.head }));
-    }
-    navBack(router, { name: "entries" });
-  },
-  onPullFfFailed() {
-    toast.info(t("create.remoteChanged"));
-    navBack(router, { name: "entries" });
-  },
-});
+const { divergence, resolving, divergeError, openDivergence, resolveDivergence, cancelDivergence } =
+  useDivergence({
+    resolveFailedKey: "create.resolveFailed",
+    onResolved(result: PullResult, choice: DivergenceChoice) {
+      if (choice === "adopt_remote") {
+        toast.info(t("create.adoptedRemote"));
+      } else {
+        toast.success(t("create.keptMine", { head: result.head }));
+      }
+      navBack(router, { name: "entries" });
+    },
+    onPullFfFailed() {
+      toast.info(t("create.remoteChanged"));
+      navBack(router, { name: "entries" });
+    },
+  });
 
 onMounted(loadPreset);
 
@@ -236,20 +228,14 @@ useWipeOnLeave(wipeFields);
       {{ error }}
     </BaseAlert>
 
-    <div v-if="presetsLoading" class="loading">
-      <BaseSpinner /> {{ t("create.loading") }}
-    </div>
+    <div v-if="presetsLoading" class="loading"><BaseSpinner /> {{ t("create.loading") }}</div>
 
     <section v-else-if="preset">
       <p class="text-sm text-muted mb-3">
         {{ t("create.savedUnder") }} <code>{{ preset.prefix }}/…</code>
       </p>
       <form class="flex flex-col gap-4" @submit.prevent="onSave">
-        <div
-          v-for="f in preset.fields"
-          :key="f.key"
-          class="flex flex-col gap-1"
-        >
+        <div v-for="f in preset.fields" :key="f.key" class="flex flex-col gap-1">
           <label :for="`f-${f.key}`" class="text-sm font-medium">
             {{ f.label }}<span v-if="f.required" aria-hidden="true">*</span>
           </label>
@@ -257,9 +243,7 @@ useWipeOnLeave(wipeFields);
             <BaseInput
               :id="`f-${f.key}`"
               v-model="fields[f.key]"
-              :type="
-                f.type === 'password' && !revealed[f.key] ? 'password' : 'text'
-              "
+              :type="f.type === 'password' && !revealed[f.key] ? 'password' : 'text'"
               class="flex-1"
               :autocomplete="f.key === 'password' ? 'new-password' : 'off'"
               :inputmode="f.charset === '0123456789' ? 'numeric' : undefined"
@@ -267,10 +251,7 @@ useWipeOnLeave(wipeFields);
               autocapitalize="off"
               spellcheck="false"
             />
-            <div
-              v-if="f.type === 'password' && f.charset == null"
-              class="gen-mode-picker"
-            >
+            <div v-if="f.type === 'password' && f.charset == null" class="gen-mode-picker">
               <BaseSelect
                 :name="`gen-mode-${f.key}`"
                 :aria-label="t('create.passwordStyleAria')"
@@ -285,9 +266,7 @@ useWipeOnLeave(wipeFields);
               variant="secondary"
               size="sm"
               :disabled="generating"
-              :aria-label="
-                revealed[f.key] ? t('create.hide') : t('create.show')
-              "
+              :aria-label="revealed[f.key] ? t('create.hide') : t('create.show')"
               @click="revealed[f.key] = !revealed[f.key]"
             >
               <BaseIcon :icon="revealed[f.key] ? EyeOff : Eye" />
@@ -305,11 +284,7 @@ useWipeOnLeave(wipeFields);
           </div>
         </div>
         <div class="flex gap-3">
-          <BaseButton
-            variant="primary"
-            type="submit"
-            class="flex-1"
-            :disabled="!canSubmit"
+          <BaseButton variant="primary" type="submit" class="flex-1" :disabled="!canSubmit"
             >{{ submitting ? t("create.saving") : t("create.saveSecret") }}
           </BaseButton>
           <BaseButton
@@ -320,9 +295,7 @@ useWipeOnLeave(wipeFields);
             :disabled="cancelling"
             :aria-label="t('create.cancelSaveAria')"
             @click="cancelSave"
-            >{{
-              cancelling ? t("create.cancellingSave") : t("create.cancelSave")
-            }}
+            >{{ cancelling ? t("create.cancellingSave") : t("create.cancelSave") }}
           </BaseButton>
         </div>
       </form>

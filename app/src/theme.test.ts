@@ -2,11 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import {
-  applyTheme,
-  normalizeThemeMode,
-  reconcileThemeFromBackend,
-} from "@/theme";
+import { applyTheme, normalizeThemeMode, reconcileThemeFromBackend } from "@/theme";
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

@@ -115,8 +115,7 @@ describe("UpdateDialog", () => {
 
   it("fails loud: a rejected manual check shows Retry instead of up-to-date", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "check_update_now")
-        return Promise.reject(new Error("offline"));
+      if (cmd === "check_update_now") return Promise.reject(new Error("offline"));
       return Promise.resolve(undefined);
     });
     const wrapper = mountDialog({ enabled: false, status: UP_TO_DATE });
@@ -132,9 +131,7 @@ describe("UpdateDialog", () => {
     await flushPromises();
     const probeCalls = vi
       .mocked(invoke)
-      .mock.calls.filter(
-        (call: [string, ...unknown[]]) => call[0] === "check_update_now",
-      );
+      .mock.calls.filter((call: [string, ...unknown[]]) => call[0] === "check_update_now");
     expect(probeCalls).toHaveLength(2);
     expect(wrapper.text()).toContain("Couldn't check for updates");
   });
@@ -159,9 +156,7 @@ describe("UpdateDialog", () => {
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("set_update_check", { enabled: false });
-    expect(wrapper.emitted("pref-changed")![0]).toEqual([
-      { update_check_enabled: false },
-    ]);
+    expect(wrapper.emitted("pref-changed")![0]).toEqual([{ update_check_enabled: false }]);
     // Dialog stays open and the view flips to the off state.
     expect(wrapper.emitted("close")).toBeUndefined();
     expect(wrapper.text()).toContain("Automatic checks are off");
@@ -183,8 +178,7 @@ describe("UpdateDialog", () => {
 
   it("a failed toggle leaves the view on the current pref", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "set_update_check")
-        return Promise.reject(new Error("sealed"));
+      if (cmd === "set_update_check") return Promise.reject(new Error("sealed"));
       return Promise.resolve(undefined);
     });
     const wrapper = mountDialog({ enabled: true, status: UP_TO_DATE });
@@ -200,8 +194,7 @@ describe("UpdateDialog", () => {
 
   it("a failed toggle surfaces a danger toast (the only feedback on that path)", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "set_update_check")
-        return Promise.reject(new Error("sealed"));
+      if (cmd === "set_update_check") return Promise.reject(new Error("sealed"));
       return Promise.resolve(undefined);
     });
     const mounted = mountWithApp(UpdateDialog, {
@@ -282,9 +275,7 @@ describe("UpdateDialog", () => {
 
     const probes = vi
       .mocked(invoke)
-      .mock.calls.filter(
-        (call: [string, ...unknown[]]) => call[0] === "check_update_now",
-      );
+      .mock.calls.filter((call: [string, ...unknown[]]) => call[0] === "check_update_now");
     expect(probes).toHaveLength(1);
     // The known result survives the toggle.
     expect(wrapper.text()).toContain("Update available");

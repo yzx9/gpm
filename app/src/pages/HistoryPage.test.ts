@@ -165,10 +165,8 @@ describe("HistoryPage", () => {
         status: { kind: "untrusted_key", signer_fp: "SHA256:abc" },
       });
       vi.mocked(invoke).mockImplementation((cmd: string) => {
-        if (cmd === "list_commit_signatures")
-          return Promise.resolve(page([target]));
-        if (cmd === "ignore_commit_issue")
-          return Promise.resolve({ ...target, ignored: true });
+        if (cmd === "list_commit_signatures") return Promise.resolve(page([target]));
+        if (cmd === "ignore_commit_issue") return Promise.resolve({ ...target, ignored: true });
         return Promise.resolve(undefined);
       });
 
@@ -178,9 +176,7 @@ describe("HistoryPage", () => {
       // Open the detail sheet and click "Ignore this issue".
       await wrapper.find('[role="button"]').trigger("click");
       await flushPromises();
-      const ignoreBtn = wrapper
-        .findAll("button")
-        .find((b) => /ignore/i.test(b.text()));
+      const ignoreBtn = wrapper.findAll("button").find((b) => /ignore/i.test(b.text()));
       expect(ignoreBtn).toBeTruthy();
       // Drop the mount-time list call so we can assert ignore triggers no reset.
       vi.mocked(invoke).mockClear();

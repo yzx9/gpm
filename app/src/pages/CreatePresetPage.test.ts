@@ -126,8 +126,7 @@ describe("CreatePresetPage", () => {
 
   it("the per-field style picker changes the generator mode", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "list_create_presets")
-        return Promise.resolve([passwordPreset()]);
+      if (cmd === "list_create_presets") return Promise.resolve([passwordPreset()]);
       if (cmd === "generate_password") return Promise.resolve("generated-pw");
       return Promise.resolve(undefined);
     });
@@ -140,9 +139,7 @@ describe("CreatePresetPage", () => {
     // Open the sheet and pick xkcd (Passphrase, the 3rd option).
     await w.find('button[aria-label="Password style"]').trigger("click");
     await flushPromises();
-    await w
-      .findAll('input[type="radio"][name="gen-mode-password"]')[2]!
-      .trigger("change");
+    await w.findAll('input[type="radio"][name="gen-mode-password"]')[2]!.trigger("change");
     await flushPromises();
 
     // Generate for the password field — the picked mode reaches the backend.
@@ -212,9 +209,7 @@ describe("CreatePresetPage", () => {
     m.appLock.setAppLocked(true, "idle");
     await flushPromises();
 
-    expect(
-      (m.wrapper.find('input[id="f-name"]').element as HTMLInputElement).value,
-    ).toBe("");
+    expect((m.wrapper.find('input[id="f-name"]').element as HTMLInputElement).value).toBe("");
     expect(m.draftsNotice.consume()).toBe(true); // draft lost → toast fires
   });
 

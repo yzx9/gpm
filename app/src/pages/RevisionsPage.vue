@@ -21,23 +21,8 @@ import {
   useSecretReveal,
   useToast,
 } from "@/composables";
-import {
-  GitCommitHorizontal,
-  History,
-  Lock,
-  Paperclip,
-  RefreshCw,
-  Trash2,
-  X,
-} from "@lucide/vue";
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  watch,
-} from "vue";
+import { GitCommitHorizontal, History, Lock, Paperclip, RefreshCw, Trash2, X } from "@lucide/vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 
@@ -46,24 +31,14 @@ const { formatRelativeTime } = useRelativeTime();
 const { toast } = useToast();
 const { runWithAuth } = useLockState();
 const activeRepo = useActiveRepo();
-const {
-  attributes,
-  password,
-  notes,
-  revealed,
-  clearsInSecs,
-  reveal,
-  clear,
-  withClaim,
-} = useSecretReveal();
+const { attributes, password, notes, revealed, clearsInSecs, reveal, clear, withClaim } =
+  useSecretReveal();
 
 // The entry this page is the history of: the route's catch-all param is the
 // (URL-encoded) `.age` path, decoded like EntryDetailPage.
 const route = useRoute();
 const pathMatch = route.params.pathMatch;
-const entryPath = decodeURIComponent(
-  Array.isArray(pathMatch) ? pathMatch[0] : pathMatch,
-);
+const entryPath = decodeURIComponent(Array.isArray(pathMatch) ? pathMatch[0] : pathMatch);
 // The secret this is the history of — shown under the title so the page names
 // which entry it belongs to (mirrors EntryDetailPage's `entryName`).
 const entryName = entryPath.replace(/\.age$/, "");
@@ -204,9 +179,7 @@ async function copyVersion() {
   actionLoading.value = true;
   try {
     const repoId = await activeRepo.currentId();
-    const result = await runWithAuth(() =>
-      copyRevision(repoId, entryPath, commit.hash),
-    );
+    const result = await runWithAuth(() => copyRevision(repoId, entryPath, commit.hash));
     // An attachment revision has no password — the backend skips the clipboard
     // write, so don't claim "Copied" (the clipboard may still hold a prior
     // secret). Mirrors EntryDetailPage.copyPassword's attachment branch.
@@ -319,15 +292,8 @@ onBeforeUnmount(() => {
       <BaseSpinner />
       <span>{{ t("revisions.loading") }}</span>
     </div>
-    <div
-      v-else-if="commits.length === 0 && !error"
-      class="text-center text-muted py-8"
-    >
-      <BaseIcon
-        :icon="GitCommitHorizontal"
-        :size="40"
-        class="block mb-2 mx-auto text-muted"
-      />
+    <div v-else-if="commits.length === 0 && !error" class="text-center text-muted py-8">
+      <BaseIcon :icon="GitCommitHorizontal" :size="40" class="block mb-2 mx-auto text-muted" />
       <p>{{ t("revisions.empty") }}</p>
     </div>
 
@@ -341,10 +307,7 @@ onBeforeUnmount(() => {
         @click="openDetail(commit)"
         @keydown.enter="openDetail(commit)"
       >
-        <CommitSigIndicator
-          :status="commit.status"
-          class="w-6 text-center shrink-0 mt-0.5"
-        />
+        <CommitSigIndicator :status="commit.status" class="w-6 text-center shrink-0 mt-0.5" />
         <div class="flex-1 min-w-0 flex flex-col gap-0.5">
           <span class="font-medium wrap-break-word line-clamp-2">{{
             commit.subject || t("revisions.noMessage")
@@ -393,11 +356,7 @@ onBeforeUnmount(() => {
     >
       <div class="flex justify-between items-start mb-2">
         <code class="text-xs text-muted">{{ selected.short_hash }}</code>
-        <BaseButton
-          variant="link"
-          :aria-label="t('revisions.closeAria')"
-          @click="closeDetail"
-        >
+        <BaseButton variant="link" :aria-label="t('revisions.closeAria')" @click="closeDetail">
           <BaseIcon :icon="X" />
         </BaseButton>
       </div>
@@ -437,15 +396,9 @@ onBeforeUnmount(() => {
 
       <!-- Revealed past value: bg-edge so a glance distinguishes it from the
            current-secret reveal in EntryDetailPage. -->
-      <div
-        v-if="viewState === 'revealed' && revealed"
-        class="mt-3 rounded-md bg-edge p-2"
-      >
+      <div v-if="viewState === 'revealed' && revealed" class="mt-3 rounded-md bg-edge p-2">
         <div class="font-mono break-all">{{ password }}</div>
-        <div
-          v-if="notes"
-          class="font-mono break-all text-muted mt-1 whitespace-pre-wrap"
-        >
+        <div v-if="notes" class="font-mono break-all text-muted mt-1 whitespace-pre-wrap">
           {{ notes }}
         </div>
         <EntryAttributes :attributes="attributes ?? []" class="mt-1" />
@@ -478,20 +431,12 @@ onBeforeUnmount(() => {
       >
         <BaseIcon :icon="Lock" :size="16" class="shrink-0 mt-0.5" />
         <span>
-          <span class="font-medium">{{
-            t("revisions.undecryptableTitle")
-          }}</span>
-          <span class="block text-xs">{{
-            t("revisions.undecryptableBody")
-          }}</span>
+          <span class="font-medium">{{ t("revisions.undecryptableTitle") }}</span>
+          <span class="block text-xs">{{ t("revisions.undecryptableBody") }}</span>
         </span>
       </BaseAlert>
 
-      <BaseAlert
-        v-if="viewState === 'deleted'"
-        variant="info"
-        class="mt-3 flex items-start gap-2"
-      >
+      <BaseAlert v-if="viewState === 'deleted'" variant="info" class="mt-3 flex items-start gap-2">
         <BaseIcon :icon="Trash2" :size="16" class="shrink-0 mt-0.5" />
         <span>
           <span class="font-medium">{{ t("revisions.deletedTitle") }}</span>
@@ -507,16 +452,10 @@ onBeforeUnmount(() => {
           @click="showVersion"
         >
           {{
-            viewState === "loading"
-              ? t("revisions.loadMoreLoading")
-              : t("revisions.showVersion")
+            viewState === "loading" ? t("revisions.loadMoreLoading") : t("revisions.showVersion")
           }}
         </BaseButton>
-        <BaseButton
-          v-if="viewState === 'revealed' && revealed"
-          variant="action"
-          @click="clear"
-        >
+        <BaseButton v-if="viewState === 'revealed' && revealed" variant="action" @click="clear">
           {{ t("revisions.hideVersion") }}
         </BaseButton>
         <BaseButton

@@ -5,10 +5,7 @@
 import type { AppConfig, LockMode } from "@/api";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createSecuritySettings,
-  type SecuritySettingsState,
-} from "./useSecuritySettings";
+import { createSecuritySettings, type SecuritySettingsState } from "./useSecuritySettings";
 
 vi.mock("@tauri-apps/api/core");
 
@@ -41,9 +38,7 @@ describe("useSecuritySettings", () => {
     vi.mocked(invoke).mockResolvedValue(cfg(10));
     await s.loadSecuritySettings();
     await s.loadSecuritySettings();
-    expect(
-      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "get_app_config"),
-    ).toHaveLength(1);
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "get_app_config")).toHaveLength(1);
   });
 
   it("loadSecuritySettings keeps defaults when get_app_config rejects", async () => {

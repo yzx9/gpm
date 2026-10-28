@@ -61,14 +61,7 @@ import {
   Settings,
   X,
 } from "@lucide/vue";
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  watch,
-} from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -185,9 +178,7 @@ const lastSyncLabel = computed(() => {
   return formatRelativeTime(now.value, lastSyncTime.value);
 });
 
-const remaining = computed(() =>
-  Math.max(0, total.value - displayedEntries.value.length),
-);
+const remaining = computed(() => Math.max(0, total.value - displayedEntries.value.length));
 
 // Fetch one page from the backend. `replace` swaps page 0 in; otherwise the
 // page is appended (load-more). A monotonic request-id guard drops any page
@@ -205,9 +196,7 @@ async function fetchPage(q: string, offset: number, replace: boolean) {
       ? await searchEntries(repoId, q, offset, PAGE_SIZE)
       : await listEntries(repoId, offset, PAGE_SIZE);
     if (myId !== reqId) return; // superseded by a newer query/reset/pull
-    displayedEntries.value = replace
-      ? page.entries
-      : displayedEntries.value.concat(page.entries);
+    displayedEntries.value = replace ? page.entries : displayedEntries.value.concat(page.entries);
     total.value = page.total;
     hasMore.value = page.has_more;
     activeQuery.value = q; // load-more continues whatever is displayed
@@ -375,10 +364,7 @@ async function syncRepo() {
     }
 
     // Audit mismatch → informational modal (sync already succeeded).
-    if (
-      result.authenticity.mode === "audit" &&
-      result.authenticity.open_issues.length > 0
-    ) {
+    if (result.authenticity.mode === "audit" && result.authenticity.open_issues.length > 0) {
       auditIssues.value = result.authenticity.open_issues;
     }
     // Enforce block → HEAD did not advance; explain + offer actions.
@@ -440,9 +426,7 @@ async function resolveDivergence(choice: DivergenceChoice) {
     const repoId = await activeRepo.currentId();
     const result =
       choice === "keep_mine"
-        ? await runWithAuth(() =>
-            resolveSyncDivergence(repoId, expectedRemoteOid, choice),
-          )
+        ? await runWithAuth(() => resolveSyncDivergence(repoId, expectedRemoteOid, choice))
         : await resolveSyncDivergence(repoId, expectedRemoteOid, choice);
     divergence.value = null;
     pullResult.value = `Updated to ${result.head}`;
@@ -487,9 +471,7 @@ async function ignoreIssue(commit: CommitSigInfo) {
     toast.success(t("entries.toastIgnored"));
     // Remove it from the modal list.
     if (auditIssues.value) {
-      auditIssues.value = auditIssues.value.filter(
-        (c) => c.hash !== commit.hash,
-      );
+      auditIssues.value = auditIssues.value.filter((c) => c.hash !== commit.hash);
       if (auditIssues.value.length === 0) auditIssues.value = null;
     }
   } catch (e) {
@@ -500,18 +482,11 @@ async function ignoreIssue(commit: CommitSigInfo) {
 }
 
 async function trustBlockSigner(commit: CommitSigInfo) {
-  const label = window.prompt(
-    t("entries.trustSignerPrompt"),
-    commit.short_hash,
-  );
+  const label = window.prompt(t("entries.trustSignerPrompt"), commit.short_hash);
   if (label === null) return;
   try {
     const repoId = await activeRepo.currentId();
-    await trustCommitSigner(
-      repoId,
-      commit.hash,
-      label.trim() || commit.short_hash,
-    );
+    await trustCommitSigner(repoId, commit.hash, label.trim() || commit.short_hash);
     toast.success(t("entries.toastTrusted"));
     blockIssues.value = null;
     await loadAuthState();
@@ -666,10 +641,7 @@ defineExpose({ syncRepo });
           aria-valuemin="0"
           aria-valuemax="100"
         >
-          <div
-            class="pull-progress-fill"
-            :style="{ width: `${pullProgressPercent}%` }"
-          ></div>
+          <div class="pull-progress-fill" :style="{ width: `${pullProgressPercent}%` }"></div>
         </div>
         <BaseButton
           variant="link"
@@ -705,11 +677,7 @@ defineExpose({ syncRepo });
       />
     </div>
 
-    <BaseAlert
-      v-if="error"
-      variant="danger"
-      class="flex justify-between items-center mb-3"
-    >
+    <BaseAlert v-if="error" variant="danger" class="flex justify-between items-center mb-3">
       {{ error }}
       <BaseButton variant="link" size="xs" tone="danger" @click="retry">
         {{ t("entries.retry") }}
@@ -726,24 +694,13 @@ defineExpose({ syncRepo });
       <BaseSpinner />
       <span>{{ t("entries.loadingEntries") }}</span>
     </div>
-    <div
-      v-else-if="displayedEntries.length === 0 && !error"
-      class="text-center text-muted py-8"
-    >
+    <div v-else-if="displayedEntries.length === 0 && !error" class="text-center text-muted py-8">
       <template v-if="search.trim() && !searchError">
-        <BaseIcon
-          :icon="Search"
-          :size="40"
-          class="block mb-2 mx-auto text-muted"
-        />
+        <BaseIcon :icon="Search" :size="40" class="block mb-2 mx-auto text-muted" />
         <p>{{ t("entries.noMatches", { query: search }) }}</p>
       </template>
       <template v-else>
-        <BaseIcon
-          :icon="Lock"
-          :size="40"
-          class="block mb-2 mx-auto text-muted"
-        />
+        <BaseIcon :icon="Lock" :size="40" class="block mb-2 mx-auto text-muted" />
         <p>{{ t("entries.empty") }}</p>
         <p class="text-xs text-muted mt-1">
           {{ t("entries.emptyHint") }}
@@ -763,16 +720,11 @@ defineExpose({ syncRepo });
           @keydown.space.prevent="openEntry(entry)"
         >
           <div class="flex-1 min-w-0">
-            <span
-              class="block font-medium whitespace-nowrap overflow-hidden text-ellipsis"
-              >{{ entry.name }}</span
-            >
+            <span class="block font-medium whitespace-nowrap overflow-hidden text-ellipsis">{{
+              entry.name
+            }}</span>
           </div>
-          <BaseIcon
-            :icon="ChevronRight"
-            :size="20"
-            class="text-muted shrink-0"
-          />
+          <BaseIcon :icon="ChevronRight" :size="20" class="text-muted shrink-0" />
         </div>
       </li>
     </ul>
@@ -786,11 +738,7 @@ defineExpose({ syncRepo });
         :aria-label="t('entries.loadMoreAria')"
         @click="loadMore"
       >
-        {{
-          loading
-            ? t("entries.loadMoreLoading")
-            : t("entries.loadMore", { count: remaining })
-        }}
+        {{ loading ? t("entries.loadMoreLoading") : t("entries.loadMore", { count: remaining }) }}
       </BaseButton>
     </div>
     <!-- Sentinel the IntersectionObserver watches to auto-load the next page -->
@@ -809,11 +757,7 @@ defineExpose({ syncRepo });
         {{ t("entries.auditPreamble", { count: auditIssues.length }) }}
       </p>
       <ul class="flex flex-col gap-2 mb-3">
-        <li
-          v-for="c in auditIssues"
-          :key="c.hash"
-          class="flex items-center gap-2 text-sm"
-        >
+        <li v-for="c in auditIssues" :key="c.hash" class="flex items-center gap-2 text-sm">
           <CommitSigIndicator :status="c.status" />
           <code class="text-xs text-muted">{{ c.short_hash }}</code>
           <span class="flex-1 truncate">{{ c.subject }}</span>

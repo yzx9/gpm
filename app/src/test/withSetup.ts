@@ -20,10 +20,7 @@ import { createApp, type App } from "vue";
  *
  * @see https://vuejs.org/guide/scaling-up/testing.html#testing-composables
  */
-export function withSetup<T>(
-  composable: () => T,
-  provide?: (app: App) => void,
-): [T, App] {
+export function withSetup<T>(composable: () => T, provide?: (app: App) => void): [T, App] {
   let result!: T;
   const app = createApp({
     setup() {

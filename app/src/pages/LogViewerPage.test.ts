@@ -17,10 +17,7 @@ vi.mock("@tauri-apps/api/core");
 /** The commands this page calls: `read_log` + `get_app_config` on load,
  *  `clear_log` on clear, `set_verbose` on toggle. `routeInvoke` resolves the
  *  `ok` map, rejects the `reject` map, and defaults anything else to success. */
-function routeInvoke(
-  ok: Record<string, unknown>,
-  reject: Record<string, unknown> = {},
-): void {
+function routeInvoke(ok: Record<string, unknown>, reject: Record<string, unknown> = {}): void {
   vi.mocked(invoke).mockImplementation((cmd: string) => {
     if (cmd in reject) return Promise.reject(reject[cmd]);
     if (cmd in ok) return Promise.resolve(ok[cmd]);
@@ -39,9 +36,7 @@ describe("LogViewerPage", () => {
   /** The verbose toggle button — labeled with the verbose legend (plus its state
    *  badge once active), so it's found by that label regardless of on/off. */
   function verboseButton(wrapper: ReturnType<typeof mountWithApp>["wrapper"]) {
-    const btn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Verbose logging"));
+    const btn = wrapper.findAll("button").find((b) => b.text().includes("Verbose logging"));
     if (!btn) throw new Error("verbose toggle button not found");
     return btn;
   }
@@ -63,9 +58,7 @@ describe("LogViewerPage", () => {
 
     // Verbose is now a single toggle button, not an On/Off option picker — the
     // state is already visible, so the two-option segmented control is gone.
-    expect(
-      wrapper.findComponent({ name: "BaseSegmentedControl" }).exists(),
-    ).toBe(false);
+    expect(wrapper.findComponent({ name: "BaseSegmentedControl" }).exists()).toBe(false);
     const btn = verboseButton(wrapper);
     // No verbose_until ⇒ off (aria-pressed conveys the state).
     expect(btn.attributes("aria-pressed")).toBe("false");
@@ -115,10 +108,7 @@ describe("LogViewerPage", () => {
     await verboseButton(wrapper).trigger("click"); // On → Off
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith(
-      "set_verbose",
-      expect.objectContaining({ enabled: false }),
-    );
+    expect(invoke).toHaveBeenCalledWith("set_verbose", expect.objectContaining({ enabled: false }));
     expect(infoSpy).not.toHaveBeenCalled(); // the Off path does not toast
     wrapper.unmount();
   });
@@ -179,9 +169,7 @@ describe("LogViewerPage", () => {
     const { wrapper, dialog } = mountWithApp(LogViewerPage);
     await flushPromises();
 
-    const clearBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Clear"));
+    const clearBtn = wrapper.findAll("button").find((b) => b.text().includes("Clear"));
     expect(clearBtn).toBeTruthy();
     await clearBtn!.trigger("click");
     await flushPromises();
@@ -196,9 +184,7 @@ describe("LogViewerPage", () => {
     vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
     await flushPromises();
 
-    const clearBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Clear"));
+    const clearBtn = wrapper.findAll("button").find((b) => b.text().includes("Clear"));
     await clearBtn!.trigger("click");
     await flushPromises();
 

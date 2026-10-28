@@ -18,11 +18,7 @@
 // CommitSigStatus) and re-exported, so existing `@/api` imports resolve
 // unchanged. Single source of truth = the Rust enums.
 import type { SecureScreenMode } from "./generated/app";
-import type {
-  CommitSigStatus,
-  LockMode,
-  VerifyMode,
-} from "./generated/rustpass";
+import type { CommitSigStatus, LockMode, VerifyMode } from "./generated/rustpass";
 
 export type { CommitSigStatus, LockMode, SecureScreenMode, VerifyMode };
 

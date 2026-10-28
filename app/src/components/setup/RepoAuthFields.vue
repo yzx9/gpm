@@ -92,9 +92,7 @@ async function copyPublicKey() {
 <template>
   <!-- Git Repository URL — always present -->
   <div class="flex flex-col gap-1">
-    <label for="repo-url" class="text-sm font-medium">{{
-      t("setup.auth.repoUrlLabel")
-    }}</label>
+    <label for="repo-url" class="text-sm font-medium">{{ t("setup.auth.repoUrlLabel") }}</label>
     <BaseInput
       id="repo-url"
       v-model="repoUrl"
@@ -109,9 +107,7 @@ async function copyPublicKey() {
 
   <!-- PAT field (shown for HTTPS URLs) -->
   <div v-if="!isSshUrl" class="flex flex-col gap-1">
-    <label for="pat" class="text-sm font-medium">{{
-      t("setup.auth.patLabel")
-    }}</label>
+    <label for="pat" class="text-sm font-medium">{{ t("setup.auth.patLabel") }}</label>
     <BaseInput
       id="pat"
       v-model="pat"
@@ -140,9 +136,7 @@ async function copyPublicKey() {
     <!-- Paste key (or always-shown SSH block when keygen hidden) -->
     <template v-if="sshKeySource === 'paste' || !showKeygen">
       <div class="flex flex-col gap-1">
-        <label for="ssh-key" class="text-sm font-medium">{{
-          t("setup.auth.sshKeyLabel")
-        }}</label>
+        <label for="ssh-key" class="text-sm font-medium">{{ t("setup.auth.sshKeyLabel") }}</label>
         <BaseTextarea
           id="ssh-key"
           v-model="sshKey"
@@ -153,9 +147,7 @@ async function copyPublicKey() {
           spellcheck="false"
           :disabled="disabled"
         />
-        <small class="text-xs text-muted">{{
-          t("setup.auth.sshKeyHint")
-        }}</small>
+        <small class="text-xs text-muted">{{ t("setup.auth.sshKeyHint") }}</small>
       </div>
       <div class="flex flex-col gap-1">
         <label for="ssh-passphrase" class="text-sm font-medium">{{
@@ -190,19 +182,13 @@ async function copyPublicKey() {
         @click="generateKey"
       >
         <BaseIcon v-if="!generating" :icon="KeyRound" />
-        {{
-          generating
-            ? t("setup.auth.genButtonLoading")
-            : t("setup.auth.genButton")
-        }}
+        {{ generating ? t("setup.auth.genButtonLoading") : t("setup.auth.genButton") }}
       </BaseButton>
 
       <!-- Public key display after generation -->
       <div v-if="generatedPublicKey" class="flex flex-col gap-2">
         <div class="flex items-center justify-between">
-          <span
-            class="text-sm font-medium text-success inline-flex items-center gap-1"
-          >
+          <span class="text-sm font-medium text-success inline-flex items-center gap-1">
             <BaseIcon :icon="CircleCheck" :size="14" />
             {{ t("setup.auth.publicKeyLabel") }}
           </span>
@@ -210,12 +196,8 @@ async function copyPublicKey() {
             <BaseIcon :icon="Copy" /> {{ t("setup.auth.publicKeyCopy") }}
           </BaseButton>
         </div>
-        <pre class="public-key-display" @click="copyPublicKey">{{
-          generatedPublicKey
-        }}</pre>
-        <small class="text-xs text-muted">{{
-          t("setup.auth.publicKeyHint")
-        }}</small>
+        <pre class="public-key-display" @click="copyPublicKey">{{ generatedPublicKey }}</pre>
+        <small class="text-xs text-muted">{{ t("setup.auth.publicKeyHint") }}</small>
       </div>
     </template>
   </template>

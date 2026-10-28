@@ -99,10 +99,7 @@ describe("useForegroundSync", () => {
 
   it("cold-start syncs when AutoSync is on, ready, and unlocked (silent on FF)", async () => {
     mockInvoke({ autosync: true, fg: FF_CHANGED });
-    const fg = createForegroundSyncStore(
-      fakeAppLockStore({ ready: true }),
-      fakeRouter(),
-    );
+    const fg = createForegroundSyncStore(fakeAppLockStore({ ready: true }), fakeRouter());
 
     await flush();
 
@@ -123,10 +120,7 @@ describe("useForegroundSync", () => {
 
   it("does NOT sync while app-locked", async () => {
     mockInvoke({ autosync: true, fg: FF_CHANGED });
-    createForegroundSyncStore(
-      fakeAppLockStore({ ready: true, locked: true }),
-      fakeRouter(),
-    );
+    createForegroundSyncStore(fakeAppLockStore({ ready: true, locked: true }), fakeRouter());
 
     await flush();
 
@@ -144,10 +138,7 @@ describe("useForegroundSync", () => {
 
   it("sets the attention badge on a diverged outcome (never a modal)", async () => {
     mockInvoke({ autosync: true, fg: DIVERGED });
-    const fg = createForegroundSyncStore(
-      fakeAppLockStore({ ready: true }),
-      fakeRouter(),
-    );
+    const fg = createForegroundSyncStore(fakeAppLockStore({ ready: true }), fakeRouter());
 
     await flush();
 
@@ -160,10 +151,7 @@ describe("useForegroundSync", () => {
   it("engage() routes to the list and retains the badge (not cleared on tap)", async () => {
     mockInvoke({ autosync: true, fg: DIVERGED });
     const router = fakeRouter();
-    const fg = createForegroundSyncStore(
-      fakeAppLockStore({ ready: true }),
-      router,
-    );
+    const fg = createForegroundSyncStore(fakeAppLockStore({ ready: true }), router);
 
     await flush();
     expect(fg.syncAttention.value).toEqual(DIVERGED);
@@ -178,10 +166,7 @@ describe("useForegroundSync", () => {
 
   it("a skipped/failed sync (null) is silent and does not set the badge", async () => {
     mockInvoke({ autosync: true, fg: null });
-    const fg = createForegroundSyncStore(
-      fakeAppLockStore({ ready: true }),
-      fakeRouter(),
-    );
+    const fg = createForegroundSyncStore(fakeAppLockStore({ ready: true }), fakeRouter());
 
     await flush();
 
@@ -202,9 +187,7 @@ describe("useForegroundSync", () => {
     fg.init();
     (store.appReady as unknown as { value: boolean }).value = true;
     await vi.runAllTimersAsync();
-    const coldCount = vi
-      .mocked(invoke)
-      .mock.calls.filter((c) => c[0] === "background_sync").length;
+    const coldCount = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync").length;
     expect(coldCount).toBe(1);
 
     // Fast-forward past the 60s throttle, then a resume must sync again — this
@@ -261,10 +244,7 @@ describe("useForegroundSync", () => {
       },
     } as const;
     mockInvoke({ autosync: true, fg: BLOCKED_FF });
-    const fg = createForegroundSyncStore(
-      fakeAppLockStore({ ready: true }),
-      fakeRouter(),
-    );
+    const fg = createForegroundSyncStore(fakeAppLockStore({ ready: true }), fakeRouter());
     await flush();
     expect(fg.syncAttention.value).toEqual(BLOCKED_FF);
   });
@@ -301,20 +281,14 @@ describe("useForegroundSync", () => {
     const fg = createForegroundSyncStore(store, fakeRouter());
     fg.init();
     await vi.runAllTimersAsync();
-    expect(
-      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync")
-        .length,
-    ).toBe(1); // cold-start ran
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync").length).toBe(1); // cold-start ran
     // Past the throttle, a grace-window resume (gate on + unlocked) MUST sync —
     // the old `appLockEnabled` bail is gone (R058: it was for every-resume re-lock;
     // under grace the app stays unlocked, so skipping the sync would lose updates).
     vi.setSystemTime(new Date("2026-01-01T00:02:00Z"));
     fireResume();
     await vi.runAllTimersAsync();
-    expect(
-      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync")
-        .length,
-    ).toBe(2);
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync").length).toBe(2);
     fg.dispose();
   });
 
@@ -342,10 +316,7 @@ describe("useForegroundSync", () => {
       if (cmd === "background_sync") throw new Error("net down");
       return undefined;
     });
-    const fg = createForegroundSyncStore(
-      fakeAppLockStore({ ready: true }),
-      fakeRouter(),
-    );
+    const fg = createForegroundSyncStore(fakeAppLockStore({ ready: true }), fakeRouter());
     fg.init();
     await vi.runAllTimersAsync();
     expect(fg.syncAttention.value).toBeNull(); // silent
@@ -353,10 +324,7 @@ describe("useForegroundSync", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.100Z"));
     fireResume();
     await vi.runAllTimersAsync();
-    expect(
-      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync")
-        .length,
-    ).toBe(2);
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "background_sync").length).toBe(2);
     fg.dispose();
   });
 
@@ -371,14 +339,10 @@ describe("useForegroundSync", () => {
           repositories: ["test-repo"],
           last_active: "test-repo",
         };
-      if (cmd === "background_sync")
-        return call++ === 0 ? DIVERGED : FF_CHANGED;
+      if (cmd === "background_sync") return call++ === 0 ? DIVERGED : FF_CHANGED;
       return undefined;
     });
-    const fg = createForegroundSyncStore(
-      fakeAppLockStore({ ready: true }),
-      fakeRouter(),
-    );
+    const fg = createForegroundSyncStore(fakeAppLockStore({ ready: true }), fakeRouter());
     fg.init();
     await vi.runAllTimersAsync();
     expect(fg.syncAttention.value).toEqual(DIVERGED);

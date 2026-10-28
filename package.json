@@ -1,10 +1,10 @@
 {
   "name": "gpm-monorepo",
   "private": true,
-  "type": "module",
   "workspaces": [
     "app"
   ],
+  "type": "module",
   "scripts": {
     "dev": "npm run dev -w app",
     "build": "npm run build -w app",

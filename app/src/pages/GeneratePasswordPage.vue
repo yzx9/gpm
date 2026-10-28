@@ -66,9 +66,7 @@ const safeCount = computed(() =>
 );
 const lenPayload = computed(() => {
   if (!showLength.value) return null;
-  return Number.isInteger(length.value) && length.value >= 1
-    ? length.value
-    : null;
+  return Number.isInteger(length.value) && length.value >= 1 ? length.value : null;
 });
 
 /** Generate a batch of passwords via the backend (CSPRNG). */
@@ -158,9 +156,7 @@ useWipeOnLeave(() => {
       </template>
     </BaseHeader>
 
-    <BaseAlert v-if="error" variant="danger" class="mb-3">{{
-      error
-    }}</BaseAlert>
+    <BaseAlert v-if="error" variant="danger" class="mb-3">{{ error }}</BaseAlert>
 
     <form class="controls" @submit.prevent="onGenerate">
       <BaseSelect
@@ -188,9 +184,7 @@ useWipeOnLeave(() => {
       </div>
 
       <div class="flex flex-col gap-1">
-        <label for="g-count" class="text-sm font-medium">{{
-          t("generate.howMany")
-        }}</label>
+        <label for="g-count" class="text-sm font-medium">{{ t("generate.howMany") }}</label>
         <BaseInput
           id="g-count"
           v-model.number="count"

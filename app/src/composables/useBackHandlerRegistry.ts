@@ -144,6 +144,4 @@ export function createBackHandlerRegistry(): BackHandlerRegistry {
 // provides the production instance; mountWithApp + the bare-mount component
 // tests provide a fresh instance each, so no shared mutable state leaks across
 // tests.
-export const BACK_HANDLER_KEY: InjectionKey<BackHandlerRegistry> = Symbol(
-  "BackHandlerRegistry",
-);
+export const BACK_HANDLER_KEY: InjectionKey<BackHandlerRegistry> = Symbol("BackHandlerRegistry");

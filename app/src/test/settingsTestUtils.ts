@@ -17,8 +17,7 @@
 export const sshConfig = {
   url: "git@github.com:user/repo.git",
   pat: null,
-  ssh_key:
-    "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----",
+  ssh_key: "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----",
   ssh_passphrase: null,
   local_path: "/tmp/repo",
 };
@@ -78,11 +77,7 @@ export function when(overrides: Overrides, cmd: string, value: unknown): void {
 }
 
 /** Make `cmd` reject with `payload`. */
-export function reject(
-  overrides: Overrides,
-  cmd: string,
-  payload: unknown,
-): void {
+export function reject(overrides: Overrides, cmd: string, payload: unknown): void {
   overrides[cmd] = { reject: payload };
 }
 

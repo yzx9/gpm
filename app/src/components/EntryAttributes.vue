@@ -43,15 +43,11 @@ const visible = computed(() =>
 );
 
 const sensitive = computed(() =>
-  visible.value
-    .map((attr, index) => ({ attr, index }))
-    .filter((x) => isSensitiveKey(x.attr.key)),
+  visible.value.map((attr, index) => ({ attr, index })).filter((x) => isSensitiveKey(x.attr.key)),
 );
 
 const plain = computed(() =>
-  visible.value
-    .map((attr, index) => ({ attr, index }))
-    .filter((x) => !isSensitiveKey(x.attr.key)),
+  visible.value.map((attr, index) => ({ attr, index })).filter((x) => !isSensitiveKey(x.attr.key)),
 );
 
 /** Per-attribute reveal state for sensitive values (masked by default). */
@@ -69,10 +65,9 @@ function toggleValue(index: number) {
       :key="`s-${index}`"
       class="rounded-sm bg-accent-ring p-2"
     >
-      <label
-        class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1"
-        >{{ attr.key }}</label
-      >
+      <label class="block text-xs font-semibold uppercase tracking-wide text-muted mb-1">{{
+        attr.key
+      }}</label>
       <div class="flex items-center gap-2">
         <code class="font-mono break-all flex-1 select-all">{{
           revealedValue[index] ? attr.value : "••••••••••"
@@ -80,11 +75,7 @@ function toggleValue(index: number) {
         <BaseButton
           variant="link"
           tone="muted"
-          :aria-label="
-            revealedValue[index]
-              ? t('entry.hideValueAria')
-              : t('entry.showValueAria')
-          "
+          :aria-label="revealedValue[index] ? t('entry.hideValueAria') : t('entry.showValueAria')"
           @click="toggleValue(index)"
         >
           <BaseIcon :icon="revealedValue[index] ? EyeOff : Eye" />
@@ -93,14 +84,8 @@ function toggleValue(index: number) {
     </div>
 
     <!-- Plain metadata: compact labeled rows, source order. -->
-    <div
-      v-for="{ attr, index } in plain"
-      :key="`p-${index}`"
-      class="flex flex-col"
-    >
-      <span class="text-xs font-semibold uppercase tracking-wide text-muted">{{
-        attr.key
-      }}</span>
+    <div v-for="{ attr, index } in plain" :key="`p-${index}`" class="flex flex-col">
+      <span class="text-xs font-semibold uppercase tracking-wide text-muted">{{ attr.key }}</span>
       <span class="break-all">{{ attr.value }}</span>
     </div>
   </div>

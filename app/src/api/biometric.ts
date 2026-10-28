@@ -105,10 +105,7 @@ export async function enableBiometricUnlock(
  * Resolves on success; rejects with a {@link BiometricError} on cancel or
  * failure.
  */
-export async function biometricUnlock(
-  repoId: string,
-  prompt?: BiometricPromptText,
-): Promise<void> {
+export async function biometricUnlock(repoId: string, prompt?: BiometricPromptText): Promise<void> {
   await invoke("biometric_unlock", { repoId, promptText: prompt });
 }
 

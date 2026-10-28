@@ -3,14 +3,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 
 <script setup lang="ts">
-import type {
-  AppConfig,
-  AppError,
-  AppLockError,
-  BiometricError,
-  GateIdle,
-  LockMode,
-} from "@/api";
+import type { AppConfig, AppError, AppLockError, BiometricError, GateIdle, LockMode } from "@/api";
 import {
   DEFAULT_GATE_IDLE,
   DEFAULT_LOCK_IDLE,
@@ -57,11 +50,7 @@ import {
   useToast,
   useWipeOnLeave,
 } from "@/composables";
-import {
-  appLockEnrollPrompt,
-  appLockUnlockPrompt,
-  identityEnrollPrompt,
-} from "@/i18n/native";
+import { appLockEnrollPrompt, appLockUnlockPrompt, identityEnrollPrompt } from "@/i18n/native";
 import { CircleCheck, KeyRound, Lock } from "@lucide/vue";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -109,9 +98,7 @@ const appConfig = ref<AppConfig | null>(null);
 // App-launch-gate in-app idle timeout ("Re-lock when inactive"). A computed view
 // over appConfig (mirrors rawLockMode etc.) so it stays in sync automatically;
 // the shared security-settings cache also holds it for the activity bumper.
-const gateIdle = computed<GateIdle>(
-  () => appConfig.value?.gate_idle ?? DEFAULT_GATE_IDLE,
-);
+const gateIdle = computed<GateIdle>(() => appConfig.value?.gate_idle ?? DEFAULT_GATE_IDLE);
 
 // ── Passphrase management state ──────────────────────────────────────────
 const isIdentityEncrypted = ref(false);
@@ -178,9 +165,7 @@ const ppShowNew = computed(
 // Submit is blocked until the user acknowledges a NEW passphrase (set/change)
 // is unrecoverable. Empty passphrase is rejected by validate() on submit, so
 // the gate only needs to engage once something has been typed.
-const ppSubmitDisabled = computed(
-  () => ppShowNew.value && !!ppNew.value && !ppAck.value,
-);
+const ppSubmitDisabled = computed(() => ppShowNew.value && !!ppNew.value && !ppAck.value);
 // Invalidate the ack whenever the typed passphrase changes — each distinct
 // committed value gets its own acknowledgment (ack is value-bound, not
 // modal-bound), so editing the passphrase after ticking forces a re-ack.
@@ -203,18 +188,14 @@ const appLockLoading = ref(false);
 // passphrase-encrypted by gpm (they rely on their own native protection),
 // so the seal encryption UI is hidden for them.
 const isSshIdentity = computed(
-  () =>
-    identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
+  () => identityType.value === "ssh_ed25519" || identityType.value === "ssh_rsa",
 );
 
 // Identity Auto-Unlock is on with the gate enabled and an encryptable identity:
 // the identity then follows the gate's lifecycle, so its own auto-lock timing is
 // ignored (the backend disarms reset_lock_timer + skips the Immediate wipe).
 const identityCoupled = computed(
-  () =>
-    appLockEnabled.value &&
-    identityAutoUnlockEnabled.value &&
-    isIdentityEncrypted.value,
+  () => appLockEnabled.value && identityAutoUnlockEnabled.value && isIdentityEncrypted.value,
 );
 
 /** Wipe every in-DOM secret: the typed passphrase-modal inputs and their
@@ -325,21 +306,15 @@ async function onPassphraseSubmit() {
       // Re-encryption can invalidate a previously-sealed biometric unlock and
       // auto-unlock slot — re-read both from the backend.
       biometricEnabled.value = await isBiometricUnlockEnabled();
-      identityAutoUnlockEnabled.value =
-        (await getConfig()).unlock_identity_with_app ?? false;
+      identityAutoUnlockEnabled.value = (await getConfig()).unlock_identity_with_app ?? false;
       toast.success(t("settings.passphrase.setToast"));
     } else if (mode === "change") {
       await changePassphrase(repoId, ppCurrent.value, ppNew.value);
       biometricEnabled.value = await isBiometricUnlockEnabled();
-      identityAutoUnlockEnabled.value =
-        (await getConfig()).unlock_identity_with_app ?? false;
+      identityAutoUnlockEnabled.value = (await getConfig()).unlock_identity_with_app ?? false;
       toast.success(t("settings.passphrase.changedToast"));
     } else if (mode === "enable-biometric") {
-      await enableBiometricUnlock(
-        repoId,
-        ppCurrent.value,
-        identityEnrollPrompt(),
-      );
+      await enableBiometricUnlock(repoId, ppCurrent.value, identityEnrollPrompt());
       biometricEnabled.value = true;
       toast.success(t("settings.biometric.enabledToast"));
     } else {
@@ -461,13 +436,11 @@ const lockLoading = ref(false);
 // idle (cache + lock after N), Never — with the idle duration revealed only
 // under "After idle". `immediate` is a distinct mode, not "idle of zero".
 type LockTopMode = "immediate" | "idle" | "never";
-const LOCK_TOP_OPTIONS = computed<{ label: string; value: LockTopMode }[]>(
-  () => [
-    { label: t("settings.lock.immediate"), value: "immediate" },
-    { label: t("settings.lock.afterIdle"), value: "idle" },
-    { label: t("settings.lock.never"), value: "never" },
-  ],
-);
+const LOCK_TOP_OPTIONS = computed<{ label: string; value: LockTopMode }[]>(() => [
+  { label: t("settings.lock.immediate"), value: "immediate" },
+  { label: t("settings.lock.afterIdle"), value: "idle" },
+  { label: t("settings.lock.never"), value: "never" },
+]);
 const LOCK_IDLE_PRESETS = computed<{ label: string; value: LockMode }[]>(() => [
   { label: t("settings.lock.minutes", { count: 1 }), value: { idle: 60 } },
   { label: t("settings.lock.minutes", { count: 5 }), value: { idle: 300 } },
@@ -475,9 +448,7 @@ const LOCK_IDLE_PRESETS = computed<{ label: string; value: LockMode }[]>(() => [
   { label: t("settings.lock.minutes", { count: 30 }), value: { idle: 1800 } },
 ]);
 
-const rawLockMode = computed<LockMode>(
-  () => appConfig.value?.lock_mode ?? "immediate",
-);
+const rawLockMode = computed<LockMode>(() => appConfig.value?.lock_mode ?? "immediate");
 const lockTopMode = computed<LockTopMode>(() => {
   const m = rawLockMode.value;
   return m === "immediate" || m === "never" ? m : "idle";
@@ -537,16 +508,12 @@ async function onLockTopChange(top: LockTopMode) {
 }
 
 // Password view auto-clear: on/off + duration (0 = never = off).
-const VIEW_CLEAR_DURATION_PRESETS = computed<
-  { label: string; value: number | null }[]
->(() => [
+const VIEW_CLEAR_DURATION_PRESETS = computed<{ label: string; value: number | null }[]>(() => [
   { label: t("settings.clear.seconds", { count: 10 }), value: 10 },
   { label: t("settings.clear.default", { count: 45 }), value: null },
   { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
 ]);
-const rawViewClear = computed<number | null>(
-  () => appConfig.value?.view_clear_secs ?? null,
-);
+const rawViewClear = computed<number | null>(() => appConfig.value?.view_clear_secs ?? null);
 const viewClearEnabled = computed(() => rawViewClear.value !== 0);
 // Last-used duration (null = the 45s default), restored on off→on.
 const lastViewClear = ref<number | null>(null);
@@ -577,9 +544,7 @@ async function onViewClearToggle(enabled: boolean) {
 }
 
 // Clipboard auto-clear: on/off + duration (0 = never = off).
-const CLIPBOARD_CLEAR_DURATION_PRESETS = computed<
-  { label: string; value: number | null }[]
->(() => [
+const CLIPBOARD_CLEAR_DURATION_PRESETS = computed<{ label: string; value: number | null }[]>(() => [
   { label: t("settings.clear.default", { count: 45 }), value: null },
   { label: t("settings.lock.minutes", { count: 3 }), value: 180 },
 ]);
@@ -629,22 +594,19 @@ async function onClipboardClearToggle(enabled: boolean) {
 // The gate wipe is a superset of the identity auto-lock (it clears the master
 // key too), so when both run the gate dominates — surfaced via copy, not by
 // suppressing either control. On/off primary + duration select (off = opt-out).
-const GATE_IDLE_AFTER_PRESETS = computed<{ label: string; value: GateIdle }[]>(
-  () => [
-    { label: t("settings.lock.minutes", { count: 5 }), value: { after: 300 } },
-    { label: t("settings.lock.minutes", { count: 15 }), value: { after: 900 } },
-    {
-      label: t("settings.lock.minutes", { count: 30 }),
-      value: { after: 1800 },
-    },
-  ],
-);
+const GATE_IDLE_AFTER_PRESETS = computed<{ label: string; value: GateIdle }[]>(() => [
+  { label: t("settings.lock.minutes", { count: 5 }), value: { after: 300 } },
+  { label: t("settings.lock.minutes", { count: 15 }), value: { after: 900 } },
+  {
+    label: t("settings.lock.minutes", { count: 30 }),
+    value: { after: 1800 },
+  },
+]);
 
 // Object-valued (the { after } presets) → === never matches; use a comparator.
 function gateIdleEq(a: GateIdle, b: GateIdle): boolean {
   if (a === b) return true;
-  if (typeof a === "object" && typeof b === "object")
-    return a.after === b.after;
+  if (typeof a === "object" && typeof b === "object") return a.after === b.after;
   return false;
 }
 
@@ -749,10 +711,7 @@ onMounted(async () => {
 
 <template>
   <main ref="rootEl" class="max-w-120 md:max-w-150 mx-auto p-4" role="main">
-    <BaseHeader
-      :back-fallback="{ name: 'settings' }"
-      :title="t('settings.hub.lockAndIdentity')"
-    />
+    <BaseHeader :back-fallback="{ name: 'settings' }" :title="t('settings.hub.lockAndIdentity')" />
 
     <div v-if="loading" class="text-center text-muted py-8">
       {{ t("common.loading") }}
@@ -857,11 +816,7 @@ onMounted(async () => {
 
         <!-- App lock enable/disable -->
         <template v-if="!appLockEnabled">
-          <BaseButton
-            variant="action"
-            :loading="appLockLoading"
-            @click="onEnableAppLock"
-          >
+          <BaseButton variant="action" :loading="appLockLoading" @click="onEnableAppLock">
             <BaseIcon :icon="Lock" /> {{ t("settings.appLock.enable") }}
           </BaseButton>
         </template>
@@ -871,11 +826,7 @@ onMounted(async () => {
             <BaseIcon :icon="CircleCheck" :size="14" class="text-success" />
             {{ t("settings.appLock.enabledHint") }}
           </p>
-          <BaseButton
-            variant="action-danger"
-            :disabled="appLockLoading"
-            @click="onDisableAppLock"
-          >
+          <BaseButton variant="action-danger" :disabled="appLockLoading" @click="onDisableAppLock">
             {{ t("settings.appLock.disable") }}
           </BaseButton>
 
@@ -902,9 +853,7 @@ onMounted(async () => {
                   <template v-if="gateIdleEnabled">{{
                     t("settings.appLock.gateIdle.idleHint")
                   }}</template>
-                  <template v-else>{{
-                    t("settings.appLock.gateIdle.offHint")
-                  }}</template>
+                  <template v-else>{{ t("settings.appLock.gateIdle.offHint") }}</template>
                 </p>
               </template>
             </BaseOnOffToggle>
@@ -924,10 +873,7 @@ onMounted(async () => {
           <!-- Identity auto-unlock opt-in (req3): when on, the identity follows
                the gate's lifecycle and the Auto-Lock timing below is ignored.
                Only meaningful with the gate on and an encrypted identity. -->
-          <div
-            v-if="isIdentityEncrypted"
-            class="mt-4 pt-4 border-t border-edge"
-          >
+          <div v-if="isIdentityEncrypted" class="mt-4 pt-4 border-t border-edge">
             <h3 class="text-sm font-medium mb-1">
               {{ t("settings.appLock.autoUnlock.title") }}
             </h3>
@@ -984,11 +930,7 @@ onMounted(async () => {
           @change="onLockTopChange"
         >
           <template #hint>
-            <p
-              v-if="identityCoupled"
-              id="lock-mode-managed"
-              class="text-xs text-muted mt-1"
-            >
+            <p v-if="identityCoupled" id="lock-mode-managed" class="text-xs text-muted mt-1">
               {{ t("settings.lock.managedByAppLock") }}
             </p>
             <p v-else class="text-xs text-muted mt-1">
@@ -1093,11 +1035,7 @@ onMounted(async () => {
         :disabled="passphraseLoading"
         class="mb-3"
       />
-      <PassphraseUnrecoverableAck
-        v-if="ppShowNew"
-        v-model="ppAck"
-        class="mb-3"
-      />
+      <PassphraseUnrecoverableAck v-if="ppShowNew" v-model="ppAck" class="mb-3" />
       <div class="flex gap-2">
         <BaseButton
           variant="secondary"

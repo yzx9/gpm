@@ -3,10 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import type { SecretParts } from "@/api";
-import {
-  useEntryConflict,
-  type EntryConflictPayload,
-} from "@/composables/useEntryConflict";
+import { useEntryConflict, type EntryConflictPayload } from "@/composables/useEntryConflict";
 import { mountWithApp } from "@/test/appTestUtils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -299,9 +296,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(
-      vi
-        .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "resolve_entry_conflict"),
+      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "resolve_entry_conflict"),
     ).toHaveLength(0);
     expect(handle.conflict.value).toBeNull();
     expect(handle.resolving.value).toBe(false);
@@ -344,9 +339,7 @@ describe("useEntryConflict", () => {
     await flushPromises();
 
     expect(
-      vi
-        .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === "resolve_entry_conflict"),
+      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "resolve_entry_conflict"),
     ).toHaveLength(0);
     expect(handle.resolving.value).toBe(false);
   });

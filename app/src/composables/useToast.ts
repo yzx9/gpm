@@ -106,16 +106,10 @@ export function createToast(): ToastState {
   }
 
   /** Push a toast; returns a dismiss fn bound to its id. */
-  function push(
-    message: string,
-    variant: ToastVariant,
-    opts: ToastOptions,
-  ): () => void {
+  function push(message: string, variant: ToastVariant, opts: ToastOptions): () => void {
     const id = nextId++;
-    const timeout =
-      opts.timeout === undefined ? DEFAULT_TIMEOUT_MS : opts.timeout;
-    const closable =
-      opts.closable ?? (timeout === null || timeout > LONG_TIMEOUT_MS);
+    const timeout = opts.timeout === undefined ? DEFAULT_TIMEOUT_MS : opts.timeout;
+    const closable = opts.closable ?? (timeout === null || timeout > LONG_TIMEOUT_MS);
     toasts.value.push({ id, message, variant, closable });
     // Cap: drop oldest (and clear its timer) while over the limit, so a burst
     // can't pile an unbounded stack on a small mobile screen.
@@ -138,12 +132,9 @@ export function createToast(): ToastState {
   }
 
   // `success`/`danger`/... — each takes either a plain msg or an opts object.
-  function withVariant(
-    variant: ToastVariant,
-  ): (msgOrOpts: string | ToastOptions) => () => void {
+  function withVariant(variant: ToastVariant): (msgOrOpts: string | ToastOptions) => () => void {
     return (msgOrOpts) => {
-      const opts =
-        typeof msgOrOpts === "string" ? { message: msgOrOpts } : msgOrOpts;
+      const opts = typeof msgOrOpts === "string" ? { message: msgOrOpts } : msgOrOpts;
       return push(opts.message, variant, opts);
     };
   }
