@@ -988,9 +988,9 @@ done
     /// `gopass fscopy <from> <to>`: upload a real file into the store as a
     /// base64 attachment — gopass's binary write path, which runs the bytes
     /// through `secFromBytes` (Content-Disposition + Content-Transfer-Encoding:
-    /// Base64 + base64 body). The write encrypts only to the recipients file, so
-    /// it needs no identity and never reaches the mock pinentry. The source
-    /// file's basename becomes the attachment's Content-Disposition filename.
+    /// Base64 + base64 body). The store retains gopass's own recipient to satisfy
+    /// its local-identity check. The source file's basename becomes the
+    /// attachment's Content-Disposition filename.
     fn gopass_fscopy(home: &Path, from: &Path, to: &str) {
         let out = gopass(home, &["fscopy", from.to_str().unwrap(), to])
             .output()
@@ -1017,7 +1017,7 @@ done
         }
 
         let (identity, recipient) = generate_test_keypair();
-        let (home, store_dir) = provision_gopass_store(&recipient);
+        let (home, store_dir, _) = provision_gopass_store_with_gopass_recipient(&recipient);
 
         // gopass fscopy uploads a file as a base64 attachment. The source file's
         // basename becomes the Content-Disposition filename (secFromBytes), so
