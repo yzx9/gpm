@@ -147,12 +147,18 @@ mod tests {
 
     #[test]
     fn rank_entries_no_match_returns_empty() {
-        assert!(rank_entries(rank_sample_entries(), "zzznomatch").is_empty());
+        assert_eq!(
+            rank_entries(rank_sample_entries(), "zzznomatch"),
+            Vec::<Entry>::new()
+        );
     }
 
     #[test]
     fn rank_entries_query_longer_than_any_target_excluded() {
-        assert!(rank_entries(rank_sample_entries(), "abcdefghijklmnopqrstuvwxyz").is_empty());
+        assert_eq!(
+            rank_entries(rank_sample_entries(), "abcdefghijklmnopqrstuvwxyz"),
+            Vec::<Entry>::new()
+        );
     }
 
     #[test]
@@ -272,7 +278,7 @@ mod tests {
     #[test]
     fn slice_page_offset_beyond_total_is_empty() {
         let p = slice_page(page_sample(), 10, 2);
-        assert!(p.entries.is_empty());
+        assert_eq!(p.entries, Vec::<Entry>::new());
         assert_eq!(p.total, 5, "total stays the real full count");
     }
 
@@ -280,14 +286,14 @@ mod tests {
     fn slice_page_offset_at_boundary() {
         // offset exactly == len → empty page, total preserved.
         let p = slice_page(page_sample(), 5, 2);
-        assert!(p.entries.is_empty());
+        assert_eq!(p.entries, Vec::<Entry>::new());
         assert_eq!(p.total, 5);
     }
 
     #[test]
     fn slice_page_limit_zero_is_empty() {
         let p = slice_page(page_sample(), 0, 0);
-        assert!(p.entries.is_empty());
+        assert_eq!(p.entries, Vec::<Entry>::new());
         assert_eq!(p.total, 5);
     }
 

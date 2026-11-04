@@ -538,7 +538,7 @@ mod tests {
             &mut secrets,
             &mut other,
         );
-        assert!(secrets.is_empty());
+        assert_eq!(secrets, Vec::<String>::new());
         assert_eq!(other, vec!["tw/github.gpg".to_string()]);
 
         // Symmetric: an .age secret under the age extension is a secret.

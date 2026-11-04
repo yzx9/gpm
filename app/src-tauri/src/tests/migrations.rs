@@ -1260,7 +1260,7 @@ async fn m0009_leaves_registry_empty_when_no_repo() {
 
     let reloaded = reload_at(dir.path(), &store).await;
     assert_eq!(reloaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
-    assert!(reloaded.repositories.is_empty());
+    assert_eq!(reloaded.repositories, Vec::<String>::new());
     assert!(reloaded.last_active.is_none());
 }
 
@@ -1281,7 +1281,7 @@ async fn m0009_propagates_error_for_corrupt_repo_json() {
 
     let reloaded = reload_at(dir.path(), &store).await;
     assert_eq!(reloaded.schema_version, 8); // halted, NOT bumped past recovery
-    assert!(reloaded.repositories.is_empty());
+    assert_eq!(reloaded.repositories, Vec::<String>::new());
     assert!(reloaded.last_active.is_none());
 }
 

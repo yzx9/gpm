@@ -796,7 +796,7 @@ mod tests {
             key,
         }];
         // Flip one byte of a non-empty payload (clippy-safe vs indexing).
-        assert!(!GPG_PAYLOAD.is_empty());
+        assert_ne!(GPG_PAYLOAD, b"");
         let mut tampered = GPG_PAYLOAD.to_vec();
         if let Some(b) = tampered.first_mut() {
             *b ^= 0xff;

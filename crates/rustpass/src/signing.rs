@@ -1608,8 +1608,8 @@ mod tests {
     fn authenticity_config_default_is_off_empty() {
         let cfg = AuthenticityConfig::default();
         assert_eq!(cfg.mode, VerifyMode::Off);
-        assert!(cfg.trusted_keys.is_empty());
-        assert!(cfg.ignored.is_empty());
+        assert_eq!(cfg.trusted_keys, Vec::<TrustedKey>::new());
+        assert_eq!(cfg.ignored, Vec::<IgnoredIssue>::new());
     }
 
     #[test]
@@ -1618,7 +1618,7 @@ mod tests {
         let json = "{}";
         let cfg: AuthenticityConfig = serde_json::from_str(json).expect("parse empty");
         assert_eq!(cfg.mode, VerifyMode::Off);
-        assert!(cfg.trusted_keys.is_empty());
+        assert_eq!(cfg.trusted_keys, Vec::<TrustedKey>::new());
         // The GPG field is additive (`#[serde(default)]`): an old config that
         // predates RFC 0009 must deserialize to an empty list, not fail.
         assert!(
@@ -2042,7 +2042,7 @@ mod tests {
             "subject should be lossy-decoded: {:?}",
             info.subject
         );
-        assert!(!info.subject.is_empty());
+        assert_ne!(info.subject, "");
     }
 
     // ── format helpers ────────────────────────────────────────────────────

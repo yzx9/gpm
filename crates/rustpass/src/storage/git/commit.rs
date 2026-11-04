@@ -354,7 +354,7 @@ mod tests {
         let message = "Initialized Store for age1abc";
         let head = commit_initial(dir.path(), &[RECIPIENTS_FILE.to_string()], message)
             .expect("commit_initial");
-        assert!(!head.is_empty());
+        assert_ne!(head, "");
 
         let repo = Repository::open(dir.path()).unwrap();
         let oid = repo.head().unwrap().target().unwrap();

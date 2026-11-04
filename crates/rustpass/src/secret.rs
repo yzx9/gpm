@@ -683,7 +683,7 @@ mod tests {
         let secret = Secret::parse(b"hunter2").unwrap();
         assert_eq!(secret.password(), "hunter2");
         assert_eq!(secret.body(), "");
-        assert!(secret.attributes().is_empty());
+        assert_eq!(secret.attributes(), []);
     }
 
     #[test]
@@ -1217,7 +1217,7 @@ mod tests {
         let secret = Secret::parse(b"password\n---\notp: bar").unwrap();
         assert!(secret.is_yaml());
         assert_eq!(secret.password(), "password");
-        assert!(secret.attributes().is_empty());
+        assert_eq!(secret.attributes(), []);
         assert_eq!(secret.body_bytes(), b"---\notp: bar");
     }
 
@@ -1272,7 +1272,7 @@ mod tests {
         assert!(!secret.is_yaml());
         assert_eq!(secret.password(), "pw");
         // The armor has no `": "` lines, so it is all free-text body.
-        assert!(secret.attributes().is_empty());
+        assert_eq!(secret.attributes(), []);
         assert!(secret.body_bytes().starts_with(b"-----BEGIN"));
     }
 
