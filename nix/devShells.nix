@@ -120,6 +120,7 @@ let
     webkitgtk_4_1
     libsoup_3
     dbus
+    zlib
   ];
 
   # shellHook fragment: the desktop runtime on LD_LIBRARY_PATH (see above).
