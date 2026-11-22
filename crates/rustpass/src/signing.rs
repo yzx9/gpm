@@ -612,10 +612,7 @@ pub fn commit_sig_info(
     let author = format_signature(&commit.author());
     let committer_time = commit.committer().when();
     let date = format_iso8601(committer_time.seconds(), committer_time.offset_minutes());
-    let subject = commit
-        .summary_bytes()
-        .map(String::from_utf8_lossy)
-        .unwrap_or_default()
+    let subject = String::from_utf8_lossy(commit.summary_bytes().unwrap_or_default())
         .trim()
         .lines()
         .next()
