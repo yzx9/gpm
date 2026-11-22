@@ -59,33 +59,33 @@ const op = computed(() => props.conflict?.op ?? "edit");
 const heading = computed(
   () =>
     (
-      ({
+      {
         edit: t("common.entryConflict.headingEdit"),
         delete: t("common.entryConflict.headingDelete"),
         create: t("common.entryConflict.headingCreate"),
-      }) as const
+      } as const
     )[op.value],
 );
 /** The discard-your-work action — keep-theirs (drops your edit/delete/create). */
 const keepTheirsLabel = computed(
   () =>
     (
-      ({
+      {
         edit: t("common.entryConflict.useTheirsEdit"),
         delete: t("common.entryConflict.keepTheirsDelete"),
         create: t("common.entryConflict.keepTheirsCreate"),
-      }) as const
+      } as const
     )[op.value],
 );
 /** The informed-overwrite/remove action — keep-mine. */
 const keepMineLabel = computed(
   () =>
     (
-      ({
+      {
         edit: t("common.entryConflict.useMineEdit"),
         delete: t("common.entryConflict.deleteAnyway"),
         create: t("common.entryConflict.overwriteCreate"),
-      }) as const
+      } as const
     )[op.value],
 );
 // Step-2 contextual confirm copy, keyed by (choice, op). Returns an i18n key.
