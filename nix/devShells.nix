@@ -121,6 +121,7 @@ let
     libsoup_3
     dbus
     zlib
+    xz
   ];
 
   # shellHook fragment: the desktop runtime on LD_LIBRARY_PATH (see above).
