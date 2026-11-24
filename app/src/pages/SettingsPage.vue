@@ -236,6 +236,12 @@ onMounted(async () => {
   transition: background-color 0.15s;
 }
 .hub-row + .hub-row {
+  position: relative;
+}
+.hub-row + .hub-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
   border-top: 1px solid var(--color-edge);
 }
 .hub-row:focus-visible {

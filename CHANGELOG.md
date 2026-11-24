@@ -16,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   your identity. Removing a key and later adding one back works from the same screen (the repository
   settings entry now routes SSH remotes there), and the form clears itself whenever the app locks.
 
+### Fixed
+
+- Dividers between rows on the Settings page are now straight instead of curving at the ends.
+
 ### Security
 
 - **A half-typed access token no longer survives a lock.** The access-token page's replace field
