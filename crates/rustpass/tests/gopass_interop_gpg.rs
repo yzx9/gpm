@@ -884,6 +884,7 @@ done
             eprintln!("skipping gpg interop test: `gopass`/`gpg` not on PATH");
             return;
         }
+        // A leading zero in the Ed25519 secret can cause `Invalid checksum` on import (rpgp/rpgp#901).
         let (home, store_dir, identity_armor, _recipient) =
             provision_gopass_gpg_store_with(true, None);
 
