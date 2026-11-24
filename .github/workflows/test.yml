@@ -64,6 +64,17 @@ jobs:
           npm_cache: true
           java_cache: true
 
+      # Robolectric fetches its SDK jars at test runtime, outside Gradle's cache.
+      - name: Cache local Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: >-
+            maven-${{ runner.os }}-${{ hashFiles('crates/*/android/build.gradle.kts',
+            '**/GpmAppDepsPlugin.kt', '**/src/test/**/*.kt', '**/robolectric.properties') }}
+          restore-keys: |
+            maven-${{ runner.os }}-
+
       - name: Build single-ABI + run plugin tests
         # gen-icons + a single-ABI debug build produce the gitignored
         # tauri.settings.gradle that gradle needs to configure; `just test-plugin`
