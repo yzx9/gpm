@@ -323,27 +323,42 @@ export async function copyGeneratedPassword(
   await invoke("copy_generated_password", { text, notifyText: notify });
 }
 
-/** Generate one password. The arg object is passed through verbatim. */
-export async function generatePassword(opts: {
+/** Generator options shared by the one-off and batch commands. */
+export interface GenerateOptions {
   mode: GenerateMode;
   charset: string | null;
   minLen: number | null;
   maxLen: number | null;
   strict: boolean;
-}): Promise<string> {
-  return invoke<string>("generate_password", opts);
+  /** Minimum digits required in a random/charset password (0 = no minimum). */
+  minDigits?: number;
+  /** Minimum symbols required in a random/charset password (0 = no minimum). */
+  minSymbols?: number;
+  /** Strip visually ambiguous characters from an explicit charset. */
+  avoidAmbiguous?: boolean;
 }
 
-/** Generate a batch of `count` passwords. The arg object is passed through verbatim. */
-export async function generatePasswordBatch(opts: {
-  mode: GenerateMode;
-  charset: string | null;
-  minLen: number | null;
-  maxLen: number | null;
-  strict: boolean;
-  count: number;
-}): Promise<string[]> {
-  return invoke<string[]>("generate_password_batch", opts);
+/** Fill the advanced-generator defaults for callers that only use gopass's
+ *  create-wizard options (a missing Rust argument would fail deserialization). */
+function generatorPayload(opts: GenerateOptions) {
+  return {
+    ...opts,
+    minDigits: opts.minDigits ?? 0,
+    minSymbols: opts.minSymbols ?? 0,
+    avoidAmbiguous: opts.avoidAmbiguous ?? false,
+  };
+}
+
+/** Generate one password. */
+export async function generatePassword(opts: GenerateOptions): Promise<string> {
+  return invoke<string>("generate_password", generatorPayload(opts));
+}
+
+/** Generate a batch of `count` passwords. */
+export async function generatePasswordBatch(
+  opts: GenerateOptions & { count: number },
+): Promise<string[]> {
+  return invoke<string[]>("generate_password_batch", generatorPayload(opts));
 }
 
 /** List the built-in create presets. */

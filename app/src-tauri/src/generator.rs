@@ -14,13 +14,16 @@ use zeroize::Zeroizing;
 /// result is drawn from that alphabet (e.g. a digits-only PIN); otherwise the
 /// selected `mode` (random/memorable/xkcd) drives it.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub(crate) async fn generate_password(
     mode: GenerateMode,
     charset: Option<String>,
     min_len: Option<usize>,
     max_len: Option<usize>,
     strict: bool,
+    min_digits: usize,
+    min_symbols: usize,
+    avoid_ambiguous: bool,
 ) -> Result<Zeroizing<String>, Error> {
     rustpass::generate_password(&GenerateOptions {
         mode,
@@ -28,6 +31,9 @@ pub(crate) async fn generate_password(
         min_len,
         max_len,
         strict,
+        min_digits,
+        min_symbols,
+        avoid_ambiguous,
     })
 }
 
@@ -49,13 +55,16 @@ fn clamp_count(count: usize) -> usize {
 /// cleared there on lock/unmount/regenerate like other shown secrets — the
 /// `WebView`'s copy is ordinary JS strings, not `Zeroizing`.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub(crate) async fn generate_password_batch(
     mode: GenerateMode,
     charset: Option<String>,
     min_len: Option<usize>,
     max_len: Option<usize>,
     strict: bool,
+    min_digits: usize,
+    min_symbols: usize,
+    avoid_ambiguous: bool,
     count: usize,
 ) -> Result<Vec<Zeroizing<String>>, Error> {
     let opts = GenerateOptions {
@@ -64,6 +73,9 @@ pub(crate) async fn generate_password_batch(
         min_len,
         max_len,
         strict,
+        min_digits,
+        min_symbols,
+        avoid_ambiguous,
     };
     let n = clamp_count(count);
     let mut out = Vec::with_capacity(n);

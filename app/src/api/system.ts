@@ -14,6 +14,7 @@ import type { LockMode, SecureScreenMode } from "./common";
 
 // R085: generated from the Rust enums by `just gen-codegen`.
 import type { BackgroundSyncCadence, GateIdle } from "./generated/app";
+import type { GenerateMode } from "./secrets";
 
 export type { BackgroundSyncCadence, GateIdle };
 
@@ -65,6 +66,11 @@ export interface AppConfig {
   /** Color-scheme override. Absent ⇒ track system; `"light"` / `"dark"` ⇒
    *  pinned (applied via a `<html data-theme>` attribute by `@/theme`). */
   theme_mode?: string;
+  /** Standalone password-generator recipe (non-secret). Absent ⇒ install
+   *  defaults; the Generate screen saves it on every change so the same mode,
+   *  sliders, and character groups return on the next visit/launch. Generated
+   *  passwords themselves are never persisted. */
+  generator?: GeneratorSettings;
   /** App auto-lock mode. Absent ⇒ Immediate. Mirrors Rust `LockMode`. */
   lock_mode?: LockMode;
   /** Password-view auto-clear seconds. Absent/null ⇒ default (45); 0 ⇒ never. */
@@ -109,6 +115,117 @@ export interface AppConfig {
    *  any repository is set up. `useActiveRepo` resolves to this, falling back to
    *  `repositories[0]`. */
   last_active?: string;
+}
+
+/** Bounds mirrored from the Rust normalizer (`app_config.rs`); the sliders and
+ *  the persistence sanitizer share them. */
+export const GENERATOR_LENGTH_MIN = 5;
+export const GENERATOR_LENGTH_MAX = 128;
+export const GENERATOR_COUNT_MIN = 1;
+export const GENERATOR_COUNT_MAX = 32;
+
+/** Non-secret standalone-generator recipe persisted in `app.json`. Wire fields
+ *  are camelCase (Rust `#[serde(rename_all = "camelCase")]`). */
+export interface GeneratorSettings {
+  mode: GenerateMode;
+  /** Exact length for `random`, a floor for `memorable`, unused for `xkcd`. */
+  length: number;
+  /** Number of passwords generated per run. */
+  count: number;
+  upper: boolean;
+  lower: boolean;
+  digits: boolean;
+  symbols: boolean;
+  minDigits: number;
+  minSymbols: number;
+  avoidAmbiguous: boolean;
+}
+
+/** Install defaults — must match `GeneratorSettings::default()` in Rust. */
+export const DEFAULT_GENERATOR_SETTINGS: Readonly<GeneratorSettings> = {
+  mode: "random",
+  length: 24,
+  count: 1,
+  upper: true,
+  lower: true,
+  digits: true,
+  symbols: true,
+  minDigits: 1,
+  minSymbols: 1,
+  avoidAmbiguous: true,
+};
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback;
+}
+
+/**
+ * Merge an on-disk recipe with the install defaults and normalize it into one
+ * the generator can execute. A field the backend already normalizes is
+ * defended here too, so a hand-edited `app.json` or an older schema can't put
+ * the form into an impossible state.
+ */
+export function normalizeGeneratorSettings(
+  raw: Partial<GeneratorSettings> | null | undefined,
+): GeneratorSettings {
+  const rawMode = raw?.mode;
+  const mode: GenerateMode =
+    rawMode === "random" || rawMode === "memorable" || rawMode === "xkcd"
+      ? rawMode
+      : DEFAULT_GENERATOR_SETTINGS.mode;
+  const length = clampInt(
+    raw?.length,
+    GENERATOR_LENGTH_MIN,
+    GENERATOR_LENGTH_MAX,
+    DEFAULT_GENERATOR_SETTINGS.length,
+  );
+  const count = clampInt(
+    raw?.count,
+    GENERATOR_COUNT_MIN,
+    GENERATOR_COUNT_MAX,
+    DEFAULT_GENERATOR_SETTINGS.count,
+  );
+  const groups = {
+    upper: raw?.upper ?? DEFAULT_GENERATOR_SETTINGS.upper,
+    lower: raw?.lower ?? DEFAULT_GENERATOR_SETTINGS.lower,
+    digits: raw?.digits ?? DEFAULT_GENERATOR_SETTINGS.digits,
+    symbols: raw?.symbols ?? DEFAULT_GENERATOR_SETTINGS.symbols,
+  };
+  // Never persist an alphabet-less recipe; mirror the Rust normalizer.
+  if (!groups.upper && !groups.lower && !groups.digits && !groups.symbols) {
+    groups.lower = true;
+  }
+  const minDigits = groups.digits
+    ? Math.min(clampInt(raw?.minDigits, 0, length, DEFAULT_GENERATOR_SETTINGS.minDigits), length)
+    : 0;
+  const minSymbols = groups.symbols
+    ? Math.min(
+        clampInt(raw?.minSymbols, 0, length, DEFAULT_GENERATOR_SETTINGS.minSymbols),
+        length - minDigits,
+      )
+    : 0;
+  return {
+    mode,
+    length,
+    count,
+    ...groups,
+    minDigits,
+    minSymbols,
+    avoidAmbiguous: raw?.avoidAmbiguous ?? DEFAULT_GENERATOR_SETTINGS.avoidAmbiguous,
+  };
+}
+
+/**
+ * Persist the standalone generator's non-secret recipe (`set_generator_settings`).
+ * Returns the updated config; the Generate screen applies it locally as the
+ * user changes controls and never persists the generated passwords themselves.
+ */
+export async function setGeneratorSettings(
+  settings: GeneratorSettings,
+): Promise<AppConfig> {
+  return invoke<AppConfig>("set_generator_settings", { settings });
 }
 
 /**
