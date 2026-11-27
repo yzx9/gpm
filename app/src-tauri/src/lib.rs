@@ -983,6 +983,7 @@ pub fn run() {
             app_config::set_locale_pref,
             app_config::resolved_locale,
             app_config::set_theme_mode,
+            app_config::set_generator_settings,
             app_config::set_verbose,
             app_config::screen_secure_available,
             app_config::runtime_platform,

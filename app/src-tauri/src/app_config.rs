@@ -57,7 +57,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustpass::config::save_atomic;
-use rustpass::{Error, ErrorCode, LockMode, Store, clamp_lock_mode, normalize_clear_secs};
+use rustpass::{
+    Error, ErrorCode, GenerateMode, LockMode, Store, clamp_lock_mode, normalize_clear_secs,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tokio::fs;
@@ -192,6 +194,97 @@ pub(crate) fn clamp_gate_idle(mode: GateIdle) -> GateIdle {
     }
 }
 
+/// Standalone generator bounds shared by the persistence normalizer and the
+/// frontend's mirror in `api/system.ts`. Keep these in sync with the slider
+/// ranges: an out-of-range value arriving over IPC is clamped, never persisted.
+const GENERATOR_LENGTH_MIN: usize = 5;
+const GENERATOR_LENGTH_MAX: usize = 128;
+const GENERATOR_COUNT_MIN: usize = 1;
+const GENERATOR_COUNT_MAX: usize = 32;
+
+/// The standalone generator's persisted **non-secret** recipe. This is the
+/// recipe only — generated passwords themselves stay in memory (see the
+/// security model) — so it is safe to keep in the sealed app config and
+/// restore on the next launch. `mode` reuses [`GenerateMode`] so the wire
+/// values stay lowercase (`random`/`memorable`/`xkcd`), exactly like the
+/// generator IPC. Fields are camelCase on the wire to match the frontend's
+/// Tauri-converted names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+#[allow(clippy::struct_excessive_bools)] // the 5 bools are independent class toggles, not a state machine
+pub(crate) struct GeneratorSettings {
+    /// Generator method.
+    pub(crate) mode: GenerateMode,
+    /// Requested length: exact for `random`, a floor for `memorable`, ignored
+    /// for `xkcd`. Clamped to `5..=128`.
+    pub(crate) length: usize,
+    /// Batch size / number of passwords generated per run. Clamped to `1..=32`.
+    pub(crate) count: usize,
+    /// Character groups for `random` mode (`A-Z`, `a-z`, `0-9`, `!@#$%^&*-_=+?`).
+    pub(crate) upper: bool,
+    pub(crate) lower: bool,
+    pub(crate) digits: bool,
+    pub(crate) symbols: bool,
+    /// Minimum digit count (random mode only).
+    pub(crate) min_digits: usize,
+    /// Minimum symbol count (random mode only).
+    pub(crate) min_symbols: usize,
+    /// Leave visually ambiguous characters out of the alphabet.
+    pub(crate) avoid_ambiguous: bool,
+}
+
+impl Default for GeneratorSettings {
+    fn default() -> Self {
+        Self {
+            mode: GenerateMode::Random,
+            length: 24,
+            count: 1,
+            upper: true,
+            lower: true,
+            digits: true,
+            symbols: true,
+            min_digits: 1,
+            min_symbols: 1,
+            avoid_ambiguous: true,
+        }
+    }
+}
+
+impl GeneratorSettings {
+    /// Normalize a client-supplied recipe into one the generator can always
+    /// execute: bounds are clamped, a quota for a disabled group is cleared,
+    /// and quotas are trimmed to fit the length. This keeps a malformed /
+    /// stale config from wedging the Generate screen behind a validation error.
+    fn normalized(mut self) -> Self {
+        self.length = self
+            .length
+            .clamp(GENERATOR_LENGTH_MIN, GENERATOR_LENGTH_MAX);
+        self.count = self.count.clamp(GENERATOR_COUNT_MIN, GENERATOR_COUNT_MAX);
+        if !self.upper && !self.lower && !self.digits && !self.symbols {
+            // Never persist an alphabet-less recipe; the UI also refuses to
+            // deselect the last group.
+            self.lower = true;
+        }
+        if !self.digits {
+            self.min_digits = 0;
+        }
+        if !self.symbols {
+            self.min_symbols = 0;
+        }
+        self.min_digits = self.min_digits.min(self.length);
+        self.min_symbols = self
+            .min_symbols
+            .min(self.length.saturating_sub(self.min_digits));
+        self
+    }
+
+    /// True at the install defaults, so `skip_serializing_if` omits the whole
+    /// object and an existing `app.json` stays byte-identical on round-trip.
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// App-level (non-repo) preferences — the **single sealed on-disk shape** at
 /// schema 8 (the merged display + behavior config). [`AppConfigStore::get`]
 /// clones it straight from the one in-memory cache; [`AppConfigStore::save_merged`]
@@ -230,6 +323,11 @@ pub(crate) struct AppConfig {
     /// non-breaking (mirrors `locale`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) theme_mode: Option<String>,
+    /// Standalone password-generator recipe (non-secret). Persisted so the
+    /// Generate screen reopens with the same mode, sliders, and character
+    /// groups. Omitted while default so existing files stay byte-identical.
+    #[serde(default, skip_serializing_if = "GeneratorSettings::is_default")]
+    pub(crate) generator: GeneratorSettings,
     /// How the app auto-locks the identity cache. Skipped
     /// from serialization when default (`Immediate`), so an uncustomized config
     /// is byte-identical to one written before this field moved here.
@@ -326,6 +424,7 @@ impl Default for AppConfig {
             secure_screen_mode: None,
             locale: None,
             theme_mode: None,
+            generator: GeneratorSettings::default(),
             lock_mode: LockMode::default(),
             view_clear_secs: None,
             clipboard_clear_secs: None,
@@ -359,6 +458,10 @@ impl AppConfig {
             secure_screen_mode: behavior.secure_screen_mode,
             locale: pref.locale.clone(),
             theme_mode: pref.theme_mode.clone(),
+            // The generator recipe was added after the pref/behavior split, so
+            // it is never carried by the legacy halves. Runtime updates clone
+            // the merged config and preserve it.
+            generator: GeneratorSettings::default(),
             lock_mode: behavior.lock_mode,
             view_clear_secs: behavior.view_clear_secs,
             clipboard_clear_secs: behavior.clipboard_clear_secs,
@@ -1578,6 +1681,18 @@ impl AppConfigStore {
         self.update(|c| c.theme_mode = mode).await
     }
 
+    /// Persist the standalone generator's non-secret recipe. The incoming
+    /// values are normalized first (slider bounds, quotas cleared for disabled
+    /// groups, quota sum trimmed to the length) so a stale/malformed config can
+    /// never wedge generation.
+    pub(crate) async fn set_generator_settings(
+        &self,
+        settings: GeneratorSettings,
+    ) -> Result<AppConfig, Error> {
+        let settings = settings.normalized();
+        self.update(|c| c.generator = settings).await
+    }
+
     /// Set the display-language preference (`null` clears the override — track
     /// system; `"en"` / `"zh-CN"` pin it). Mirrors `set_theme_mode`. The frontend
     /// re-applies the locale on receipt.
@@ -1701,6 +1816,19 @@ pub(crate) async fn set_theme_mode(
     mode: Option<String>,
 ) -> Result<AppConfig, Error> {
     state.app_config.set_theme_mode(mode).await
+}
+
+/// Persist the standalone generator's non-secret recipe (mode, sliders,
+/// character groups, quotas). Returns the updated config; the Generate screen
+/// applies it immediately and restores it on the next visit/launch. Generated
+/// passwords themselves are never persisted.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) async fn set_generator_settings(
+    state: State<'_, AppState>,
+    settings: GeneratorSettings,
+) -> Result<AppConfig, Error> {
+    state.app_config.set_generator_settings(settings).await
 }
 
 /// The authoritative locale the app should render in. The frontend reconciles
@@ -1907,6 +2035,86 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
         assert!(store_at(dir.path()).await.get().theme_mode.is_none());
+    }
+
+    #[test]
+    fn default_generator_settings_are_omitted_from_the_wire() {
+        // A pre-existing app.json must round-trip byte-identically — the
+        // generator recipe only appears once the user changes something.
+        let v = serde_json::to_value(AppConfig::default()).unwrap();
+        assert!(
+            v.get("generator").is_none(),
+            "default generator recipe is omitted; got: {v}"
+        );
+        let g = GeneratorSettings::default();
+        assert_eq!(g.mode, GenerateMode::Random);
+        assert_eq!((g.length, g.count), (24, 1));
+        assert!(g.upper && g.lower && g.digits && g.symbols);
+        assert!(g.avoid_ambiguous);
+    }
+
+    #[tokio::test]
+    async fn existing_app_json_without_generator_loads_defaults() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(APP_CONFIG_FILE), "{}").unwrap();
+        let got = store_at(dir.path()).await.get().generator;
+        assert_eq!(got, GeneratorSettings::default());
+    }
+
+    #[tokio::test]
+    async fn set_generator_settings_persists_and_normalizes() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_with_desktop_store(dir.path()).await;
+        // Out-of-range length/count, all groups off, and a quota for disabled
+        // groups — all normalized before persisting.
+        store
+            .set_generator_settings(GeneratorSettings {
+                mode: GenerateMode::Memorable,
+                length: 200,
+                count: 99,
+                upper: false,
+                lower: false,
+                digits: true,
+                symbols: false,
+                min_digits: 50,
+                min_symbols: 7,
+                avoid_ambiguous: false,
+            })
+            .await
+            .unwrap();
+
+        let got = store.get().generator;
+        assert_eq!(got.mode, GenerateMode::Memorable);
+        assert_eq!(got.length, 128);
+        assert_eq!(got.count, 32);
+        assert!(got.digits, "the only enabled group survives");
+        assert!(!got.symbols && !got.upper && !got.lower);
+        assert_eq!(got.min_digits, 50);
+        assert_eq!(got.min_symbols, 0, "quota for a disabled group is cleared");
+        assert!(!got.avoid_ambiguous);
+
+        // A fresh store re-reads the same normalized recipe from disk.
+        let reloaded = store_with_desktop_store(dir.path()).await.get().generator;
+        assert_eq!(reloaded, got);
+    }
+
+    #[tokio::test]
+    async fn generator_quota_sum_is_trimmed_to_the_length() {
+        let dir = tempdir().expect("tempdir");
+        let store = store_with_desktop_store(dir.path()).await;
+        store
+            .set_generator_settings(GeneratorSettings {
+                length: 10,
+                min_digits: 8,
+                min_symbols: 8,
+                ..GeneratorSettings::default()
+            })
+            .await
+            .unwrap();
+        let got = store.get().generator;
+        assert_eq!(got.min_digits, 8);
+        assert_eq!(got.min_symbols, 2);
+        assert_eq!(got.min_digits + got.min_symbols, got.length);
     }
 
     #[tokio::test]

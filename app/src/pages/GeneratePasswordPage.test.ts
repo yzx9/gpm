@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import { DEFAULT_GENERATOR_SETTINGS, type GeneratorSettings } from "@/api";
 import { mountWithApp } from "@/test/appTestUtils";
 import { invoke } from "@tauri-apps/api/core";
 import { flushPromises } from "@vue/test-utils";
@@ -21,11 +22,23 @@ vi.mock("vue-router", () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace, back: vi.fn() }),
 }));
 
-/** Wire `invoke` per command; returns a fresh mounted GeneratePasswordPage. */
-async function mountPage(handlers: Record<string, () => unknown>) {
-  vi.mocked(invoke).mockImplementation(((cmd: string) => {
-    const h = handlers[cmd];
-    if (h) return Promise.resolve(h());
+type Handler = (args?: unknown) => unknown;
+type Handlers = Record<string, Handler>;
+
+const DEFAULT_CONFIG = { generator: { ...DEFAULT_GENERATOR_SETTINGS } };
+
+/** Wire `invoke` per command; returns a fresh mounted GeneratePasswordPage.
+ *  Auto-generation means every mount needs `get_app_config` + a batch handler. */
+async function mountPage(handlers: Handlers = {}) {
+  const defaults: Handlers = {
+    get_app_config: () => DEFAULT_CONFIG,
+    generate_password_batch: () => ["generated"],
+    set_generator_settings: () => DEFAULT_CONFIG,
+    copy_generated_password: () => undefined,
+  };
+  vi.mocked(invoke).mockImplementation(((cmd: string, args?: unknown) => {
+    const h = handlers[cmd] ?? defaults[cmd];
+    if (h) return Promise.resolve(h(args));
     return Promise.resolve(undefined);
   }) as typeof invoke);
   const app = mountWithApp(GeneratePasswordPage);
@@ -33,115 +46,276 @@ async function mountPage(handlers: Record<string, () => unknown>) {
   return app;
 }
 
+function generateCalls() {
+  return vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "generate_password_batch");
+}
+
+function lastGenerateArgs(): Record<string, unknown> {
+  const calls = generateCalls();
+  return (calls[calls.length - 1]?.[1] ?? {}) as Record<string, unknown>;
+}
+
+function settingsSaves() {
+  return vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "set_generator_settings");
+}
+
+function lastSavedSettings(): GeneratorSettings {
+  const calls = settingsSaves();
+  return (calls[calls.length - 1]?.[1] as { settings: GeneratorSettings }).settings;
+}
+
+function configWith(generator: Partial<GeneratorSettings>) {
+  return { generator: { ...DEFAULT_GENERATOR_SETTINGS, ...generator } };
+}
+
 describe("GeneratePasswordPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("generates 10 passwords by default", async () => {
-    const { wrapper } = await mountPage({
-      generate_password_batch: () => ["a"],
-    });
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
+  it("auto-generates once on mount with the install defaults", async () => {
+    const { wrapper } = await mountPage();
 
-    expect(invoke).toHaveBeenCalledWith(
-      "generate_password_batch",
-      expect.objectContaining({ count: 10 }),
+    expect(generateCalls()).toHaveLength(1);
+    expect(lastGenerateArgs()).toEqual(
+      expect.objectContaining({
+        mode: "random",
+        count: 1,
+        minLen: 24,
+        maxLen: 24,
+        minDigits: 1,
+        minSymbols: 1,
+        avoidAmbiguous: true,
+      }),
     );
+    expect(wrapper.findAll(".current-row")).toHaveLength(1);
+    expect(wrapper.find(".current-row").text()).toContain("generated");
   });
 
-  it("renders one row per generated password", async () => {
+  it("restores the persisted recipe before auto-generating", async () => {
     const { wrapper } = await mountPage({
-      generate_password_batch: () => ["aa", "bb", "cc"],
+      get_app_config: () =>
+        configWith({
+          mode: "memorable",
+          length: 30,
+          count: 2,
+          upper: false,
+          lower: true,
+          digits: false,
+          symbols: false,
+          minDigits: 0,
+          minSymbols: 0,
+          avoidAmbiguous: false,
+        }),
+      generate_password_batch: () => ["first", "second"],
     });
-    await wrapper.find("#g-count").setValue("3");
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith(
-      "generate_password_batch",
-      expect.objectContaining({ count: 3 }),
+    expect(lastGenerateArgs()).toEqual(
+      expect.objectContaining({
+        mode: "memorable",
+        count: 2,
+        minLen: 30,
+        maxLen: 30,
+        charset: null,
+        minDigits: 0,
+        minSymbols: 0,
+        avoidAmbiguous: false,
+      }),
     );
-    expect(wrapper.findAll(".result-row")).toHaveLength(3);
+    expect(wrapper.findAll(".current-row")).toHaveLength(2);
+    expect((wrapper.find("#g-length").element as HTMLInputElement).value).toBe("30");
+    expect((wrapper.find("#g-count").element as HTMLInputElement).value).toBe("2");
   });
 
-  it("the style selector changes which generator runs", async () => {
+  it("falls back to defaults when the config read fails", async () => {
     const { wrapper } = await mountPage({
-      generate_password_batch: () => ["x"],
+      get_app_config: () => Promise.reject({ code: "CONFIG_ERROR", message: "boom" }),
     });
-    // Open the BaseSelect sheet and pick xkcd (the 3rd option).
-    await wrapper.find('button[aria-labelledby="generate-style-legend"]').trigger("click");
-    await flushPromises();
-    await wrapper.findAll('input[type="radio"][name="generate-style"]')[2]!.trigger("change");
-    await flushPromises();
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith(
-      "generate_password_batch",
-      expect.objectContaining({ mode: "xkcd" }),
-    );
+    expect(lastGenerateArgs()).toEqual(expect.objectContaining({ mode: "random", count: 1 }));
+    expect(wrapper.findAll(".current-row")).toHaveLength(1);
   });
 
-  it("random mode pins an exact length via min == max", async () => {
-    const { wrapper } = await mountPage({
-      generate_password_batch: () => ["x"],
-    });
-    // Defaults: mode random, length 24.
-    await wrapper.find("form").trigger("submit");
+  it("switching the mode buttons regenerates with that generator", async () => {
+    const { wrapper } = await mountPage();
+
+    // The three top buttons are the mode fieldset's radios; pick Passphrase.
+    await wrapper.findAll('input[type="radio"][name="generate-mode"]')[2]!.trigger("change");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith(
-      "generate_password_batch",
-      expect.objectContaining({ mode: "random", minLen: 24, maxLen: 24 }),
+    expect(lastGenerateArgs()).toEqual(
+      expect.objectContaining({ mode: "xkcd", minLen: null, maxLen: null, count: 1 }),
     );
-  });
-
-  it("a chosen length flows through to the request", async () => {
-    const { wrapper } = await mountPage({
-      generate_password_batch: () => ["x"],
-    });
-    await wrapper.find("#g-length").setValue("32");
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
-
-    expect(invoke).toHaveBeenCalledWith(
-      "generate_password_batch",
-      expect.objectContaining({ minLen: 32, maxLen: 32 }),
-    );
-  });
-
-  it("xkcd hides the length control and sends no length", async () => {
-    const { wrapper } = await mountPage({
-      generate_password_batch: () => ["x"],
-    });
-    // Open the BaseSelect sheet and pick xkcd (the 3rd option).
-    await wrapper.find('button[aria-labelledby="generate-style-legend"]').trigger("click");
-    await flushPromises();
-    await wrapper.findAll('input[type="radio"][name="generate-style"]')[2]!.trigger("change");
-    await flushPromises();
-
+    expect(lastSavedSettings()).toEqual(expect.objectContaining({ mode: "xkcd" }));
     expect(wrapper.find("#g-length").exists()).toBe(false);
+  });
 
-    await wrapper.find("form").trigger("submit");
+  it("length and count sliders flow through to the request and persist", async () => {
+    const { wrapper } = await mountPage();
+
+    await wrapper.find("#g-length").setValue("32");
+    await flushPromises();
+    await wrapper.find("#g-count").setValue("3");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith(
-      "generate_password_batch",
-      expect.objectContaining({ minLen: null, maxLen: null }),
+    expect(lastGenerateArgs()).toEqual(
+      expect.objectContaining({ minLen: 32, maxLen: 32, count: 3 }),
     );
+    expect(lastSavedSettings()).toEqual(expect.objectContaining({ length: 32, count: 3 }));
+  });
+
+  it("sends the selected character groups and advanced quotas", async () => {
+    const { wrapper } = await mountPage();
+
+    await wrapper.find("#g-length").setValue("16");
+    await flushPromises();
+    // Turn off uppercase, lowercase, and digits — only symbols remain.
+    const groups = wrapper.findAll('input[type="checkbox"]');
+    await groups[0]!.setValue(false);
+    await groups[1]!.setValue(false);
+    await groups[2]!.setValue(false);
+    await flushPromises();
+    await wrapper.find("#g-min-symbols").setValue("2");
+    await flushPromises();
+
+    expect(lastGenerateArgs()).toEqual(
+      expect.objectContaining({
+        charset: "!@#$%^&*-_=+?",
+        minDigits: 0,
+        minSymbols: 2,
+        avoidAmbiguous: true,
+        minLen: 16,
+        maxLen: 16,
+      }),
+    );
+    expect(lastSavedSettings()).toEqual(
+      expect.objectContaining({
+        upper: false,
+        lower: false,
+        digits: false,
+        symbols: true,
+        minDigits: 0,
+        minSymbols: 2,
+      }),
+    );
+  });
+
+  it("disabling a group clears its minimum", async () => {
+    const { wrapper } = await mountPage();
+    const groups = wrapper.findAll('input[type="checkbox"]');
+    expect(groups).toHaveLength(4);
+    // Digits is the third group; its minimum resets to 0 when it is disabled.
+    await groups[2]!.setValue(false);
+    await flushPromises();
+    expect((wrapper.find("#g-min-digits").element as HTMLInputElement).disabled).toBe(true);
+
+    expect(lastGenerateArgs()).toEqual(expect.objectContaining({ minDigits: 0 }));
+    expect(lastSavedSettings()).toEqual(expect.objectContaining({ minDigits: 0 }));
+  });
+
+  it("refuses to disable the last remaining character group", async () => {
+    const { wrapper } = await mountPage();
+    const groups = wrapper.findAll('input[type="checkbox"]');
+    // Leave symbols as the only enabled group.
+    await groups[0]!.setValue(false);
+    await groups[1]!.setValue(false);
+    await groups[2]!.setValue(false);
+    await flushPromises();
+    expect(lastGenerateArgs()).toEqual(expect.objectContaining({ charset: "!@#$%^&*-_=+?" }));
+
+    await groups[3]!.setValue(false);
+    await flushPromises();
+
+    // The last group cannot be toggled off; the request still has an alphabet.
+    expect(
+      (wrapper.findAll('input[type="checkbox"]')[3]!.element as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(lastGenerateArgs()).toEqual(
+      expect.objectContaining({ charset: "!@#$%^&*-_=+?" }),
+    );
+  });
+
+  it("the avoid-ambiguous toggle flows through and persists", async () => {
+    const { wrapper } = await mountPage();
+
+    // BaseOnOffToggle: On is the first pill, Off is the second.
+    await wrapper
+      .findAll('input[type="radio"][name="generate-avoid-ambiguous"]')[1]!
+      .trigger("change");
+    await flushPromises();
+
+    expect(lastGenerateArgs()).toEqual(expect.objectContaining({ avoidAmbiguous: false }));
+    expect(lastSavedSettings()).toEqual(expect.objectContaining({ avoidAmbiguous: false }));
+  });
+
+  it("keeps the previous batch in history, newest first", async () => {
+    let call = 0;
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => {
+        call++;
+        return call === 1 ? ["first"] : ["second"];
+      },
+    });
+
+    expect(wrapper.find(".current-row").text()).toContain("first");
+
+    await wrapper.find('button[aria-label="Regenerate"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".current-row").text()).toContain("second");
+    const history = wrapper.findAll(".history-row");
+    expect(history).toHaveLength(1);
+    expect(history[0]!.text()).toContain("first");
+  });
+
+  it("clears only the earlier history after confirmation", async () => {
+    let call = 0;
+    const { wrapper, dialog, toast } = await mountPage({
+      generate_password_batch: () => {
+        call++;
+        return call === 1 ? ["current-now"] : ["older"];
+      },
+    });
+    // A first regenerate moves the auto-generated batch into history.
+    await wrapper.find('button[aria-label="Regenerate"]').trigger("click");
+    await flushPromises();
+    // Wait: the mock's second call is the *new* current; the first moved down.
+    expect(wrapper.findAll(".history-row")).toHaveLength(1);
+
+    await wrapper.find('button[aria-label="Clear history"]').trigger("click");
+    await flushPromises();
+
+    expect(dialog.dialog.confirm).toHaveBeenCalled();
+    expect(wrapper.findAll(".history-row")).toHaveLength(0);
+    // The current result stays on screen; only earlier batches were cleared.
+    expect(wrapper.find(".current-row").text()).toContain("older");
+    expect(toast.toasts.value.some((m) => m.message.includes("History cleared"))).toBe(true);
+  });
+
+  it("keeps history when the clear confirmation is cancelled", async () => {
+    let call = 0;
+    const { wrapper, dialog } = await mountPage({
+      generate_password_batch: () => {
+        call++;
+        return call === 1 ? ["first"] : ["second"];
+      },
+    });
+    vi.mocked(dialog.dialog.confirm).mockResolvedValue(false);
+    await wrapper.find('button[aria-label="Regenerate"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.find('button[aria-label="Clear history"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".history-row")).toHaveLength(1);
   });
 
   it("copying a row invokes copy_generated_password and toasts", async () => {
     const { wrapper, toast } = await mountPage({
       generate_password_batch: () => ["topsecret"],
-      copy_generated_password: () => undefined,
     });
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
 
-    await wrapper.find('button[aria-label="Copy"]').trigger("click");
+    await wrapper.find(".current-row button").trigger("click");
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith(
@@ -152,32 +326,27 @@ describe("GeneratePasswordPage", () => {
   });
 
   it("a generate error shows the message and renders no rows", async () => {
-    vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch") {
-        return Promise.reject({ code: "STORE_ERROR", message: "RNG down" });
-      }
-      return Promise.resolve(undefined);
-    }) as typeof invoke);
-    const { wrapper } = mountWithApp(GeneratePasswordPage);
-    await flushPromises();
-
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => Promise.reject({ code: "STORE_ERROR", message: "RNG down" }),
+    });
 
     expect(wrapper.text()).toContain("RNG down");
-    expect(wrapper.findAll(".result-row")).toHaveLength(0);
+    expect(wrapper.findAll(".current-row")).toHaveLength(0);
   });
 
-  it("clears the batch the moment the identity locks", async () => {
-    vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch") return Promise.resolve(["a", "b", "c"]);
-      return Promise.resolve(undefined);
-    }) as typeof invoke);
-    const { wrapper, lock } = mountWithApp(GeneratePasswordPage);
+  it("clears the current batch and history the moment the identity locks", async () => {
+    let call = 0;
+    const { wrapper, lock } = await mountPage({
+      generate_password_batch: () => {
+        call++;
+        return call === 1 ? ["a"] : ["b"];
+      },
+    });
+    // Force a history entry, then lock.
+    await wrapper.find('button[aria-label="Regenerate"]').trigger("click");
     await flushPromises();
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
-    expect(wrapper.findAll(".result-row")).toHaveLength(3);
+    expect(wrapper.findAll(".current-row")).toHaveLength(1);
+    expect(wrapper.findAll(".history-row")).toHaveLength(1);
 
     // The page registers an onLock clearer via useLockState; drive the same
     // unlocked → locked transition the backend event would (default mount is
@@ -185,83 +354,66 @@ describe("GeneratePasswordPage", () => {
     lock.setLocked(true);
     await flushPromises();
 
-    expect(wrapper.findAll(".result-row")).toHaveLength(0);
+    expect(wrapper.findAll(".current-row")).toHaveLength(0);
+    expect(wrapper.findAll(".history-row")).toHaveLength(0);
   });
 
   it("clears the batch on browser back (popstate)", async () => {
-    vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch") return Promise.resolve(["a", "b", "c"]);
-      return Promise.resolve(undefined);
-    }) as typeof invoke);
-    const { wrapper } = mountWithApp(GeneratePasswordPage);
-    await flushPromises();
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
-    expect(wrapper.findAll(".result-row")).toHaveLength(3);
+    const { wrapper } = await mountPage({
+      generate_password_batch: () => ["a", "b", "c"],
+    });
+    expect(wrapper.findAll(".current-row")).toHaveLength(3);
 
     // vue-router is mocked, so drive popstate directly (the real browser-back path).
     window.dispatchEvent(new PopStateEvent("popstate"));
     await flushPromises();
 
-    expect(wrapper.findAll(".result-row")).toHaveLength(0);
+    expect(wrapper.findAll(".current-row")).toHaveLength(0);
   });
 
-  it("drops a stale generate result superseded by a newer one", async () => {
-    let resolveFirst!: (v: string[]) => void;
-    const firstCall = new Promise<string[]>((r) => {
-      resolveFirst = r;
+  it("drops a stale result that resolves after a lock", async () => {
+    let resolveGenerate!: (v: string[]) => void;
+    const pending = new Promise<string[]>((r) => {
+      resolveGenerate = r;
     });
-    let calls = 0;
-    vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch") {
-        calls++;
-        return calls === 1 ? firstCall : Promise.resolve(["second"]);
-      }
-      return Promise.resolve(undefined);
-    }) as typeof invoke);
-    const { wrapper } = mountWithApp(GeneratePasswordPage);
+    const { wrapper, lock } = await mountPage({
+      generate_password_batch: () => pending,
+    });
+
+    lock.setLocked(true);
+    await flushPromises();
+    resolveGenerate(["STALE"]);
     await flushPromises();
 
-    await wrapper.find("form").trigger("submit"); // first generate, in-flight
-    await wrapper.find("form").trigger("submit"); // second supersedes it
-    await flushPromises();
-    expect(wrapper.findAll(".result-row")).toHaveLength(1);
-    expect(wrapper.find(".result-pw").text()).toBe("second");
-
-    resolveFirst(["STALE"]); // the superseded first result resolves late
-    await flushPromises();
     expect(wrapper.text()).not.toContain("STALE");
+    expect(wrapper.findAll(".current-row")).toHaveLength(0);
   });
 
   it("Back returns to the entry list", async () => {
-    const { wrapper } = await mountPage({});
+    const { wrapper } = await mountPage();
     await wrapper.find('button[aria-label="Back"]').trigger("click");
     expect(mockReplace).toHaveBeenCalledWith({ name: "entries" });
   });
 
   // ── Gate re-lock (issue #20): the mask does not unmount the page ────────
 
-  it("a gate re-lock clears the batch and marks the drafts notice (unsaved passwords lost)", async () => {
-    vi.mocked(invoke).mockImplementation(((cmd: string) => {
-      if (cmd === "generate_password_batch") return Promise.resolve(["a", "b", "c"]);
-      return Promise.resolve(undefined);
-    }) as typeof invoke);
-    const m = mountWithApp(GeneratePasswordPage);
-    await flushPromises();
-    await m.wrapper.find("form").trigger("submit");
-    await flushPromises();
-    expect(m.wrapper.findAll(".result-row")).toHaveLength(3);
+  it("a gate re-lock clears the auto-generated batch and marks the drafts notice", async () => {
+    const m = await mountPage({
+      generate_password_batch: () => ["a", "b", "c"],
+    });
+    expect(m.wrapper.findAll(".current-row")).toHaveLength(3);
 
     m.appLock.setAppLocked(true, "idle");
     await flushPromises();
 
-    expect(m.wrapper.findAll(".result-row")).toHaveLength(0);
+    expect(m.wrapper.findAll(".current-row")).toHaveLength(0);
     expect(m.draftsNotice.consume()).toBe(true); // batch lost → toast fires
   });
 
   it("a gate re-lock with no generated batch does not mark the notice", async () => {
-    const m = mountWithApp(GeneratePasswordPage);
-    await flushPromises();
+    const m = await mountPage({
+      generate_password_batch: () => Promise.reject({ code: "STORE_ERROR", message: "RNG down" }),
+    });
 
     m.appLock.setAppLocked(true, "idle");
     await flushPromises();

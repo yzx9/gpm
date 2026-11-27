@@ -28,9 +28,6 @@ const MEMORABLE_MIN_LEN: usize = 16;
 /// Number of words in an xkcd-style passphrase (gopass default).
 const XKCD_WORDS: usize = 4;
 
-/// Max retries when a `strict` character-class validator rejects a candidate.
-const MAX_STRICT_TRIES: usize = 64;
-
 const RAW_DIGITS: &[u8] = b"0123456789";
 const RAW_UPPER: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const RAW_LOWER: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
@@ -53,7 +50,8 @@ pub enum GenerateMode {
 }
 
 /// Parameters for [`generate_password`]. Mirrors the relevant fields of gopass's
-/// create-wizard `Attribute`.
+/// create-wizard `Attribute`, extended with the standalone generator's minimum
+/// class counts and ambiguous-character switch.
 #[derive(Debug, Clone, Copy)]
 pub struct GenerateOptions<'a> {
     /// Generator method (ignored when `charset` is set — the charset locks it).
@@ -68,6 +66,14 @@ pub struct GenerateOptions<'a> {
     /// Require every character class present in the alphabet to be represented
     /// (gopass `strict`).
     pub strict: bool,
+    /// Minimum number of digits in a random/charset password. `0` disables the
+    /// requirement. Unlike `strict`, this is a count, not a presence check.
+    pub min_digits: usize,
+    /// Minimum number of symbols in a random/charset password. `0` disables.
+    pub min_symbols: usize,
+    /// Remove visually ambiguous characters (`0ODQ1IlB8G6S5Z2`) from an explicit
+    /// `charset`. The default random alphabet already omits them.
+    pub avoid_ambiguous: bool,
 }
 
 /// Generate a password per `opts`, mirroring gopass's create-wizard semantics.
@@ -86,12 +92,22 @@ pub struct GenerateOptions<'a> {
 /// supplied but empty.
 pub fn generate_password(opts: &GenerateOptions<'_>) -> Result<Zeroizing<String>, Error> {
     match opts.charset {
-        Some(cs) => generate_from_charset(cs, opts.min_len, opts.max_len, opts.strict),
+        Some(cs) => generate_from_charset(
+            cs,
+            opts.min_len,
+            opts.max_len,
+            opts.strict,
+            opts.min_digits,
+            opts.min_symbols,
+            opts.avoid_ambiguous,
+        ),
         None => match opts.mode {
             GenerateMode::Random => random_chars(
                 default_alphabet(),
                 target_len(opts.min_len, opts.max_len),
                 opts.strict,
+                opts.min_digits,
+                opts.min_symbols,
             ),
             GenerateMode::Memorable => memorable_password_with(
                 // Clamp like the random path's `target_len`: memorable honors
@@ -110,20 +126,37 @@ pub fn generate_password(opts: &GenerateOptions<'_>) -> Result<Zeroizing<String>
 
 /// Charset-driven generation (the PIN path): random over `charset`, length
 /// clamped to `[min, max]`, `strict` enforces all classes present in the charset.
+#[allow(clippy::too_many_arguments)]
 fn generate_from_charset(
     charset: &str,
     min_len: Option<usize>,
     max_len: Option<usize>,
     strict: bool,
+    min_digits: usize,
+    min_symbols: usize,
+    avoid_ambiguous: bool,
 ) -> Result<Zeroizing<String>, Error> {
-    let alphabet = charset.as_bytes();
+    let alphabet: Vec<u8> = charset
+        .bytes()
+        .filter(|&b| !avoid_ambiguous || !AMBIGUOUS.contains(&b))
+        .collect();
     if alphabet.is_empty() {
         return Err(Error::new(
             ErrorCode::StoreError,
-            "password charset is empty",
+            if charset.is_empty() {
+                "password charset is empty"
+            } else {
+                "password charset is empty after removing ambiguous characters"
+            },
         ));
     }
-    random_chars(alphabet, target_len(min_len, max_len), strict)
+    random_chars(
+        &alphabet,
+        target_len(min_len, max_len),
+        strict,
+        min_digits,
+        min_symbols,
+    )
 }
 
 /// Default generation length clamped into `[min, max]`.
@@ -138,38 +171,104 @@ fn target_len(min_len: Option<usize>, max_len: Option<usize>) -> usize {
     len.clamp(1, MAX_PASSWORD_LEN)
 }
 
-/// Build a `len`-character string by uniform sampling from `alphabet`. When
-/// `strict`, retry until every class present in `alphabet` is represented.
-fn random_chars(alphabet: &[u8], len: usize, strict: bool) -> Result<Zeroizing<String>, Error> {
-    if strict {
-        let classes = classes_in(alphabet);
-        for _ in 0..MAX_STRICT_TRIES {
-            let pw = sample_string(alphabet, len)?;
-            if has_all_classes(pw.as_bytes(), &classes) {
-                return Ok(Zeroizing::new(pw));
-            }
-        }
+/// Build a `len`-character string by uniform sampling from `alphabet`, with
+/// minimum per-class counts. Required characters are seeded first, the rest are
+/// sampled uniformly, then the whole result is shuffled so required classes
+/// aren't clustered at the front. `strict` promotes every class present in
+/// `alphabet` to a minimum of one.
+///
+/// # Errors
+///
+/// Returns [`ErrorCode::StoreError`] when a requirement cannot be met (an empty
+/// alphabet, a quota for an absent class, or quotas longer than `len`).
+fn random_chars(
+    alphabet: &[u8],
+    len: usize,
+    strict: bool,
+    min_digits: usize,
+    min_symbols: usize,
+) -> Result<Zeroizing<String>, Error> {
+    if alphabet.is_empty() {
         return Err(Error::new(
             ErrorCode::StoreError,
-            "could not satisfy strict character-class rules",
+            "password charset is empty",
         ));
     }
-    sample_string(alphabet, len).map(Zeroizing::new)
+    let len = len.clamp(1, MAX_PASSWORD_LEN);
+    let digit_pool = class_pool(alphabet, Class::Digit);
+    let symbol_pool = class_pool(alphabet, Class::Symbol);
+    if min_digits > 0 && digit_pool.is_empty() {
+        return Err(Error::new(
+            ErrorCode::StoreError,
+            "password length requires digits but the charset has none",
+        ));
+    }
+    if min_symbols > 0 && symbol_pool.is_empty() {
+        return Err(Error::new(
+            ErrorCode::StoreError,
+            "password length requires symbols but the charset has none",
+        ));
+    }
+
+    // Required count per class. Quotas are saturating-summed so an absurd
+    // client-supplied count can't overflow before the length check rejects it.
+    let mut required: Vec<(Class, usize)> = Vec::new();
+    for class in classes_in(alphabet) {
+        let count = match class {
+            Class::Digit => min_digits,
+            Class::Symbol => min_symbols,
+            Class::Upper | Class::Lower => 0,
+        };
+        let count = if strict { count.max(1) } else { count };
+        if count > 0 {
+            required.push((class, count));
+        }
+    }
+    let required_len = required
+        .iter()
+        .fold(0_usize, |sum, (_, count)| sum.saturating_add(*count));
+    if required_len > len {
+        return Err(Error::new(
+            ErrorCode::StoreError,
+            "password length is too short for the requested character requirements",
+        ));
+    }
+
+    let mut out: Vec<u8> = Vec::with_capacity(len);
+    for (class, count) in required {
+        let pool = class_pool(alphabet, class);
+        for _ in 0..count {
+            let idx = uniform_index(pool.len())?;
+            out.push(*pool.get(idx).expect("index in range by construction"));
+        }
+    }
+    while out.len() < len {
+        let idx = uniform_index(alphabet.len())?;
+        out.push(*alphabet.get(idx).expect("index in range by construction"));
+    }
+    shuffle(&mut out)?;
+
+    // Every alphabet byte is ASCII in practice; keep the conversion total so a
+    // future non-ASCII charset can't panic here.
+    Ok(Zeroizing::new(String::from_utf8_lossy(&out).into_owned()))
 }
 
-/// Sample a `len`-character ASCII string uniformly from `alphabet`.
-fn sample_string(alphabet: &[u8], len: usize) -> Result<String, Error> {
-    let n = alphabet.len();
-    let mut out = String::with_capacity(len);
-    for _ in 0..len {
-        let idx = uniform_index(n)?;
-        let b = alphabet
-            .get(idx)
-            .copied()
-            .expect("index in range by construction");
-        out.push(char::from(b));
+/// All bytes of `alphabet` in `class`.
+fn class_pool(alphabet: &[u8], class: Class) -> Vec<u8> {
+    alphabet
+        .iter()
+        .copied()
+        .filter(|&b| class_of(b) == class)
+        .collect()
+}
+
+/// In-place Fisher-Yates shuffle over the OS CSPRNG.
+fn shuffle(items: &mut [u8]) -> Result<(), Error> {
+    for i in (1..items.len()).rev() {
+        let j = uniform_index(i + 1)?;
+        items.swap(i, j);
     }
-    Ok(out)
+    Ok(())
 }
 
 /// Memorable password over a supplied wordlist (test seam).
@@ -243,13 +342,6 @@ fn classes_in(alphabet: &[u8]) -> Vec<Class> {
     v
 }
 
-/// True if `pw` contains at least one byte of every class in `required`.
-fn has_all_classes(pw: &[u8], required: &[Class]) -> bool {
-    required
-        .iter()
-        .all(|&c| pw.iter().any(|&b| class_of(b) == c))
-}
-
 /// Default alphabet: digits + upper + lower + curated symbols, with visually
 /// ambiguous characters removed. Built once and cached.
 fn default_alphabet() -> &'static [u8] {
@@ -307,6 +399,9 @@ mod tests {
             min_len: Some(1),
             max_len: Some(64),
             strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         for _ in 0..16 {
             let pw = generate_password(&opts).unwrap();
@@ -328,6 +423,9 @@ mod tests {
             min_len: None,
             max_len: None,
             strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         assert!(generate_password(&opts).is_err());
     }
@@ -340,6 +438,9 @@ mod tests {
             min_len: None,
             max_len: None,
             strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         let alpha = default_alphabet();
         for _ in 0..32 {
@@ -365,6 +466,9 @@ mod tests {
             min_len: None,
             max_len: None,
             strict: true,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         let pw = generate_password(&opts).unwrap();
         let bytes = pw.as_bytes();
@@ -408,6 +512,9 @@ mod tests {
             min_len: Some(8),
             max_len: Some(8),
             strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         for _ in 0..16 {
             let pw = generate_password(&opts).unwrap();
@@ -424,10 +531,147 @@ mod tests {
             min_len: Some(100),
             max_len: Some(100),
             strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         let pw = generate_password(&opts).unwrap();
         let s = &*pw;
         assert_eq!(s.len(), 100, "wrong length: {s}");
+    }
+
+    #[test]
+    fn explicit_charset_honors_min_digits_and_symbols() {
+        let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        let opts = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: Some(alphabet),
+            min_len: Some(32),
+            max_len: Some(32),
+            strict: false,
+            min_digits: 4,
+            min_symbols: 3,
+            avoid_ambiguous: false,
+        };
+        for _ in 0..64 {
+            let pw = generate_password(&opts).unwrap();
+            let s = &*pw;
+            assert_eq!(s.len(), 32);
+            assert!(
+                s.bytes().filter(u8::is_ascii_digit).count() >= 4,
+                "too few digits: {s}"
+            );
+            assert!(
+                s.bytes().filter(|b| class_of(*b) == Class::Symbol).count() >= 3,
+                "too few symbols: {s}"
+            );
+            assert!(
+                s.bytes().all(|b| alphabet.as_bytes().contains(&b)),
+                "char outside charset: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_minimums_fit_a_short_exact_length() {
+        // Every class seeded, quotas filled, then shuffled into exactly 4 chars.
+        let opts = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: Some("0aA!"),
+            min_len: Some(4),
+            max_len: Some(4),
+            strict: true,
+            min_digits: 1,
+            min_symbols: 1,
+            avoid_ambiguous: false,
+        };
+        for _ in 0..16 {
+            let pw = generate_password(&opts).unwrap();
+            let s = &*pw;
+            assert_eq!(s.len(), 4);
+            assert!(s.bytes().any(|b| b.is_ascii_digit()), "no digit: {s}");
+            assert!(s.bytes().any(|b| b.is_ascii_uppercase()), "no upper: {s}");
+            assert!(s.bytes().any(|b| b.is_ascii_lowercase()), "no lower: {s}");
+            assert!(
+                s.bytes().any(|b| class_of(b) == Class::Symbol),
+                "no symbol: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn avoid_ambiguous_filters_the_requested_charset() {
+        // Filtering leaves only "A"; every generated char must be "A".
+        let opts = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: Some("A0"),
+            min_len: Some(8),
+            max_len: Some(8),
+            strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: true,
+        };
+        for _ in 0..16 {
+            let pw = generate_password(&opts).unwrap();
+            assert_eq!(pw.as_str(), "A".repeat(8).as_str());
+        }
+    }
+
+    #[test]
+    fn impossible_class_quotas_are_an_error() {
+        // Sum of minimums exceeds the length.
+        let too_many = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: Some("0a"),
+            min_len: Some(3),
+            max_len: Some(3),
+            strict: false,
+            min_digits: 2,
+            min_symbols: 2,
+            avoid_ambiguous: false,
+        };
+        assert!(generate_password(&too_many).is_err());
+
+        // Requested digits/symbols but the selected charset has none.
+        let no_digits = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: Some("abc"),
+            min_len: Some(8),
+            max_len: Some(8),
+            strict: false,
+            min_digits: 1,
+            min_symbols: 0,
+            avoid_ambiguous: false,
+        };
+        assert!(generate_password(&no_digits).is_err());
+
+        let no_symbols = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: Some("abc"),
+            min_len: Some(8),
+            max_len: Some(8),
+            strict: false,
+            min_digits: 0,
+            min_symbols: 1,
+            avoid_ambiguous: false,
+        };
+        assert!(generate_password(&no_symbols).is_err());
+    }
+
+    #[test]
+    fn avoid_ambiguous_can_empty_the_charset() {
+        let opts = GenerateOptions {
+            mode: GenerateMode::Random,
+            charset: Some("0O"),
+            min_len: Some(8),
+            max_len: Some(8),
+            strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: true,
+        };
+        assert!(generate_password(&opts).is_err());
     }
 
     #[test]
@@ -438,6 +682,9 @@ mod tests {
             min_len: Some(40),
             max_len: None,
             strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         for _ in 0..16 {
             let pw = generate_password(&opts).unwrap();
@@ -455,6 +702,9 @@ mod tests {
             min_len: None,
             max_len: None,
             strict: false,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         let pw = generate_password(&opts).unwrap();
         let s = &*pw;
@@ -473,6 +723,9 @@ mod tests {
                 min_len: Some(min),
                 max_len: None,
                 strict: false,
+                min_digits: 0,
+                min_symbols: 0,
+                avoid_ambiguous: false,
             };
             let pw = generate_password(&opts).unwrap();
             let s = &*pw;
@@ -522,6 +775,9 @@ mod tests {
                 min_len: None,
                 max_len: None,
                 strict: false,
+                min_digits: 0,
+                min_symbols: 0,
+                avoid_ambiguous: false,
             };
             let pw = generate_password(&opts).unwrap();
             assert!(!pw.is_empty(), "{mode:?} returned empty");
@@ -560,6 +816,9 @@ mod tests {
             min_len: Some(1),
             max_len: Some(1),
             strict: true,
+            min_digits: 0,
+            min_symbols: 0,
+            avoid_ambiguous: false,
         };
         let err = generate_password(&opts).unwrap_err();
         assert_eq!(err.code, "STORE_ERROR");
