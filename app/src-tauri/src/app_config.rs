@@ -211,6 +211,7 @@ const GENERATOR_COUNT_MAX: usize = 32;
 /// Tauri-converted names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[allow(clippy::struct_excessive_bools)] // the 5 bools are independent class toggles, not a state machine
 pub(crate) struct GeneratorSettings {
     /// Generator method.
     pub(crate) mode: GenerateMode,
@@ -219,7 +220,7 @@ pub(crate) struct GeneratorSettings {
     pub(crate) length: usize,
     /// Batch size / number of passwords generated per run. Clamped to `1..=32`.
     pub(crate) count: usize,
-    /// Character groups for `random` mode (`A-Z`, `a-z`, `0-9`, `!@#$%^&*`).
+    /// Character groups for `random` mode (`A-Z`, `a-z`, `0-9`, `!@#$%^&*-_=+?`).
     pub(crate) upper: bool,
     pub(crate) lower: bool,
     pub(crate) digits: bool,
@@ -255,7 +256,9 @@ impl GeneratorSettings {
     /// and quotas are trimmed to fit the length. This keeps a malformed /
     /// stale config from wedging the Generate screen behind a validation error.
     fn normalized(mut self) -> Self {
-        self.length = self.length.clamp(GENERATOR_LENGTH_MIN, GENERATOR_LENGTH_MAX);
+        self.length = self
+            .length
+            .clamp(GENERATOR_LENGTH_MIN, GENERATOR_LENGTH_MAX);
         self.count = self.count.clamp(GENERATOR_COUNT_MIN, GENERATOR_COUNT_MAX);
         if !self.upper && !self.lower && !self.digits && !self.symbols {
             // Never persist an alphabet-less recipe; the UI also refuses to

@@ -287,11 +287,13 @@ function onModeChange(next: GenerateMode) {
   onSettingsCommitted();
 }
 
-function onGroupToggle(key: keyof CharGroups, enabled: boolean) {
+function onGroupToggle(key: keyof CharGroups, el: HTMLInputElement) {
+  const enabled = el.checked;
   // Keep at least one group selected — an alphabet-less request can only fail.
   if (!enabled && !GROUP_DEFS.some((g) => g.key !== key && groups.value[g.key])) {
-    // The DOM checkbox already flipped; re-render so it snaps back on.
-    groups.value = { ...groups.value };
+    // Vue can't restore the box (its checked diff sees `true` on both sides),
+    // so force the DOM value the rejected toggle was meant to keep.
+    el.checked = true;
     return;
   }
   groups.value[key] = enabled;
@@ -469,7 +471,7 @@ useWipeOnLeave(() => {
               <input
                 type="checkbox"
                 :checked="groups[g.key]"
-                @change="onGroupToggle(g.key, ($event.target as HTMLInputElement).checked)"
+                @change="onGroupToggle(g.key, $event.target as HTMLInputElement)"
               />
               <span class="group-copy">
                 <code class="group-chars">{{ g.label }}</code>

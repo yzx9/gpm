@@ -222,9 +222,7 @@ export function normalizeGeneratorSettings(
  * Returns the updated config; the Generate screen applies it locally as the
  * user changes controls and never persists the generated passwords themselves.
  */
-export async function setGeneratorSettings(
-  settings: GeneratorSettings,
-): Promise<AppConfig> {
+export async function setGeneratorSettings(settings: GeneratorSettings): Promise<AppConfig> {
   return invoke<AppConfig>("set_generator_settings", { settings });
 }
 

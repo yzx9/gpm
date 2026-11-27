@@ -161,9 +161,7 @@ describe("GeneratePasswordPage", () => {
     expect(lastGenerateArgs()).toEqual(
       expect.objectContaining({ minLen: 32, maxLen: 32, count: 3 }),
     );
-    expect(lastSavedSettings()).toEqual(
-      expect.objectContaining({ length: 32, count: 3 }),
-    );
+    expect(lastSavedSettings()).toEqual(expect.objectContaining({ length: 32, count: 3 }));
   });
 
   it("sends the selected character groups and advanced quotas", async () => {
@@ -182,7 +180,7 @@ describe("GeneratePasswordPage", () => {
 
     expect(lastGenerateArgs()).toEqual(
       expect.objectContaining({
-        charset: "!@#$%^&*",
+        charset: "!@#$%^&*-_=+?",
         minDigits: 0,
         minSymbols: 2,
         avoidAmbiguous: true,
@@ -223,25 +221,27 @@ describe("GeneratePasswordPage", () => {
     await groups[1]!.setValue(false);
     await groups[2]!.setValue(false);
     await flushPromises();
-    expect(lastGenerateArgs()).toEqual(expect.objectContaining({ charset: "!@#$%^&*" }));
+    expect(lastGenerateArgs()).toEqual(expect.objectContaining({ charset: "!@#$%^&*-_=+?" }));
 
     await groups[3]!.setValue(false);
     await flushPromises();
 
     // The last group cannot be toggled off; the request still has an alphabet.
-    expect((wrapper.findAll('input[type="checkbox"]')[3]!.element as HTMLInputElement).checked).toBe(
-      true,
+    expect(
+      (wrapper.findAll('input[type="checkbox"]')[3]!.element as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(lastGenerateArgs()).toEqual(
+      expect.objectContaining({ charset: "!@#$%^&*-_=+?" }),
     );
-    expect(lastGenerateArgs()).toEqual(expect.objectContaining({ charset: "!@#$%^&*" }));
   });
 
   it("the avoid-ambiguous toggle flows through and persists", async () => {
     const { wrapper } = await mountPage();
 
     // BaseOnOffToggle: On is the first pill, Off is the second.
-    await wrapper.findAll('input[type="radio"][name="generate-avoid-ambiguous"]')[1]!.trigger(
-      "change",
-    );
+    await wrapper
+      .findAll('input[type="radio"][name="generate-avoid-ambiguous"]')[1]!
+      .trigger("change");
     await flushPromises();
 
     expect(lastGenerateArgs()).toEqual(expect.objectContaining({ avoidAmbiguous: false }));
